@@ -91,6 +91,14 @@ pub struct BoardGraphicSegment {
 pub struct CommitId(String);
 
 impl CommitId {
+    pub fn new(value: impl Into<String>) -> Result<Self, IpcError> {
+        let value = value.into();
+        if value.is_empty() {
+            return Err(IpcError::EmptyCommitId);
+        }
+        Ok(Self(value))
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -146,6 +154,7 @@ pub enum IpcError {
     InvalidEndpoint,
     InvalidClientName,
     EmptyInstanceToken,
+    EmptyCommitId,
     MalformedEnvelope,
     MissingResponseStatus,
     MissingResponseHeader,
@@ -182,6 +191,7 @@ impl IpcError {
             Self::InvalidEndpoint => "invalid_endpoint",
             Self::InvalidClientName => "invalid_client_name",
             Self::EmptyInstanceToken => "empty_instance_token",
+            Self::EmptyCommitId => "empty_commit_id",
             Self::MalformedEnvelope
             | Self::MissingResponseStatus
             | Self::MissingResponseHeader

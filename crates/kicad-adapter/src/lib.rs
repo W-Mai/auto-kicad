@@ -1,6 +1,10 @@
-use kicad_ipc::{OpenDocument, OpenDocumentKind, VersionInfo};
+use kicad_engine::{MAX_GRAPHIC_BOUNDING_AREA_NM2, MAX_GRAPHIC_SPAN_NM, OperationKind};
+use kicad_ipc::{
+    BoardGraphicLayer as IpcBoardGraphicLayer, BoardGraphicSegment as IpcBoardGraphicSegment,
+    CommitId, KiCadClient, KiCadTransport, OpenDocument, OpenDocumentKind, VersionInfo,
+};
 use kicad_model::{
-    CapabilityObservation, CapabilityStatus, Diagnostic, DiscoveredDocument,
+    BoardGraphicLayer, CapabilityObservation, CapabilityStatus, Diagnostic, DiscoveredDocument,
     DiscoveredDocumentKind, DiscoverySnapshot, ModelError, StableId,
 };
 use sha2::{Digest, Sha256};
@@ -336,9 +340,166 @@ fn discovered_document(document: OpenDocument) -> Result<Option<DiscoveredDocume
     }))
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BoardGraphicsCommitOutcome {
+    CommittedAndSaved,
+    CommittedButNotSaved { reason: String },
+    Rejected { reason: String },
+    Unknown { reason: String },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoardGraphicsExecutor {
+    pub max_segments: usize,
+}
+
+impl Default for BoardGraphicsExecutor {
+    fn default() -> Self {
+        Self { max_segments: 100 }
+    }
+}
+
+pub trait BoardGraphicsIpc {
+    fn begin_commit(&mut self) -> Result<String, String>;
+    fn create_board_graphics(
+        &mut self,
+        board_filename: &str,
+        graphics: &[IpcBoardGraphicSegment],
+    ) -> Result<(), String>;
+    fn commit_changes(&mut self, commit: &str, message: &str) -> Result<(), String>;
+    fn drop_commit(&mut self, commit: &str) -> Result<(), String>;
+    fn save_board(&mut self, board_filename: &str) -> Result<(), String>;
+}
+
+impl<T: KiCadTransport> BoardGraphicsIpc for KiCadClient<T> {
+    fn begin_commit(&mut self) -> Result<String, String> {
+        KiCadClient::begin_commit(self)
+            .map(|commit| commit.as_str().to_owned())
+            .map_err(|error| error.to_string())
+    }
+
+    fn create_board_graphics(
+        &mut self,
+        board_filename: &str,
+        graphics: &[IpcBoardGraphicSegment],
+    ) -> Result<(), String> {
+        KiCadClient::create_board_graphics(self, board_filename, graphics)
+            .map_err(|error| error.to_string())
+    }
+
+    fn commit_changes(&mut self, commit: &str, message: &str) -> Result<(), String> {
+        let commit = CommitId::new(commit).map_err(|error| error.to_string())?;
+        KiCadClient::commit_changes(self, &commit, message).map_err(|error| error.to_string())
+    }
+
+    fn drop_commit(&mut self, commit: &str) -> Result<(), String> {
+        let commit = CommitId::new(commit).map_err(|error| error.to_string())?;
+        KiCadClient::drop_commit(self, &commit).map_err(|error| error.to_string())
+    }
+
+    fn save_board(&mut self, board_filename: &str) -> Result<(), String> {
+        KiCadClient::save_board(self, board_filename).map_err(|error| error.to_string())
+    }
+}
+
+impl BoardGraphicsExecutor {
+    pub fn execute<I: BoardGraphicsIpc>(
+        &self,
+        ipc: &mut I,
+        operation: &OperationKind,
+        board_filename: &str,
+        message: &str,
+    ) -> BoardGraphicsCommitOutcome {
+        let OperationKind::AddBoardGraphicSegments { segments, .. } = operation else {
+            return BoardGraphicsCommitOutcome::Rejected {
+                reason: "operation is not board graphics".into(),
+            };
+        };
+        if board_filename.is_empty() {
+            return BoardGraphicsCommitOutcome::Rejected {
+                reason: "board filename is empty".into(),
+            };
+        }
+        if segments.is_empty() || segments.len() > self.max_segments {
+            return BoardGraphicsCommitOutcome::Rejected {
+                reason: "graphic segment count exceeded bounds".into(),
+            };
+        }
+        if segments.iter().any(|segment| {
+            segment.validate().is_err() || !matches!(segment.layer, BoardGraphicLayer::DwgsUser)
+        }) {
+            return BoardGraphicsCommitOutcome::Rejected {
+                reason: "graphic segment is invalid or uses an unsupported layer".into(),
+            };
+        }
+        let min_x = segments
+            .iter()
+            .map(|segment| segment.start.x.min(segment.end.x))
+            .min()
+            .unwrap();
+        let max_x = segments
+            .iter()
+            .map(|segment| segment.start.x.max(segment.end.x))
+            .max()
+            .unwrap();
+        let min_y = segments
+            .iter()
+            .map(|segment| segment.start.y.min(segment.end.y))
+            .min()
+            .unwrap();
+        let max_y = segments
+            .iter()
+            .map(|segment| segment.start.y.max(segment.end.y))
+            .max()
+            .unwrap();
+        let width = i128::from(max_x) - i128::from(min_x);
+        let height = i128::from(max_y) - i128::from(min_y);
+        let area = width.checked_mul(height);
+        if width > MAX_GRAPHIC_SPAN_NM
+            || height > MAX_GRAPHIC_SPAN_NM
+            || area.is_none_or(|area| area > MAX_GRAPHIC_BOUNDING_AREA_NM2)
+        {
+            return BoardGraphicsCommitOutcome::Rejected {
+                reason: "graphic bounds exceeded".into(),
+            };
+        }
+        let graphics = segments
+            .iter()
+            .map(|segment| IpcBoardGraphicSegment {
+                start_x_nm: segment.start.x,
+                start_y_nm: segment.start.y,
+                end_x_nm: segment.end.x,
+                end_y_nm: segment.end.y,
+                width_nm: segment.width_nm,
+                layer: IpcBoardGraphicLayer::DwgsUser,
+            })
+            .collect::<Vec<_>>();
+        let commit = match ipc.begin_commit() {
+            Ok(commit) => commit,
+            Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
+        };
+        if let Err(reason) = ipc.create_board_graphics(board_filename, &graphics) {
+            return match ipc.drop_commit(&commit) {
+                Ok(()) => BoardGraphicsCommitOutcome::Rejected { reason },
+                Err(drop_reason) => BoardGraphicsCommitOutcome::Unknown {
+                    reason: format!("create failed: {reason}; drop failed: {drop_reason}"),
+                },
+            };
+        }
+        if let Err(reason) = ipc.commit_changes(&commit, message) {
+            return BoardGraphicsCommitOutcome::Unknown { reason };
+        }
+        match ipc.save_board(board_filename) {
+            Ok(()) => BoardGraphicsCommitOutcome::CommittedAndSaved,
+            Err(reason) => BoardGraphicsCommitOutcome::CommittedButNotSaved { reason },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kicad_model::{BoardGraphicSegment, Coordinate, DocumentSpace, Unit};
 
     fn version() -> VersionInfo {
         VersionInfo {
@@ -439,5 +600,203 @@ mod tests {
                 .iter()
                 .any(|diagnostic| { diagnostic.code == "content_not_observed" })
         );
+    }
+
+    struct FakeGraphicsIpc {
+        begin: Result<String, String>,
+        create: Result<(), String>,
+        commit: Result<(), String>,
+        drop: Result<(), String>,
+        save: Result<(), String>,
+        calls: Vec<String>,
+        graphics: Vec<IpcBoardGraphicSegment>,
+    }
+
+    impl Default for FakeGraphicsIpc {
+        fn default() -> Self {
+            Self {
+                begin: Ok("c1".into()),
+                create: Ok(()),
+                commit: Ok(()),
+                drop: Ok(()),
+                save: Ok(()),
+                calls: Vec::new(),
+                graphics: Vec::new(),
+            }
+        }
+    }
+
+    impl BoardGraphicsIpc for FakeGraphicsIpc {
+        fn begin_commit(&mut self) -> Result<String, String> {
+            self.calls.push("begin".into());
+            self.begin.clone()
+        }
+
+        fn create_board_graphics(
+            &mut self,
+            filename: &str,
+            graphics: &[IpcBoardGraphicSegment],
+        ) -> Result<(), String> {
+            self.calls.push(format!("create:{filename}"));
+            self.graphics = graphics.to_vec();
+            self.create.clone()
+        }
+
+        fn commit_changes(&mut self, commit: &str, _: &str) -> Result<(), String> {
+            self.calls.push(format!("commit:{commit}"));
+            self.commit.clone()
+        }
+
+        fn drop_commit(&mut self, commit: &str) -> Result<(), String> {
+            self.calls.push(format!("drop:{commit}"));
+            self.drop.clone()
+        }
+
+        fn save_board(&mut self, filename: &str) -> Result<(), String> {
+            self.calls.push(format!("save:{filename}"));
+            self.save.clone()
+        }
+    }
+
+    fn graphic() -> BoardGraphicSegment {
+        BoardGraphicSegment {
+            graphic_id: StableId::new("g1").unwrap(),
+            start: Coordinate {
+                x: 1,
+                y: 2,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            },
+            end: Coordinate {
+                x: 3,
+                y: 4,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            },
+            width_nm: 100,
+            layer: BoardGraphicLayer::DwgsUser,
+        }
+    }
+
+    fn graphics_operation() -> OperationKind {
+        OperationKind::AddBoardGraphicSegments {
+            board: StableId::new("board").unwrap(),
+            segments: vec![graphic()],
+        }
+    }
+
+    #[test]
+    fn graphics_executor_rejects_invalid_input_before_ipc() {
+        let mut ipc = FakeGraphicsIpc {
+            begin: Ok("c1".into()),
+            ..Default::default()
+        };
+        let mut invalid = graphic();
+        invalid.start.space = DocumentSpace::Schematic;
+        let operation = OperationKind::AddBoardGraphicSegments {
+            board: StableId::new("board").unwrap(),
+            segments: vec![invalid],
+        };
+        let outcome = BoardGraphicsExecutor::default().execute(
+            &mut ipc,
+            &operation,
+            "board.kicad_pcb",
+            "draw",
+        );
+        assert!(matches!(
+            outcome,
+            BoardGraphicsCommitOutcome::Rejected { .. }
+        ));
+        assert!(ipc.calls.is_empty());
+    }
+
+    #[test]
+    fn graphics_executor_reports_create_rejection_after_drop() {
+        let mut ipc = FakeGraphicsIpc {
+            begin: Ok("c1".into()),
+            create: Err("create failed".into()),
+            drop: Ok(()),
+            ..Default::default()
+        };
+        let outcome = BoardGraphicsExecutor::default().execute(
+            &mut ipc,
+            &graphics_operation(),
+            "board.kicad_pcb",
+            "draw",
+        );
+        assert_eq!(
+            outcome,
+            BoardGraphicsCommitOutcome::Rejected {
+                reason: "create failed".into()
+            }
+        );
+        assert_eq!(ipc.calls, ["begin", "create:board.kicad_pcb", "drop:c1"]);
+    }
+
+    #[test]
+    fn graphics_executor_reports_unknown_when_create_and_drop_fail() {
+        let mut ipc = FakeGraphicsIpc {
+            create: Err("create failed".into()),
+            drop: Err("drop failed".into()),
+            ..Default::default()
+        };
+        let outcome = BoardGraphicsExecutor::default().execute(
+            &mut ipc,
+            &graphics_operation(),
+            "board.kicad_pcb",
+            "draw",
+        );
+        assert_eq!(
+            outcome,
+            BoardGraphicsCommitOutcome::Unknown {
+                reason: "create failed: create failed; drop failed: drop failed".into()
+            }
+        );
+    }
+
+    #[test]
+    fn graphics_executor_reports_unknown_when_commit_transport_fails() {
+        let mut ipc = FakeGraphicsIpc {
+            begin: Ok("c1".into()),
+            create: Ok(()),
+            commit: Err("transport lost".into()),
+            ..Default::default()
+        };
+        let outcome = BoardGraphicsExecutor::default().execute(
+            &mut ipc,
+            &graphics_operation(),
+            "board.kicad_pcb",
+            "draw",
+        );
+        assert_eq!(
+            outcome,
+            BoardGraphicsCommitOutcome::Unknown {
+                reason: "transport lost".into()
+            }
+        );
+    }
+
+    #[test]
+    fn graphics_executor_reports_committed_but_not_saved() {
+        let mut ipc = FakeGraphicsIpc {
+            begin: Ok("c1".into()),
+            create: Ok(()),
+            commit: Ok(()),
+            save: Err("save failed".into()),
+            ..Default::default()
+        };
+        let outcome = BoardGraphicsExecutor::default().execute(
+            &mut ipc,
+            &graphics_operation(),
+            "board.kicad_pcb",
+            "draw",
+        );
+        assert_eq!(
+            outcome,
+            BoardGraphicsCommitOutcome::CommittedButNotSaved {
+                reason: "save failed".into()
+            }
+        );
+        assert_eq!(ipc.graphics[0].layer, IpcBoardGraphicLayer::DwgsUser);
     }
 }

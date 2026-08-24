@@ -420,6 +420,7 @@ name = "kicad-adapter"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "kicad-engine",
  "kicad-ipc",
  "kicad-model",
  "serde_json",
