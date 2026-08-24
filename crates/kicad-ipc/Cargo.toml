@@ -1,0 +1,11 @@
+[package]
+name = "kicad-ipc"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+nng = "1.0"
+protobuf = "3.7"
+
+[build-dependencies]
+protobuf-codegen = "3.7"

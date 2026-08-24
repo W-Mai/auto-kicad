@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/auto-kicad",
+    "crates/kicad-ipc",
     "crates/runtime",
 ]
 resolver = "3"
