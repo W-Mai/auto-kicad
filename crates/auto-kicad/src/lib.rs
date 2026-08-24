@@ -1,4 +1,6 @@
-use kicad_adapter::{DiscoveryInput, DocumentObservation, discovery_snapshot};
+use kicad_adapter::{
+    DiscoveryInput, DocumentObservation, artifact_discovery_snapshot, discovery_snapshot,
+};
 use kicad_ipc::{ClientConfig, DocumentQuery, KiCadClient, NngTransport};
 use kicad_model::DiscoverySnapshot;
 use rmcp::{
@@ -22,14 +24,22 @@ pub struct Capability {
 }
 
 pub trait DiscoveryService: Send + Sync {
-    fn discover(&self, endpoint: &str) -> Result<DiscoverySnapshot, String>;
+    fn discover(
+        &self,
+        endpoint: &str,
+        project_dir: Option<&std::path::Path>,
+    ) -> Result<DiscoverySnapshot, String>;
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct IpcDiscoveryService;
 
 impl DiscoveryService for IpcDiscoveryService {
-    fn discover(&self, endpoint: &str) -> Result<DiscoverySnapshot, String> {
+    fn discover(
+        &self,
+        endpoint: &str,
+        project_dir: Option<&std::path::Path>,
+    ) -> Result<DiscoverySnapshot, String> {
         let version_config =
             ClientConfig::new(endpoint, "auto-kicad-mcp").map_err(|error| error.to_string())?;
         let version_transport =
@@ -38,8 +48,15 @@ impl DiscoveryService for IpcDiscoveryService {
         let version = version_client
             .get_version()
             .map_err(|error| error.to_string())?;
-        let schematic = observe_documents(endpoint, DocumentQuery::Schematic)?;
-        let pcb = observe_documents(endpoint, DocumentQuery::Pcb)?;
+        let schematic = observe_documents(&mut version_client, DocumentQuery::Schematic)?;
+        let pcb = observe_documents(&mut version_client, DocumentQuery::Pcb)?;
+        if let Some(project_dir) = project_dir
+            && is_unsupported(&schematic)
+            && is_unsupported(&pcb)
+        {
+            return artifact_discovery_snapshot(project_dir, endpoint, version)
+                .map_err(|error| error.to_string());
+        }
         discovery_snapshot(DiscoveryInput {
             endpoint: endpoint.to_owned(),
             version,
@@ -50,12 +67,14 @@ impl DiscoveryService for IpcDiscoveryService {
     }
 }
 
-fn observe_documents(endpoint: &str, query: DocumentQuery) -> Result<DocumentObservation, String> {
-    let config =
-        ClientConfig::new(endpoint, "auto-kicad-mcp").map_err(|error| error.to_string())?;
-    let transport = NngTransport::connect(config.clone()).map_err(|error| error.to_string())?;
-    let mut client = KiCadClient::new(transport, config);
-    client.get_version().map_err(|error| error.to_string())?;
+fn is_unsupported(observation: &DocumentObservation) -> bool {
+    matches!(observation, DocumentObservation::Unsupported(_))
+}
+
+fn observe_documents<T: kicad_ipc::KiCadTransport>(
+    client: &mut KiCadClient<T>,
+    query: DocumentQuery,
+) -> Result<DocumentObservation, String> {
     match client.get_open_documents(query) {
         Ok(documents) => Ok(DocumentObservation::Documents(documents)),
         Err(error) if error.code() == "unsupported_capability" => {
@@ -92,6 +111,7 @@ pub struct CapabilityRequest {
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 pub struct InspectProjectRequest {
     pub endpoint: String,
+    pub project_dir: Option<String>,
     pub request_id: Option<String>,
 }
 
@@ -186,9 +206,10 @@ impl Server {
         let request_id = arguments
             .request_id
             .unwrap_or_else(|| "req_inspect_project".to_owned());
+        let project_dir = arguments.project_dir.as_deref().map(std::path::Path::new);
         let snapshot = self
             .discovery
-            .discover(&arguments.endpoint)
+            .discover(&arguments.endpoint, project_dir)
             .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
         let revision = snapshot
             .revision()
@@ -232,7 +253,11 @@ mod tests {
     struct FakeDiscovery;
 
     impl DiscoveryService for FakeDiscovery {
-        fn discover(&self, endpoint: &str) -> Result<DiscoverySnapshot, String> {
+        fn discover(
+            &self,
+            endpoint: &str,
+            _project_dir: Option<&std::path::Path>,
+        ) -> Result<DiscoverySnapshot, String> {
             Ok(DiscoverySnapshot {
                 kicad_version: "10.0.4".to_owned(),
                 endpoint: endpoint.to_owned(),

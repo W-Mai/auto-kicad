@@ -7,6 +7,7 @@ edition = "2024"
 kicad-ipc = { path = "../kicad-ipc" }
 kicad-model = { path = "../kicad-model" }
 hex = "0.4"
+serde_json = "1"
 sha2 = "0.10"
 
 [dev-dependencies]

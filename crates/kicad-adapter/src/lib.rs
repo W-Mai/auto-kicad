@@ -4,6 +4,9 @@ use kicad_model::{
     DiscoveredDocumentKind, DiscoverySnapshot, ModelError, StableId,
 };
 use sha2::{Digest, Sha256};
+use std::fs;
+use std::io::Read;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DocumentObservation {
@@ -18,6 +21,147 @@ pub struct DiscoveryInput {
     pub version: VersionInfo,
     pub schematic: DocumentObservation,
     pub pcb: DocumentObservation,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProjectArtifacts {
+    pub project_dir: PathBuf,
+    pub project_name: String,
+    pub project_file: PathBuf,
+    pub schematic_file: Option<PathBuf>,
+    pub board_file: Option<PathBuf>,
+}
+
+#[derive(Debug)]
+pub enum ArtifactError {
+    InvalidProjectDirectory,
+    ProjectNotFound,
+    AmbiguousProject,
+    Io(std::io::Error),
+    InvalidProjectJson(serde_json::Error),
+}
+
+impl std::fmt::Display for ArtifactError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidProjectDirectory => formatter.write_str("invalid project directory"),
+            Self::ProjectNotFound => formatter.write_str("KiCad project not found"),
+            Self::AmbiguousProject => formatter.write_str("multiple KiCad projects found"),
+            Self::Io(error) => write!(formatter, "artifact I/O failed: {error}"),
+            Self::InvalidProjectJson(error) => {
+                write!(formatter, "invalid KiCad project JSON: {error}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ArtifactError {}
+
+pub fn discover_project_artifacts(project_dir: &Path) -> Result<ProjectArtifacts, ArtifactError> {
+    if !project_dir.is_absolute() || !project_dir.is_dir() {
+        return Err(ArtifactError::InvalidProjectDirectory);
+    }
+    let mut projects = fs::read_dir(project_dir)
+        .map_err(ArtifactError::Io)?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|extension| extension == "kicad_pro")
+        })
+        .collect::<Vec<_>>();
+    projects.sort();
+    let project_file = match projects.as_slice() {
+        [] => return Err(ArtifactError::ProjectNotFound),
+        [project] => project.clone(),
+        _ => return Err(ArtifactError::AmbiguousProject),
+    };
+    let project_content = fs::read_to_string(&project_file).map_err(ArtifactError::Io)?;
+    serde_json::from_str::<serde_json::Value>(&project_content)
+        .map_err(ArtifactError::InvalidProjectJson)?;
+    let project_name = project_file
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .ok_or(ArtifactError::ProjectNotFound)?
+        .to_owned();
+    let schematic = project_dir.join(format!("{project_name}.kicad_sch"));
+    let board = project_dir.join(format!("{project_name}.kicad_pcb"));
+    let schematic_file = validate_artifact(&schematic, "(kicad_sch")?;
+    let board_file = validate_artifact(&board, "(kicad_pcb")?;
+    Ok(ProjectArtifacts {
+        project_dir: project_dir.to_path_buf(),
+        project_name,
+        project_file,
+        schematic_file,
+        board_file,
+    })
+}
+
+fn validate_artifact(path: &Path, expected_root: &str) -> Result<Option<PathBuf>, ArtifactError> {
+    if !path.is_file() {
+        return Ok(None);
+    }
+    let mut file = fs::File::open(path).map_err(ArtifactError::Io)?;
+    let mut prefix = [0_u8; 64];
+    let length = file.read(&mut prefix).map_err(ArtifactError::Io)?;
+    let content = std::str::from_utf8(&prefix[..length]).unwrap_or_default();
+    if !content.trim_start().starts_with(expected_root) {
+        return Err(ArtifactError::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("unexpected KiCad artifact root: {}", path.display()),
+        )));
+    }
+    Ok(Some(path.to_path_buf()))
+}
+
+pub fn artifact_discovery_snapshot(
+    project_dir: &Path,
+    endpoint: &str,
+    version: VersionInfo,
+) -> Result<DiscoverySnapshot, ArtifactError> {
+    let artifacts = discover_project_artifacts(project_dir)?;
+    let schematic = artifacts.schematic_file.as_ref().map(|file| OpenDocument {
+        project_name: Some(artifacts.project_name.clone()),
+        project_path: Some(artifacts.project_dir.display().to_string()),
+        kind: OpenDocumentKind::Schematic {
+            filename: Some(file.display().to_string()),
+            sheet_path: None,
+            sheet_kiids: Vec::new(),
+        },
+    });
+    let pcb = artifacts.board_file.as_ref().map(|file| OpenDocument {
+        project_name: Some(artifacts.project_name.clone()),
+        project_path: Some(artifacts.project_dir.display().to_string()),
+        kind: OpenDocumentKind::Pcb {
+            board_filename: file.display().to_string(),
+        },
+    });
+    let mut snapshot = discovery_snapshot(DiscoveryInput {
+        endpoint: endpoint.to_owned(),
+        version,
+        schematic: schematic.map_or_else(
+            || DocumentObservation::Unsupported("schematic artifact not found".to_owned()),
+            |document| DocumentObservation::Documents(vec![document]),
+        ),
+        pcb: pcb.map_or_else(
+            || DocumentObservation::Unsupported("PCB artifact not found".to_owned()),
+            |document| DocumentObservation::Documents(vec![document]),
+        ),
+    })
+    .map_err(|error| ArtifactError::Io(std::io::Error::other(error.to_string())))?;
+    for capability in &mut snapshot.capabilities {
+        if matches!(
+            capability.id.as_str(),
+            "schematic.documents.discover" | "pcb.documents.discover"
+        ) {
+            capability.detail = Some("offline artifact source".to_owned());
+        }
+    }
+    snapshot.diagnostics.push(Diagnostic {
+        code: "offline_artifact_source".to_owned(),
+        message: artifacts.project_file.display().to_string(),
+    });
+    Ok(snapshot.canonical())
 }
 
 pub fn discovery_snapshot(input: DiscoveryInput) -> Result<DiscoverySnapshot, ModelError> {
@@ -251,6 +395,27 @@ mod tests {
                 .iter()
                 .any(|diagnostic| { diagnostic.code == "project_identity_incomplete" })
         );
+    }
+
+    #[test]
+    fn artifact_discovery_finds_same_named_project_documents() {
+        let root = std::env::temp_dir().join(format!(
+            "kicad-adapter-{}-{}",
+            std::process::id(),
+            std::thread::current().name().unwrap_or("test")
+        ));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("fixture.kicad_pro"), "{}").unwrap();
+        fs::write(root.join("fixture.kicad_sch"), "(kicad_sch)").unwrap();
+        fs::write(root.join("fixture.kicad_pcb"), "(kicad_pcb)").unwrap();
+        let snapshot =
+            artifact_discovery_snapshot(&root, "ipc:///tmp/kicad/api.sock", version()).unwrap();
+        assert_eq!(snapshot.documents.len(), 2);
+        assert!(snapshot.capabilities.iter().any(|capability| {
+            capability.id == "schematic.documents.discover"
+                && capability.detail.as_deref() == Some("offline artifact source")
+        }));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
