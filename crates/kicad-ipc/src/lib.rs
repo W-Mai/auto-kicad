@@ -315,6 +315,10 @@ impl<T: KiCadTransport> KiCadClient<T> {
         }
     }
 
+    pub fn instance_token(&self) -> Option<&InstanceToken> {
+        self.token.as_ref()
+    }
+
     pub fn get_version(&mut self) -> Result<VersionInfo, IpcError> {
         let request = get_version_request(&self.config, self.token.as_ref());
         let response = self.transport.request(request)?;
@@ -1276,7 +1280,9 @@ mod tests {
             requests: Vec::new(),
         };
         let mut client = KiCadClient::new(fake, config);
+        assert!(client.instance_token().is_none());
         assert_eq!(client.get_version().unwrap().major, 10);
+        assert_eq!(client.instance_token().unwrap().as_str(), "token");
         assert_eq!(client.get_version().unwrap().major, 10);
         assert_eq!(
             client.transport.requests[1]

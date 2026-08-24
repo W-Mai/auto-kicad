@@ -1,13 +1,16 @@
 use kicad_engine::{MAX_GRAPHIC_BOUNDING_AREA_NM2, MAX_GRAPHIC_SPAN_NM, OperationKind};
 use kicad_ipc::{
     BoardGraphicLayer as IpcBoardGraphicLayer, BoardGraphicSegment as IpcBoardGraphicSegment,
-    CommitId, KiCadClient, KiCadTransport, OpenDocument, OpenDocumentKind, VersionInfo,
+    CommitId, InstanceToken, KiCadClient, KiCadTransport, ObservedBoardGraphicSegment,
+    OpenDocument, OpenDocumentKind, VersionInfo,
 };
 use kicad_model::{
-    BoardGraphicLayer, CapabilityObservation, CapabilityStatus, Diagnostic, DiscoveredDocument,
-    DiscoveredDocumentKind, DiscoverySnapshot, ModelError, StableId,
+    Board, BoardGraphicLayer, BoardGraphicSegment, CapabilityObservation, CapabilityStatus,
+    Coordinate, Diagnostic, DiscoveredDocument, DiscoveredDocumentKind, DiscoverySnapshot,
+    DocumentSpace, ModelError, ProjectSnapshot, Schematic, StableId, Unit,
 };
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -283,6 +286,128 @@ fn push_optional(output: &mut Vec<u8>, value: Option<&str>) {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LiveBoardObservation {
+    pub snapshot: ProjectSnapshot,
+    pub instance_token: InstanceToken,
+    pub board_filename: String,
+}
+
+#[derive(Debug)]
+pub enum LiveBoardObservationError {
+    NonPcbDocument,
+    MissingProjectIdentity,
+    MissingDocumentIdentity,
+    DuplicateGraphicId(String),
+    UnsupportedGraphicLayer,
+    Model(ModelError),
+}
+
+impl std::fmt::Display for LiveBoardObservationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NonPcbDocument => formatter.write_str("open document is not a PCB"),
+            Self::MissingProjectIdentity => formatter.write_str("project identity is unavailable"),
+            Self::MissingDocumentIdentity => {
+                formatter.write_str("PCB document identity is unavailable")
+            }
+            Self::DuplicateGraphicId(id) => write!(formatter, "duplicate board graphic id: {id}"),
+            Self::UnsupportedGraphicLayer => formatter.write_str("unsupported board graphic layer"),
+            Self::Model(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for LiveBoardObservationError {}
+
+impl From<ModelError> for LiveBoardObservationError {
+    fn from(error: ModelError) -> Self {
+        Self::Model(error)
+    }
+}
+
+pub fn live_board_observation(
+    version: VersionInfo,
+    document: OpenDocument,
+    graphics: Vec<ObservedBoardGraphicSegment>,
+    instance_token: InstanceToken,
+) -> Result<LiveBoardObservation, LiveBoardObservationError> {
+    let board_filename = match &document.kind {
+        OpenDocumentKind::Pcb { board_filename } if !board_filename.is_empty() => {
+            board_filename.clone()
+        }
+        OpenDocumentKind::Pcb { .. } => {
+            return Err(LiveBoardObservationError::MissingDocumentIdentity);
+        }
+        _ => return Err(LiveBoardObservationError::NonPcbDocument),
+    };
+    if document.project_path.is_none() && document.project_name.is_none() {
+        return Err(LiveBoardObservationError::MissingProjectIdentity);
+    }
+    let discovered = discovered_document(document.clone())?
+        .ok_or(LiveBoardObservationError::MissingDocumentIdentity)?;
+    let mut project_identity = Vec::new();
+    push_optional(&mut project_identity, document.project_path.as_deref());
+    push_optional(&mut project_identity, document.project_name.as_deref());
+    let project_id = StableId::new(format!(
+        "project:sha256:{}",
+        hex::encode(Sha256::digest(&project_identity))
+    ))?;
+    let mut graphic_ids = BTreeSet::new();
+    let graphics = graphics
+        .into_iter()
+        .map(|observed| {
+            if !graphic_ids.insert(observed.graphic_id.clone()) {
+                return Err(LiveBoardObservationError::DuplicateGraphicId(
+                    observed.graphic_id,
+                ));
+            }
+            if observed.segment.layer != IpcBoardGraphicLayer::DwgsUser {
+                return Err(LiveBoardObservationError::UnsupportedGraphicLayer);
+            }
+            let graphic = BoardGraphicSegment {
+                graphic_id: StableId::new(observed.graphic_id)?,
+                start: Coordinate {
+                    x: observed.segment.start_x_nm,
+                    y: observed.segment.start_y_nm,
+                    unit: Unit::Nanometres,
+                    space: DocumentSpace::Board,
+                },
+                end: Coordinate {
+                    x: observed.segment.end_x_nm,
+                    y: observed.segment.end_y_nm,
+                    unit: Unit::Nanometres,
+                    space: DocumentSpace::Board,
+                },
+                width_nm: observed.segment.width_nm,
+                layer: BoardGraphicLayer::DwgsUser,
+            };
+            graphic.validate()?;
+            Ok(graphic)
+        })
+        .collect::<Result<Vec<_>, LiveBoardObservationError>>()?;
+    let snapshot = ProjectSnapshot {
+        project_id,
+        kicad_version: version.full_version,
+        capabilities: vec![
+            "pcb.board_graphics.read".to_owned(),
+            "pcb.board_graphics.write".to_owned(),
+        ],
+        schematic: Schematic::default(),
+        board: Board {
+            document_id: Some(discovered.document_id),
+            footprints: Vec::new(),
+            graphics,
+        },
+    }
+    .canonical();
+    Ok(LiveBoardObservation {
+        snapshot,
+        instance_token,
+        board_filename,
+    })
+}
+
 fn discovered_document(document: OpenDocument) -> Result<Option<DiscoveredDocument>, ModelError> {
     let kind = match document.kind {
         OpenDocumentKind::Schematic {
@@ -529,6 +654,150 @@ mod tests {
             schematic: DocumentObservation::Documents(documents),
             pcb: DocumentObservation::Unsupported("no handler".to_owned()),
         }
+    }
+
+    fn pcb() -> OpenDocument {
+        OpenDocument {
+            project_name: Some("xLock".to_owned()),
+            project_path: Some("/projects/xLock".to_owned()),
+            kind: OpenDocumentKind::Pcb {
+                board_filename: "xLock.kicad_pcb".to_owned(),
+            },
+        }
+    }
+
+    fn observed_graphic(id: &str, x: i64) -> ObservedBoardGraphicSegment {
+        ObservedBoardGraphicSegment {
+            graphic_id: id.to_owned(),
+            segment: IpcBoardGraphicSegment {
+                start_x_nm: x,
+                start_y_nm: 2,
+                end_x_nm: x + 10,
+                end_y_nm: 4,
+                width_nm: 100_000,
+                layer: IpcBoardGraphicLayer::DwgsUser,
+            },
+        }
+    }
+
+    #[test]
+    fn live_board_observation_maps_identity_geometry_and_capabilities() {
+        let observation = live_board_observation(
+            version(),
+            pcb(),
+            vec![observed_graphic("graphic-1", 1)],
+            InstanceToken::new("token").unwrap(),
+        )
+        .unwrap();
+        let discovered = discovered_document(pcb()).unwrap().unwrap();
+        assert_eq!(observation.board_filename, "xLock.kicad_pcb");
+        assert_eq!(observation.instance_token.as_str(), "token");
+        assert_eq!(
+            observation.snapshot.board.document_id,
+            Some(discovered.document_id)
+        );
+        assert_eq!(
+            observation.snapshot.capabilities,
+            ["pcb.board_graphics.read", "pcb.board_graphics.write"]
+        );
+        assert!(observation.snapshot.schematic.nets.is_empty());
+        assert!(observation.snapshot.schematic.symbols.is_empty());
+        assert!(observation.snapshot.board.footprints.is_empty());
+        let graphic = &observation.snapshot.board.graphics[0];
+        assert_eq!(graphic.graphic_id.as_str(), "graphic-1");
+        assert_eq!((graphic.start.x, graphic.end.x), (1, 11));
+        assert_eq!(graphic.start.space, DocumentSpace::Board);
+        assert_eq!(graphic.width_nm, 100_000);
+    }
+
+    #[test]
+    fn live_board_revision_is_independent_of_graphic_order() {
+        let first = live_board_observation(
+            version(),
+            pcb(),
+            vec![observed_graphic("b", 20), observed_graphic("a", 1)],
+            InstanceToken::new("token").unwrap(),
+        )
+        .unwrap();
+        let second = live_board_observation(
+            version(),
+            pcb(),
+            vec![observed_graphic("a", 1), observed_graphic("b", 20)],
+            InstanceToken::new("token").unwrap(),
+        )
+        .unwrap();
+        assert_eq!(first.snapshot, second.snapshot);
+        assert_eq!(
+            first.snapshot.revision().unwrap(),
+            second.snapshot.revision().unwrap()
+        );
+    }
+
+    #[test]
+    fn live_board_observation_rejects_duplicate_or_invalid_graphic_ids() {
+        let duplicate = live_board_observation(
+            version(),
+            pcb(),
+            vec![observed_graphic("same", 1), observed_graphic("same", 20)],
+            InstanceToken::new("token").unwrap(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            duplicate,
+            LiveBoardObservationError::DuplicateGraphicId(ref id) if id == "same"
+        ));
+        let invalid = live_board_observation(
+            version(),
+            pcb(),
+            vec![observed_graphic("", 1)],
+            InstanceToken::new("token").unwrap(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            invalid,
+            LiveBoardObservationError::Model(ModelError::EmptyStableId)
+        ));
+    }
+
+    #[test]
+    fn live_board_observation_rejects_missing_project_identity() {
+        let mut document = pcb();
+        document.project_name = None;
+        document.project_path = None;
+        let error = live_board_observation(
+            version(),
+            document,
+            Vec::new(),
+            InstanceToken::new("token").unwrap(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            LiveBoardObservationError::MissingProjectIdentity
+        ));
+    }
+
+    #[test]
+    fn live_board_observation_rejects_non_pcb_document() {
+        let error = live_board_observation(
+            version(),
+            schematic("xLock.kicad_sch"),
+            Vec::new(),
+            InstanceToken::new("token").unwrap(),
+        )
+        .unwrap_err();
+        assert!(matches!(error, LiveBoardObservationError::NonPcbDocument));
+
+        let mut document = pcb();
+        document.kind = OpenDocumentKind::Other;
+        let error = live_board_observation(
+            version(),
+            document,
+            Vec::new(),
+            InstanceToken::new("token").unwrap(),
+        )
+        .unwrap_err();
+        assert!(matches!(error, LiveBoardObservationError::NonPcbDocument));
     }
 
     #[test]
