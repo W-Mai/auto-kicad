@@ -9,6 +9,10 @@ fn main() {
             "proto/common/commands/editor_commands.proto",
             "proto/common/types/base_types.proto",
             "proto/common/types/enums.proto",
+            "proto/common/types/project_settings.proto",
+            "proto/board/board.proto",
+            "proto/board/board_types.proto",
+            "proto/board/board_commands.proto",
         ])
         .cargo_out_dir("generated")
         .run_from_script();

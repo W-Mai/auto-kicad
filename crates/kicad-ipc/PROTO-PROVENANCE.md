@@ -16,3 +16,7 @@ Vendored files and SHA-256:
 | `proto/common/commands/editor_commands.proto` | `efdfdf569c867b4e9dbef5edb0da22ca5546bb09bf5908825219057d8fe198f7` |
 | `proto/common/types/base_types.proto` | `875d10d36a49aee52bfd16234e553b34a92f68240cecc087ce6721827046e4f2` |
 | `proto/common/types/enums.proto` | `ee9c1ac5fdc61d2f012a1f8bfc358358115423b79c05023903021f7665523f47` |
+| `proto/common/types/project_settings.proto` | `4552846e15cc07645a681034026018b4fb1186f39ac0b9a8cb0c2c893226b0ca` |
+| `proto/board/board.proto` | `b24eb03626b27884de7fc256d8e76f80b730cde23718a8c225474b935ba452e5` |
+| `proto/board/board_types.proto` | `b5971ec8b3678d06046bbdff9b9e52f52f02a303d0d328a1b99ce1903e835649` |
+| `proto/board/board_commands.proto` | `593d4c4aaabf564ab300b2500f880e5c4f4a7337d23416dd77823fe2fdcad966` |

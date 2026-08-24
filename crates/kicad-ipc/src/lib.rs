@@ -13,6 +13,9 @@ use envelope::{ApiRequest, ApiRequestHeader, ApiResponse, ApiStatusCode};
 pub const GET_VERSION_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.GetVersion";
 pub const GET_OPEN_DOCUMENTS_TYPE_URL: &str =
     "type.googleapis.com/kiapi.common.commands.GetOpenDocuments";
+pub const GET_NETS_TYPE_URL: &str = "type.googleapis.com/kiapi.board.commands.GetNets";
+pub const GET_NETS_RESPONSE_TYPE_URL: &str =
+    "type.googleapis.com/kiapi.board.commands.NetsResponse";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DocumentQuery {
@@ -46,6 +49,12 @@ pub struct OpenDocument {
     pub project_name: Option<String>,
     pub project_path: Option<String>,
     pub kind: OpenDocumentKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoardNet {
+    pub code: Option<i32>,
+    pub name: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -234,6 +243,24 @@ impl<T: KiCadTransport> KiCadClient<T> {
         })
     }
 
+    pub fn get_board_nets(&mut self, board_filename: &str) -> Result<Vec<BoardNet>, IpcError> {
+        let request = get_nets_request(&self.config, self.token.as_ref(), board_filename);
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let response =
+            decode_any::<board_commands::NetsResponse>(&response, GET_NETS_RESPONSE_TYPE_URL)?;
+        self.token = Some(token);
+        Ok(response
+            .nets
+            .iter()
+            .map(|net| BoardNet {
+                code: net.code.as_ref().map(|code| code.value),
+                name: net.name.clone(),
+            })
+            .collect())
+    }
+
     pub fn get_open_documents(
         &mut self,
         query: DocumentQuery,
@@ -262,6 +289,36 @@ pub fn get_version_request(config: &ClientConfig, token: Option<&InstanceToken>)
         value: command
             .write_to_bytes()
             .expect("empty GetVersion serializes"),
+        ..Any::default()
+    };
+    ApiRequest {
+        header: MessageField::some(ApiRequestHeader {
+            client_name: config.client_name.clone(),
+            kicad_token: token.map_or_else(String::new, |token| token.as_str().to_owned()),
+            ..ApiRequestHeader::default()
+        }),
+        message: MessageField::some(any),
+        ..ApiRequest::default()
+    }
+}
+
+fn get_nets_request(
+    config: &ClientConfig,
+    token: Option<&InstanceToken>,
+    board_filename: &str,
+) -> ApiRequest {
+    let mut board = base_types::DocumentSpecifier {
+        type_: protobuf::EnumOrUnknown::new(base_types::DocumentType::DOCTYPE_PCB),
+        ..base_types::DocumentSpecifier::default()
+    };
+    board.set_board_filename(board_filename.to_owned());
+    let command = board_commands::GetNets {
+        board: MessageField::some(board),
+        ..board_commands::GetNets::default()
+    };
+    let any = Any {
+        type_url: GET_NETS_TYPE_URL.to_owned(),
+        value: command.write_to_bytes().expect("GetNets serializes"),
         ..Any::default()
     };
     ApiRequest {
@@ -546,6 +603,26 @@ mod tests {
             base_types::DocumentType::DOCTYPE_PCB
         );
         assert_eq!(any.type_url, GET_OPEN_DOCUMENTS_TYPE_URL);
+        assert_eq!(request.header.as_ref().unwrap().kicad_token, "token");
+    }
+
+    #[test]
+    fn get_nets_request_encodes_board_document() {
+        let config = ClientConfig::new("ipc:///tmp/kicad/api.sock", "test-client").unwrap();
+        let request = get_nets_request(
+            &config,
+            Some(&InstanceToken::new("token").unwrap()),
+            "xLock.kicad_pcb",
+        );
+        let any = request.message.as_ref().unwrap();
+        let command = board_commands::GetNets::parse_from_bytes(&any.value).unwrap();
+        let board = command.board.as_ref().unwrap();
+        assert_eq!(
+            board.type_.enum_value_or_default(),
+            base_types::DocumentType::DOCTYPE_PCB
+        );
+        assert_eq!(board.board_filename(), "xLock.kicad_pcb");
+        assert_eq!(any.type_url, GET_NETS_TYPE_URL);
         assert_eq!(request.header.as_ref().unwrap().kicad_token, "token");
     }
 
