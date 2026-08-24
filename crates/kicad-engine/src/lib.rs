@@ -1,11 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 
-use kicad_model::{Coordinate, DocumentSpace, ProjectSnapshot, RevisionDigest, StableId, Symbol};
+use kicad_model::{
+    BoardGraphicSegment, Coordinate, DocumentSpace, ProjectSnapshot, RevisionDigest, StableId,
+    Symbol,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub const MAX_OPERATIONS: usize = 100;
+pub const MAX_GRAPHIC_SPAN_NM: i128 = 10_000_000;
+pub const MAX_GRAPHIC_BOUNDING_AREA_NM2: i128 = 100_000_000_000_000;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "arguments")]
@@ -29,6 +34,10 @@ pub enum OperationKind {
     PlaceFootprint {
         target: StableId,
         position: Coordinate,
+    },
+    AddBoardGraphicSegments {
+        board: StableId,
+        segments: Vec<BoardGraphicSegment>,
     },
 }
 
@@ -66,6 +75,7 @@ impl Operation {
             OperationKind::ConnectPins { source, target } => vec![source, target],
             OperationKind::AssignFootprint { symbol, .. } => vec![symbol],
             OperationKind::PlaceFootprint { target, .. } => vec![target],
+            OperationKind::AddBoardGraphicSegments { board, .. } => vec![board],
         }
     }
 }
@@ -116,6 +126,12 @@ impl ChangePlan {
             .iter()
             .map(|s| s.source_uuid.clone())
             .collect();
+        let existing_graphics: BTreeSet<StableId> = snapshot
+            .board
+            .graphics
+            .iter()
+            .map(|graphic| graphic.graphic_id.clone())
+            .collect();
         let mut planned_adds = BTreeMap::new();
         for (index, operation) in self.operations.iter().enumerate() {
             if let OperationKind::AddSymbol { symbol } = &operation.kind
@@ -128,6 +144,9 @@ impl ChangePlan {
             }
         }
         let mut known = existing.clone();
+        if let Some(board) = &snapshot.board.document_id {
+            known.insert(board.clone());
+        }
         for (index, op) in self.operations.iter().enumerate() {
             if op.source_run_id != self.source_run_id {
                 return Err(EngineError::InvalidPlan("operation run identity mismatch"));
@@ -152,7 +171,7 @@ impl ChangePlan {
             }
             if let OperationKind::AddSymbol { symbol } = &op.kind {
                 known.insert(symbol.source_uuid.clone());
-            } else {
+            } else if !matches!(op.kind, OperationKind::AddBoardGraphicSegments { .. }) {
                 for target in op.refs() {
                     if !known.contains(target) {
                         if planned_adds
@@ -190,6 +209,22 @@ impl ChangePlan {
                     }) {
                         return Err(EngineError::InvalidOrder);
                     }
+                }
+                OperationKind::AddBoardGraphicSegments { board, segments } => {
+                    if snapshot.board.document_id.as_ref() != Some(board) {
+                        return Err(EngineError::ScopeMismatch);
+                    }
+                    let mut ids = BTreeSet::new();
+                    for segment in segments {
+                        if existing_graphics.contains(&segment.graphic_id)
+                            || !ids.insert(segment.graphic_id.clone())
+                        {
+                            return Err(EngineError::TargetAlreadyExists(
+                                segment.graphic_id.clone(),
+                            ));
+                        }
+                    }
+                    validate_graphics(segments)?;
                 }
             }
         }
@@ -470,10 +505,61 @@ fn apply_operations(
                 symbol.value = Some(value.clone());
             }
             OperationKind::SetProperty { .. } => return Err(EngineError::UnsupportedOperation),
+            OperationKind::AddBoardGraphicSegments { segments, .. } => {
+                snapshot.board.graphics.extend(segments.clone());
+            }
             _ => return Err(EngineError::UnsupportedOperation),
         }
     }
     Ok(snapshot.canonical())
+}
+
+fn validate_graphics(segments: &[BoardGraphicSegment]) -> Result<(), EngineError> {
+    if segments.is_empty() {
+        return Err(EngineError::InvalidPlan(
+            "graphic segment list must not be empty",
+        ));
+    }
+    if segments.len() > MAX_OPERATIONS {
+        return Err(EngineError::OperationLimitExceeded);
+    }
+    for segment in segments {
+        segment
+            .validate()
+            .map_err(|_| EngineError::InvalidPlan("invalid board graphic"))?;
+    }
+    let min_x = segments
+        .iter()
+        .map(|segment| segment.start.x.min(segment.end.x))
+        .min()
+        .unwrap();
+    let max_x = segments
+        .iter()
+        .map(|segment| segment.start.x.max(segment.end.x))
+        .max()
+        .unwrap();
+    let min_y = segments
+        .iter()
+        .map(|segment| segment.start.y.min(segment.end.y))
+        .min()
+        .unwrap();
+    let max_y = segments
+        .iter()
+        .map(|segment| segment.start.y.max(segment.end.y))
+        .max()
+        .unwrap();
+    let width = i128::from(max_x) - i128::from(min_x);
+    let height = i128::from(max_y) - i128::from(min_y);
+    if width > MAX_GRAPHIC_SPAN_NM || height > MAX_GRAPHIC_SPAN_NM {
+        return Err(EngineError::InvalidPlan("graphic bounding span exceeded"));
+    }
+    let area = width
+        .checked_mul(height)
+        .ok_or(EngineError::InvalidPlan("graphic bounding area overflowed"))?;
+    if area > MAX_GRAPHIC_BOUNDING_AREA_NM2 {
+        return Err(EngineError::InvalidPlan("graphic bounding area exceeded"));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -492,7 +578,10 @@ mod tests {
             kicad_version: "10.0.5".into(),
             capabilities: vec!["schematic.write".into()],
             schematic: Schematic::default(),
-            board: Board::default(),
+            board: Board {
+                document_id: Some(id("board")),
+                ..Board::default()
+            },
         }
     }
     fn symbol(uuid: &str) -> Symbol {
@@ -509,6 +598,31 @@ mod tests {
                 space: kicad_model::DocumentSpace::Schematic,
             },
             pins: vec![],
+        }
+    }
+    fn graphic(
+        graphic_id: &str,
+        start_x: i64,
+        start_y: i64,
+        end_x: i64,
+        end_y: i64,
+    ) -> BoardGraphicSegment {
+        BoardGraphicSegment {
+            graphic_id: id(graphic_id),
+            start: Coordinate {
+                x: start_x,
+                y: start_y,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            },
+            end: Coordinate {
+                x: end_x,
+                y: end_y,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            },
+            width_nm: 100_000,
+            layer: kicad_model::BoardGraphicLayer::DwgsUser,
         }
     }
     fn op(kind: OperationKind, target: &str, key: &str) -> Operation {
@@ -795,5 +909,119 @@ mod tests {
         );
         stale.base_revision = digest('b');
         assert_eq!(engine.preview(&stale), Err(EngineError::RevisionStale));
+    }
+
+    #[test]
+    fn board_graphics_require_exact_scope_and_unique_identity() {
+        let engine = Engine::new(snapshot(), "token");
+        let segment = graphic("g1", 0, 0, 1_000_000, 1_000_000);
+        let wrong_scope = op(
+            OperationKind::AddBoardGraphicSegments {
+                board: id("other-board"),
+                segments: vec![segment.clone()],
+            },
+            "other-board",
+            "graphic",
+        );
+        assert_eq!(
+            engine.preview(&plan(&engine, vec![wrong_scope])),
+            Err(EngineError::ScopeMismatch)
+        );
+
+        let duplicate = op(
+            OperationKind::AddBoardGraphicSegments {
+                board: id("board"),
+                segments: vec![segment.clone(), segment],
+            },
+            "board",
+            "graphic",
+        );
+        assert_eq!(
+            engine.preview(&plan(&engine, vec![duplicate])),
+            Err(EngineError::TargetAlreadyExists(id("g1")))
+        );
+    }
+
+    #[test]
+    fn board_graphics_preview_commit_and_replay_are_deterministic() {
+        let mut engine = Engine::new(snapshot(), "token");
+        let operation = op(
+            OperationKind::AddBoardGraphicSegments {
+                board: id("board"),
+                segments: vec![
+                    graphic("g2", 1_000_000, 0, 0, 1_000_000),
+                    graphic("g1", 0, 0, 1_000_000, 0),
+                ],
+            },
+            "board",
+            "graphics",
+        );
+        let mut session = engine
+            .begin_session(plan(&engine, vec![operation]))
+            .unwrap();
+        let preview = engine.preview_session(&mut session).unwrap();
+        assert_eq!(preview.after.board.graphics[0].graphic_id, id("g1"));
+        assert_ne!(
+            preview.before.revision().unwrap(),
+            preview.after.revision().unwrap()
+        );
+        engine.validate(&mut session).unwrap();
+        engine.request_approval(&mut session).unwrap();
+        let hash = session.plan_hash.clone();
+        engine.approve(&mut session, &hash).unwrap();
+        let mut replay = session.clone();
+        engine.commit(&mut session).unwrap();
+        engine.commit(&mut replay).unwrap();
+        assert_eq!(engine.snapshot().board.graphics.len(), 2);
+        assert_eq!(replay.audit.last().unwrap().event, "commit_replayed");
+    }
+
+    #[test]
+    fn board_graphics_reject_missing_scope_existing_identity_and_large_area() {
+        let mut missing = snapshot();
+        missing.board.document_id = None;
+        let engine = Engine::new(missing, "token");
+        let operation = op(
+            OperationKind::AddBoardGraphicSegments {
+                board: id("board"),
+                segments: vec![graphic("g1", 0, 0, 1, 1)],
+            },
+            "board",
+            "graphic",
+        );
+        assert_eq!(
+            engine.preview(&plan(&engine, vec![operation])),
+            Err(EngineError::ScopeMismatch)
+        );
+
+        let mut existing = snapshot();
+        existing.board.graphics.push(graphic("g1", 0, 0, 1, 1));
+        let engine = Engine::new(existing, "token");
+        let duplicate = op(
+            OperationKind::AddBoardGraphicSegments {
+                board: id("board"),
+                segments: vec![graphic("g1", 2, 2, 3, 3)],
+            },
+            "board",
+            "graphic",
+        );
+        assert_eq!(
+            engine.preview(&plan(&engine, vec![duplicate])),
+            Err(EngineError::TargetAlreadyExists(id("g1")))
+        );
+
+        let engine = Engine::new(snapshot(), "token");
+        let oversized = op(
+            OperationKind::AddBoardGraphicSegments {
+                board: id("board"),
+                segments: vec![graphic("large", 0, 0, 20_000_000, 20_000_000)],
+            },
+            "board",
+            "large",
+        );
+        assert_eq!(
+            engine.preview(&plan(&engine, vec![oversized])),
+            Err(EngineError::InvalidPlan("graphic bounding span exceeded"))
+        );
     }
 }

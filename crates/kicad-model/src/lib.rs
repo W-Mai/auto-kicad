@@ -100,9 +100,51 @@ pub struct Schematic {
     pub symbols: Vec<Symbol>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub enum BoardGraphicLayer {
+    DwgsUser,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BoardGraphicSegment {
+    pub graphic_id: StableId,
+    pub start: Coordinate,
+    pub end: Coordinate,
+    pub width_nm: i64,
+    pub layer: BoardGraphicLayer,
+}
+
+impl BoardGraphicSegment {
+    pub fn validate(&self) -> Result<(), ModelError> {
+        if self.start.unit != Unit::Nanometres || self.end.unit != Unit::Nanometres {
+            return Err(ModelError::InvalidBoardGraphic(
+                "coordinates must use nanometres",
+            ));
+        }
+        if self.start.space != DocumentSpace::Board || self.end.space != DocumentSpace::Board {
+            return Err(ModelError::InvalidBoardGraphic(
+                "coordinates must use board space",
+            ));
+        }
+        if self.width_nm <= 0 {
+            return Err(ModelError::InvalidBoardGraphic("width must be positive"));
+        }
+        if self.start.x == self.end.x && self.start.y == self.end.y {
+            return Err(ModelError::InvalidBoardGraphic(
+                "segment endpoints must differ",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Board {
+    #[serde(default)]
+    pub document_id: Option<StableId>,
     pub footprints: Vec<Footprint>,
+    #[serde(default)]
+    pub graphics: Vec<BoardGraphicSegment>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -215,6 +257,17 @@ impl ProjectSnapshot {
             .board
             .footprints
             .sort_by(|left, right| left.source_uuid.cmp(&right.source_uuid));
+        snapshot.board.graphics.sort_by_key(|graphic| {
+            (
+                graphic.start.x,
+                graphic.start.y,
+                graphic.end.x,
+                graphic.end.y,
+                graphic.width_nm,
+                graphic.layer,
+                graphic.graphic_id.clone(),
+            )
+        });
         snapshot
     }
 
@@ -267,6 +320,7 @@ impl Display for RevisionDigest {
 pub enum ModelError {
     EmptyStableId,
     InvalidRevisionDigest,
+    InvalidBoardGraphic(&'static str),
     Serialization(serde_json::Error),
 }
 
@@ -277,6 +331,7 @@ impl Display for ModelError {
             Self::InvalidRevisionDigest => {
                 formatter.write_str("revision digest must be 64 hexadecimal characters")
             }
+            Self::InvalidBoardGraphic(message) => formatter.write_str(message),
             Self::Serialization(error) => {
                 write!(formatter, "snapshot serialization failed: {error}")
             }
@@ -405,5 +460,60 @@ mod tests {
             RevisionDigest::new("A".repeat(64)).unwrap().as_str(),
             "a".repeat(64)
         );
+    }
+
+    fn graphic(graphic_id: &str) -> BoardGraphicSegment {
+        BoardGraphicSegment {
+            graphic_id: id(graphic_id),
+            start: Coordinate {
+                x: 0,
+                y: 0,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            },
+            end: Coordinate {
+                x: 1,
+                y: 1,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            },
+            width_nm: 1,
+            layer: BoardGraphicLayer::DwgsUser,
+        }
+    }
+
+    #[test]
+    fn board_graphic_identity_changes_revision_and_order_does_not() {
+        let mut first = snapshot(vec![]);
+        first.board.document_id = Some(id("board"));
+        first.board.graphics = vec![graphic("b"), graphic("a")];
+        let mut reordered = first.clone();
+        reordered.board.graphics.reverse();
+        assert_eq!(first.revision().unwrap(), reordered.revision().unwrap());
+        reordered.board.graphics[0].graphic_id = id("changed");
+        assert_ne!(first.revision().unwrap(), reordered.revision().unwrap());
+    }
+
+    #[test]
+    fn old_board_snapshot_deserializes_without_new_fields() {
+        let board: Board = serde_json::from_value(serde_json::json!({
+            "footprints": []
+        }))
+        .unwrap();
+        assert_eq!(board.document_id, None);
+        assert!(board.graphics.is_empty());
+    }
+
+    #[test]
+    fn board_graphic_validation_rejects_invalid_geometry() {
+        assert!(graphic("valid").validate().is_ok());
+        let mut invalid = graphic("invalid");
+        invalid.end = invalid.start;
+        assert!(matches!(
+            invalid.validate(),
+            Err(ModelError::InvalidBoardGraphic(
+                "segment endpoints must differ"
+            ))
+        ));
     }
 }
