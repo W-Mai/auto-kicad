@@ -444,6 +444,7 @@ dependencies = [
  "nng",
  "protobuf",
  "protobuf-codegen",
+ "serde",
  "serde_json",
 ]
 

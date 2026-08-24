@@ -16,6 +16,20 @@ pub const GET_OPEN_DOCUMENTS_TYPE_URL: &str =
 pub const GET_NETS_TYPE_URL: &str = "type.googleapis.com/kiapi.board.commands.GetNets";
 pub const GET_NETS_RESPONSE_TYPE_URL: &str =
     "type.googleapis.com/kiapi.board.commands.NetsResponse";
+pub const GET_ITEMS_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.GetItems";
+pub const GET_ITEMS_RESPONSE_TYPE_URL: &str =
+    "type.googleapis.com/kiapi.common.commands.GetItemsResponse";
+pub const BEGIN_COMMIT_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.BeginCommit";
+pub const BEGIN_COMMIT_RESPONSE_TYPE_URL: &str =
+    "type.googleapis.com/kiapi.common.commands.BeginCommitResponse";
+pub const CREATE_ITEMS_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.CreateItems";
+pub const CREATE_ITEMS_RESPONSE_TYPE_URL: &str =
+    "type.googleapis.com/kiapi.common.commands.CreateItemsResponse";
+pub const END_COMMIT_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.EndCommit";
+pub const END_COMMIT_RESPONSE_TYPE_URL: &str =
+    "type.googleapis.com/kiapi.common.commands.EndCommitResponse";
+pub const SAVE_DOCUMENT_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.SaveDocument";
+pub const EMPTY_RESPONSE_TYPE_URL: &str = "type.googleapis.com/google.protobuf.Empty";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DocumentQuery {
@@ -55,6 +69,31 @@ pub struct OpenDocument {
 pub struct BoardNet {
     pub code: Option<i32>,
     pub name: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BoardGraphicLayer {
+    DwgsUser,
+    FSilkS,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BoardGraphicSegment {
+    pub start_x_nm: i64,
+    pub start_y_nm: i64,
+    pub end_x_nm: i64,
+    pub end_y_nm: i64,
+    pub width_nm: i64,
+    pub layer: BoardGraphicLayer,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CommitId(String);
+
+impl CommitId {
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -115,6 +154,16 @@ pub enum IpcError {
         expected: &'static str,
         actual: String,
     },
+    CreateItemsCountMismatch {
+        expected: usize,
+        actual: usize,
+    },
+    CreateItemFailed {
+        index: usize,
+        status: i32,
+        message: String,
+    },
+    InvalidBoardGraphic(&'static str),
     Status(ApiStatusCode, String),
     Transport(nng::Error),
 }
@@ -138,6 +187,9 @@ impl IpcError {
             | Self::MissingResponseHeader
             | Self::MissingResponseMessage
             | Self::UnexpectedMessageType { .. } => "protocol_decode_failed",
+            Self::CreateItemsCountMismatch { .. } => "create_items_count_mismatch",
+            Self::CreateItemFailed { .. } => "create_item_failed",
+            Self::InvalidBoardGraphic(_) => "invalid_board_graphic",
             Self::Status(status, _) => match status {
                 ApiStatusCode::AS_TIMEOUT => "connection_unavailable",
                 ApiStatusCode::AS_NOT_READY => "kicad_not_ready",
@@ -161,6 +213,26 @@ impl Display for IpcError {
             }
             Self::UnexpectedMessageType { actual, .. } => {
                 write!(formatter, "{}: unexpected type {actual}", self.code())
+            }
+            Self::CreateItemsCountMismatch { expected, actual } => write!(
+                formatter,
+                "{}: expected {expected} results, received {actual}",
+                self.code()
+            ),
+            Self::CreateItemFailed {
+                index,
+                status,
+                message,
+            } if !message.is_empty() => write!(
+                formatter,
+                "{}: item {index} status {status}: {message}",
+                self.code()
+            ),
+            Self::CreateItemFailed { index, status, .. } => {
+                write!(formatter, "{}: item {index} status {status}", self.code())
+            }
+            Self::InvalidBoardGraphic(message) => {
+                write!(formatter, "{}: {message}", self.code())
             }
             Self::Transport(error) => write!(formatter, "{}: {error}", self.code()),
             _ => formatter.write_str(self.code()),
@@ -243,6 +315,121 @@ impl<T: KiCadTransport> KiCadClient<T> {
         })
     }
 
+    pub fn begin_commit(&mut self) -> Result<CommitId, IpcError> {
+        let request = simple_command_request(
+            &self.config,
+            self.token.as_ref(),
+            BEGIN_COMMIT_TYPE_URL,
+            &editor_commands::BeginCommit::default(),
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let response = decode_any::<editor_commands::BeginCommitResponse>(
+            &response,
+            BEGIN_COMMIT_RESPONSE_TYPE_URL,
+        )?;
+        self.token = Some(token);
+        let id = response
+            .id
+            .into_option()
+            .ok_or(IpcError::MissingResponseMessage)?;
+        Ok(CommitId(id.value))
+    }
+
+    pub fn create_board_graphics(
+        &mut self,
+        board_filename: &str,
+        graphics: &[BoardGraphicSegment],
+    ) -> Result<(), IpcError> {
+        let items = graphics
+            .iter()
+            .map(board_graphic_segment_item)
+            .collect::<Result<Vec<_>, IpcError>>()?;
+        let command = editor_commands::CreateItems {
+            header: MessageField::some(board_item_header(board_filename)),
+            items,
+            ..editor_commands::CreateItems::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            CREATE_ITEMS_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let response = decode_any::<editor_commands::CreateItemsResponse>(
+            &response,
+            CREATE_ITEMS_RESPONSE_TYPE_URL,
+        )?;
+        self.token = Some(token);
+        validate_create_items_response(&response, graphics.len())
+    }
+
+    pub fn commit_changes(&mut self, commit: &CommitId, message: &str) -> Result<(), IpcError> {
+        self.end_commit(commit, editor_commands::CommitAction::CMA_COMMIT, message)
+    }
+
+    pub fn save_board(&mut self, board_filename: &str) -> Result<(), IpcError> {
+        let command = editor_commands::SaveDocument {
+            document: MessageField::some(board_document(board_filename)),
+            ..editor_commands::SaveDocument::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            SAVE_DOCUMENT_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let _ = decode_any::<protobuf::well_known_types::empty::Empty>(
+            &response,
+            EMPTY_RESPONSE_TYPE_URL,
+        )?;
+        self.token = Some(token);
+        Ok(())
+    }
+
+    pub fn drop_commit(&mut self, commit: &CommitId) -> Result<(), IpcError> {
+        self.end_commit(commit, editor_commands::CommitAction::CMA_DROP, "")
+    }
+
+    fn end_commit(
+        &mut self,
+        commit: &CommitId,
+        action: editor_commands::CommitAction,
+        message: &str,
+    ) -> Result<(), IpcError> {
+        let command = editor_commands::EndCommit {
+            id: MessageField::some(base_types::KIID {
+                value: commit.0.clone(),
+                ..base_types::KIID::default()
+            }),
+            action: protobuf::EnumOrUnknown::new(action),
+            message: message.to_owned(),
+            ..editor_commands::EndCommit::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            END_COMMIT_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let _ = decode_any::<editor_commands::EndCommitResponse>(
+            &response,
+            END_COMMIT_RESPONSE_TYPE_URL,
+        )?;
+        self.token = Some(token);
+        Ok(())
+    }
+
     pub fn get_board_nets(&mut self, board_filename: &str) -> Result<Vec<BoardNet>, IpcError> {
         let request = get_nets_request(&self.config, self.token.as_ref(), board_filename);
         let response = self.transport.request(request)?;
@@ -282,6 +469,39 @@ impl<T: KiCadTransport> KiCadClient<T> {
     }
 }
 
+fn command_request<M: Message>(
+    config: &ClientConfig,
+    token: Option<&InstanceToken>,
+    type_url: &str,
+    command: M,
+) -> Result<ApiRequest, IpcError> {
+    let any = Any {
+        type_url: type_url.to_owned(),
+        value: command
+            .write_to_bytes()
+            .map_err(|_| IpcError::MalformedEnvelope)?,
+        ..Any::default()
+    };
+    Ok(ApiRequest {
+        header: MessageField::some(ApiRequestHeader {
+            client_name: config.client_name.clone(),
+            kicad_token: token.map_or_else(String::new, |token| token.as_str().to_owned()),
+            ..ApiRequestHeader::default()
+        }),
+        message: MessageField::some(any),
+        ..ApiRequest::default()
+    })
+}
+
+fn simple_command_request<M: Message>(
+    config: &ClientConfig,
+    token: Option<&InstanceToken>,
+    type_url: &str,
+    command: &M,
+) -> Result<ApiRequest, IpcError> {
+    command_request(config, token, type_url, command.clone())
+}
+
 pub fn get_version_request(config: &ClientConfig, token: Option<&InstanceToken>) -> ApiRequest {
     let command = base_commands::GetVersion::new();
     let any = Any {
@@ -300,6 +520,111 @@ pub fn get_version_request(config: &ClientConfig, token: Option<&InstanceToken>)
         message: MessageField::some(any),
         ..ApiRequest::default()
     }
+}
+
+fn board_document(board_filename: &str) -> base_types::DocumentSpecifier {
+    let mut board = base_types::DocumentSpecifier {
+        type_: protobuf::EnumOrUnknown::new(base_types::DocumentType::DOCTYPE_PCB),
+        ..base_types::DocumentSpecifier::default()
+    };
+    board.set_board_filename(board_filename.to_owned());
+    board
+}
+
+fn board_item_header(board_filename: &str) -> base_types::ItemHeader {
+    base_types::ItemHeader {
+        document: MessageField::some(board_document(board_filename)),
+        ..base_types::ItemHeader::default()
+    }
+}
+
+fn validate_create_items_response(
+    response: &editor_commands::CreateItemsResponse,
+    expected: usize,
+) -> Result<(), IpcError> {
+    if response.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
+        return Err(IpcError::Status(
+            ApiStatusCode::AS_BAD_REQUEST,
+            format!(
+                "create items status: {:?}",
+                response.status.enum_value_or_default()
+            ),
+        ));
+    }
+    if response.created_items.len() != expected {
+        return Err(IpcError::CreateItemsCountMismatch {
+            expected,
+            actual: response.created_items.len(),
+        });
+    }
+    for (index, result) in response.created_items.iter().enumerate() {
+        let status = result.status.as_ref();
+        let code = status.map_or(0, |status| status.code.value());
+        if code != editor_commands::ItemStatusCode::ISC_OK as i32 {
+            return Err(IpcError::CreateItemFailed {
+                index,
+                status: code,
+                message: status.map_or_else(String::new, |status| status.error_message.clone()),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn board_graphic_segment_item(segment: &BoardGraphicSegment) -> Result<Any, IpcError> {
+    if segment.width_nm <= 0 {
+        return Err(IpcError::InvalidBoardGraphic(
+            "segment width must be positive",
+        ));
+    }
+    if segment.start_x_nm == segment.end_x_nm && segment.start_y_nm == segment.end_y_nm {
+        return Err(IpcError::InvalidBoardGraphic(
+            "segment endpoints must differ",
+        ));
+    }
+    let layer = match segment.layer {
+        BoardGraphicLayer::DwgsUser => board_types::BoardLayer::BL_Dwgs_User,
+        BoardGraphicLayer::FSilkS => board_types::BoardLayer::BL_F_SilkS,
+    };
+    let graphic = board_types::BoardGraphicShape {
+        shape: MessageField::some(base_types::GraphicShape {
+            attributes: MessageField::some(base_types::GraphicAttributes {
+                stroke: MessageField::some(base_types::StrokeAttributes {
+                    width: MessageField::some(base_types::Distance {
+                        value_nm: segment.width_nm,
+                        ..base_types::Distance::default()
+                    }),
+                    ..base_types::StrokeAttributes::default()
+                }),
+                ..base_types::GraphicAttributes::default()
+            }),
+            geometry: Some(base_types::graphic_shape::Geometry::Segment(
+                base_types::GraphicSegmentAttributes {
+                    start: MessageField::some(base_types::Vector2 {
+                        x_nm: segment.start_x_nm,
+                        y_nm: segment.start_y_nm,
+                        ..base_types::Vector2::default()
+                    }),
+                    end: MessageField::some(base_types::Vector2 {
+                        x_nm: segment.end_x_nm,
+                        y_nm: segment.end_y_nm,
+                        ..base_types::Vector2::default()
+                    }),
+                    ..base_types::GraphicSegmentAttributes::default()
+                },
+            )),
+            ..base_types::GraphicShape::default()
+        }),
+        layer: protobuf::EnumOrUnknown::new(layer),
+        ..board_types::BoardGraphicShape::default()
+    };
+    Ok(Any {
+        type_url: "type.googleapis.com/kiapi.board.types.BoardGraphicShape".to_owned(),
+        value: graphic
+            .write_to_bytes()
+            .map_err(|_| IpcError::MalformedEnvelope)?,
+        ..Any::default()
+    })
 }
 
 fn get_nets_request(
@@ -532,6 +857,54 @@ mod tests {
         }
     }
 
+    fn create_items_response(
+        token: &str,
+        statuses: &[(editor_commands::ItemStatusCode, &str)],
+    ) -> ApiResponse {
+        let response = editor_commands::CreateItemsResponse {
+            status: protobuf::EnumOrUnknown::new(base_types::ItemRequestStatus::IRS_OK),
+            created_items: statuses
+                .iter()
+                .map(|(code, message)| editor_commands::ItemCreationResult {
+                    status: MessageField::some(editor_commands::ItemStatus {
+                        code: protobuf::EnumOrUnknown::new(*code),
+                        error_message: (*message).to_owned(),
+                        ..editor_commands::ItemStatus::default()
+                    }),
+                    ..editor_commands::ItemCreationResult::default()
+                })
+                .collect(),
+            ..editor_commands::CreateItemsResponse::default()
+        };
+        ApiResponse {
+            header: MessageField::some(envelope::ApiResponseHeader {
+                kicad_token: token.to_owned(),
+                ..envelope::ApiResponseHeader::default()
+            }),
+            status: MessageField::some(envelope::ApiResponseStatus {
+                status: protobuf::EnumOrUnknown::new(ApiStatusCode::AS_OK),
+                ..envelope::ApiResponseStatus::default()
+            }),
+            message: MessageField::some(Any {
+                type_url: CREATE_ITEMS_RESPONSE_TYPE_URL.to_owned(),
+                value: response.write_to_bytes().unwrap(),
+                ..Any::default()
+            }),
+            ..ApiResponse::default()
+        }
+    }
+
+    fn segment() -> BoardGraphicSegment {
+        BoardGraphicSegment {
+            start_x_nm: 1,
+            start_y_nm: 2,
+            end_x_nm: 3,
+            end_y_nm: 4,
+            width_nm: 100_000,
+            layer: BoardGraphicLayer::DwgsUser,
+        }
+    }
+
     fn version_response(token: &str, major: u32) -> ApiResponse {
         let version = base_commands::GetVersionResponse {
             version: MessageField::some(base_types::KiCadVersion {
@@ -575,6 +948,90 @@ mod tests {
                 .unwrap()
                 .kicad_token,
             "token"
+        );
+    }
+
+    #[test]
+    fn create_board_graphics_rejects_result_count_mismatch() {
+        let config = ClientConfig::new("ipc:///tmp/kicad/api.sock", "test-client").unwrap();
+        let fake = FakeTransport {
+            responses: vec![create_items_response(
+                "token",
+                &[(editor_commands::ItemStatusCode::ISC_OK, "")],
+            )],
+            requests: Vec::new(),
+        };
+        let mut client = KiCadClient::new(fake, config);
+        let error = client
+            .create_board_graphics("main.kicad_pcb", &[segment(), segment()])
+            .unwrap_err();
+        assert_eq!(
+            error,
+            IpcError::CreateItemsCountMismatch {
+                expected: 2,
+                actual: 1
+            }
+        );
+        assert_eq!(error.code(), "create_items_count_mismatch");
+    }
+
+    #[test]
+    fn create_board_graphics_rejects_per_item_failure() {
+        let config = ClientConfig::new("ipc:///tmp/kicad/api.sock", "test-client").unwrap();
+        let fake = FakeTransport {
+            responses: vec![create_items_response(
+                "token",
+                &[
+                    (editor_commands::ItemStatusCode::ISC_OK, ""),
+                    (
+                        editor_commands::ItemStatusCode::ISC_INVALID_DATA,
+                        "invalid segment",
+                    ),
+                ],
+            )],
+            requests: Vec::new(),
+        };
+        let mut client = KiCadClient::new(fake, config);
+        let error = client
+            .create_board_graphics("main.kicad_pcb", &[segment(), segment()])
+            .unwrap_err();
+        assert_eq!(
+            error,
+            IpcError::CreateItemFailed {
+                index: 1,
+                status: editor_commands::ItemStatusCode::ISC_INVALID_DATA as i32,
+                message: "invalid segment".to_owned(),
+            }
+        );
+        assert_eq!(error.code(), "create_item_failed");
+        assert_eq!(
+            error.to_string(),
+            "create_item_failed: item 1 status 7: invalid segment"
+        );
+    }
+
+    #[test]
+    fn create_board_graphics_rejects_non_positive_width_before_request() {
+        let mut invalid = segment();
+        invalid.width_nm = 0;
+        let error = board_graphic_segment_item(&invalid).unwrap_err();
+        assert_eq!(error.code(), "invalid_board_graphic");
+        assert_eq!(
+            error.to_string(),
+            "invalid_board_graphic: segment width must be positive"
+        );
+    }
+
+    #[test]
+    fn create_board_graphics_rejects_zero_length_before_request() {
+        let mut invalid = segment();
+        invalid.end_x_nm = invalid.start_x_nm;
+        invalid.end_y_nm = invalid.start_y_nm;
+        let error = board_graphic_segment_item(&invalid).unwrap_err();
+        assert_eq!(error.code(), "invalid_board_graphic");
+        assert_eq!(
+            error.to_string(),
+            "invalid_board_graphic: segment endpoints must differ"
         );
     }
 
