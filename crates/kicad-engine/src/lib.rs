@@ -8,6 +8,7 @@ use sha2::{Digest, Sha256};
 pub const MAX_OPERATIONS: usize = 100;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "arguments")]
 pub enum OperationKind {
     AddSymbol {
         symbol: Symbol,
@@ -58,15 +59,6 @@ pub struct Operation {
 }
 
 impl Operation {
-    fn rank(&self) -> u8 {
-        match self.kind {
-            OperationKind::AddSymbol { .. } => 0,
-            OperationKind::SetProperty { .. } => 1,
-            OperationKind::ConnectPins { .. } => 2,
-            OperationKind::AssignFootprint { .. } => 3,
-            OperationKind::PlaceFootprint { .. } => 4,
-        }
-    }
     fn refs(&self) -> Vec<&StableId> {
         match &self.kind {
             OperationKind::AddSymbol { symbol } => vec![&symbol.source_uuid],
@@ -124,23 +116,19 @@ impl ChangePlan {
             .iter()
             .map(|s| s.source_uuid.clone())
             .collect();
-        let mut planned_adds = BTreeSet::new();
-        let mut previous_rank = 0;
+        let mut planned_adds = BTreeMap::new();
         for (index, operation) in self.operations.iter().enumerate() {
-            let rank = operation.rank();
-            if index > 0 && rank < previous_rank {
-                return Err(EngineError::InvalidOrder);
-            }
-            previous_rank = rank;
             if let OperationKind::AddSymbol { symbol } = &operation.kind
                 && (existing.contains(&symbol.source_uuid)
-                    || !planned_adds.insert(symbol.source_uuid.clone()))
+                    || planned_adds
+                        .insert(symbol.source_uuid.clone(), index)
+                        .is_some())
             {
                 return Err(EngineError::TargetAlreadyExists(symbol.source_uuid.clone()));
             }
         }
         let mut known = existing.clone();
-        for op in &self.operations {
+        for (index, op) in self.operations.iter().enumerate() {
             if op.source_run_id != self.source_run_id {
                 return Err(EngineError::InvalidPlan("operation run identity mismatch"));
             }
@@ -148,54 +136,60 @@ impl ChangePlan {
             {
                 return Err(EngineError::ScopeMismatch);
             }
-            match &op.kind {
-                OperationKind::AddSymbol { symbol } => {
-                    if !known.insert(symbol.source_uuid.clone()) {
-                        return Err(EngineError::TargetAlreadyExists(symbol.source_uuid.clone()));
+            for precondition in &op.preconditions {
+                match precondition {
+                    Precondition::TargetExists(target) if !known.contains(target) => {
+                        return Err(EngineError::PreconditionFailed);
+                    }
+                    Precondition::TargetAbsent(target) if known.contains(target) => {
+                        return Err(EngineError::PreconditionFailed);
+                    }
+                    Precondition::Revision(revision) if revision != &self.base_revision => {
+                        return Err(EngineError::PreconditionFailed);
+                    }
+                    _ => {}
+                }
+            }
+            if let OperationKind::AddSymbol { symbol } = &op.kind {
+                known.insert(symbol.source_uuid.clone());
+            } else {
+                for target in op.refs() {
+                    if !known.contains(target) {
+                        if planned_adds
+                            .get(target)
+                            .is_some_and(|add_index| *add_index > index)
+                        {
+                            return Err(EngineError::InvalidOrder);
+                        }
+                        return Err(EngineError::TargetNotFound(target.clone()));
                     }
                 }
-                OperationKind::SetProperty {
-                    target, property, ..
-                } => {
+            }
+            match &op.kind {
+                OperationKind::AddSymbol { .. } => {}
+                OperationKind::SetProperty { property, .. } => {
                     if property.is_empty() {
                         return Err(EngineError::InvalidPlan("property is empty"));
                     }
-                    if !known.contains(target) {
-                        return Err(EngineError::TargetNotFound(target.clone()));
-                    }
                 }
-                OperationKind::ConnectPins { source, target } => {
-                    if !known.contains(source) {
-                        return Err(EngineError::TargetNotFound(source.clone()));
-                    }
-                    if !known.contains(target) {
-                        return Err(EngineError::TargetNotFound(target.clone()));
-                    }
-                }
-                OperationKind::AssignFootprint { symbol, footprint } => {
+                OperationKind::ConnectPins { .. } => {}
+                OperationKind::AssignFootprint { footprint, .. } => {
                     if footprint.is_empty() {
                         return Err(EngineError::InvalidPlan("footprint is empty"));
                     }
-                    if !known.contains(symbol) {
-                        return Err(EngineError::TargetNotFound(symbol.clone()));
-                    }
                 }
-                OperationKind::PlaceFootprint { target, position } => {
+                OperationKind::PlaceFootprint { position, target } => {
                     if position.space != DocumentSpace::Board {
                         return Err(EngineError::InvalidPlan(
                             "footprint position must use board space",
                         ));
                     }
-                    if !known.contains(target) {
-                        return Err(EngineError::TargetNotFound(target.clone()));
+                    if self.operations.iter().enumerate().any(|(candidate_index, candidate)| {
+                        candidate_index > index
+                            && matches!(&candidate.kind, OperationKind::AssignFootprint { symbol, .. } if symbol == target)
+                    }) {
+                        return Err(EngineError::InvalidOrder);
                     }
-                }
-            }
-            for precondition in &op.preconditions {
-                if let Precondition::TargetAbsent(target) = precondition
-                    && known.contains(target)
-                {
-                    return Err(EngineError::PreconditionFailed);
                 }
             }
         }
@@ -279,12 +273,14 @@ impl std::error::Error for EngineError {}
 pub struct Engine {
     snapshot: ProjectSnapshot,
     instance_token: String,
+    committed: BTreeMap<String, String>,
 }
 impl Engine {
     pub fn new(snapshot: ProjectSnapshot, instance_token: impl Into<String>) -> Self {
         Self {
             snapshot,
             instance_token: instance_token.into(),
+            committed: BTreeMap::new(),
         }
     }
     pub fn snapshot(&self) -> &ProjectSnapshot {
@@ -369,7 +365,11 @@ impl Engine {
         Ok(())
     }
     pub fn approve(&self, session: &mut ChangeSession, plan_hash: &str) -> Result<(), EngineError> {
-        if session.state != SessionState::AwaitingApproval || session.plan_hash != plan_hash {
+        let current_hash = session.plan.hash()?;
+        if session.state != SessionState::AwaitingApproval
+            || session.plan_hash != current_hash
+            || current_hash != plan_hash
+        {
             return Err(EngineError::ApprovalMismatch);
         }
         session.approval_hash = Some(plan_hash.into());
@@ -380,15 +380,33 @@ impl Engine {
         Ok(())
     }
     pub fn commit(&mut self, session: &mut ChangeSession) -> Result<(), EngineError> {
+        let current_hash = session.plan.hash()?;
         if session.state != SessionState::AwaitingApproval
-            || session.approval_hash.as_deref() != Some(session.plan_hash.as_str())
+            || session.plan_hash != current_hash
+            || session.approval_hash.as_deref() != Some(current_hash.as_str())
         {
             return Err(EngineError::InvalidState);
         }
+        if session
+            .plan
+            .operations
+            .iter()
+            .all(|op| self.committed.get(&op.idempotency_key) == Some(&current_hash))
+        {
+            session.state = SessionState::Committed;
+            session.audit.push(AuditEvent {
+                event: "commit_replayed".into(),
+                detail: current_hash,
+            });
+            return Ok(());
+        }
         self.check_identity(&session.plan)?;
         session.plan.validate(&self.snapshot)?;
-        self.snapshot = apply_operations(self.snapshot.clone(), &session.plan.operations)?;
+        let updated = apply_operations(self.snapshot.clone(), &session.plan.operations)?;
+        self.snapshot = updated;
         for op in &session.plan.operations {
+            self.committed
+                .insert(op.idempotency_key.clone(), session.plan_hash.clone());
             session
                 .committed_idempotency
                 .insert(op.idempotency_key.clone(), session.plan_hash.clone());
@@ -416,6 +434,12 @@ impl Engine {
             return Err(EngineError::InvalidState);
         }
         self.snapshot = session.snapshot.clone();
+        for op in &session.plan.operations {
+            if self.committed.get(&op.idempotency_key) == Some(&session.plan_hash) {
+                self.committed.remove(&op.idempotency_key);
+            }
+        }
+        session.committed_idempotency.clear();
         session.state = SessionState::RolledBack;
         session.audit.push(AuditEvent {
             event: "rolled_back".into(),
@@ -616,21 +640,144 @@ mod tests {
     #[test]
     fn unsupported_commit_does_not_mutate_snapshot() {
         let mut engine = Engine::new(snapshot(), "token");
+        let add_source = op(
+            OperationKind::AddSymbol {
+                symbol: symbol("source"),
+            },
+            "source",
+            "add-source",
+        );
+        let add_target = op(
+            OperationKind::AddSymbol {
+                symbol: symbol("target"),
+            },
+            "target",
+            "add-target",
+        );
+        let connect = Operation {
+            operation_id: id("connect"),
+            kind: OperationKind::ConnectPins {
+                source: id("source"),
+                target: id("target"),
+            },
+            targets: vec![id("source"), id("target")],
+            preconditions: vec![],
+            expected_effects: vec![],
+            risk_class: RiskClass::Low,
+            idempotency_key: "connect".into(),
+            source_run_id: "run".into(),
+        };
+        let change_plan = plan(&engine, vec![add_source, add_target, connect]);
+        let plan_hash = change_plan.hash().unwrap();
+        let mut session = ChangeSession {
+            plan: change_plan,
+            plan_hash: plan_hash.clone(),
+            state: SessionState::AwaitingApproval,
+            approval_hash: Some(plan_hash),
+            snapshot: engine.snapshot().clone(),
+            audit: vec![],
+            committed_idempotency: BTreeMap::new(),
+        };
+        assert_eq!(
+            engine.commit(&mut session),
+            Err(EngineError::UnsupportedOperation)
+        );
+        assert!(engine.snapshot().schematic.symbols.is_empty());
+    }
+
+    #[test]
+    fn preconditions_are_evaluated_before_each_operation() {
+        let engine = Engine::new(snapshot(), "token");
+        let mut add = op(
+            OperationKind::AddSymbol {
+                symbol: symbol("s"),
+            },
+            "s",
+            "add",
+        );
+        add.preconditions = vec![Precondition::TargetAbsent(id("s"))];
+        assert!(engine.preview(&plan(&engine, vec![add.clone()])).is_ok());
+
+        add.preconditions = vec![Precondition::TargetExists(id("missing"))];
+        assert_eq!(
+            engine.preview(&plan(&engine, vec![add.clone()])),
+            Err(EngineError::PreconditionFailed)
+        );
+        add.preconditions = vec![Precondition::Revision(digest('b'))];
+        assert_eq!(
+            engine.preview(&plan(&engine, vec![add])),
+            Err(EngineError::PreconditionFailed)
+        );
+    }
+
+    #[test]
+    fn approval_rejects_plan_mutation() {
+        let mut engine = Engine::new(snapshot(), "token");
         let mut session = engine
             .begin_session(plan(
                 &engine,
                 vec![op(
-                    OperationKind::ConnectPins {
-                        source: id("source"),
-                        target: id("target"),
+                    OperationKind::AddSymbol {
+                        symbol: symbol("s"),
                     },
-                    "source",
-                    "connect",
+                    "s",
+                    "add",
                 )],
             ))
             .unwrap();
-        engine.preview_session(&mut session).unwrap_err();
+        engine.preview_session(&mut session).unwrap();
+        engine.validate(&mut session).unwrap();
+        engine.request_approval(&mut session).unwrap();
+        let hash = session.plan_hash.clone();
+        engine.approve(&mut session, &hash).unwrap();
+        session.plan.operations[0]
+            .expected_effects
+            .push("tampered".into());
+        assert_eq!(engine.commit(&mut session), Err(EngineError::InvalidState));
         assert!(engine.snapshot().schematic.symbols.is_empty());
+    }
+
+    #[test]
+    fn committed_plan_replay_is_idempotent() {
+        let mut engine = Engine::new(snapshot(), "token");
+        let mut session = engine
+            .begin_session(plan(
+                &engine,
+                vec![op(
+                    OperationKind::AddSymbol {
+                        symbol: symbol("s"),
+                    },
+                    "s",
+                    "add",
+                )],
+            ))
+            .unwrap();
+        engine.preview_session(&mut session).unwrap();
+        engine.validate(&mut session).unwrap();
+        engine.request_approval(&mut session).unwrap();
+        let hash = session.plan_hash.clone();
+        engine.approve(&mut session, &hash).unwrap();
+        let mut replay = session.clone();
+        engine.commit(&mut session).unwrap();
+        engine.commit(&mut replay).unwrap();
+        assert_eq!(engine.snapshot().schematic.symbols.len(), 1);
+        assert_eq!(replay.audit.last().unwrap().event, "commit_replayed");
+    }
+
+    #[test]
+    fn operation_kind_uses_stable_tagged_json() {
+        let value = serde_json::to_value(op(
+            OperationKind::SetProperty {
+                target: id("s"),
+                property: "value".into(),
+                value: "22k".into(),
+            },
+            "s",
+            "set",
+        ))
+        .unwrap();
+        assert_eq!(value["kind"]["kind"], "SetProperty");
+        assert_eq!(value["kind"]["arguments"]["property"], "value");
     }
 
     #[test]
