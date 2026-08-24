@@ -1,6 +1,8 @@
 use std::env;
 
-use kicad_ipc::{ClientConfig, KiCadClient, NngTransport, OpenDocument, OpenDocumentKind};
+use kicad_ipc::{
+    ClientConfig, DocumentQuery, KiCadClient, NngTransport, OpenDocument, OpenDocumentKind,
+};
 use serde_json::{Value, json};
 
 fn document_json(document: &OpenDocument) -> Value {
@@ -30,13 +32,13 @@ fn document_json(document: &OpenDocument) -> Value {
 
 fn documents_json(
     endpoint: &str,
-    document_type: kicad_ipc::base_types::DocumentType,
+    query: DocumentQuery,
 ) -> Result<Value, Box<dyn std::error::Error>> {
     let config = ClientConfig::new(endpoint, "auto-kicad-live-smoke")?;
     let transport = NngTransport::connect(config.clone())?;
     let mut client = KiCadClient::new(transport, config);
     client.get_version()?;
-    Ok(match client.get_open_documents(document_type) {
+    Ok(match client.get_open_documents(query) {
         Ok(documents) => Value::Array(documents.iter().map(document_json).collect()),
         Err(error) => json!({ "error": error.to_string(), "code": error.code() }),
     })
@@ -49,11 +51,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let version_transport = NngTransport::connect(version_config.clone())?;
     let mut version_client = KiCadClient::new(version_transport, version_config);
     let version = version_client.get_version()?;
-    let pcb = documents_json(&endpoint, kicad_ipc::base_types::DocumentType::DOCTYPE_PCB)?;
-    let schematic = documents_json(
-        &endpoint,
-        kicad_ipc::base_types::DocumentType::DOCTYPE_SCHEMATIC,
-    )?;
+    let pcb = documents_json(&endpoint, DocumentQuery::Pcb)?;
+    let schematic = documents_json(&endpoint, DocumentQuery::Schematic)?;
     println!(
         "{}",
         json!({

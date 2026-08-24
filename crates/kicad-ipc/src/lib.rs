@@ -14,6 +14,20 @@ pub const GET_VERSION_TYPE_URL: &str = "type.googleapis.com/kiapi.common.command
 pub const GET_OPEN_DOCUMENTS_TYPE_URL: &str =
     "type.googleapis.com/kiapi.common.commands.GetOpenDocuments";
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DocumentQuery {
+    Schematic,
+    Pcb,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VersionInfo {
+    pub major: u32,
+    pub minor: u32,
+    pub patch: u32,
+    pub full_version: String,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OpenDocumentKind {
     Schematic {
@@ -199,7 +213,7 @@ impl<T: KiCadTransport> KiCadClient<T> {
         }
     }
 
-    pub fn get_version(&mut self) -> Result<base_types::KiCadVersion, IpcError> {
+    pub fn get_version(&mut self) -> Result<VersionInfo, IpcError> {
         let request = get_version_request(&self.config, self.token.as_ref());
         let response = self.transport.request(request)?;
         response_status(&response)?;
@@ -207,19 +221,24 @@ impl<T: KiCadTransport> KiCadClient<T> {
         let version = decode_any::<base_commands::GetVersionResponse>(
             &response,
             "type.googleapis.com/kiapi.common.commands.GetVersionResponse",
-        )?;
+        )?
+        .version
+        .into_option()
+        .ok_or(IpcError::MissingResponseMessage)?;
         self.token = Some(token);
-        version
-            .version
-            .into_option()
-            .ok_or(IpcError::MissingResponseMessage)
+        Ok(VersionInfo {
+            major: version.major,
+            minor: version.minor,
+            patch: version.patch,
+            full_version: version.full_version,
+        })
     }
 
     pub fn get_open_documents(
         &mut self,
-        document_type: base_types::DocumentType,
+        query: DocumentQuery,
     ) -> Result<Vec<OpenDocument>, IpcError> {
-        let request = get_open_documents_request(&self.config, self.token.as_ref(), document_type);
+        let request = get_open_documents_request(&self.config, self.token.as_ref(), query);
         let response = self.transport.request(request)?;
         response_status(&response)?;
         let token = response_token(&response)?;
@@ -256,11 +275,15 @@ pub fn get_version_request(config: &ClientConfig, token: Option<&InstanceToken>)
     }
 }
 
-pub fn get_open_documents_request(
+fn get_open_documents_request(
     config: &ClientConfig,
     token: Option<&InstanceToken>,
-    document_type: base_types::DocumentType,
+    query: DocumentQuery,
 ) -> ApiRequest {
+    let document_type = match query {
+        DocumentQuery::Schematic => base_types::DocumentType::DOCTYPE_SCHEMATIC,
+        DocumentQuery::Pcb => base_types::DocumentType::DOCTYPE_PCB,
+    };
     let command = editor_commands::GetOpenDocuments {
         type_: protobuf::EnumOrUnknown::new(document_type),
         ..editor_commands::GetOpenDocuments::default()
@@ -514,7 +537,7 @@ mod tests {
         let request = get_open_documents_request(
             &config,
             Some(&InstanceToken::new("token").unwrap()),
-            base_types::DocumentType::DOCTYPE_PCB,
+            DocumentQuery::Pcb,
         );
         let any = request.message.as_ref().unwrap();
         let command = editor_commands::GetOpenDocuments::parse_from_bytes(&any.value).unwrap();
@@ -534,9 +557,7 @@ mod tests {
             requests: Vec::new(),
         };
         let mut client = KiCadClient::new(fake, config);
-        let documents = client
-            .get_open_documents(base_types::DocumentType::DOCTYPE_PCB)
-            .unwrap();
+        let documents = client.get_open_documents(DocumentQuery::Pcb).unwrap();
         assert_eq!(documents.len(), 3);
         assert_eq!(documents[0].project_name, Some("main".to_owned()));
         assert_eq!(

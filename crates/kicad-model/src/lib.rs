@@ -106,6 +106,82 @@ pub struct Board {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum CapabilityStatus {
+    Verified,
+    Unsupported,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct CapabilityObservation {
+    pub id: String,
+    pub status: CapabilityStatus,
+    pub detail: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum DiscoveredDocumentKind {
+    Schematic {
+        filename: Option<String>,
+        sheet_path: Option<String>,
+        sheet_kiids: Vec<String>,
+    },
+    Pcb {
+        filename: String,
+    },
+    Unknown,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct DiscoveredDocument {
+    pub document_id: StableId,
+    pub project_name: Option<String>,
+    pub project_path: Option<String>,
+    pub kind: DiscoveredDocumentKind,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct Diagnostic {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct DiscoverySnapshot {
+    pub kicad_version: String,
+    pub endpoint: String,
+    pub documents: Vec<DiscoveredDocument>,
+    pub capabilities: Vec<CapabilityObservation>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+impl DiscoverySnapshot {
+    pub fn canonical(&self) -> Self {
+        let mut snapshot = self.clone();
+        snapshot
+            .documents
+            .sort_by(|left, right| left.document_id.cmp(&right.document_id));
+        snapshot
+            .capabilities
+            .sort_by(|left, right| left.id.cmp(&right.id));
+        snapshot
+            .diagnostics
+            .sort_by(|left, right| (&left.code, &left.message).cmp(&(&right.code, &right.message)));
+        snapshot
+    }
+
+    pub fn canonical_bytes(&self) -> Result<Vec<u8>, ModelError> {
+        serde_json::to_vec(&self.canonical()).map_err(ModelError::Serialization)
+    }
+
+    pub fn revision(&self) -> Result<RevisionDigest, ModelError> {
+        let mut hasher = Sha256::new();
+        hasher.update(self.canonical_bytes()?);
+        Ok(RevisionDigest(hex::encode(hasher.finalize())))
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ProjectSnapshot {
     pub project_id: StableId,
     pub kicad_version: String,

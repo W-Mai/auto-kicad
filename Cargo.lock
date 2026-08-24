@@ -413,6 +413,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kicad-adapter"
+version = "0.1.0"
+dependencies = [
+ "hex",
+ "kicad-ipc",
+ "kicad-model",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "kicad-engine"
 version = "0.1.0"
 dependencies = [
