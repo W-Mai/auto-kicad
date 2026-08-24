@@ -88,6 +88,12 @@ pub struct BoardGraphicSegment {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObservedBoardGraphicSegment {
+    pub graphic_id: String,
+    pub segment: BoardGraphicSegment,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommitId(String);
 
 impl CommitId {
@@ -173,6 +179,7 @@ pub enum IpcError {
         message: String,
     },
     InvalidBoardGraphic(&'static str),
+    InvalidObservedBoardGraphic(&'static str),
     Status(ApiStatusCode, String),
     Transport(nng::Error),
 }
@@ -200,6 +207,7 @@ impl IpcError {
             Self::CreateItemsCountMismatch { .. } => "create_items_count_mismatch",
             Self::CreateItemFailed { .. } => "create_item_failed",
             Self::InvalidBoardGraphic(_) => "invalid_board_graphic",
+            Self::InvalidObservedBoardGraphic(_) => "invalid_observed_board_graphic",
             Self::Status(status, _) => match status {
                 ApiStatusCode::AS_TIMEOUT => "connection_unavailable",
                 ApiStatusCode::AS_NOT_READY => "kicad_not_ready",
@@ -242,6 +250,9 @@ impl Display for IpcError {
                 write!(formatter, "{}: item {index} status {status}", self.code())
             }
             Self::InvalidBoardGraphic(message) => {
+                write!(formatter, "{}: {message}", self.code())
+            }
+            Self::InvalidObservedBoardGraphic(message) => {
                 write!(formatter, "{}: {message}", self.code())
             }
             Self::Transport(error) => write!(formatter, "{}: {error}", self.code()),
@@ -458,6 +469,35 @@ impl<T: KiCadTransport> KiCadClient<T> {
             .collect())
     }
 
+    pub fn get_board_graphics(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<Vec<ObservedBoardGraphicSegment>, IpcError> {
+        let command = editor_commands::GetItems {
+            header: MessageField::some(board_item_header(board_filename)),
+            types: vec![protobuf::EnumOrUnknown::new(
+                enums::KiCadObjectType::KOT_PCB_SHAPE,
+            )],
+            ..editor_commands::GetItems::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            GET_ITEMS_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let response = decode_any::<editor_commands::GetItemsResponse>(
+            &response,
+            GET_ITEMS_RESPONSE_TYPE_URL,
+        )?;
+        let graphics = board_graphics_from_response(&response)?;
+        self.token = Some(token);
+        Ok(graphics)
+    }
+
     pub fn get_open_documents(
         &mut self,
         query: DocumentQuery,
@@ -579,6 +619,118 @@ fn validate_create_items_response(
         }
     }
     Ok(())
+}
+
+fn board_graphics_from_response(
+    response: &editor_commands::GetItemsResponse,
+) -> Result<Vec<ObservedBoardGraphicSegment>, IpcError> {
+    if response.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
+        return Err(IpcError::Status(
+            ApiStatusCode::AS_BAD_REQUEST,
+            format!(
+                "get items status: {:?}",
+                response.status.enum_value_or_default()
+            ),
+        ));
+    }
+    response
+        .items
+        .iter()
+        .filter_map(observed_board_graphic)
+        .collect()
+}
+
+fn observed_board_graphic(item: &Any) -> Option<Result<ObservedBoardGraphicSegment, IpcError>> {
+    const BOARD_GRAPHIC_SHAPE_TYPE_URL: &str =
+        "type.googleapis.com/kiapi.board.types.BoardGraphicShape";
+    if item.type_url != BOARD_GRAPHIC_SHAPE_TYPE_URL {
+        return Some(Err(IpcError::UnexpectedMessageType {
+            expected: BOARD_GRAPHIC_SHAPE_TYPE_URL,
+            actual: item.type_url.clone(),
+        }));
+    }
+    let graphic = match board_types::BoardGraphicShape::parse_from_bytes(&item.value) {
+        Ok(graphic) => graphic,
+        Err(_) => return Some(Err(IpcError::MalformedEnvelope)),
+    };
+    if graphic.layer.enum_value_or_default() != board_types::BoardLayer::BL_Dwgs_User {
+        return None;
+    }
+    Some(observed_dwgs_user_segment(&graphic))
+}
+
+fn observed_dwgs_user_segment(
+    graphic: &board_types::BoardGraphicShape,
+) -> Result<ObservedBoardGraphicSegment, IpcError> {
+    let graphic_id = graphic
+        .id
+        .as_ref()
+        .map(|id| id.value.clone())
+        .filter(|id| !id.is_empty())
+        .ok_or(IpcError::InvalidObservedBoardGraphic(
+            "board graphic id must not be empty",
+        ))?;
+    let shape = graphic
+        .shape
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedBoardGraphic(
+            "board graphic shape is required",
+        ))?;
+    let segment = match shape.geometry.as_ref() {
+        Some(base_types::graphic_shape::Geometry::Segment(segment)) => segment,
+        Some(_) => {
+            return Err(IpcError::InvalidObservedBoardGraphic(
+                "Dwgs.User graphic must be a segment",
+            ));
+        }
+        None => {
+            return Err(IpcError::InvalidObservedBoardGraphic(
+                "board graphic geometry is required",
+            ));
+        }
+    };
+    let start = segment
+        .start
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedBoardGraphic(
+            "segment start is required",
+        ))?;
+    let end = segment
+        .end
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedBoardGraphic(
+            "segment end is required",
+        ))?;
+    if start.x_nm == end.x_nm && start.y_nm == end.y_nm {
+        return Err(IpcError::InvalidObservedBoardGraphic(
+            "segment endpoints must differ",
+        ));
+    }
+    let width_nm = shape
+        .attributes
+        .as_ref()
+        .and_then(|attributes| attributes.stroke.as_ref())
+        .and_then(|stroke| stroke.width.as_ref())
+        .map(|width| width.value_nm)
+        .ok_or(IpcError::InvalidObservedBoardGraphic(
+            "segment width is required",
+        ))?;
+    if width_nm <= 0 {
+        return Err(IpcError::InvalidObservedBoardGraphic(
+            "segment width must be positive",
+        ));
+    }
+    Ok(ObservedBoardGraphicSegment {
+        graphic_id,
+        segment: BoardGraphicSegment {
+            start_x_nm: start.x_nm,
+            start_y_nm: start.y_nm,
+            end_x_nm: end.x_nm,
+            end_y_nm: end.y_nm,
+            width_nm,
+            layer: BoardGraphicLayer::DwgsUser,
+        },
+    })
 }
 
 fn board_graphic_segment_item(segment: &BoardGraphicSegment) -> Result<Any, IpcError> {
@@ -904,6 +1056,90 @@ mod tests {
         }
     }
 
+    fn get_items_response(
+        token: &str,
+        status: base_types::ItemRequestStatus,
+        items: Vec<Any>,
+    ) -> ApiResponse {
+        let response = editor_commands::GetItemsResponse {
+            status: protobuf::EnumOrUnknown::new(status),
+            items,
+            ..editor_commands::GetItemsResponse::default()
+        };
+        ApiResponse {
+            header: MessageField::some(envelope::ApiResponseHeader {
+                kicad_token: token.to_owned(),
+                ..envelope::ApiResponseHeader::default()
+            }),
+            status: MessageField::some(envelope::ApiResponseStatus {
+                status: protobuf::EnumOrUnknown::new(ApiStatusCode::AS_OK),
+                ..envelope::ApiResponseStatus::default()
+            }),
+            message: MessageField::some(Any {
+                type_url: GET_ITEMS_RESPONSE_TYPE_URL.to_owned(),
+                value: response.write_to_bytes().unwrap(),
+                ..Any::default()
+            }),
+            ..ApiResponse::default()
+        }
+    }
+
+    fn observed_segment_item(layer: board_types::BoardLayer) -> Any {
+        let shape = base_types::GraphicShape {
+            attributes: MessageField::some(base_types::GraphicAttributes {
+                stroke: MessageField::some(base_types::StrokeAttributes {
+                    width: MessageField::some(base_types::Distance {
+                        value_nm: 100_000,
+                        ..base_types::Distance::default()
+                    }),
+                    ..base_types::StrokeAttributes::default()
+                }),
+                ..base_types::GraphicAttributes::default()
+            }),
+            geometry: Some(base_types::graphic_shape::Geometry::Segment(
+                base_types::GraphicSegmentAttributes {
+                    start: MessageField::some(base_types::Vector2 {
+                        x_nm: 1,
+                        y_nm: 2,
+                        ..base_types::Vector2::default()
+                    }),
+                    end: MessageField::some(base_types::Vector2 {
+                        x_nm: 3,
+                        y_nm: 4,
+                        ..base_types::Vector2::default()
+                    }),
+                    ..base_types::GraphicSegmentAttributes::default()
+                },
+            )),
+            ..base_types::GraphicShape::default()
+        };
+        let graphic = board_types::BoardGraphicShape {
+            shape: MessageField::some(shape),
+            layer: protobuf::EnumOrUnknown::new(layer),
+            id: MessageField::some(base_types::KIID {
+                value: "graphic-1".to_owned(),
+                ..base_types::KIID::default()
+            }),
+            ..board_types::BoardGraphicShape::default()
+        };
+        Any {
+            type_url: "type.googleapis.com/kiapi.board.types.BoardGraphicShape".to_owned(),
+            value: graphic.write_to_bytes().unwrap(),
+            ..Any::default()
+        }
+    }
+
+    fn graphics_client(response: ApiResponse) -> KiCadClient<FakeTransport> {
+        let config = ClientConfig::new("ipc:///tmp/kicad/api.sock", "test-client").unwrap();
+        KiCadClient::new(
+            FakeTransport {
+                responses: vec![response],
+                requests: Vec::new(),
+            },
+            config,
+        )
+    }
+
     fn segment() -> BoardGraphicSegment {
         BoardGraphicSegment {
             start_x_nm: 1,
@@ -939,6 +1175,97 @@ mod tests {
             }),
             ..ApiResponse::default()
         }
+    }
+
+    #[test]
+    fn get_board_graphics_decodes_dwgs_user_segments_and_request() {
+        let mut client = graphics_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![observed_segment_item(board_types::BoardLayer::BL_Dwgs_User)],
+        ));
+        let graphics = client.get_board_graphics("main.kicad_pcb").unwrap();
+        assert_eq!(graphics[0].graphic_id, "graphic-1");
+        assert_eq!(graphics[0].segment, segment());
+        let command = editor_commands::GetItems::parse_from_bytes(
+            &client.transport.requests[0].message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        assert_eq!(
+            command.types[0].enum_value_or_default(),
+            enums::KiCadObjectType::KOT_PCB_SHAPE
+        );
+    }
+
+    #[test]
+    fn get_board_graphics_ignores_other_layers() {
+        let mut client = graphics_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![observed_segment_item(board_types::BoardLayer::BL_F_SilkS)],
+        ));
+        assert!(
+            client
+                .get_board_graphics("main.kicad_pcb")
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn get_board_graphics_rejects_non_segment() {
+        let mut item = observed_segment_item(board_types::BoardLayer::BL_Dwgs_User);
+        let mut graphic = board_types::BoardGraphicShape::parse_from_bytes(&item.value).unwrap();
+        graphic.shape.as_mut().unwrap().geometry = None;
+        item.value = graphic.write_to_bytes().unwrap();
+        let mut client = graphics_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![item],
+        ));
+        assert_eq!(
+            client
+                .get_board_graphics("main.kicad_pcb")
+                .unwrap_err()
+                .code(),
+            "invalid_observed_board_graphic"
+        );
+    }
+
+    #[test]
+    fn get_board_graphics_rejects_missing_required_fields() {
+        let mut item = observed_segment_item(board_types::BoardLayer::BL_Dwgs_User);
+        let mut graphic = board_types::BoardGraphicShape::parse_from_bytes(&item.value).unwrap();
+        graphic.id = MessageField::none();
+        item.value = graphic.write_to_bytes().unwrap();
+        let mut client = graphics_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![item],
+        ));
+        assert_eq!(
+            client
+                .get_board_graphics("main.kicad_pcb")
+                .unwrap_err()
+                .code(),
+            "invalid_observed_board_graphic"
+        );
+    }
+
+    #[test]
+    fn get_board_graphics_rejects_response_status() {
+        let mut client = graphics_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_DOCUMENT_NOT_FOUND,
+            Vec::new(),
+        ));
+        assert_eq!(
+            client.get_board_graphics("main.kicad_pcb").unwrap_err(),
+            IpcError::Status(
+                ApiStatusCode::AS_BAD_REQUEST,
+                "get items status: IRS_DOCUMENT_NOT_FOUND".to_owned()
+            )
+        );
     }
 
     #[test]
