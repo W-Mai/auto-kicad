@@ -2,6 +2,8 @@
 members = [
     "crates/auto-kicad",
     "crates/kicad-ipc",
+    "crates/kicad-engine",
+    "crates/kicad-model",
     "crates/runtime",
 ]
 resolver = "3"
