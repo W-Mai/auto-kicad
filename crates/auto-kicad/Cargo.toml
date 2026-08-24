@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 kicad-adapter = { path = "../kicad-adapter" }
+kicad-engine = { path = "../kicad-engine" }
 kicad-ipc = { path = "../kicad-ipc" }
 kicad-model = { path = "../kicad-model" }
 rmcp = { version = "3.1.4", features = ["client", "server", "transport-io"] }

@@ -31,6 +31,7 @@ name = "auto-kicad"
 version = "0.1.0"
 dependencies = [
  "kicad-adapter",
+ "kicad-engine",
  "kicad-ipc",
  "kicad-model",
  "rmcp",
