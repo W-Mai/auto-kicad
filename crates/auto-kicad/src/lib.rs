@@ -35,6 +35,14 @@ pub trait DiscoveryService: Send + Sync {
         endpoint: &str,
         project_dir: Option<&std::path::Path>,
     ) -> Result<DiscoverySnapshot, String>;
+
+    fn project_snapshot(
+        &self,
+        _endpoint: &str,
+        _project_dir: Option<&std::path::Path>,
+    ) -> Result<ProjectSnapshot, String> {
+        Err("normalized project snapshot is unavailable".into())
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -101,7 +109,6 @@ pub struct PlanBoardGraphicsRequest {
     pub instance_token: String,
     pub source_run_id: String,
     pub segments: Value,
-    pub snapshot: Value,
     pub request_id: String,
 }
 
@@ -214,12 +221,7 @@ impl Server {
                     "mode": capability.mode,
                     "status": capability.status
                 })).collect::<Vec<_>>(),
-                "advertised_tools": [
-                    "kicad_capabilities",
-                    "kicad_inspect_project",
-                    "kicad_plan_change",
-                    "kicad_preview_change"
-                ]
+                "advertised_tools": ["kicad_capabilities", "kicad_inspect_project"]
             }),
             diagnostics: Vec::new(),
             next_actions: Vec::new(),
@@ -264,19 +266,17 @@ impl Server {
         Ok(rmcp::model::CallToolResult::structured(value).into())
     }
 
-    #[tool(
-        name = "kicad_plan_change",
-        description = "Plan bounded Dwgs.User board graphics without mutating KiCad."
-    )]
     pub async fn kicad_plan_change(
         &self,
         Parameters(arguments): Parameters<PlanBoardGraphicsRequest>,
     ) -> Result<CallToolResponse, ErrorData> {
-        let snapshot: ProjectSnapshot = serde_json::from_value(arguments.snapshot.clone())
-            .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
         if arguments.endpoint.is_empty() || arguments.instance_token.is_empty() {
             return Ok(self.rejected(arguments.request_id, "identity_is_required"));
         }
+        let snapshot = self
+            .discovery
+            .project_snapshot(&arguments.endpoint, None)
+            .map_err(|error| ErrorData::internal_error(error, None))?;
         if !snapshot
             .capabilities
             .iter()
@@ -348,10 +348,6 @@ impl Server {
         )
     }
 
-    #[tool(
-        name = "kicad_preview_change",
-        description = "Preview a stored board graphics plan without mutating KiCad."
-    )]
     pub async fn kicad_preview_change(
         &self,
         Parameters(arguments): Parameters<PreviewChangeRequest>,
@@ -463,8 +459,10 @@ mod tests {
 
     impl ClientHandler for TestClient {}
 
-    #[derive(Clone)]
-    struct FakeDiscovery;
+    #[derive(Clone, Default)]
+    struct FakeDiscovery {
+        write_capability: bool,
+    }
 
     impl DiscoveryService for FakeDiscovery {
         fn discover(
@@ -487,6 +485,14 @@ mod tests {
                 }],
             }
             .canonical())
+        }
+
+        fn project_snapshot(
+            &self,
+            _endpoint: &str,
+            _project_dir: Option<&std::path::Path>,
+        ) -> Result<ProjectSnapshot, String> {
+            Ok(project_snapshot(self.write_capability))
         }
     }
 
@@ -536,7 +542,6 @@ mod tests {
             instance_token: "token".into(),
             source_run_id: "run".into(),
             segments: serde_json::to_value(vec![graphic("g1")]).unwrap(),
-            snapshot: serde_json::to_value(snapshot).unwrap(),
             request_id: request_id.into(),
         }
     }
@@ -557,23 +562,21 @@ mod tests {
 
     #[tokio::test]
     async fn sdk_initialize_and_tool_list_expose_verified_read_tools() {
-        let client = connected(Server::with_discovery(Arc::new(FakeDiscovery))).await;
+        let client = connected(Server::with_discovery(Arc::new(FakeDiscovery {
+            write_capability: true,
+        })))
+        .await;
         let tools = client.list_tools(None).await.expect("tool list");
         let names: Vec<_> = tools.tools.iter().map(|tool| tool.name.clone()).collect();
-        assert_eq!(
-            names,
-            vec![
-                "kicad_capabilities",
-                "kicad_inspect_project",
-                "kicad_plan_change",
-                "kicad_preview_change"
-            ]
-        );
+        assert_eq!(names, vec!["kicad_capabilities", "kicad_inspect_project"]);
     }
 
     #[tokio::test]
     async fn sdk_call_preserves_versioned_stable_envelope() {
-        let client = connected(Server::with_discovery(Arc::new(FakeDiscovery))).await;
+        let client = connected(Server::with_discovery(Arc::new(FakeDiscovery {
+            write_capability: true,
+        })))
+        .await;
         let result = client
             .call_tool(
                 CallToolRequestParams::new("kicad_capabilities").with_arguments(
@@ -600,7 +603,10 @@ mod tests {
 
     #[tokio::test]
     async fn sdk_inspect_project_returns_normalized_snapshot_envelope() {
-        let client = connected(Server::with_discovery(Arc::new(FakeDiscovery))).await;
+        let client = connected(Server::with_discovery(Arc::new(FakeDiscovery {
+            write_capability: true,
+        })))
+        .await;
         let result = client
             .call_tool(
                 CallToolRequestParams::new("kicad_inspect_project").with_arguments(
@@ -624,8 +630,12 @@ mod tests {
 
     #[tokio::test]
     async fn plan_hash_is_deterministic_for_the_same_request() {
-        let first = Server::with_discovery(Arc::new(FakeDiscovery));
-        let second = Server::with_discovery(Arc::new(FakeDiscovery));
+        let first = Server::with_discovery(Arc::new(FakeDiscovery {
+            write_capability: true,
+        }));
+        let second = Server::with_discovery(Arc::new(FakeDiscovery {
+            write_capability: true,
+        }));
         let request = plan_request(project_snapshot(true), "req_plan");
         let first_result = first
             .kicad_plan_change(Parameters(request.clone()))
@@ -648,7 +658,9 @@ mod tests {
 
     #[tokio::test]
     async fn preview_returns_before_and_after_without_mutating_session_snapshot() {
-        let server = Server::with_discovery(Arc::new(FakeDiscovery));
+        let server = Server::with_discovery(Arc::new(FakeDiscovery {
+            write_capability: true,
+        }));
         let planned = server
             .kicad_plan_change(Parameters(plan_request(
                 project_snapshot(true),
@@ -694,7 +706,9 @@ mod tests {
 
     #[tokio::test]
     async fn plan_rejects_unverified_write_capability_without_storing_session() {
-        let server = Server::with_discovery(Arc::new(FakeDiscovery));
+        let server = Server::with_discovery(Arc::new(FakeDiscovery {
+            write_capability: false,
+        }));
         let result = server
             .kicad_plan_change(Parameters(plan_request(
                 project_snapshot(false),
@@ -713,7 +727,10 @@ mod tests {
 
     #[tokio::test]
     async fn sdk_rejects_unadvertised_tool() {
-        let client = connected(Server::with_discovery(Arc::new(FakeDiscovery))).await;
+        let client = connected(Server::with_discovery(Arc::new(FakeDiscovery {
+            write_capability: true,
+        })))
+        .await;
         let error = client
             .call_tool(CallToolRequestParams::new("raw_protobuf_request"))
             .await
