@@ -1,5 +1,6 @@
 use kicad_adapter::{
-    DiscoveryInput, DocumentObservation, artifact_discovery_snapshot, discovery_snapshot,
+    DiscoveryInput, DocumentObservation, LiveBoardObservation, artifact_discovery_snapshot,
+    discovery_snapshot, live_board_observation,
 };
 use kicad_engine::{
     ChangePlan, ChangeSession, Engine, Operation, OperationKind, Precondition, RiskClass,
@@ -43,6 +44,14 @@ pub trait DiscoveryService: Send + Sync {
     ) -> Result<ProjectSnapshot, String> {
         Err("normalized project snapshot is unavailable".into())
     }
+
+    fn live_board_observation(
+        &self,
+        _endpoint: &str,
+        _project_dir: Option<&std::path::Path>,
+    ) -> Result<LiveBoardObservation, String> {
+        Err("live board observation is unavailable".into())
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -78,6 +87,43 @@ impl DiscoveryService for IpcDiscoveryService {
             pcb,
         })
         .map_err(|error| error.to_string())
+    }
+
+    fn live_board_observation(
+        &self,
+        endpoint: &str,
+        _project_dir: Option<&std::path::Path>,
+    ) -> Result<LiveBoardObservation, String> {
+        let config =
+            ClientConfig::new(endpoint, "auto-kicad-mcp").map_err(|error| error.to_string())?;
+        let transport = NngTransport::connect(config.clone()).map_err(|error| error.to_string())?;
+        let mut client = KiCadClient::new(transport, config);
+        let version = client.get_version().map_err(|error| error.to_string())?;
+        let mut documents = client
+            .get_open_documents(DocumentQuery::Pcb)
+            .map_err(|error| error.to_string())?;
+        if documents.len() != 1 {
+            return Err(format!(
+                "expected exactly one open PCB document, found {}",
+                documents.len()
+            ));
+        }
+        let document = documents.pop().expect("document count checked");
+        let board_filename = match &document.kind {
+            kicad_ipc::OpenDocumentKind::Pcb { board_filename } if !board_filename.is_empty() => {
+                board_filename.as_str()
+            }
+            _ => return Err("open PCB document has no usable filename".into()),
+        };
+        let graphics = client
+            .get_board_graphics(board_filename)
+            .map_err(|error| error.to_string())?;
+        let instance_token = client
+            .instance_token()
+            .cloned()
+            .ok_or_else(|| "KiCad instance token was not observed".to_owned())?;
+        live_board_observation(version, document, graphics, instance_token)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -273,10 +319,15 @@ impl Server {
         if arguments.endpoint.is_empty() || arguments.instance_token.is_empty() {
             return Ok(self.rejected(arguments.request_id, "identity_is_required"));
         }
-        let snapshot = self
+        let observation = self
             .discovery
-            .project_snapshot(&arguments.endpoint, None)
+            .live_board_observation(&arguments.endpoint, None)
             .map_err(|error| ErrorData::internal_error(error, None))?;
+        let observed_token = observation.instance_token.as_str();
+        if observed_token != arguments.instance_token {
+            return Ok(self.rejected(arguments.request_id, "instance_stale"));
+        }
+        let snapshot = observation.snapshot;
         if !snapshot
             .capabilities
             .iter()
@@ -316,14 +367,15 @@ impl Server {
             idempotency_key: arguments.request_id.clone(),
             source_run_id: arguments.source_run_id.clone(),
         };
+        let server_token = observed_token.to_owned();
         let plan = ChangePlan {
             plan_id: plan_id.clone(),
             source_run_id: arguments.source_run_id,
             base_revision,
-            instance_token: arguments.instance_token.clone(),
+            instance_token: server_token.clone(),
             operations: vec![operation],
         };
-        let engine = Engine::new(snapshot, arguments.instance_token.clone());
+        let engine = Engine::new(snapshot, server_token.clone());
         let session = engine
             .begin_session(plan)
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
@@ -332,7 +384,7 @@ impl Server {
         self.instance_tokens
             .lock()
             .expect("instance token lock")
-            .insert(arguments.endpoint, arguments.instance_token);
+            .insert(arguments.endpoint, server_token);
         self.sessions
             .lock()
             .expect("session lock")
@@ -493,6 +545,18 @@ mod tests {
             _project_dir: Option<&std::path::Path>,
         ) -> Result<ProjectSnapshot, String> {
             Ok(project_snapshot(self.write_capability))
+        }
+
+        fn live_board_observation(
+            &self,
+            _endpoint: &str,
+            _project_dir: Option<&std::path::Path>,
+        ) -> Result<LiveBoardObservation, String> {
+            Ok(LiveBoardObservation {
+                snapshot: project_snapshot(self.write_capability),
+                instance_token: kicad_ipc::InstanceToken::new("token").unwrap(),
+                board_filename: "board.kicad_pcb".into(),
+            })
         }
     }
 
@@ -702,6 +766,40 @@ mod tests {
             1
         );
         assert_eq!(server.sessions.lock().unwrap()[&plan_id].snapshot, before);
+    }
+
+    #[tokio::test]
+    async fn plan_rejects_client_token_mismatch_without_storing_session() {
+        let server = Server::with_discovery(Arc::new(FakeDiscovery {
+            write_capability: true,
+        }));
+        let mut request = plan_request(project_snapshot(true), "req_stale_token");
+        request.instance_token = "client-forged-token".into();
+        let result = server.kicad_plan_change(Parameters(request)).await.unwrap();
+        let result = match result {
+            rmcp::model::CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("plan call should complete"),
+        };
+        assert_eq!(result["ok"], false);
+        assert_eq!(result["data"]["reason"], "instance_stale");
+        assert!(server.sessions.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn plan_uses_server_owned_snapshot_revision() {
+        let server = Server::with_discovery(Arc::new(FakeDiscovery {
+            write_capability: true,
+        }));
+        let mut request = plan_request(project_snapshot(true), "req_server_snapshot");
+        let mut client_snapshot = project_snapshot(true);
+        client_snapshot.kicad_version = "client-fabricated-version".into();
+        request.base_revision = client_snapshot.revision().unwrap().to_string();
+        let error = server
+            .kicad_plan_change(Parameters(request))
+            .await
+            .expect_err("client revision must not be accepted");
+        assert!(!error.to_string().is_empty());
+        assert!(server.sessions.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
