@@ -1,6 +1,6 @@
 use kicad_adapter::{
-    DiscoveryInput, DocumentObservation, LiveBoardObservation, artifact_discovery_snapshot,
-    discovery_snapshot, live_board_observation,
+    BoardGraphicsCommitOutcome, BoardGraphicsExecutor, DiscoveryInput, DocumentObservation,
+    LiveBoardObservation, artifact_discovery_snapshot, discovery_snapshot, live_board_observation,
 };
 use kicad_engine::{
     ChangePlan, ChangeSession, Engine, Operation, OperationKind, Precondition, RiskClass,
@@ -150,9 +150,6 @@ fn observe_documents<T: kicad_ipc::KiCadTransport>(
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 pub struct PlanBoardGraphicsRequest {
     pub endpoint: String,
-    pub board_scope: String,
-    pub base_revision: String,
-    pub instance_token: String,
     pub source_run_id: String,
     pub segments: Value,
     pub request_id: String,
@@ -165,12 +162,160 @@ pub struct PreviewChangeRequest {
     pub request_id: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+pub struct CommitChangeRequest {
+    pub plan_id: String,
+    pub plan_hash: String,
+    pub approval_hash: String,
+    pub request_id: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StoredExecutionState {
+    Ready,
+    InFlight,
+    Committed,
+    Unknown,
+}
+
+#[derive(Clone, Debug)]
+struct StoredChangeSession {
+    session: ChangeSession,
+    endpoint: String,
+    board_filename: String,
+    execution_state: StoredExecutionState,
+}
+
+pub trait BoardGraphicsExecutionService: Send + Sync {
+    fn execute(
+        &self,
+        endpoint: &str,
+        board_filename: &str,
+        expected_token: &str,
+        expected_revision: &RevisionDigest,
+        operation: &OperationKind,
+    ) -> BoardGraphicsCommitOutcome;
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct IpcBoardGraphicsExecutionService;
+
+impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
+    fn execute(
+        &self,
+        endpoint: &str,
+        board_filename: &str,
+        expected_token: &str,
+        expected_revision: &RevisionDigest,
+        operation: &OperationKind,
+    ) -> BoardGraphicsCommitOutcome {
+        let config = match ClientConfig::new(endpoint, "auto-kicad-mcp") {
+            Ok(config) => config,
+            Err(reason) => {
+                return BoardGraphicsCommitOutcome::Unknown {
+                    reason: reason.to_string(),
+                };
+            }
+        };
+        let transport = match NngTransport::connect(config.clone()) {
+            Ok(transport) => transport,
+            Err(reason) => {
+                return BoardGraphicsCommitOutcome::Unknown {
+                    reason: reason.to_string(),
+                };
+            }
+        };
+        let mut client = KiCadClient::new(transport, config);
+        let version = match client.get_version() {
+            Ok(version) => version,
+            Err(reason) => {
+                return BoardGraphicsCommitOutcome::Unknown {
+                    reason: reason.to_string(),
+                };
+            }
+        };
+        let mut documents = match client.get_open_documents(DocumentQuery::Pcb) {
+            Ok(documents) if documents.len() == 1 => documents,
+            Ok(documents) => {
+                return BoardGraphicsCommitOutcome::Rejected {
+                    reason: format!(
+                        "expected exactly one open PCB document, found {}",
+                        documents.len()
+                    ),
+                };
+            }
+            Err(reason) => {
+                return BoardGraphicsCommitOutcome::Unknown {
+                    reason: reason.to_string(),
+                };
+            }
+        };
+        let document = documents.pop().expect("document count checked");
+        let observed_filename = match &document.kind {
+            kicad_ipc::OpenDocumentKind::Pcb { board_filename } => board_filename,
+            _ => {
+                return BoardGraphicsCommitOutcome::Rejected {
+                    reason: "open document is not a PCB".into(),
+                };
+            }
+        };
+        if observed_filename != board_filename {
+            return BoardGraphicsCommitOutcome::Rejected {
+                reason: "board filename changed".into(),
+            };
+        }
+        let graphics = match client.get_board_graphics(board_filename) {
+            Ok(graphics) => graphics,
+            Err(reason) => {
+                return BoardGraphicsCommitOutcome::Unknown {
+                    reason: reason.to_string(),
+                };
+            }
+        };
+        let token = match client.instance_token().cloned() {
+            Some(token) => token,
+            None => {
+                return BoardGraphicsCommitOutcome::Unknown {
+                    reason: "KiCad instance token was not observed".into(),
+                };
+            }
+        };
+        let observation = match live_board_observation(version, document, graphics, token) {
+            Ok(observation) => observation,
+            Err(reason) => {
+                return BoardGraphicsCommitOutcome::Rejected {
+                    reason: reason.to_string(),
+                };
+            }
+        };
+        let revision = match observation.snapshot.revision() {
+            Ok(revision) => revision,
+            Err(reason) => {
+                return BoardGraphicsCommitOutcome::Unknown {
+                    reason: reason.to_string(),
+                };
+            }
+        };
+        if observation.instance_token.as_str() != expected_token || &revision != expected_revision {
+            return BoardGraphicsCommitOutcome::Rejected {
+                reason: "live identity or revision is stale".into(),
+            };
+        }
+        BoardGraphicsExecutor::default().execute(
+            &mut client,
+            operation,
+            board_filename,
+            "auto-kicad MCP approved board graphics change",
+        )
+    }
+}
+
 #[derive(Clone)]
 pub struct Server {
-    sessions: Arc<Mutex<BTreeMap<String, ChangeSession>>>,
-    instance_tokens: Arc<Mutex<BTreeMap<String, String>>>,
+    sessions: Arc<Mutex<BTreeMap<String, StoredChangeSession>>>,
     capabilities: Vec<Capability>,
     discovery: Arc<dyn DiscoveryService>,
+    execution: Arc<dyn BoardGraphicsExecutionService>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -208,15 +353,24 @@ pub struct Envelope {
 
 impl Default for Server {
     fn default() -> Self {
-        Self::with_discovery(Arc::new(IpcDiscoveryService))
+        Self::with_discovery_and_execution(
+            Arc::new(IpcDiscoveryService),
+            Arc::new(IpcBoardGraphicsExecutionService),
+        )
     }
 }
 
 impl Server {
     pub fn with_discovery(discovery: Arc<dyn DiscoveryService>) -> Self {
+        Self::with_discovery_and_execution(discovery, Arc::new(IpcBoardGraphicsExecutionService))
+    }
+
+    pub fn with_discovery_and_execution(
+        discovery: Arc<dyn DiscoveryService>,
+        execution: Arc<dyn BoardGraphicsExecutionService>,
+    ) -> Self {
         Self {
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
-            instance_tokens: Arc::new(Mutex::new(BTreeMap::new())),
             capabilities: vec![
                 Capability {
                     id: "base.get_version",
@@ -232,6 +386,7 @@ impl Server {
                 },
             ],
             discovery,
+            execution,
             tool_router: Self::tool_router(),
         }
     }
@@ -267,7 +422,7 @@ impl Server {
                     "mode": capability.mode,
                     "status": capability.status
                 })).collect::<Vec<_>>(),
-                "advertised_tools": ["kicad_capabilities", "kicad_inspect_project"]
+                "advertised_tools": ["kicad_capabilities", "kicad_inspect_project", "kicad_plan_change", "kicad_preview_change", "kicad_commit_change"]
             }),
             diagnostics: Vec::new(),
             next_actions: Vec::new(),
@@ -312,11 +467,15 @@ impl Server {
         Ok(rmcp::model::CallToolResult::structured(value).into())
     }
 
+    #[tool(
+        name = "kicad_plan_change",
+        description = "Plan bounded Dwgs.User board graphics without mutating KiCad."
+    )]
     pub async fn kicad_plan_change(
         &self,
         Parameters(arguments): Parameters<PlanBoardGraphicsRequest>,
     ) -> Result<CallToolResponse, ErrorData> {
-        if arguments.endpoint.is_empty() || arguments.instance_token.is_empty() {
+        if arguments.endpoint.is_empty() {
             return Ok(self.rejected(arguments.request_id, "identity_is_required"));
         }
         let observation = self
@@ -324,9 +483,6 @@ impl Server {
             .live_board_observation(&arguments.endpoint, None)
             .map_err(|error| ErrorData::internal_error(error, None))?;
         let observed_token = observation.instance_token.as_str();
-        if observed_token != arguments.instance_token {
-            return Ok(self.rejected(arguments.request_id, "instance_stale"));
-        }
         let snapshot = observation.snapshot;
         if !snapshot
             .capabilities
@@ -335,32 +491,27 @@ impl Server {
         {
             return Ok(self.rejected(arguments.request_id, "capability_not_verified"));
         }
-        let board = StableId::new(arguments.board_scope.clone())
-            .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
-        if snapshot.board.document_id.as_ref() != Some(&board) {
-            return Ok(self.rejected(arguments.request_id, "board_identity_mismatch"));
-        }
-        {
-            let tokens = self.instance_tokens.lock().expect("instance token lock");
-            if tokens
-                .get(&arguments.endpoint)
-                .is_some_and(|token| token != &arguments.instance_token)
-            {
-                return Ok(self.rejected(arguments.request_id, "instance_stale"));
-            }
-        }
+        let board = snapshot
+            .board
+            .document_id
+            .clone()
+            .ok_or_else(|| ErrorData::internal_error("board identity is unavailable", None))?;
         let segments: Vec<BoardGraphicSegment> = serde_json::from_value(arguments.segments)
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
-        let base_revision = RevisionDigest::new(arguments.base_revision)
-            .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+        let base_revision = snapshot
+            .revision()
+            .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
         let plan_id = StableId::new(format!("plan:{}", arguments.request_id))
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
         let operation_id = StableId::new(format!("operation:{}", arguments.request_id))
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
         let operation = Operation {
             operation_id,
-            kind: OperationKind::AddBoardGraphicSegments { board, segments },
-            targets: vec![StableId::new(arguments.board_scope).unwrap()],
+            kind: OperationKind::AddBoardGraphicSegments {
+                board: board.clone(),
+                segments,
+            },
+            targets: vec![board],
             preconditions: vec![Precondition::Revision(base_revision.clone())],
             expected_effects: vec!["add board graphic segments".into()],
             risk_class: RiskClass::Medium,
@@ -381,14 +532,15 @@ impl Server {
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
         let plan_hash = session.plan_hash.clone();
         let base_revision = session.plan.base_revision.to_string();
-        self.instance_tokens
-            .lock()
-            .expect("instance token lock")
-            .insert(arguments.endpoint, server_token);
-        self.sessions
-            .lock()
-            .expect("session lock")
-            .insert(plan_id.to_string(), session);
+        self.sessions.lock().expect("session lock").insert(
+            plan_id.to_string(),
+            StoredChangeSession {
+                session,
+                endpoint: arguments.endpoint,
+                board_filename: observation.board_filename,
+                execution_state: StoredExecutionState::Ready,
+            },
+        );
         self.envelope(
             arguments.request_id,
             Some(base_revision),
@@ -400,27 +552,40 @@ impl Server {
         )
     }
 
+    #[tool(
+        name = "kicad_preview_change",
+        description = "Preview and validate a planned KiCad board graphics change, then await approval."
+    )]
     pub async fn kicad_preview_change(
         &self,
         Parameters(arguments): Parameters<PreviewChangeRequest>,
     ) -> Result<CallToolResponse, ErrorData> {
-        let session = self
+        let mut stored = self
             .sessions
             .lock()
             .expect("session lock")
             .get(&arguments.plan_id)
             .cloned()
             .ok_or_else(|| ErrorData::invalid_params("unknown plan_id", None))?;
-        if session.plan_hash != arguments.plan_hash {
+        if stored.session.plan_hash != arguments.plan_hash {
             return Err(ErrorData::invalid_params("plan hash mismatch", None));
         }
         let engine = Engine::new(
-            session.snapshot.clone(),
-            session.plan.instance_token.clone(),
+            stored.session.snapshot.clone(),
+            stored.session.plan.instance_token.clone(),
         );
         let preview = engine
-            .preview(&session.plan)
+            .preview_session(&mut stored.session)
+            .and_then(|preview| {
+                engine.validate(&mut stored.session)?;
+                engine.request_approval(&mut stored.session)?;
+                Ok(preview)
+            })
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+        self.sessions
+            .lock()
+            .expect("session lock")
+            .insert(arguments.plan_id.clone(), stored.clone());
         let after_revision = preview
             .after
             .revision()
@@ -432,14 +597,144 @@ impl Server {
                 .unwrap_or_else(|| "req_preview_change".into()),
             Some(after_revision),
             json!({
-                "plan_id": session.plan.plan_id,
+                "plan_id": stored.session.plan.plan_id,
                 "plan_hash": preview.plan_hash,
                 "before": preview.before,
                 "after": preview.after,
-                "base_revision": session.plan.base_revision,
-                "state": "previewed"
+                "base_revision": stored.session.plan.base_revision,
+                "state": "awaiting_approval"
             }),
         )
+    }
+
+    #[tool(
+        name = "kicad_commit_change",
+        description = "Commit an approved KiCad board graphics change."
+    )]
+    pub async fn kicad_commit_change(
+        &self,
+        Parameters(arguments): Parameters<CommitChangeRequest>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let mut stored = self
+            .sessions
+            .lock()
+            .expect("session lock")
+            .get(&arguments.plan_id)
+            .cloned()
+            .ok_or_else(|| ErrorData::invalid_params("unknown plan_id", None))?;
+        if stored.session.plan_hash != arguments.plan_hash
+            || arguments.approval_hash != arguments.plan_hash
+        {
+            return Err(ErrorData::invalid_params("approval mismatch", None));
+        }
+        if stored.execution_state != StoredExecutionState::Ready {
+            return Err(ErrorData::invalid_params(
+                match stored.execution_state {
+                    StoredExecutionState::InFlight => "change execution is already in flight",
+                    StoredExecutionState::Committed => "change already committed",
+                    StoredExecutionState::Unknown => {
+                        "change outcome is unknown; manual verification required"
+                    }
+                    StoredExecutionState::Ready => unreachable!("state checked above"),
+                },
+                None,
+            ));
+        }
+        let engine = Engine::new(
+            stored.session.snapshot.clone(),
+            stored.session.plan.instance_token.clone(),
+        );
+        engine
+            .approve(&mut stored.session, &arguments.approval_hash)
+            .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+
+        let mut sessions = self.sessions.lock().expect("session lock");
+        let current = sessions
+            .get_mut(&arguments.plan_id)
+            .ok_or_else(|| ErrorData::invalid_params("unknown plan_id", None))?;
+        if current.execution_state != StoredExecutionState::Ready {
+            return Err(ErrorData::invalid_params(
+                "change execution was claimed",
+                None,
+            ));
+        }
+        current.execution_state = StoredExecutionState::InFlight;
+        drop(sessions);
+
+        let outcome = self.execution.execute(
+            &stored.endpoint,
+            &stored.board_filename,
+            &stored.session.plan.instance_token,
+            &stored.session.plan.base_revision,
+            &stored.session.plan.operations[0].kind,
+        );
+        let (ok, state, outcome_data) = match &outcome {
+            BoardGraphicsCommitOutcome::CommittedAndSaved => {
+                let mut commit_engine = Engine::new(
+                    stored.session.snapshot.clone(),
+                    stored.session.plan.instance_token.clone(),
+                );
+                if let Err(error) = commit_engine.commit(&mut stored.session) {
+                    stored.execution_state = StoredExecutionState::Unknown;
+                    self.sessions
+                        .lock()
+                        .expect("session lock")
+                        .insert(arguments.plan_id.clone(), stored);
+                    return Err(ErrorData::internal_error(error.to_string(), None));
+                }
+                stored.execution_state = StoredExecutionState::Committed;
+                (true, "committed", json!({"kind": "committed_and_saved"}))
+            }
+            BoardGraphicsCommitOutcome::CommittedButNotSaved { reason } => {
+                let mut commit_engine = Engine::new(
+                    stored.session.snapshot.clone(),
+                    stored.session.plan.instance_token.clone(),
+                );
+                if let Err(error) = commit_engine.commit(&mut stored.session) {
+                    stored.execution_state = StoredExecutionState::Unknown;
+                    self.sessions
+                        .lock()
+                        .expect("session lock")
+                        .insert(arguments.plan_id.clone(), stored);
+                    return Err(ErrorData::internal_error(error.to_string(), None));
+                }
+                stored.execution_state = StoredExecutionState::Committed;
+                (
+                    true,
+                    "committed",
+                    json!({"kind": "committed_but_not_saved", "reason": reason}),
+                )
+            }
+            BoardGraphicsCommitOutcome::Rejected { reason } => {
+                stored.execution_state = StoredExecutionState::Ready;
+                (
+                    false,
+                    "rejected",
+                    json!({"kind": "rejected", "reason": reason}),
+                )
+            }
+            BoardGraphicsCommitOutcome::Unknown { reason } => {
+                stored.execution_state = StoredExecutionState::Unknown;
+                (
+                    false,
+                    "unknown",
+                    json!({"kind": "unknown", "reason": reason}),
+                )
+            }
+        };
+        self.sessions
+            .lock()
+            .expect("session lock")
+            .insert(arguments.plan_id.clone(), stored);
+        let request_id = arguments
+            .request_id
+            .unwrap_or_else(|| "req_commit_change".into());
+        let data = json!({"plan_id": arguments.plan_id, "state": state, "outcome": outcome_data});
+        if ok {
+            self.envelope(request_id, None, data)
+        } else {
+            Ok(self.envelope_sync(request_id, None, data))
+        }
     }
 
     fn rejected(&self, request_id: String, reason: &str) -> CallToolResponse {
@@ -598,12 +893,9 @@ mod tests {
         }
     }
 
-    fn plan_request(snapshot: ProjectSnapshot, request_id: &str) -> PlanBoardGraphicsRequest {
+    fn plan_request(_snapshot: ProjectSnapshot, request_id: &str) -> PlanBoardGraphicsRequest {
         PlanBoardGraphicsRequest {
             endpoint: "ipc:///tmp/kicad/api.sock".into(),
-            board_scope: "board".into(),
-            base_revision: snapshot.revision().unwrap().as_str().into(),
-            instance_token: "token".into(),
             source_run_id: "run".into(),
             segments: serde_json::to_value(vec![graphic("g1")]).unwrap(),
             request_id: request_id.into(),
@@ -632,7 +924,16 @@ mod tests {
         .await;
         let tools = client.list_tools(None).await.expect("tool list");
         let names: Vec<_> = tools.tools.iter().map(|tool| tool.name.clone()).collect();
-        assert_eq!(names, vec!["kicad_capabilities", "kicad_inspect_project"]);
+        assert_eq!(
+            names,
+            vec![
+                "kicad_capabilities",
+                "kicad_commit_change",
+                "kicad_inspect_project",
+                "kicad_plan_change",
+                "kicad_preview_change",
+            ]
+        );
     }
 
     #[tokio::test]
@@ -738,7 +1039,10 @@ mod tests {
         };
         let plan_id = planned["data"]["plan_id"].as_str().unwrap().to_owned();
         let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
-        let before = server.sessions.lock().unwrap()[&plan_id].snapshot.clone();
+        let before = server.sessions.lock().unwrap()[&plan_id]
+            .session
+            .snapshot
+            .clone();
         let preview = server
             .kicad_preview_change(Parameters(PreviewChangeRequest {
                 plan_id: plan_id.clone(),
@@ -765,41 +1069,287 @@ mod tests {
                 .len(),
             1
         );
-        assert_eq!(server.sessions.lock().unwrap()[&plan_id].snapshot, before);
+        assert_eq!(
+            server.sessions.lock().unwrap()[&plan_id].session.snapshot,
+            before
+        );
     }
 
     #[tokio::test]
-    async fn plan_rejects_client_token_mismatch_without_storing_session() {
+    async fn commit_requires_preview_and_exact_approval_and_executes_once() {
+        let calls = Arc::new(Mutex::new(0));
+        let execution = Arc::new(FakeExecution {
+            outcome: BoardGraphicsCommitOutcome::CommittedAndSaved,
+            calls: calls.clone(),
+        });
+        let server = Server::with_discovery_and_execution(
+            Arc::new(FakeDiscovery {
+                write_capability: true,
+            }),
+            execution,
+        );
+        let planned = server
+            .kicad_plan_change(Parameters(plan_request(
+                project_snapshot(true),
+                "req_commit",
+            )))
+            .await
+            .unwrap();
+        let planned = match planned {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("plan call should complete"),
+        };
+        let plan_id = planned["data"]["plan_id"].as_str().unwrap().to_owned();
+        let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
+        let early = server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id: plan_id.clone(),
+                plan_hash: plan_hash.clone(),
+                approval_hash: plan_hash.clone(),
+                request_id: Some("req_early".into()),
+            }))
+            .await;
+        assert!(early.is_err());
+        let preview = server
+            .kicad_preview_change(Parameters(PreviewChangeRequest {
+                plan_id: plan_id.clone(),
+                plan_hash: plan_hash.clone(),
+                request_id: Some("req_preview".into()),
+            }))
+            .await
+            .unwrap();
+        assert!(matches!(preview, CallToolResponse::Complete(_)));
+        let wrong = server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id: plan_id.clone(),
+                plan_hash: plan_hash.clone(),
+                approval_hash: "wrong".into(),
+                request_id: Some("req_wrong".into()),
+            }))
+            .await;
+        assert!(wrong.is_err());
+        let committed = server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id: plan_id.clone(),
+                plan_hash: plan_hash.clone(),
+                approval_hash: plan_hash.clone(),
+                request_id: Some("req_commit_ok".into()),
+            }))
+            .await
+            .unwrap();
+        assert!(matches!(committed, CallToolResponse::Complete(_)));
+        assert_eq!(*calls.lock().unwrap(), 1);
+        let replay = server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id,
+                plan_hash: plan_hash.clone(),
+                approval_hash: plan_hash,
+                request_id: Some("req_commit_replay".into()),
+            }))
+            .await;
+        assert!(replay.is_err());
+        assert_eq!(*calls.lock().unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn in_flight_claim_rejects_without_calling_executor() {
+        let calls = Arc::new(Mutex::new(0));
+        let (server, plan_id, plan_hash) = planned_server(
+            BoardGraphicsCommitOutcome::CommittedAndSaved,
+            calls.clone(),
+            "req_in_flight",
+        )
+        .await;
+        server
+            .sessions
+            .lock()
+            .unwrap()
+            .get_mut(&plan_id)
+            .unwrap()
+            .execution_state = StoredExecutionState::InFlight;
+        let result = server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id,
+                plan_hash: plan_hash.clone(),
+                approval_hash: plan_hash,
+                request_id: Some("req_in_flight_commit".into()),
+            }))
+            .await;
+        assert!(result.is_err());
+        assert_eq!(*calls.lock().unwrap(), 0);
+    }
+
+    async fn planned_server(
+        outcome: BoardGraphicsCommitOutcome,
+        calls: Arc<Mutex<usize>>,
+        request_id: &str,
+    ) -> (Server, String, String) {
+        let server = Server::with_discovery_and_execution(
+            Arc::new(FakeDiscovery {
+                write_capability: true,
+            }),
+            Arc::new(FakeExecution { outcome, calls }),
+        );
+        let result = server
+            .kicad_plan_change(Parameters(plan_request(project_snapshot(true), request_id)))
+            .await
+            .unwrap();
+        let result = match result {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("plan call should complete"),
+        };
+        let plan_id = result["data"]["plan_id"].as_str().unwrap().to_owned();
+        let plan_hash = result["data"]["plan_hash"].as_str().unwrap().to_owned();
+        server
+            .kicad_preview_change(Parameters(PreviewChangeRequest {
+                plan_id: plan_id.clone(),
+                plan_hash: plan_hash.clone(),
+                request_id: Some("req_outcome_preview".into()),
+            }))
+            .await
+            .unwrap();
+        (server, plan_id, plan_hash)
+    }
+
+    #[tokio::test]
+    async fn rejected_can_retry_but_unknown_and_saved_states_cannot() {
+        let rejected_calls = Arc::new(Mutex::new(0));
+        let (server, plan_id, plan_hash) = planned_server(
+            BoardGraphicsCommitOutcome::Rejected {
+                reason: "stale revision".into(),
+            },
+            rejected_calls.clone(),
+            "req_rejected",
+        )
+        .await;
+        let first = server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id: plan_id.clone(),
+                plan_hash: plan_hash.clone(),
+                approval_hash: plan_hash.clone(),
+                request_id: Some("req_rejected_commit".into()),
+            }))
+            .await
+            .unwrap();
+        let first = match first {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("commit should complete"),
+        };
+        assert!(!first["ok"].as_bool().unwrap());
+        assert_eq!(first["data"]["state"], "rejected");
+        assert_eq!(
+            server.sessions.lock().unwrap()[&plan_id].execution_state,
+            StoredExecutionState::Ready
+        );
+
+        let unknown_calls = Arc::new(Mutex::new(0));
+        let (unknown_server, unknown_id, unknown_hash) = planned_server(
+            BoardGraphicsCommitOutcome::Unknown {
+                reason: "connection lost after write".into(),
+            },
+            unknown_calls.clone(),
+            "req_unknown",
+        )
+        .await;
+        unknown_server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id: unknown_id.clone(),
+                plan_hash: unknown_hash.clone(),
+                approval_hash: unknown_hash.clone(),
+                request_id: Some("req_unknown_commit".into()),
+            }))
+            .await
+            .unwrap();
+        assert_eq!(
+            unknown_server.sessions.lock().unwrap()[&unknown_id].execution_state,
+            StoredExecutionState::Unknown
+        );
+        let retry = unknown_server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id: unknown_id,
+                plan_hash: unknown_hash.clone(),
+                approval_hash: unknown_hash,
+                request_id: Some("req_unknown_retry".into()),
+            }))
+            .await;
+        assert!(retry.is_err());
+        assert_eq!(*unknown_calls.lock().unwrap(), 1);
+
+        let saved_calls = Arc::new(Mutex::new(0));
+        let (saved_server, saved_id, saved_hash) = planned_server(
+            BoardGraphicsCommitOutcome::CommittedButNotSaved {
+                reason: "save failed".into(),
+            },
+            saved_calls.clone(),
+            "req_save_failure",
+        )
+        .await;
+        let saved = saved_server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id: saved_id.clone(),
+                plan_hash: saved_hash.clone(),
+                approval_hash: saved_hash.clone(),
+                request_id: Some("req_save_commit".into()),
+            }))
+            .await
+            .unwrap();
+        let saved = match saved {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("commit should complete"),
+        };
+        assert!(saved["ok"].as_bool().unwrap());
+        assert_eq!(saved["data"]["outcome"]["kind"], "committed_but_not_saved");
+        assert_eq!(
+            saved_server.sessions.lock().unwrap()[&saved_id].execution_state,
+            StoredExecutionState::Committed
+        );
+        assert_eq!(*saved_calls.lock().unwrap(), 1);
+    }
+
+    #[derive(Clone)]
+    struct FakeExecution {
+        outcome: BoardGraphicsCommitOutcome,
+        calls: Arc<Mutex<usize>>,
+    }
+
+    impl BoardGraphicsExecutionService for FakeExecution {
+        fn execute(
+            &self,
+            _endpoint: &str,
+            _board_filename: &str,
+            _expected_token: &str,
+            _expected_revision: &RevisionDigest,
+            _operation: &OperationKind,
+        ) -> BoardGraphicsCommitOutcome {
+            *self.calls.lock().unwrap() += 1;
+            self.outcome.clone()
+        }
+    }
+
+    #[tokio::test]
+    async fn plan_uses_server_owned_identity_and_revision() {
         let server = Server::with_discovery(Arc::new(FakeDiscovery {
             write_capability: true,
         }));
-        let mut request = plan_request(project_snapshot(true), "req_stale_token");
-        request.instance_token = "client-forged-token".into();
-        let result = server.kicad_plan_change(Parameters(request)).await.unwrap();
+        let snapshot = project_snapshot(true);
+        let expected_revision = snapshot.revision().unwrap();
+        let result = server
+            .kicad_plan_change(Parameters(plan_request(snapshot, "req_server_snapshot")))
+            .await
+            .unwrap();
         let result = match result {
             rmcp::model::CallToolResponse::Complete(result) => result.structured_content.unwrap(),
             _ => panic!("plan call should complete"),
         };
-        assert_eq!(result["ok"], false);
-        assert_eq!(result["data"]["reason"], "instance_stale");
-        assert!(server.sessions.lock().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn plan_uses_server_owned_snapshot_revision() {
-        let server = Server::with_discovery(Arc::new(FakeDiscovery {
-            write_capability: true,
-        }));
-        let mut request = plan_request(project_snapshot(true), "req_server_snapshot");
-        let mut client_snapshot = project_snapshot(true);
-        client_snapshot.kicad_version = "client-fabricated-version".into();
-        request.base_revision = client_snapshot.revision().unwrap().to_string();
-        let error = server
-            .kicad_plan_change(Parameters(request))
-            .await
-            .expect_err("client revision must not be accepted");
-        assert!(!error.to_string().is_empty());
-        assert!(server.sessions.lock().unwrap().is_empty());
+        let plan_id = result["data"]["plan_id"].as_str().unwrap();
+        let sessions = server.sessions.lock().unwrap();
+        let plan = &sessions[plan_id].session.plan;
+        assert_eq!(plan.base_revision, expected_revision);
+        assert_eq!(plan.instance_token, "token");
+        assert_eq!(
+            plan.operations[0].targets,
+            [StableId::new("board").unwrap()]
+        );
     }
 
     #[tokio::test]
