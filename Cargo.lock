@@ -430,6 +430,7 @@ dependencies = [
  "nng",
  "protobuf",
  "protobuf-codegen",
+ "serde_json",
 ]
 
 [[package]]

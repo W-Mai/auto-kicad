@@ -11,6 +11,28 @@ use protobuf::{Message, MessageField};
 use envelope::{ApiRequest, ApiRequestHeader, ApiResponse, ApiStatusCode};
 
 pub const GET_VERSION_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.GetVersion";
+pub const GET_OPEN_DOCUMENTS_TYPE_URL: &str =
+    "type.googleapis.com/kiapi.common.commands.GetOpenDocuments";
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum OpenDocumentKind {
+    Schematic {
+        filename: Option<String>,
+        sheet_path: Option<String>,
+        sheet_kiids: Vec<String>,
+    },
+    Pcb {
+        board_filename: String,
+    },
+    Other,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OpenDocument {
+    pub project_name: Option<String>,
+    pub project_path: Option<String>,
+    pub kind: OpenDocumentKind,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ClientConfig {
@@ -98,7 +120,9 @@ impl IpcError {
                 ApiStatusCode::AS_NOT_READY => "kicad_not_ready",
                 ApiStatusCode::AS_TOKEN_MISMATCH => "token_mismatch",
                 ApiStatusCode::AS_BUSY => "kicad_busy",
-                ApiStatusCode::AS_UNIMPLEMENTED => "unsupported_capability",
+                ApiStatusCode::AS_UNIMPLEMENTED | ApiStatusCode::AS_UNHANDLED => {
+                    "unsupported_capability"
+                }
                 _ => "kicad_status_error",
             },
             Self::Transport(_) => "connection_unavailable",
@@ -190,6 +214,26 @@ impl<T: KiCadTransport> KiCadClient<T> {
             .into_option()
             .ok_or(IpcError::MissingResponseMessage)
     }
+
+    pub fn get_open_documents(
+        &mut self,
+        document_type: base_types::DocumentType,
+    ) -> Result<Vec<OpenDocument>, IpcError> {
+        let request = get_open_documents_request(&self.config, self.token.as_ref(), document_type);
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let response = decode_any::<editor_commands::GetOpenDocumentsResponse>(
+            &response,
+            "type.googleapis.com/kiapi.common.commands.GetOpenDocumentsResponse",
+        )?;
+        self.token = Some(token);
+        response
+            .documents
+            .iter()
+            .map(open_document_from_proto)
+            .collect()
+    }
 }
 
 pub fn get_version_request(config: &ClientConfig, token: Option<&InstanceToken>) -> ApiRequest {
@@ -210,6 +254,81 @@ pub fn get_version_request(config: &ClientConfig, token: Option<&InstanceToken>)
         message: MessageField::some(any),
         ..ApiRequest::default()
     }
+}
+
+pub fn get_open_documents_request(
+    config: &ClientConfig,
+    token: Option<&InstanceToken>,
+    document_type: base_types::DocumentType,
+) -> ApiRequest {
+    let command = editor_commands::GetOpenDocuments {
+        type_: protobuf::EnumOrUnknown::new(document_type),
+        ..editor_commands::GetOpenDocuments::default()
+    };
+    let any = Any {
+        type_url: GET_OPEN_DOCUMENTS_TYPE_URL.to_owned(),
+        value: command
+            .write_to_bytes()
+            .expect("GetOpenDocuments serializes"),
+        ..Any::default()
+    };
+    ApiRequest {
+        header: MessageField::some(ApiRequestHeader {
+            client_name: config.client_name.clone(),
+            kicad_token: token.map_or_else(String::new, |token| token.as_str().to_owned()),
+            ..ApiRequestHeader::default()
+        }),
+        message: MessageField::some(any),
+        ..ApiRequest::default()
+    }
+}
+
+fn open_document_from_proto(
+    document: &base_types::DocumentSpecifier,
+) -> Result<OpenDocument, IpcError> {
+    let project_name = document
+        .project
+        .as_ref()
+        .map(|project| project.name.clone());
+    let project_path = document
+        .project
+        .as_ref()
+        .map(|project| project.path.clone());
+    let document_type = document.type_.enum_value_or_default();
+    let kind = match (document_type, document.identifier.as_ref()) {
+        (
+            base_types::DocumentType::DOCTYPE_SCHEMATIC,
+            Some(base_types::document_specifier::Identifier::SheetPath(sheet_path)),
+        ) => OpenDocumentKind::Schematic {
+            filename: None,
+            sheet_path: Some(sheet_path.path_human_readable.clone()),
+            sheet_kiids: sheet_path
+                .path
+                .iter()
+                .map(|kiid| kiid.value.clone())
+                .collect(),
+        },
+        (
+            base_types::DocumentType::DOCTYPE_SCHEMATIC,
+            Some(base_types::document_specifier::Identifier::BoardFilename(filename)),
+        ) => OpenDocumentKind::Schematic {
+            filename: Some(filename.clone()),
+            sheet_path: None,
+            sheet_kiids: Vec::new(),
+        },
+        (
+            base_types::DocumentType::DOCTYPE_PCB,
+            Some(base_types::document_specifier::Identifier::BoardFilename(filename)),
+        ) => OpenDocumentKind::Pcb {
+            board_filename: filename.clone(),
+        },
+        _ => OpenDocumentKind::Other,
+    };
+    Ok(OpenDocument {
+        project_name,
+        project_path,
+        kind,
+    })
 }
 
 pub fn response_status(response: &ApiResponse) -> Result<(), IpcError> {
@@ -263,6 +382,73 @@ mod tests {
         fn request(&mut self, request: ApiRequest) -> Result<ApiResponse, IpcError> {
             self.requests.push(request);
             Ok(self.responses.remove(0))
+        }
+    }
+
+    fn open_documents_response(token: &str) -> ApiResponse {
+        let response = editor_commands::GetOpenDocumentsResponse {
+            documents: vec![
+                base_types::DocumentSpecifier {
+                    type_: protobuf::EnumOrUnknown::new(base_types::DocumentType::DOCTYPE_PCB),
+                    identifier: Some(base_types::document_specifier::Identifier::BoardFilename(
+                        "main.kicad_pcb".to_owned(),
+                    )),
+                    project: MessageField::some(base_types::ProjectSpecifier {
+                        name: "main".to_owned(),
+                        path: "/tmp/main".to_owned(),
+                        ..base_types::ProjectSpecifier::default()
+                    }),
+                    ..base_types::DocumentSpecifier::default()
+                },
+                base_types::DocumentSpecifier {
+                    type_: protobuf::EnumOrUnknown::new(
+                        base_types::DocumentType::DOCTYPE_SCHEMATIC,
+                    ),
+                    identifier: Some(base_types::document_specifier::Identifier::SheetPath(
+                        base_types::SheetPath {
+                            path_human_readable: "/".to_owned(),
+                            path: vec![base_types::KIID {
+                                value: "root".to_owned(),
+                                ..base_types::KIID::default()
+                            }],
+                            ..base_types::SheetPath::default()
+                        },
+                    )),
+                    project: MessageField::some(base_types::ProjectSpecifier {
+                        name: "main".to_owned(),
+                        path: "/tmp/main".to_owned(),
+                        ..base_types::ProjectSpecifier::default()
+                    }),
+                    ..base_types::DocumentSpecifier::default()
+                },
+                base_types::DocumentSpecifier {
+                    type_: protobuf::EnumOrUnknown::new(
+                        base_types::DocumentType::DOCTYPE_SCHEMATIC,
+                    ),
+                    identifier: Some(base_types::document_specifier::Identifier::BoardFilename(
+                        "xLock.kicad_sch".to_owned(),
+                    )),
+                    ..base_types::DocumentSpecifier::default()
+                },
+            ],
+            ..editor_commands::GetOpenDocumentsResponse::default()
+        };
+        ApiResponse {
+            header: MessageField::some(envelope::ApiResponseHeader {
+                kicad_token: token.to_owned(),
+                ..envelope::ApiResponseHeader::default()
+            }),
+            status: MessageField::some(envelope::ApiResponseStatus {
+                status: protobuf::EnumOrUnknown::new(ApiStatusCode::AS_OK),
+                ..envelope::ApiResponseStatus::default()
+            }),
+            message: MessageField::some(Any {
+                type_url: "type.googleapis.com/kiapi.common.commands.GetOpenDocumentsResponse"
+                    .to_owned(),
+                value: response.write_to_bytes().unwrap(),
+                ..Any::default()
+            }),
+            ..ApiResponse::default()
         }
     }
 
@@ -323,6 +509,62 @@ mod tests {
     }
 
     #[test]
+    fn get_open_documents_request_encodes_document_type() {
+        let config = ClientConfig::new("ipc:///tmp/kicad/api.sock", "test-client").unwrap();
+        let request = get_open_documents_request(
+            &config,
+            Some(&InstanceToken::new("token").unwrap()),
+            base_types::DocumentType::DOCTYPE_PCB,
+        );
+        let any = request.message.as_ref().unwrap();
+        let command = editor_commands::GetOpenDocuments::parse_from_bytes(&any.value).unwrap();
+        assert_eq!(
+            command.type_.enum_value_or_default(),
+            base_types::DocumentType::DOCTYPE_PCB
+        );
+        assert_eq!(any.type_url, GET_OPEN_DOCUMENTS_TYPE_URL);
+        assert_eq!(request.header.as_ref().unwrap().kicad_token, "token");
+    }
+
+    #[test]
+    fn client_decodes_open_document_identities() {
+        let config = ClientConfig::new("ipc:///tmp/kicad/api.sock", "test-client").unwrap();
+        let fake = FakeTransport {
+            responses: vec![open_documents_response("token")],
+            requests: Vec::new(),
+        };
+        let mut client = KiCadClient::new(fake, config);
+        let documents = client
+            .get_open_documents(base_types::DocumentType::DOCTYPE_PCB)
+            .unwrap();
+        assert_eq!(documents.len(), 3);
+        assert_eq!(documents[0].project_name, Some("main".to_owned()));
+        assert_eq!(
+            documents[0].kind,
+            OpenDocumentKind::Pcb {
+                board_filename: "main.kicad_pcb".to_owned()
+            }
+        );
+        assert_eq!(
+            documents[1].kind,
+            OpenDocumentKind::Schematic {
+                filename: None,
+                sheet_path: Some("/".to_owned()),
+                sheet_kiids: vec!["root".to_owned()]
+            }
+        );
+        assert_eq!(
+            documents[2].kind,
+            OpenDocumentKind::Schematic {
+                filename: Some("xLock.kicad_sch".to_owned()),
+                sheet_path: None,
+                sheet_kiids: Vec::new()
+            }
+        );
+        assert_eq!(documents[2].project_name, None);
+    }
+
+    #[test]
     fn statuses_map_to_stable_errors() {
         let mut response = ApiResponse::new();
         response.status = MessageField::some(envelope::ApiResponseStatus {
@@ -333,5 +575,14 @@ mod tests {
         let error = response_status(&response).unwrap_err();
         assert_eq!(error.code(), "token_mismatch");
         assert_eq!(error.to_string(), "token_mismatch: wrong instance");
+
+        response.status = MessageField::some(envelope::ApiResponseStatus {
+            status: protobuf::EnumOrUnknown::new(ApiStatusCode::AS_UNHANDLED),
+            error_message: "no handler".to_owned(),
+            ..envelope::ApiResponseStatus::default()
+        });
+        let error = response_status(&response).unwrap_err();
+        assert_eq!(error.code(), "unsupported_capability");
+        assert_eq!(error.to_string(), "unsupported_capability: no handler");
     }
 }

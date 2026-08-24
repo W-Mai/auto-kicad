@@ -6,6 +6,7 @@ fn main() {
         .inputs([
             "proto/common/envelope.proto",
             "proto/common/commands/base_commands.proto",
+            "proto/common/commands/editor_commands.proto",
             "proto/common/types/base_types.proto",
             "proto/common/types/enums.proto",
         ])
