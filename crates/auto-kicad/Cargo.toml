@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+kicad-checks = { path = "../kicad-checks" }
 kicad-adapter = { path = "../kicad-adapter" }
 kicad-engine = { path = "../kicad-engine" }
 kicad-ipc = { path = "../kicad-ipc" }

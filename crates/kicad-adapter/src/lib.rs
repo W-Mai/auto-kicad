@@ -291,6 +291,8 @@ pub struct LiveBoardObservation {
     pub snapshot: ProjectSnapshot,
     pub instance_token: InstanceToken,
     pub board_filename: String,
+    pub board_path: PathBuf,
+    pub project_dir: PathBuf,
 }
 
 #[derive(Debug)]
@@ -344,6 +346,21 @@ pub fn live_board_observation(
     if document.project_path.is_none() && document.project_name.is_none() {
         return Err(LiveBoardObservationError::MissingProjectIdentity);
     }
+    let project_path = document
+        .project_path
+        .as_deref()
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .ok_or(LiveBoardObservationError::MissingProjectIdentity)?;
+    let board_path = {
+        let filename = Path::new(&board_filename);
+        if filename.is_absolute() {
+            filename.to_owned()
+        } else {
+            project_path.join(filename)
+        }
+    };
     let discovered = discovered_document(document.clone())?
         .ok_or(LiveBoardObservationError::MissingDocumentIdentity)?;
     let mut project_identity = Vec::new();
@@ -405,6 +422,8 @@ pub fn live_board_observation(
         snapshot,
         instance_token,
         board_filename,
+        board_path,
+        project_dir: project_path,
     })
 }
 

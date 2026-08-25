@@ -2,6 +2,7 @@ use kicad_adapter::{
     BoardGraphicsCommitOutcome, BoardGraphicsExecutor, DiscoveryInput, DocumentObservation,
     LiveBoardObservation, artifact_discovery_snapshot, discovery_snapshot, live_board_observation,
 };
+use kicad_checks::{CheckResult, DrcPolicy, DrcReport, compare_drc, run_pcb_drc};
 use kicad_engine::{
     ChangePlan, ChangeSession, Engine, Operation, OperationKind, Precondition, RiskClass,
 };
@@ -18,7 +19,9 @@ use rmcp::{
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 pub const CONTRACT_SCHEMA_VERSION: &str = "1";
 
@@ -310,12 +313,45 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+pub struct ValidateProjectRequest {
+    pub endpoint: String,
+    pub baseline_id: Option<String>,
+    pub request_id: Option<String>,
+}
+
+pub trait BoardValidationService: Send + Sync {
+    fn validate(&self, board_path: &std::path::Path, policy: &DrcPolicy) -> CheckResult;
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct IpcBoardValidationService;
+
+impl BoardValidationService for IpcBoardValidationService {
+    fn validate(&self, board_path: &std::path::Path, policy: &DrcPolicy) -> CheckResult {
+        run_pcb_drc(board_path, policy)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct StoredDrcBaseline {
+    instance_token: String,
+    board_identity: String,
+    board_path: std::path::PathBuf,
+    kicad_version: String,
+    captured_revision: RevisionDigest,
+    report: DrcReport,
+}
+
 #[derive(Clone)]
 pub struct Server {
     sessions: Arc<Mutex<BTreeMap<String, StoredChangeSession>>>,
+    drc_baselines: Arc<Mutex<BTreeMap<String, StoredDrcBaseline>>>,
     capabilities: Vec<Capability>,
     discovery: Arc<dyn DiscoveryService>,
     execution: Arc<dyn BoardGraphicsExecutionService>,
+    validation: Arc<dyn BoardValidationService>,
+    baseline_sequence: Arc<AtomicU64>,
     tool_router: ToolRouter<Self>,
 }
 
@@ -369,9 +405,24 @@ impl Server {
         discovery: Arc<dyn DiscoveryService>,
         execution: Arc<dyn BoardGraphicsExecutionService>,
     ) -> Self {
+        Self::with_services(discovery, execution, Arc::new(IpcBoardValidationService))
+    }
+
+    pub fn with_services(
+        discovery: Arc<dyn DiscoveryService>,
+        execution: Arc<dyn BoardGraphicsExecutionService>,
+        validation: Arc<dyn BoardValidationService>,
+    ) -> Self {
         Self {
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            drc_baselines: Arc::new(Mutex::new(BTreeMap::new())),
             capabilities: vec![
+                Capability {
+                    id: "pcb.drc.validate",
+                    domain: "pcb",
+                    mode: "read",
+                    status: "verified",
+                },
                 Capability {
                     id: "base.get_version",
                     domain: "base",
@@ -387,6 +438,8 @@ impl Server {
             ],
             discovery,
             execution,
+            validation,
+            baseline_sequence: Arc::new(AtomicU64::new(0)),
             tool_router: Self::tool_router(),
         }
     }
@@ -422,7 +475,7 @@ impl Server {
                     "mode": capability.mode,
                     "status": capability.status
                 })).collect::<Vec<_>>(),
-                "advertised_tools": ["kicad_capabilities", "kicad_inspect_project", "kicad_plan_change", "kicad_preview_change", "kicad_commit_change"]
+                "advertised_tools": ["kicad_capabilities", "kicad_inspect_project", "kicad_validate_project", "kicad_plan_change", "kicad_preview_change", "kicad_commit_change"]
             }),
             diagnostics: Vec::new(),
             next_actions: Vec::new(),
@@ -430,6 +483,170 @@ impl Server {
         let value = serde_json::to_value(envelope)
             .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
         Ok(rmcp::model::CallToolResult::structured(value).into())
+    }
+
+    #[tool(
+        name = "kicad_validate_project",
+        description = "Run read-only PCB DRC against the server-observed open board."
+    )]
+    pub async fn kicad_validate_project(
+        &self,
+        Parameters(arguments): Parameters<ValidateProjectRequest>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let request_id = arguments
+            .request_id
+            .unwrap_or_else(|| "req_validate_project".to_owned());
+        let observation = match self
+            .discovery
+            .live_board_observation(&arguments.endpoint, None)
+        {
+            Ok(observation) => observation,
+            Err(error) => {
+                return Ok(self.envelope_sync(
+                    request_id,
+                    None,
+                    json!({
+                        "kind": "observation_failed", "message": error
+                    }),
+                ));
+            }
+        };
+        let board_identity = observation
+            .snapshot
+            .board
+            .document_id
+            .as_ref()
+            .map(ToString::to_string)
+            .ok_or_else(|| ErrorData::internal_error("board identity is unavailable", None))?;
+        let board_path = match std::fs::canonicalize(&observation.board_path) {
+            Ok(path) if path.is_file() => path,
+            _ => {
+                return Ok(self.envelope_sync(
+                    request_id,
+                    None,
+                    json!({ "kind": "board_file_unavailable" }),
+                ));
+            }
+        };
+        let project_dir = match std::fs::canonicalize(&observation.project_dir) {
+            Ok(path) if path.is_dir() => path,
+            _ => {
+                return Ok(self.envelope_sync(
+                    request_id,
+                    None,
+                    json!({ "kind": "project_directory_unavailable" }),
+                ));
+            }
+        };
+        if !board_path.starts_with(&project_dir) {
+            return Ok(self.envelope_sync(
+                request_id,
+                None,
+                json!({ "kind": "board_outside_project" }),
+            ));
+        }
+        let token = observation.instance_token.as_str().to_owned();
+        let version = observation.snapshot.kicad_version.clone();
+        let current_revision = observation
+            .snapshot
+            .revision()
+            .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
+        let baseline = if let Some(id) = arguments.baseline_id.as_deref() {
+            let baseline = self
+                .drc_baselines
+                .lock()
+                .expect("baseline lock")
+                .get(id)
+                .cloned();
+            let baseline = match baseline {
+                Some(baseline) => baseline,
+                None => {
+                    return Ok(self.envelope_sync(
+                        request_id,
+                        None,
+                        json!({ "kind": "baseline_not_found", "baseline_id": id }),
+                    ));
+                }
+            };
+            if baseline.instance_token != token
+                || baseline.board_identity != board_identity
+                || baseline.board_path != board_path
+                || baseline.kicad_version != version
+            {
+                return Ok(self.envelope_sync(
+                    request_id,
+                    None,
+                    json!({ "kind": "baseline_mismatch", "baseline_id": id }),
+                ));
+            }
+            Some(baseline)
+        } else {
+            None
+        };
+        let policy = DrcPolicy {
+            allowed_root: project_dir,
+            timeout: Duration::from_secs(30),
+        };
+        let result = self.validation.validate(&board_path, &policy);
+        let report = match result {
+            CheckResult::Completed(report) => report,
+            CheckResult::Failed(failure) => {
+                return Ok(self.envelope_sync(
+                    request_id,
+                    None,
+                    json!({
+                        "kind": "validation_failed", "failure": failure
+                    }),
+                ));
+            }
+        };
+        if let Some(id) = arguments.baseline_id {
+            let baseline = baseline.expect("baseline precheck guarantees presence");
+            if baseline.report.parser_version != report.parser_version {
+                return Ok(self.envelope_sync(
+                    request_id,
+                    None,
+                    json!({ "kind": "baseline_mismatch", "baseline_id": id }),
+                ));
+            }
+            let delta = compare_drc(&baseline.report, &report);
+            return self.envelope(
+                request_id,
+                Some(current_revision.to_string()),
+                json!({
+                    "baseline_id": id,
+                    "report": report,
+                    "delta": delta,
+                    "captured_revision": baseline.captured_revision.to_string(),
+                    "current_revision": current_revision.to_string()
+                }),
+            );
+        }
+        let sequence = self.baseline_sequence.fetch_add(1, Ordering::Relaxed);
+        let baseline_id = StableId::new(format!("drc-baseline:{sequence}"))
+            .map_err(|error| ErrorData::internal_error(error.to_string(), None))?
+            .to_string();
+        self.drc_baselines.lock().expect("baseline lock").insert(
+            baseline_id.clone(),
+            StoredDrcBaseline {
+                instance_token: token,
+                board_identity,
+                board_path,
+                kicad_version: version,
+                captured_revision: current_revision.clone(),
+                report: report.clone(),
+            },
+        );
+        self.envelope(
+            request_id,
+            Some(current_revision.to_string()),
+            json!({
+                "baseline_id": baseline_id,
+                "report": report,
+                "delta": Value::Null,
+                "captured_revision": current_revision.to_string()
+            }),
+        )
     }
 
     #[tool(
@@ -795,11 +1012,15 @@ impl ServerHandler for Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kicad_checks::{CheckFailure, DrcItem, DrcViolation, Position, ViolationIdentity};
     use kicad_model::{
         Board, BoardGraphicLayer, CapabilityObservation, CapabilityStatus, Coordinate, Diagnostic,
         DocumentSpace, ProjectSnapshot, Schematic, Unit,
     };
     use rmcp::{ClientHandler, ServiceExt, model::CallToolRequestParams};
+    use std::collections::VecDeque;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
 
     #[derive(Clone, Default)]
     struct TestClient;
@@ -851,8 +1072,141 @@ mod tests {
                 snapshot: project_snapshot(self.write_capability),
                 instance_token: kicad_ipc::InstanceToken::new("token").unwrap(),
                 board_filename: "board.kicad_pcb".into(),
+                board_path: "/tmp/board.kicad_pcb".into(),
+                project_dir: "/tmp".into(),
             })
         }
+    }
+
+    #[derive(Clone)]
+    struct ValidationDiscovery {
+        root: PathBuf,
+        board_path: PathBuf,
+        snapshot: ProjectSnapshot,
+        token: String,
+    }
+
+    impl DiscoveryService for ValidationDiscovery {
+        fn discover(&self, endpoint: &str, _: Option<&Path>) -> Result<DiscoverySnapshot, String> {
+            Ok(DiscoverySnapshot {
+                kicad_version: self.snapshot.kicad_version.clone(),
+                endpoint: endpoint.to_owned(),
+                documents: Vec::new(),
+                capabilities: Vec::new(),
+                diagnostics: Vec::new(),
+            })
+        }
+
+        fn live_board_observation(
+            &self,
+            _: &str,
+            _: Option<&Path>,
+        ) -> Result<LiveBoardObservation, String> {
+            Ok(LiveBoardObservation {
+                snapshot: self.snapshot.clone(),
+                instance_token: kicad_ipc::InstanceToken::new(&self.token).unwrap(),
+                board_filename: "board.kicad_pcb".into(),
+                board_path: self.board_path.clone(),
+                project_dir: self.root.clone(),
+            })
+        }
+    }
+
+    #[derive(Clone)]
+    struct FakeValidation {
+        calls: Arc<AtomicUsize>,
+        results: Arc<Mutex<VecDeque<CheckResult>>>,
+    }
+
+    impl BoardValidationService for FakeValidation {
+        fn validate(&self, _: &Path, _: &DrcPolicy) -> CheckResult {
+            self.calls.fetch_add(1, AtomicOrdering::SeqCst);
+            self.results.lock().unwrap().pop_front().unwrap()
+        }
+    }
+
+    static TEMP_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
+
+    struct TempBoard {
+        root: PathBuf,
+    }
+
+    impl TempBoard {
+        fn new() -> Self {
+            let sequence = TEMP_SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed);
+            let root = std::env::temp_dir().join(format!(
+                "auto-kicad-validation-{}-{sequence}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&root).unwrap();
+            std::fs::write(
+                root.join("board.kicad_pcb"),
+                "(kicad_pcb (version 20240108))",
+            )
+            .unwrap();
+            Self { root }
+        }
+    }
+
+    impl Drop for TempBoard {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn report(violations: Vec<DrcViolation>) -> CheckResult {
+        CheckResult::Completed(DrcReport {
+            parser_version: "kicad-drc-v1".into(),
+            schema: "https://schemas.kicad.org/drc.v1.json".into(),
+            kicad_version: "10.0.5".into(),
+            source: "test".into(),
+            ignored_checks: 0,
+            unconnected_items: 0,
+            violations,
+        })
+    }
+
+    fn violation(rule_type: &str, description: &str, uuid: &str) -> DrcViolation {
+        DrcViolation {
+            identity: ViolationIdentity::Uuids {
+                rule_type: rule_type.into(),
+                uuids: vec![uuid.into()],
+            },
+            rule_type: rule_type.into(),
+            severity: "error".into(),
+            description: description.into(),
+            items: vec![DrcItem {
+                uuid: Some(uuid.into()),
+                description: "item".into(),
+                position: Some(Position { x: 1.0, y: 2.0 }),
+            }],
+        }
+    }
+
+    fn validation_server(
+        fixture: &TempBoard,
+        snapshot: ProjectSnapshot,
+        results: Vec<CheckResult>,
+    ) -> (Server, Arc<AtomicUsize>) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let discovery = Arc::new(ValidationDiscovery {
+            root: fixture.root.clone(),
+            board_path: fixture.root.join("board.kicad_pcb"),
+            snapshot,
+            token: "validation-token".into(),
+        });
+        let validation = Arc::new(FakeValidation {
+            calls: calls.clone(),
+            results: Arc::new(Mutex::new(results.into_iter().collect())),
+        });
+        (
+            Server::with_services(
+                discovery,
+                Arc::new(IpcBoardGraphicsExecutionService),
+                validation,
+            ),
+            calls,
+        )
     }
 
     fn project_snapshot(write_capability: bool) -> ProjectSnapshot {
@@ -916,6 +1270,155 @@ mod tests {
             .expect("client should initialize")
     }
 
+    async fn validate(server: &Server, baseline_id: Option<String>, request_id: &str) -> Value {
+        let response = server
+            .kicad_validate_project(Parameters(ValidateProjectRequest {
+                endpoint: "ipc:///tmp/kicad/api.sock".into(),
+                baseline_id,
+                request_id: Some(request_id.into()),
+            }))
+            .await
+            .unwrap();
+        match response {
+            rmcp::model::CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("validate call should complete"),
+        }
+    }
+
+    #[tokio::test]
+    async fn validate_captures_unique_baselines_with_server_owned_revision() {
+        let fixture = TempBoard::new();
+        let snapshot = project_snapshot(false);
+        let expected_revision = snapshot.revision().unwrap().to_string();
+        let (server, calls) = validation_server(
+            &fixture,
+            snapshot,
+            vec![report(Vec::new()), report(Vec::new())],
+        );
+
+        let first = validate(&server, None, "capture-1").await;
+        server.drc_baselines.lock().unwrap().clear();
+        let second = validate(&server, None, "capture-2").await;
+
+        assert_eq!(first["ok"], true);
+        assert_ne!(first["data"]["baseline_id"], second["data"]["baseline_id"]);
+        assert_eq!(first["project_revision"], expected_revision);
+        assert_eq!(first["data"]["captured_revision"], expected_revision);
+        assert_eq!(second["data"]["captured_revision"], expected_revision);
+        assert_eq!(calls.load(AtomicOrdering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn validate_rejects_unknown_and_mismatched_baselines_before_drc() {
+        let fixture = TempBoard::new();
+        let (server, calls) =
+            validation_server(&fixture, project_snapshot(false), vec![report(Vec::new())]);
+        let missing = validate(&server, Some("missing".into()), "missing").await;
+        assert_eq!(missing["ok"], false);
+        assert_eq!(missing["data"]["kind"], "baseline_not_found");
+        assert_eq!(calls.load(AtomicOrdering::SeqCst), 0);
+
+        let captured = validate(&server, None, "capture").await;
+        let baseline_id = captured["data"]["baseline_id"].as_str().unwrap().to_owned();
+        let mismatched_discovery = Arc::new(ValidationDiscovery {
+            root: fixture.root.clone(),
+            board_path: fixture.root.join("board.kicad_pcb"),
+            snapshot: project_snapshot(false),
+            token: "different-token".into(),
+        });
+        let mismatch_server = Server {
+            discovery: mismatched_discovery,
+            ..server.clone()
+        };
+        let mismatch = validate(&mismatch_server, Some(baseline_id), "mismatch").await;
+        assert_eq!(mismatch["ok"], false);
+        assert_eq!(mismatch["data"]["kind"], "baseline_mismatch");
+        assert_eq!(calls.load(AtomicOrdering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn validation_failure_leaves_change_sessions_unchanged() {
+        let fixture = TempBoard::new();
+        let (server, calls) = validation_server(
+            &fixture,
+            project_snapshot(true),
+            vec![CheckResult::Failed(CheckFailure::CommandUnavailable {
+                message: "missing kicad-cli".into(),
+            })],
+        );
+        let planned = server
+            .kicad_plan_change(Parameters(plan_request(
+                project_snapshot(true),
+                "before-validation",
+            )))
+            .await
+            .unwrap();
+        assert!(matches!(
+            planned,
+            rmcp::model::CallToolResponse::Complete(_)
+        ));
+        let before = server.sessions.lock().unwrap().clone();
+
+        let failed = validate(&server, None, "failure").await;
+
+        assert_eq!(failed["ok"], false);
+        assert_eq!(failed["data"]["kind"], "validation_failed");
+        let after = server.sessions.lock().unwrap();
+        assert_eq!(after.len(), before.len());
+        assert_eq!(
+            after.keys().collect::<Vec<_>>(),
+            before.keys().collect::<Vec<_>>()
+        );
+        assert_eq!(calls.load(AtomicOrdering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn validate_delta_reports_unchanged_and_introduced_violations() {
+        let fixture = TempBoard::new();
+        let unchanged = violation("clearance", "existing debt", "same");
+        let introduced = violation("courtyard", "new debt", "new");
+        let (server, calls) = validation_server(
+            &fixture,
+            project_snapshot(false),
+            vec![
+                report(vec![unchanged.clone()]),
+                report(vec![unchanged, introduced]),
+            ],
+        );
+        let captured = validate(&server, None, "capture").await;
+        let baseline_id = captured["data"]["baseline_id"].as_str().unwrap().to_owned();
+
+        let compared = validate(&server, Some(baseline_id), "compare").await;
+
+        assert_eq!(compared["ok"], true);
+        assert_eq!(
+            compared["data"]["delta"]["unchanged"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            compared["data"]["delta"]["introduced"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            compared["data"]["delta"]["resolved"]
+                .as_array()
+                .unwrap()
+                .len(),
+            0
+        );
+        assert_eq!(
+            compared["data"]["captured_revision"],
+            compared["data"]["current_revision"]
+        );
+        assert_eq!(calls.load(AtomicOrdering::SeqCst), 2);
+    }
+
     #[tokio::test]
     async fn sdk_initialize_and_tool_list_expose_verified_read_tools() {
         let client = connected(Server::with_discovery(Arc::new(FakeDiscovery {
@@ -932,6 +1435,7 @@ mod tests {
                 "kicad_inspect_project",
                 "kicad_plan_change",
                 "kicad_preview_change",
+                "kicad_validate_project",
             ]
         );
     }
