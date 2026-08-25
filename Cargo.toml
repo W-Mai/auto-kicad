@@ -2,6 +2,7 @@
 members = [
     "crates/auto-kicad",
     "crates/kicad-adapter",
+    "crates/kicad-checks",
     "crates/kicad-ipc",
     "crates/kicad-engine",
     "crates/kicad-model",
