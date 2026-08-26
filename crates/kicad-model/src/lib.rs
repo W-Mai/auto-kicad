@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt::{Display, Formatter};
 
 use serde::{Deserialize, Serialize};
@@ -98,6 +99,243 @@ pub struct Footprint {
 pub struct Schematic {
     pub nets: Vec<Net>,
     pub symbols: Vec<Symbol>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct SchematicArtifactFile {
+    pub relative_path: String,
+    pub size: u64,
+    pub content_digest: RevisionDigest,
+}
+
+impl SchematicArtifactFile {
+    pub fn new(
+        relative_path: impl Into<String>,
+        size: u64,
+        content_digest: RevisionDigest,
+    ) -> Result<Self, ModelError> {
+        let file = Self {
+            relative_path: relative_path.into(),
+            size,
+            content_digest,
+        };
+        file.validate()?;
+        Ok(file)
+    }
+
+    pub fn validate(&self) -> Result<(), ModelError> {
+        let segments = self.relative_path.split('/').collect::<Vec<_>>();
+        if self.relative_path.is_empty()
+            || self.relative_path.contains('\\')
+            || self.relative_path.starts_with('/')
+            || self.relative_path.contains(':')
+            || segments
+                .iter()
+                .any(|segment| segment.is_empty() || matches!(*segment, "." | ".."))
+        {
+            return Err(ModelError::InvalidSchematicArtifactPath);
+        }
+        Ok(())
+    }
+}
+
+impl<'de> Deserialize<'de> for SchematicArtifactFile {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct RawFile {
+            relative_path: String,
+            size: u64,
+            content_digest: RevisionDigest,
+        }
+
+        let raw = RawFile::deserialize(deserializer)?;
+        Self::new(raw.relative_path, raw.size, raw.content_digest).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct SchematicArtifactRevision {
+    pub digest: RevisionDigest,
+    pub files: Vec<SchematicArtifactFile>,
+    pub kicad_cli_version: String,
+    pub extractor_schema_version: u32,
+    pub editor_lock_present: bool,
+}
+
+impl SchematicArtifactRevision {
+    pub fn new(
+        files: Vec<SchematicArtifactFile>,
+        kicad_cli_version: impl Into<String>,
+        extractor_schema_version: u32,
+        editor_lock_present: bool,
+    ) -> Result<Self, ModelError> {
+        let mut revision = Self {
+            digest: RevisionDigest::new("0".repeat(64))?,
+            files,
+            kicad_cli_version: kicad_cli_version.into(),
+            extractor_schema_version,
+            editor_lock_present,
+        };
+        revision.canonicalize_files()?;
+        revision.digest = revision.calculate_digest()?;
+        Ok(revision)
+    }
+
+    pub fn validate(&self) -> Result<(), ModelError> {
+        let mut canonical = self.clone();
+        canonical.canonicalize_files()?;
+        if canonical.files != self.files {
+            return Err(ModelError::NonCanonicalSchematicArtifacts);
+        }
+        if self.digest != self.calculate_digest()? {
+            return Err(ModelError::SchematicArtifactDigestMismatch);
+        }
+        Ok(())
+    }
+
+    fn canonicalize_files(&mut self) -> Result<(), ModelError> {
+        for file in &self.files {
+            file.validate()?;
+        }
+        self.files
+            .sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+        let unique_paths = self
+            .files
+            .iter()
+            .map(|file| file.relative_path.as_str())
+            .collect::<BTreeSet<_>>();
+        if unique_paths.len() != self.files.len() {
+            return Err(ModelError::DuplicateSchematicArtifactPath);
+        }
+        if self.kicad_cli_version.is_empty() || self.extractor_schema_version == 0 {
+            return Err(ModelError::InvalidSchematicArtifactRevision);
+        }
+        Ok(())
+    }
+
+    fn calculate_digest(&self) -> Result<RevisionDigest, ModelError> {
+        #[derive(Serialize)]
+        struct DigestInput<'a> {
+            files: &'a [SchematicArtifactFile],
+            kicad_cli_version: &'a str,
+            extractor_schema_version: u32,
+        }
+
+        let bytes = serde_json::to_vec(&DigestInput {
+            files: &self.files,
+            kicad_cli_version: &self.kicad_cli_version,
+            extractor_schema_version: self.extractor_schema_version,
+        })
+        .map_err(ModelError::Serialization)?;
+        let mut hasher = Sha256::new();
+        hasher.update(bytes);
+        RevisionDigest::new(hex::encode(hasher.finalize()))
+    }
+}
+
+impl<'de> Deserialize<'de> for SchematicArtifactRevision {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct RawRevision {
+            digest: RevisionDigest,
+            files: Vec<SchematicArtifactFile>,
+            kicad_cli_version: String,
+            extractor_schema_version: u32,
+            editor_lock_present: bool,
+        }
+
+        let raw = RawRevision::deserialize(deserializer)?;
+        let revision = Self::new(
+            raw.files,
+            raw.kicad_cli_version,
+            raw.extractor_schema_version,
+            raw.editor_lock_present,
+        )
+        .map_err(serde::de::Error::custom)?;
+        if revision.digest != raw.digest {
+            return Err(serde::de::Error::custom(
+                ModelError::SchematicArtifactDigestMismatch,
+            ));
+        }
+        Ok(revision)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedSchematicPin {
+    pub pin_id: StableId,
+    pub source_uuid: StableId,
+    pub number: String,
+    pub name: Option<String>,
+    pub electrical_type: Option<String>,
+    pub net: ReferenceResolution,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedSchematicSymbol {
+    pub symbol_id: StableId,
+    pub source_uuid: StableId,
+    pub sheet_instance_path: String,
+    pub reference: String,
+    pub value: String,
+    pub lib_identifier: String,
+    pub footprint_field: Option<String>,
+    pub unit: u32,
+    pub pins: Vec<ObservedSchematicPin>,
+    pub observed_revision: RevisionDigest,
+}
+
+impl ObservedSchematicSymbol {
+    pub fn canonical(&self) -> Self {
+        let mut symbol = self.clone();
+        symbol.pins.sort_by(|left, right| {
+            (&left.number, &left.source_uuid).cmp(&(&right.number, &right.source_uuid))
+        });
+        for pin in &mut symbol.pins {
+            if let ReferenceResolution::Ambiguous { candidates, .. } = &mut pin.net {
+                candidates.sort();
+            }
+        }
+        symbol
+    }
+}
+
+pub fn schematic_symbol_id(
+    project_id: &StableId,
+    sheet_instance_path: &str,
+    source_uuid: &StableId,
+) -> StableId {
+    derived_stable_id(
+        "schematic-symbol-v1",
+        &[
+            project_id.as_str(),
+            sheet_instance_path,
+            source_uuid.as_str(),
+        ],
+    )
+}
+
+pub fn schematic_pin_id(symbol_id: &StableId, source_uuid: &StableId) -> StableId {
+    derived_stable_id(
+        "schematic-pin-v1",
+        &[symbol_id.as_str(), source_uuid.as_str()],
+    )
+}
+
+fn derived_stable_id(domain: &str, parts: &[&str]) -> StableId {
+    let mut hasher = Sha256::new();
+    hasher.update(domain.as_bytes());
+    for part in parts {
+        hasher.update((part.len() as u64).to_be_bytes());
+        hasher.update(part.as_bytes());
+    }
+    StableId(hex::encode(hasher.finalize()))
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -320,6 +558,11 @@ impl Display for RevisionDigest {
 pub enum ModelError {
     EmptyStableId,
     InvalidRevisionDigest,
+    InvalidSchematicArtifactPath,
+    DuplicateSchematicArtifactPath,
+    InvalidSchematicArtifactRevision,
+    NonCanonicalSchematicArtifacts,
+    SchematicArtifactDigestMismatch,
     InvalidBoardGraphic(&'static str),
     Serialization(serde_json::Error),
 }
@@ -330,6 +573,20 @@ impl Display for ModelError {
             Self::EmptyStableId => formatter.write_str("stable id must not be empty"),
             Self::InvalidRevisionDigest => {
                 formatter.write_str("revision digest must be 64 hexadecimal characters")
+            }
+            Self::InvalidSchematicArtifactPath => formatter
+                .write_str("schematic artifact path must be a normalized, project-relative path"),
+            Self::DuplicateSchematicArtifactPath => {
+                formatter.write_str("schematic artifact paths must be unique")
+            }
+            Self::InvalidSchematicArtifactRevision => formatter.write_str(
+                "schematic artifact revision requires a CLI version and nonzero schema version",
+            ),
+            Self::NonCanonicalSchematicArtifacts => {
+                formatter.write_str("schematic artifact files must be canonically ordered")
+            }
+            Self::SchematicArtifactDigestMismatch => {
+                formatter.write_str("schematic artifact revision digest does not match its inputs")
             }
             Self::InvalidBoardGraphic(message) => formatter.write_str(message),
             Self::Serialization(error) => {
@@ -515,5 +772,138 @@ mod tests {
                 "segment endpoints must differ"
             ))
         ));
+    }
+
+    fn artifact(path: &str, digest: char) -> SchematicArtifactFile {
+        SchematicArtifactFile::new(path, 42, revision(digest)).unwrap()
+    }
+
+    fn observed_symbol(sheet_path: &str, footprint_field: Option<&str>) -> ObservedSchematicSymbol {
+        let project_id = id("project");
+        let source_uuid = id("symbol-source");
+        let symbol_id = schematic_symbol_id(&project_id, sheet_path, &source_uuid);
+        let pin_source_uuid = id("pin-source");
+        ObservedSchematicSymbol {
+            symbol_id: symbol_id.clone(),
+            source_uuid,
+            sheet_instance_path: sheet_path.to_owned(),
+            reference: "R1".to_owned(),
+            value: "10k".to_owned(),
+            lib_identifier: "Device:R".to_owned(),
+            footprint_field: footprint_field.map(str::to_owned),
+            unit: 1,
+            pins: vec![ObservedSchematicPin {
+                pin_id: schematic_pin_id(&symbol_id, &pin_source_uuid),
+                source_uuid: pin_source_uuid,
+                number: "1".to_owned(),
+                name: Some("~".to_owned()),
+                electrical_type: Some("passive".to_owned()),
+                net: ReferenceResolution::Unresolved {
+                    query: "unconnected".to_owned(),
+                },
+            }],
+            observed_revision: revision('a'),
+        }
+    }
+
+    #[test]
+    fn old_project_snapshot_deserializes_without_artifact_observation_types() {
+        let old = serde_json::json!({
+            "project_id": "project",
+            "kicad_version": "10.0.5",
+            "capabilities": [],
+            "schematic": {"nets": [], "symbols": []},
+            "board": {"footprints": []}
+        });
+        let snapshot: ProjectSnapshot = serde_json::from_value(old).unwrap();
+        assert!(snapshot.schematic.symbols.is_empty());
+    }
+
+    #[test]
+    fn artifact_revision_is_order_independent_and_lock_is_gating_metadata() {
+        let first = SchematicArtifactRevision::new(
+            vec![
+                artifact("power.kicad_sch", 'b'),
+                artifact("xLock.kicad_sch", 'a'),
+            ],
+            "10.0.5",
+            1,
+            false,
+        )
+        .unwrap();
+        let locked = SchematicArtifactRevision::new(
+            vec![
+                artifact("xLock.kicad_sch", 'a'),
+                artifact("power.kicad_sch", 'b'),
+            ],
+            "10.0.5",
+            1,
+            true,
+        )
+        .unwrap();
+        assert_eq!(first.files, locked.files);
+        assert_eq!(first.digest, locked.digest);
+        assert_ne!(first.editor_lock_present, locked.editor_lock_present);
+        assert!(first.validate().is_ok());
+        assert!(locked.validate().is_ok());
+    }
+
+    #[test]
+    fn symbol_and_pin_canonicalization_is_order_independent() {
+        let mut first = observed_symbol("/root/sheet", None);
+        let mut second_pin = first.pins[0].clone();
+        second_pin.source_uuid = id("pin-source-2");
+        second_pin.pin_id = schematic_pin_id(&first.symbol_id, &second_pin.source_uuid);
+        second_pin.number = "2".to_owned();
+        first.pins.insert(0, second_pin);
+        let mut second = first.clone();
+        second.pins.reverse();
+        assert_eq!(first.canonical(), second.canonical());
+    }
+
+    #[test]
+    fn symbol_identity_is_separated_by_sheet_instance_path() {
+        let first = observed_symbol("/root/sheet-a", None);
+        let second = observed_symbol("/root/sheet-b", None);
+        assert_eq!(first.source_uuid, second.source_uuid);
+        assert_ne!(first.symbol_id, second.symbol_id);
+        assert_ne!(first.pins[0].pin_id, second.pins[0].pin_id);
+    }
+
+    #[test]
+    fn footprint_field_preserves_absent_and_explicit_empty_states() {
+        let absent = observed_symbol("/root", None);
+        let empty = observed_symbol("/root", Some(""));
+        assert_eq!(absent.footprint_field, None);
+        assert_eq!(empty.footprint_field.as_deref(), Some(""));
+        assert_ne!(
+            serde_json::to_value(absent).unwrap(),
+            serde_json::to_value(empty).unwrap()
+        );
+    }
+
+    #[test]
+    fn artifact_paths_and_serialized_digests_are_validated() {
+        for path in [
+            "",
+            "../x.kicad_sch",
+            "./x.kicad_sch",
+            "/x.kicad_sch",
+            "a\\b.kicad_sch",
+        ] {
+            assert!(SchematicArtifactFile::new(path, 1, revision('a')).is_err());
+        }
+        assert!(SchematicArtifactFile::new("sheets/power.kicad_sch", 1, revision('a')).is_ok());
+
+        let valid = SchematicArtifactRevision::new(
+            vec![artifact("xLock.kicad_sch", 'a')],
+            "10.0.5",
+            1,
+            false,
+        )
+        .unwrap();
+        let mut forged = serde_json::to_value(valid).unwrap();
+        forged["digest"] = serde_json::Value::String("f".repeat(64));
+        assert!(serde_json::from_value::<SchematicArtifactRevision>(forged).is_err());
     }
 }

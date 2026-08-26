@@ -7,6 +7,7 @@ edition = "2024"
 kicad-engine = { path = "../kicad-engine" }
 kicad-ipc = { path = "../kicad-ipc" }
 kicad-model = { path = "../kicad-model" }
+kicad-schematic = { path = "../kicad-schematic" }
 hex = "0.4"
 serde_json = "1"
 sha2 = "0.10"

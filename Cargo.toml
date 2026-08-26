@@ -6,6 +6,7 @@ members = [
     "crates/kicad-ipc",
     "crates/kicad-engine",
     "crates/kicad-model",
+    "crates/kicad-schematic",
     "crates/runtime",
 ]
 resolver = "3"

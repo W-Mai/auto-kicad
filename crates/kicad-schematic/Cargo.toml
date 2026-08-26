@@ -1,0 +1,15 @@
+[package]
+name = "kicad-schematic"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hex = "0.4"
+kicad-model = { path = "../kicad-model" }
+kiutils_sexpr = "=0.1.1"
+libc = "0.2"
+quick-xml = "0.38"
+sha2 = "0.10"
+tempfile = "3"
+thiserror = "2"
+wait-timeout = "0.2"

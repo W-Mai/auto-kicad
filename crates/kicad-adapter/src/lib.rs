@@ -7,8 +7,10 @@ use kicad_ipc::{
 use kicad_model::{
     Board, BoardGraphicLayer, BoardGraphicSegment, CapabilityObservation, CapabilityStatus,
     Coordinate, Diagnostic, DiscoveredDocument, DiscoveredDocumentKind, DiscoverySnapshot,
-    DocumentSpace, ModelError, ProjectSnapshot, Schematic, StableId, Unit,
+    DocumentSpace, ModelError, ObservedSchematicSymbol, ProjectSnapshot, RevisionDigest, Schematic,
+    StableId, Unit,
 };
+use kicad_schematic::{NetlistDocument, ParsedSchematicProject, join_netlist_connectivity};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::fs;
@@ -284,6 +286,69 @@ fn push_optional(output: &mut Vec<u8>, value: Option<&str>) {
         }
         None => output.push(0),
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SchematicObservation {
+    pub project_id: StableId,
+    pub revision: RevisionDigest,
+    pub symbols: Vec<ObservedSchematicSymbol>,
+    pub capabilities: Vec<CapabilityObservation>,
+    pub diagnostics: Vec<Diagnostic>,
+    pub baseline_eligible: bool,
+}
+
+#[derive(Debug)]
+pub enum SchematicObservationError {
+    Join(kicad_schematic::ConnectivityJoinError),
+}
+
+impl std::fmt::Display for SchematicObservationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Join(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for SchematicObservationError {}
+
+pub fn schematic_observation(
+    project: &ParsedSchematicProject,
+    netlist: &NetlistDocument,
+    project_id: StableId,
+) -> Result<SchematicObservation, SchematicObservationError> {
+    let symbols = join_netlist_connectivity(project, netlist, &project_id)
+        .map_err(SchematicObservationError::Join)?
+        .into_iter()
+        .map(|component| component.symbol.canonical())
+        .collect::<Vec<_>>();
+    let locked = project.editor_lock_present || project.revision.editor_lock_present;
+    let mut diagnostics = Vec::new();
+    if locked {
+        diagnostics.push(Diagnostic {
+            code: "schematic_editor_lock_present".to_owned(),
+            message: "saved schematic observation is stale and cannot be a commit baseline"
+                .to_owned(),
+        });
+    }
+    let status = if locked {
+        CapabilityStatus::Unknown
+    } else {
+        CapabilityStatus::Verified
+    };
+    Ok(SchematicObservation {
+        project_id,
+        revision: project.revision.digest.clone(),
+        symbols,
+        capabilities: vec![CapabilityObservation {
+            id: "schematic.saved_artifact.read".to_owned(),
+            status,
+            detail: locked.then_some("editor lock present".to_owned()),
+        }],
+        diagnostics,
+        baseline_eligible: !locked,
+    })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -643,7 +708,14 @@ impl BoardGraphicsExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kicad_model::{BoardGraphicSegment, Coordinate, DocumentSpace, Unit};
+    use kicad_model::{
+        BoardGraphicSegment, Coordinate, DocumentSpace, RevisionDigest, SchematicArtifactFile,
+        SchematicArtifactRevision, Unit,
+    };
+    use kicad_schematic::{
+        InstancePath, NetlistComponent, NetlistNet, NetlistNode, ParsedSchematic, Position,
+        RawSymbol, RawSymbolPin,
+    };
 
     fn version() -> VersionInfo {
         VersionInfo {
@@ -683,6 +755,135 @@ mod tests {
                 board_filename: "xLock.kicad_pcb".to_owned(),
             },
         }
+    }
+
+    fn schematic_fixture(locked: bool) -> (ParsedSchematicProject, NetlistDocument) {
+        let artifact = SchematicArtifactFile::new(
+            "root.kicad_sch",
+            1,
+            RevisionDigest::new("a".repeat(64)).unwrap(),
+        )
+        .unwrap();
+        let revision =
+            SchematicArtifactRevision::new(vec![artifact.clone()], "10.0.4", 1, locked).unwrap();
+        let symbol = RawSymbol {
+            source_uuid: "symbol-uuid".to_owned(),
+            lib_id: "Device:R".to_owned(),
+            position: Position {
+                x: 1.0,
+                y: 2.0,
+                orientation_degrees: Some(0.0),
+            },
+            unit: 1,
+            body_style: None,
+            reference: "R1".to_owned(),
+            value: "10k".to_owned(),
+            footprint: Some("Resistor_SMD:R_0603".to_owned()),
+            on_board: Some(true),
+            in_bom: Some(true),
+            dnp: Some(false),
+            pins: vec![RawSymbolPin {
+                number: "1".to_owned(),
+                source_uuid: "pin-uuid".to_owned(),
+            }],
+            instance_paths: vec![InstancePath {
+                project: "demo".to_owned(),
+                path: "/file-uuid/root/symbol-uuid".to_owned(),
+                reference: Some("R1".to_owned()),
+                unit: Some(1),
+                page: Some("1".to_owned()),
+            }],
+        };
+        let parsed_file = ParsedSchematic {
+            format_version: "20250114".to_owned(),
+            generator: "kicad".to_owned(),
+            generator_version: Some("10.0.4".to_owned()),
+            file_uuid: "file-uuid".to_owned(),
+            sheets: Vec::new(),
+            symbols: vec![symbol],
+            diagnostics: Vec::new(),
+            artifact,
+        };
+        let project = ParsedSchematicProject {
+            root_relative_path: "root.kicad_sch".to_owned(),
+            files: vec![parsed_file],
+            revision,
+            editor_lock_present: locked,
+        };
+        let netlist = NetlistDocument {
+            export_version: "D".to_owned(),
+            sheets: Vec::new(),
+            components: vec![NetlistComponent {
+                reference: "R1".to_owned(),
+                value: "10k".to_owned(),
+                footprint: Some("Resistor_SMD:R_0603".to_owned()),
+                symbol_uuid: Some("symbol-uuid".to_owned()),
+                sheet_path: "/root".to_owned(),
+                sheet_uuid_path: "/root/symbol-uuid".to_owned(),
+                library: "Device".to_owned(),
+                library_part: "R".to_owned(),
+            }],
+            nets: vec![NetlistNet {
+                code: "1".to_owned(),
+                name: "GND".to_owned(),
+                class: None,
+                nodes: vec![NetlistNode {
+                    reference: "R1".to_owned(),
+                    pin: "1".to_owned(),
+                    pin_function: "passive".to_owned(),
+                    pin_type: "passive".to_owned(),
+                }],
+            }],
+        };
+        (project, netlist)
+    }
+
+    #[test]
+    fn schematic_observation_maps_connectivity_and_is_deterministic() {
+        let (project, netlist) = schematic_fixture(false);
+        let first =
+            schematic_observation(&project, &netlist, StableId::new("project").unwrap()).unwrap();
+        let second =
+            schematic_observation(&project, &netlist, StableId::new("project").unwrap()).unwrap();
+        assert_eq!(first, second);
+        assert!(first.baseline_eligible);
+        assert_eq!(first.capabilities[0].status, CapabilityStatus::Verified);
+        assert!(matches!(
+            first.symbols[0].pins[0].net,
+            kicad_model::ReferenceResolution::Resolved(_)
+        ));
+        assert_eq!(
+            first.symbols[0].footprint_field.as_deref(),
+            Some("Resistor_SMD:R_0603")
+        );
+    }
+
+    #[test]
+    fn schematic_observation_lock_is_not_a_verified_baseline() {
+        let (project, netlist) = schematic_fixture(true);
+        let observation =
+            schematic_observation(&project, &netlist, StableId::new("project").unwrap()).unwrap();
+        assert!(!observation.baseline_eligible);
+        assert_eq!(
+            observation.capabilities[0].status,
+            CapabilityStatus::Unknown
+        );
+        assert_eq!(
+            observation.diagnostics[0].code,
+            "schematic_editor_lock_present"
+        );
+    }
+
+    #[test]
+    fn schematic_observation_propagates_join_errors() {
+        let (project, mut netlist) = schematic_fixture(false);
+        netlist.nets[0].nodes[0].reference = "X1".to_owned();
+        assert!(matches!(
+            schematic_observation(&project, &netlist, StableId::new("project").unwrap()),
+            Err(SchematicObservationError::Join(
+                kicad_schematic::ConnectivityJoinError::UnknownNode { .. }
+            ))
+        ));
     }
 
     fn observed_graphic(id: &str, x: i64) -> ObservedBoardGraphicSegment {
