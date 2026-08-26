@@ -93,6 +93,46 @@ pub struct ObservedBoardGraphicSegment {
     pub segment: BoardGraphicSegment,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PcbItemKind {
+    Footprint,
+    Pad,
+    Trace,
+    Via,
+    Zone,
+}
+
+impl PcbItemKind {
+    pub fn all() -> [Self; 5] {
+        [
+            Self::Footprint,
+            Self::Pad,
+            Self::Trace,
+            Self::Via,
+            Self::Zone,
+        ]
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Footprint => "footprint",
+            Self::Pad => "pad",
+            Self::Trace => "trace",
+            Self::Via => "via",
+            Self::Zone => "zone",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PcbItemDiagnostic {
+    pub requested_kind: PcbItemKind,
+    pub type_url: String,
+    pub byte_length: usize,
+    pub decoded_kind: String,
+    pub stable_id: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommitId(String);
 
@@ -180,6 +220,7 @@ pub enum IpcError {
     },
     InvalidBoardGraphic(&'static str),
     InvalidObservedBoardGraphic(&'static str),
+    UnknownPcbItemType(String),
     Status(ApiStatusCode, String),
     Transport(nng::Error),
 }
@@ -208,6 +249,7 @@ impl IpcError {
             Self::CreateItemFailed { .. } => "create_item_failed",
             Self::InvalidBoardGraphic(_) => "invalid_board_graphic",
             Self::InvalidObservedBoardGraphic(_) => "invalid_observed_board_graphic",
+            Self::UnknownPcbItemType(_) => "unknown_pcb_item_type",
             Self::Status(status, _) => match status {
                 ApiStatusCode::AS_TIMEOUT => "connection_unavailable",
                 ApiStatusCode::AS_NOT_READY => "kicad_not_ready",
@@ -254,6 +296,9 @@ impl Display for IpcError {
             }
             Self::InvalidObservedBoardGraphic(message) => {
                 write!(formatter, "{}: {message}", self.code())
+            }
+            Self::UnknownPcbItemType(type_url) => {
+                write!(formatter, "{}: {type_url}", self.code())
             }
             Self::Transport(error) => write!(formatter, "{}: {error}", self.code()),
             _ => formatter.write_str(self.code()),
@@ -473,6 +518,49 @@ impl<T: KiCadTransport> KiCadClient<T> {
             .collect())
     }
 
+    pub fn get_pcb_item_diagnostics(
+        &mut self,
+        board_filename: &str,
+        kinds: &[PcbItemKind],
+    ) -> Result<Vec<PcbItemDiagnostic>, IpcError> {
+        if kinds.is_empty() {
+            return Ok(Vec::new());
+        }
+        let types = kinds
+            .iter()
+            .map(|kind| {
+                protobuf::EnumOrUnknown::new(match kind {
+                    PcbItemKind::Footprint => enums::KiCadObjectType::KOT_PCB_FOOTPRINT,
+                    PcbItemKind::Pad => enums::KiCadObjectType::KOT_PCB_PAD,
+                    PcbItemKind::Trace => enums::KiCadObjectType::KOT_PCB_TRACE,
+                    PcbItemKind::Via => enums::KiCadObjectType::KOT_PCB_VIA,
+                    PcbItemKind::Zone => enums::KiCadObjectType::KOT_PCB_ZONE,
+                })
+            })
+            .collect();
+        let command = editor_commands::GetItems {
+            header: MessageField::some(board_item_header(board_filename)),
+            types,
+            ..editor_commands::GetItems::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            GET_ITEMS_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let response = decode_any::<editor_commands::GetItemsResponse>(
+            &response,
+            GET_ITEMS_RESPONSE_TYPE_URL,
+        )?;
+        let diagnostics = pcb_item_diagnostics(&response, kinds)?;
+        self.token = Some(token);
+        Ok(diagnostics)
+    }
+
     pub fn get_board_graphics(
         &mut self,
         board_filename: &str,
@@ -623,6 +711,79 @@ fn validate_create_items_response(
         }
     }
     Ok(())
+}
+
+fn pcb_item_diagnostics(
+    response: &editor_commands::GetItemsResponse,
+    requested_kinds: &[PcbItemKind],
+) -> Result<Vec<PcbItemDiagnostic>, IpcError> {
+    if response.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
+        return Err(IpcError::Status(
+            ApiStatusCode::AS_BAD_REQUEST,
+            format!(
+                "get items status: {:?}",
+                response.status.enum_value_or_default()
+            ),
+        ));
+    }
+
+    response
+        .items
+        .iter()
+        .map(|item| {
+            let (requested_kind, decoded_kind, stable_id) = match item.type_url.as_str() {
+                "type.googleapis.com/kiapi.board.types.FootprintInstance" => {
+                    let value = board_types::FootprintInstance::parse_from_bytes(&item.value)
+                        .map_err(|_| IpcError::MalformedEnvelope)?;
+                    (
+                        PcbItemKind::Footprint,
+                        "FootprintInstance",
+                        kiid_value(value.id.as_ref()),
+                    )
+                }
+                "type.googleapis.com/kiapi.board.types.Pad" => {
+                    let value = board_types::Pad::parse_from_bytes(&item.value)
+                        .map_err(|_| IpcError::MalformedEnvelope)?;
+                    (PcbItemKind::Pad, "Pad", kiid_value(value.id.as_ref()))
+                }
+                "type.googleapis.com/kiapi.board.types.Track" => {
+                    let value = board_types::Track::parse_from_bytes(&item.value)
+                        .map_err(|_| IpcError::MalformedEnvelope)?;
+                    (PcbItemKind::Trace, "Track", kiid_value(value.id.as_ref()))
+                }
+                "type.googleapis.com/kiapi.board.types.Arc" => {
+                    let value = board_types::Arc::parse_from_bytes(&item.value)
+                        .map_err(|_| IpcError::MalformedEnvelope)?;
+                    (PcbItemKind::Trace, "Arc", kiid_value(value.id.as_ref()))
+                }
+                "type.googleapis.com/kiapi.board.types.Via" => {
+                    let value = board_types::Via::parse_from_bytes(&item.value)
+                        .map_err(|_| IpcError::MalformedEnvelope)?;
+                    (PcbItemKind::Via, "Via", kiid_value(value.id.as_ref()))
+                }
+                "type.googleapis.com/kiapi.board.types.Zone" => {
+                    let value = board_types::Zone::parse_from_bytes(&item.value)
+                        .map_err(|_| IpcError::MalformedEnvelope)?;
+                    (PcbItemKind::Zone, "Zone", kiid_value(value.id.as_ref()))
+                }
+                _ => return Err(IpcError::UnknownPcbItemType(item.type_url.clone())),
+            };
+            if !requested_kinds.contains(&requested_kind) {
+                return Err(IpcError::UnknownPcbItemType(item.type_url.clone()));
+            }
+            Ok(PcbItemDiagnostic {
+                requested_kind,
+                type_url: item.type_url.clone(),
+                byte_length: item.value.len(),
+                decoded_kind: decoded_kind.to_owned(),
+                stable_id,
+            })
+        })
+        .collect()
+}
+
+fn kiid_value(id: Option<&base_types::KIID>) -> Option<String> {
+    id.map(|id| id.value.clone()).filter(|id| !id.is_empty())
 }
 
 fn board_graphics_from_response(
@@ -1375,6 +1536,150 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "invalid_board_graphic: segment endpoints must differ"
+        );
+    }
+
+    fn pcb_item_any(type_url: &str, value: Vec<u8>) -> Any {
+        Any {
+            type_url: type_url.to_owned(),
+            value,
+            ..Any::default()
+        }
+    }
+
+    #[test]
+    fn pcb_item_probe_encodes_all_fixed_types_and_decodes_each_payload() {
+        let items = vec![
+            pcb_item_any(
+                "type.googleapis.com/kiapi.board.types.FootprintInstance",
+                board_types::FootprintInstance::default()
+                    .write_to_bytes()
+                    .unwrap(),
+            ),
+            pcb_item_any(
+                "type.googleapis.com/kiapi.board.types.Pad",
+                board_types::Pad::default().write_to_bytes().unwrap(),
+            ),
+            pcb_item_any(
+                "type.googleapis.com/kiapi.board.types.Track",
+                board_types::Track::default().write_to_bytes().unwrap(),
+            ),
+            pcb_item_any(
+                "type.googleapis.com/kiapi.board.types.Via",
+                board_types::Via::default().write_to_bytes().unwrap(),
+            ),
+            pcb_item_any(
+                "type.googleapis.com/kiapi.board.types.Zone",
+                board_types::Zone::default().write_to_bytes().unwrap(),
+            ),
+        ];
+        let mut client = graphics_client(get_items_response(
+            "next-token",
+            base_types::ItemRequestStatus::IRS_OK,
+            items,
+        ));
+        let diagnostics = client
+            .get_pcb_item_diagnostics("main.kicad_pcb", &PcbItemKind::all())
+            .unwrap();
+        assert_eq!(diagnostics.len(), 5);
+        assert_eq!(diagnostics[0].decoded_kind, "FootprintInstance");
+        assert_eq!(diagnostics[1].decoded_kind, "Pad");
+        assert_eq!(diagnostics[2].decoded_kind, "Track");
+        assert_eq!(diagnostics[3].decoded_kind, "Via");
+        assert_eq!(diagnostics[4].decoded_kind, "Zone");
+        assert_eq!(client.token.as_ref().unwrap().as_str(), "next-token");
+
+        let command = editor_commands::GetItems::parse_from_bytes(
+            &client.transport.requests[0].message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        assert_eq!(command.types.len(), 5);
+        assert_eq!(
+            command
+                .types
+                .iter()
+                .map(|kind| kind.enum_value_or_default())
+                .collect::<Vec<_>>(),
+            vec![
+                enums::KiCadObjectType::KOT_PCB_FOOTPRINT,
+                enums::KiCadObjectType::KOT_PCB_PAD,
+                enums::KiCadObjectType::KOT_PCB_TRACE,
+                enums::KiCadObjectType::KOT_PCB_VIA,
+                enums::KiCadObjectType::KOT_PCB_ZONE,
+            ]
+        );
+    }
+
+    #[test]
+    fn pcb_item_probe_empty_kinds_do_not_send_request() {
+        let config = ClientConfig::new("ipc:///tmp/kicad/api.sock", "test-client").unwrap();
+        let fake = FakeTransport {
+            responses: Vec::new(),
+            requests: Vec::new(),
+        };
+        let mut client = KiCadClient::new(fake, config);
+        assert!(
+            client
+                .get_pcb_item_diagnostics("main.kicad_pcb", &[])
+                .unwrap()
+                .is_empty()
+        );
+        assert!(client.transport.requests.is_empty());
+    }
+
+    #[test]
+    fn pcb_item_probe_accepts_arc_as_trace() {
+        let mut client = graphics_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![pcb_item_any(
+                "type.googleapis.com/kiapi.board.types.Arc",
+                board_types::Arc::default().write_to_bytes().unwrap(),
+            )],
+        ));
+        let diagnostics = client
+            .get_pcb_item_diagnostics("main.kicad_pcb", &[PcbItemKind::Trace])
+            .unwrap();
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].requested_kind, PcbItemKind::Trace);
+        assert_eq!(diagnostics[0].decoded_kind, "Arc");
+    }
+
+    #[test]
+    fn pcb_item_probe_rejects_non_ok_response_status() {
+        let mut response =
+            get_items_response("token", base_types::ItemRequestStatus::IRS_OK, Vec::new());
+        response.status.as_mut().unwrap().status =
+            protobuf::EnumOrUnknown::new(ApiStatusCode::AS_BUSY);
+        let mut client = graphics_client(response);
+        let error = client
+            .get_pcb_item_diagnostics("main.kicad_pcb", &[PcbItemKind::Pad])
+            .unwrap_err();
+        assert_eq!(error.code(), "kicad_busy");
+    }
+
+    #[test]
+    fn pcb_item_probe_rejects_unknown_payload_type_url() {
+        let mut client = graphics_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![pcb_item_any(
+                "type.googleapis.com/kiapi.board.types.Unknown",
+                Vec::new(),
+            )],
+        ));
+        let error = client
+            .get_pcb_item_diagnostics("main.kicad_pcb", &[PcbItemKind::Pad])
+            .unwrap_err();
+        assert_eq!(
+            error,
+            IpcError::UnknownPcbItemType(
+                "type.googleapis.com/kiapi.board.types.Unknown".to_owned()
+            )
+        );
+        assert_eq!(
+            error.to_string(),
+            "unknown_pcb_item_type: type.googleapis.com/kiapi.board.types.Unknown"
         );
     }
 
