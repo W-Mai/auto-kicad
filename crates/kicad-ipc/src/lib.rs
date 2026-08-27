@@ -133,6 +133,39 @@ pub struct PcbItemDiagnostic {
     pub stable_id: Option<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum FootprintSide {
+    Front,
+    Back,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservedLockState {
+    Unknown,
+    Unlocked,
+    Locked,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObservedFootprintLibraryIdentifier {
+    pub nickname: String,
+    pub entry_name: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObservedFootprintInstance {
+    pub source_uuid: String,
+    pub position_x_nm: i64,
+    pub position_y_nm: i64,
+    pub orientation_mdeg: i64,
+    pub side: FootprintSide,
+    pub lock_state: ObservedLockState,
+    pub library_identifier: ObservedFootprintLibraryIdentifier,
+    pub reference: String,
+    pub value: String,
+    pub symbol_sheet_path: Vec<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommitId(String);
 
@@ -220,6 +253,7 @@ pub enum IpcError {
     },
     InvalidBoardGraphic(&'static str),
     InvalidObservedBoardGraphic(&'static str),
+    InvalidObservedFootprint(&'static str),
     UnknownPcbItemType(String),
     Status(ApiStatusCode, String),
     Transport(nng::Error),
@@ -249,6 +283,7 @@ impl IpcError {
             Self::CreateItemFailed { .. } => "create_item_failed",
             Self::InvalidBoardGraphic(_) => "invalid_board_graphic",
             Self::InvalidObservedBoardGraphic(_) => "invalid_observed_board_graphic",
+            Self::InvalidObservedFootprint(_) => "invalid_observed_footprint",
             Self::UnknownPcbItemType(_) => "unknown_pcb_item_type",
             Self::Status(status, _) => match status {
                 ApiStatusCode::AS_TIMEOUT => "connection_unavailable",
@@ -295,6 +330,9 @@ impl Display for IpcError {
                 write!(formatter, "{}: {message}", self.code())
             }
             Self::InvalidObservedBoardGraphic(message) => {
+                write!(formatter, "{}: {message}", self.code())
+            }
+            Self::InvalidObservedFootprint(message) => {
                 write!(formatter, "{}: {message}", self.code())
             }
             Self::UnknownPcbItemType(type_url) => {
@@ -561,6 +599,35 @@ impl<T: KiCadTransport> KiCadClient<T> {
         Ok(diagnostics)
     }
 
+    pub fn get_footprint_instances(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<Vec<ObservedFootprintInstance>, IpcError> {
+        let command = editor_commands::GetItems {
+            header: MessageField::some(board_item_header(board_filename)),
+            types: vec![protobuf::EnumOrUnknown::new(
+                enums::KiCadObjectType::KOT_PCB_FOOTPRINT,
+            )],
+            ..editor_commands::GetItems::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            GET_ITEMS_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let response = decode_any::<editor_commands::GetItemsResponse>(
+            &response,
+            GET_ITEMS_RESPONSE_TYPE_URL,
+        )?;
+        let footprints = footprint_instances_from_response(&response)?;
+        self.token = Some(token);
+        Ok(footprints)
+    }
+
     pub fn get_board_graphics(
         &mut self,
         board_filename: &str,
@@ -784,6 +851,151 @@ fn pcb_item_diagnostics(
 
 fn kiid_value(id: Option<&base_types::KIID>) -> Option<String> {
     id.map(|id| id.value.clone()).filter(|id| !id.is_empty())
+}
+
+fn footprint_instances_from_response(
+    response: &editor_commands::GetItemsResponse,
+) -> Result<Vec<ObservedFootprintInstance>, IpcError> {
+    if response.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
+        return Err(IpcError::Status(
+            ApiStatusCode::AS_BAD_REQUEST,
+            format!(
+                "get items status: {:?}",
+                response.status.enum_value_or_default()
+            ),
+        ));
+    }
+    let mut footprints = response
+        .items
+        .iter()
+        .map(footprint_instance_from_any)
+        .collect::<Result<Vec<_>, _>>()?;
+    footprints.sort_by(|left, right| left.source_uuid.cmp(&right.source_uuid));
+    if footprints
+        .windows(2)
+        .any(|pair| pair[0].source_uuid == pair[1].source_uuid)
+    {
+        return Err(IpcError::InvalidObservedFootprint(
+            "footprint identities must be unique",
+        ));
+    }
+    Ok(footprints)
+}
+
+fn footprint_instance_from_any(item: &Any) -> Result<ObservedFootprintInstance, IpcError> {
+    if item.type_url != "type.googleapis.com/kiapi.board.types.FootprintInstance" {
+        return Err(IpcError::UnexpectedMessageType {
+            expected: "type.googleapis.com/kiapi.board.types.FootprintInstance",
+            actual: item.type_url.clone(),
+        });
+    }
+    let footprint = board_types::FootprintInstance::parse_from_bytes(&item.value)
+        .map_err(|_| IpcError::MalformedEnvelope)?;
+    let source_uuid = footprint
+        .id
+        .as_ref()
+        .map(|id| id.value.clone())
+        .filter(|id| !id.is_empty())
+        .ok_or(IpcError::InvalidObservedFootprint(
+            "footprint identity is missing",
+        ))?;
+    let position = footprint
+        .position
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedFootprint(
+            "footprint position is missing",
+        ))?;
+    let orientation = footprint
+        .orientation
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedFootprint(
+            "footprint orientation is missing",
+        ))?;
+    let orientation_mdeg = (orientation.value_degrees * 1000.0).round();
+    if !orientation_mdeg.is_finite()
+        || !(-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&orientation_mdeg)
+    {
+        return Err(IpcError::InvalidObservedFootprint(
+            "footprint orientation is invalid",
+        ));
+    }
+    let side = match footprint.layer.enum_value() {
+        Ok(board_types::BoardLayer::BL_F_Cu) => FootprintSide::Front,
+        Ok(board_types::BoardLayer::BL_B_Cu) => FootprintSide::Back,
+        _ => {
+            return Err(IpcError::InvalidObservedFootprint(
+                "footprint layer is not front or back copper",
+            ));
+        }
+    };
+    let lock_state = match footprint.locked.enum_value() {
+        Ok(base_types::LockedState::LS_UNLOCKED) => ObservedLockState::Unlocked,
+        Ok(base_types::LockedState::LS_LOCKED) => ObservedLockState::Locked,
+        _ => ObservedLockState::Unknown,
+    };
+    let definition = footprint
+        .definition
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedFootprint(
+            "footprint definition is missing",
+        ))?;
+    let library = definition
+        .id
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedFootprint(
+            "footprint library identity is missing",
+        ))?;
+    if library.entry_name.is_empty() {
+        return Err(IpcError::InvalidObservedFootprint(
+            "footprint library entry is missing",
+        ));
+    }
+    let reference = field_text(footprint.reference_field.as_ref())?;
+    let value = field_text(footprint.value_field.as_ref())?;
+    let symbol_sheet_path = footprint
+        .symbol_path
+        .as_ref()
+        .map(|path| {
+            path.path
+                .iter()
+                .map(|id| {
+                    if id.value.is_empty() {
+                        Err(IpcError::InvalidObservedFootprint(
+                            "symbol sheet path contains an empty identity",
+                        ))
+                    } else {
+                        Ok(id.value.clone())
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    Ok(ObservedFootprintInstance {
+        source_uuid,
+        position_x_nm: position.x_nm,
+        position_y_nm: position.y_nm,
+        orientation_mdeg: orientation_mdeg as i64,
+        side,
+        lock_state,
+        library_identifier: ObservedFootprintLibraryIdentifier {
+            nickname: library.library_nickname.clone(),
+            entry_name: library.entry_name.clone(),
+        },
+        reference,
+        value,
+        symbol_sheet_path,
+    })
+}
+
+fn field_text(field: Option<&board_types::Field>) -> Result<String, IpcError> {
+    field
+        .and_then(|field| field.text.as_ref())
+        .and_then(|text| text.text.as_ref())
+        .map(|text| text.text.clone())
+        .ok_or(IpcError::InvalidObservedFootprint(
+            "footprint field text is missing",
+        ))
 }
 
 fn board_graphics_from_response(
@@ -1249,6 +1461,79 @@ mod tests {
         }
     }
 
+    fn field(value: &str) -> board_types::Field {
+        board_types::Field {
+            text: MessageField::some(board_types::BoardText {
+                text: MessageField::some(base_types::Text {
+                    text: value.to_owned(),
+                    ..base_types::Text::default()
+                }),
+                ..board_types::BoardText::default()
+            }),
+            ..board_types::Field::default()
+        }
+    }
+
+    fn footprint_item(id: &str) -> Any {
+        let footprint = board_types::FootprintInstance {
+            id: MessageField::some(base_types::KIID {
+                value: id.to_owned(),
+                ..base_types::KIID::default()
+            }),
+            position: MessageField::some(base_types::Vector2 {
+                x_nm: 10,
+                y_nm: -20,
+                ..base_types::Vector2::default()
+            }),
+            orientation: MessageField::some(base_types::Angle {
+                value_degrees: -1.2346,
+                ..base_types::Angle::default()
+            }),
+            layer: protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Cu),
+            locked: protobuf::EnumOrUnknown::new(base_types::LockedState::LS_LOCKED),
+            definition: MessageField::some(board_types::Footprint {
+                id: MessageField::some(base_types::LibraryIdentifier {
+                    library_nickname: "Resistor_SMD".to_owned(),
+                    entry_name: "R_0603".to_owned(),
+                    ..base_types::LibraryIdentifier::default()
+                }),
+                ..board_types::Footprint::default()
+            }),
+            reference_field: MessageField::some(field("R1")),
+            value_field: MessageField::some(field("10k")),
+            symbol_path: MessageField::some(base_types::SheetPath {
+                path: vec![
+                    base_types::KIID {
+                        value: "root".to_owned(),
+                        ..base_types::KIID::default()
+                    },
+                    base_types::KIID {
+                        value: "child".to_owned(),
+                        ..base_types::KIID::default()
+                    },
+                ],
+                ..base_types::SheetPath::default()
+            }),
+            ..board_types::FootprintInstance::default()
+        };
+        Any {
+            type_url: "type.googleapis.com/kiapi.board.types.FootprintInstance".to_owned(),
+            value: footprint.write_to_bytes().unwrap(),
+            ..Any::default()
+        }
+    }
+
+    fn footprint_client(response: ApiResponse) -> KiCadClient<FakeTransport> {
+        let config = ClientConfig::new("ipc:///tmp/kicad/api.sock", "test-client").unwrap();
+        KiCadClient::new(
+            FakeTransport {
+                responses: vec![response],
+                requests: Vec::new(),
+            },
+            config,
+        )
+    }
+
     fn observed_segment_item(layer: board_types::BoardLayer) -> Any {
         let shape = base_types::GraphicShape {
             attributes: MessageField::some(base_types::GraphicAttributes {
@@ -1340,6 +1625,228 @@ mod tests {
             }),
             ..ApiResponse::default()
         }
+    }
+
+    #[test]
+    fn get_footprint_instances_maps_fields_sorts_and_uses_document_container() {
+        let mut client = footprint_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![footprint_item("b"), footprint_item("a")],
+        ));
+        let footprints = client.get_footprint_instances("main.kicad_pcb").unwrap();
+        assert_eq!(footprints[0].source_uuid, "a");
+        assert_eq!(footprints[0].position_x_nm, 10);
+        assert_eq!(footprints[0].position_y_nm, -20);
+        assert_eq!(footprints[0].orientation_mdeg, -1235);
+        assert_eq!(footprints[0].side, FootprintSide::Front);
+        assert_eq!(footprints[0].lock_state, ObservedLockState::Locked);
+        assert_eq!(footprints[0].library_identifier.nickname, "Resistor_SMD");
+        assert_eq!(footprints[0].library_identifier.entry_name, "R_0603");
+        assert_eq!(footprints[0].reference, "R1");
+        assert_eq!(footprints[0].value, "10k");
+        assert_eq!(footprints[0].symbol_sheet_path, ["root", "child"]);
+        let command = editor_commands::GetItems::parse_from_bytes(
+            &client.transport.requests[0].message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        assert_eq!(command.types.len(), 1);
+        assert_eq!(
+            command.types[0].enum_value_or_default(),
+            enums::KiCadObjectType::KOT_PCB_FOOTPRINT
+        );
+        let header = command.header.as_ref().unwrap();
+        assert!(header.container.is_none());
+        assert_eq!(
+            header.document.as_ref().unwrap().board_filename(),
+            "main.kicad_pcb"
+        );
+    }
+
+    #[test]
+    fn get_footprint_instances_accepts_empty_and_unknown_lock() {
+        let mut empty = footprint_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            Vec::new(),
+        ));
+        assert!(
+            empty
+                .get_footprint_instances("main.kicad_pcb")
+                .unwrap()
+                .is_empty()
+        );
+        let mut item = footprint_item("a");
+        let mut footprint = board_types::FootprintInstance::parse_from_bytes(&item.value).unwrap();
+        footprint.locked = protobuf::EnumOrUnknown::from_i32(999);
+        footprint.symbol_path = MessageField::none();
+        item.value = footprint.write_to_bytes().unwrap();
+        let mut client = footprint_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![item],
+        ));
+        let observed = client.get_footprint_instances("main.kicad_pcb").unwrap();
+        assert_eq!(observed[0].lock_state, ObservedLockState::Unknown);
+        assert!(observed[0].symbol_sheet_path.is_empty());
+    }
+
+    #[test]
+    fn get_footprint_instances_rejects_status_type_and_duplicates() {
+        let mut status = footprint_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_DOCUMENT_NOT_FOUND,
+            Vec::new(),
+        ));
+        assert_eq!(
+            status
+                .get_footprint_instances("main.kicad_pcb")
+                .unwrap_err()
+                .code(),
+            "kicad_status_error"
+        );
+        let mut wrong = footprint_item("a");
+        wrong.type_url = "type.googleapis.com/kiapi.board.types.Pad".to_owned();
+        let mut client = footprint_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![wrong],
+        ));
+        assert_eq!(
+            client
+                .get_footprint_instances("main.kicad_pcb")
+                .unwrap_err()
+                .code(),
+            "protocol_decode_failed"
+        );
+        let mut duplicate = footprint_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![footprint_item("a"), footprint_item("a")],
+        ));
+        assert_eq!(
+            duplicate
+                .get_footprint_instances("main.kicad_pcb")
+                .unwrap_err()
+                .code(),
+            "invalid_observed_footprint"
+        );
+        assert!(duplicate.instance_token().is_none());
+    }
+
+    #[test]
+    fn get_footprint_instances_rejects_missing_fields_and_invalid_side() {
+        let mut item = footprint_item("a");
+        let mut footprint = board_types::FootprintInstance::parse_from_bytes(&item.value).unwrap();
+        footprint.position = MessageField::none();
+        item.value = footprint.write_to_bytes().unwrap();
+        let mut missing = footprint_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![item],
+        ));
+        assert_eq!(
+            missing
+                .get_footprint_instances("main.kicad_pcb")
+                .unwrap_err()
+                .code(),
+            "invalid_observed_footprint"
+        );
+        let mut item = footprint_item("a");
+        let mut footprint = board_types::FootprintInstance::parse_from_bytes(&item.value).unwrap();
+        footprint.layer = protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_SilkS);
+        item.value = footprint.write_to_bytes().unwrap();
+        let mut side = footprint_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![item],
+        ));
+        assert_eq!(
+            side.get_footprint_instances("main.kicad_pcb")
+                .unwrap_err()
+                .code(),
+            "invalid_observed_footprint"
+        );
+    }
+
+    #[test]
+    fn get_footprint_instances_rejects_missing_identity_definition_and_fields() {
+        let mut invalid = Vec::new();
+        for index in 0..6 {
+            let mut item = footprint_item("a");
+            let mut footprint =
+                board_types::FootprintInstance::parse_from_bytes(&item.value).unwrap();
+            match index {
+                0 => footprint.id.as_mut().unwrap().value.clear(),
+                1 => footprint.definition = MessageField::none(),
+                2 => footprint.definition.as_mut().unwrap().id = MessageField::none(),
+                3 => footprint
+                    .definition
+                    .as_mut()
+                    .unwrap()
+                    .id
+                    .as_mut()
+                    .unwrap()
+                    .entry_name
+                    .clear(),
+                4 => footprint.reference_field.as_mut().unwrap().text = MessageField::none(),
+                5 => footprint.value_field = MessageField::none(),
+                _ => unreachable!(),
+            }
+            item.value = footprint.write_to_bytes().unwrap();
+            invalid.push(item);
+        }
+        for item in invalid {
+            let mut client = footprint_client(get_items_response(
+                "token",
+                base_types::ItemRequestStatus::IRS_OK,
+                vec![item],
+            ));
+            assert_eq!(
+                client
+                    .get_footprint_instances("main.kicad_pcb")
+                    .unwrap_err()
+                    .code(),
+                "invalid_observed_footprint"
+            );
+        }
+    }
+
+    #[test]
+    fn get_footprint_instances_rejects_invalid_orientation_and_sheet_path() {
+        let mut item = footprint_item("a");
+        let mut footprint = board_types::FootprintInstance::parse_from_bytes(&item.value).unwrap();
+        footprint.orientation.as_mut().unwrap().value_degrees = f64::NAN;
+        item.value = footprint.write_to_bytes().unwrap();
+        let mut orientation = footprint_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![item],
+        ));
+        assert_eq!(
+            orientation
+                .get_footprint_instances("main.kicad_pcb")
+                .unwrap_err()
+                .code(),
+            "invalid_observed_footprint"
+        );
+        let mut item = footprint_item("a");
+        let mut footprint = board_types::FootprintInstance::parse_from_bytes(&item.value).unwrap();
+        footprint.symbol_path.as_mut().unwrap().path[0]
+            .value
+            .clear();
+        item.value = footprint.write_to_bytes().unwrap();
+        let mut path = footprint_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![item],
+        ));
+        assert_eq!(
+            path.get_footprint_instances("main.kicad_pcb")
+                .unwrap_err()
+                .code(),
+            "invalid_observed_footprint"
+        );
     }
 
     #[test]
