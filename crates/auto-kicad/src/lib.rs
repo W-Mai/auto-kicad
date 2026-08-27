@@ -130,6 +130,7 @@ enum ObserveLiveBoardError {
     Ipc(kicad_ipc::IpcError),
     MissingInstanceToken,
     Footprints(FootprintObservationError),
+    Routing(kicad_adapter::RoutingObservationError),
     LiveBoard(LiveBoardObservationError),
 }
 
@@ -141,6 +142,7 @@ impl std::fmt::Display for ObserveLiveBoardError {
                 formatter.write_str("KiCad instance token was not observed")
             }
             Self::Footprints(error) => error.fmt(formatter),
+            Self::Routing(error) => error.fmt(formatter),
             Self::LiveBoard(error) => error.fmt(formatter),
         }
     }
@@ -162,6 +164,11 @@ trait LiveBoardObservationSource {
         board_filename: &str,
         footprint_source_uuid: &str,
     ) -> Result<Vec<kicad_ipc::ObservedPad>, kicad_ipc::IpcError>;
+
+    fn board_routing(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<kicad_ipc::ObservedBoardRoutingItems, kicad_ipc::IpcError>;
 
     fn latest_instance_token(&mut self) -> Option<kicad_ipc::InstanceToken>;
 }
@@ -189,6 +196,13 @@ impl<T: kicad_ipc::KiCadTransport> LiveBoardObservationSource for KiCadClient<T>
         self.get_footprint_pads(board_filename, footprint_source_uuid)
     }
 
+    fn board_routing(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<kicad_ipc::ObservedBoardRoutingItems, kicad_ipc::IpcError> {
+        self.get_board_routing(board_filename)
+    }
+
     fn latest_instance_token(&mut self) -> Option<kicad_ipc::InstanceToken> {
         self.instance_token().cloned()
     }
@@ -214,8 +228,13 @@ fn observe_live_board<S: LiveBoardObservationSource>(
         observed.push(ObservedFootprintWithPads { footprint, pads });
     }
     let board_id = board_document_id(&document).map_err(ObserveLiveBoardError::LiveBoard)?;
-    let native_footprints = board_footprint_observation(board_id, observed)
+    let native_footprints = board_footprint_observation(board_id.clone(), observed)
         .map_err(ObserveLiveBoardError::Footprints)?;
+    let routing = source
+        .board_routing(board_filename)
+        .map_err(ObserveLiveBoardError::Ipc)?;
+    let native_routing = kicad_adapter::board_routing_observation(board_id, routing)
+        .map_err(ObserveLiveBoardError::Routing)?;
     let instance_token = source
         .latest_instance_token()
         .ok_or(ObserveLiveBoardError::MissingInstanceToken)?;
@@ -224,6 +243,7 @@ fn observe_live_board<S: LiveBoardObservationSource>(
         document,
         graphics,
         native_footprints,
+        native_routing,
         instance_token,
     )
     .map_err(ObserveLiveBoardError::LiveBoard)
@@ -379,6 +399,11 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
                 };
             }
             Err(ObserveLiveBoardError::Footprints(reason)) => {
+                return BoardGraphicsCommitOutcome::Rejected {
+                    reason: reason.to_string(),
+                };
+            }
+            Err(ObserveLiveBoardError::Routing(reason)) => {
                 return BoardGraphicsCommitOutcome::Rejected {
                     reason: reason.to_string(),
                 };
@@ -1133,6 +1158,7 @@ mod tests {
             board_filename: String,
             footprint_source_uuid: String,
         },
+        Routing(String),
         Token,
     }
 
@@ -1183,6 +1209,15 @@ mod tests {
                 .get(footprint_source_uuid)
                 .cloned()
                 .unwrap_or_default())
+        }
+
+        fn board_routing(
+            &mut self,
+            board_filename: &str,
+        ) -> Result<kicad_ipc::ObservedBoardRoutingItems, kicad_ipc::IpcError> {
+            self.calls
+                .push(LiveReadCall::Routing(board_filename.to_owned()));
+            Ok(kicad_ipc::ObservedBoardRoutingItems::default())
         }
 
         fn latest_instance_token(&mut self) -> Option<kicad_ipc::InstanceToken> {
@@ -1296,6 +1331,7 @@ mod tests {
                 board_filename: "main.kicad_pcb".to_owned(),
                 footprint_source_uuid: "footprint-b".to_owned(),
             },
+            LiveReadCall::Routing("main.kicad_pcb".to_owned()),
             LiveReadCall::Token,
         ]
     }
@@ -1362,7 +1398,7 @@ mod tests {
 
         assert!(matches!(error, ObserveLiveBoardError::Ipc(_)));
         let mut expected = expected_live_read_calls();
-        expected.pop();
+        expected.truncate(expected.len() - 2);
         assert_eq!(source.calls, expected);
     }
 
@@ -1606,6 +1642,7 @@ mod tests {
             native_footprints: Some(
                 ObservedBoardFootprints::new(StableId::new("board").unwrap(), Vec::new()).unwrap(),
             ),
+            native_routing: None,
         }
     }
 

@@ -583,6 +583,7 @@ mod tests {
                 ..Board::default()
             },
             native_footprints: None,
+            native_routing: None,
         }
     }
     fn symbol(uuid: &str) -> Symbol {

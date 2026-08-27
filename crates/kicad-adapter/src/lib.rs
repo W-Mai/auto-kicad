@@ -3,19 +3,27 @@ use kicad_ipc::{
     BoardGraphicLayer as IpcBoardGraphicLayer, BoardGraphicSegment as IpcBoardGraphicSegment,
     CommitId, FootprintSide as IpcFootprintSide, InstanceToken, KiCadClient, KiCadTransport,
     ObservedBoardGraphicSegment, ObservedBoardLayer as IpcBoardLayer,
-    ObservedDrillShape as IpcDrillShape, ObservedFootprintInstance as IpcFootprintInstance,
-    ObservedLockState as IpcLockState, ObservedPad as IpcPad, ObservedPadKind as IpcPadKind,
-    ObservedPadShape as IpcPadShape, ObservedPadStackType as IpcPadStackType, OpenDocument,
-    OpenDocumentKind, VersionInfo,
+    ObservedBoardRoutingItems as IpcBoardRoutingItems, ObservedDrillShape as IpcDrillShape,
+    ObservedFootprintInstance as IpcFootprintInstance, ObservedLockState as IpcLockState,
+    ObservedPad as IpcPad, ObservedPadKind as IpcPadKind, ObservedPadShape as IpcPadShape,
+    ObservedPadStackType as IpcPadStackType, ObservedTrackGeometry as IpcTrackGeometry,
+    ObservedVia as IpcVia, OpenDocument, OpenDocumentKind, VersionInfo,
 };
 use kicad_model::{
     Board, BoardGraphicLayer, BoardGraphicSegment, BoardLayer, BoardSide, CapabilityObservation,
     CapabilityStatus, Coordinate, Diagnostic, DiscoveredDocument, DiscoveredDocumentKind,
-    DiscoverySnapshot, DocumentSpace, Drill, DrillShape, FiniteRatio, FootprintLibraryIdentifier,
-    LocalCoordinateNm, LockState, ModelError, ObservedBoardFootprints, ObservedFootprintPlacement,
-    ObservedNetIdentity, ObservedPad, ObservedSchematicSymbol, PadCopperShape, PadKind, PadShape,
-    PadStackType, ProjectSnapshot, RevisionDigest, Schematic, SizeNm, StableId, Unit, board_net_id,
-    footprint_definition_id, footprint_pad_id, footprint_placement_id,
+    DiscoverySnapshot, DocumentSpace, Drill, DrillShape, ExactAngleDegrees, FiniteRatio,
+    FootprintLibraryIdentifier, LocalCoordinateNm, LockState, ModelError, ObservedBoardFootprints,
+    ObservedBoardRouting, ObservedFootprintPlacement, ObservedNetIdentity, ObservedPad,
+    ObservedPadStackOuterLayer, ObservedPostMachiningProperties, ObservedRoutingNet,
+    ObservedSchematicSymbol, ObservedSolderMaskOverrides, ObservedSolderPasteOverrides,
+    ObservedThermalSpokeSettings, ObservedTrack, ObservedTrackGeometry, ObservedVia,
+    ObservedViaDrill, ObservedViaPadStack, ObservedZoneConnectionSettings, PadCopperShape, PadKind,
+    PadShape, PadStackType, ProjectSnapshot, RevisionDigest, Schematic, SizeNm, SolderMaskMode,
+    SolderPasteMode, StableId, UnconnectedLayerRemoval, Unit, ViaCoveringMode, ViaDrillCappingMode,
+    ViaDrillFillingMode, ViaDrillPostMachiningMode, ViaPluggingMode, ViaType, ZoneConnectionStyle,
+    board_net_id, board_track_id, board_via_id, footprint_definition_id, footprint_pad_id,
+    footprint_placement_id,
 };
 use kicad_schematic::{NetlistDocument, ParsedSchematicProject, join_netlist_connectivity};
 use sha2::{Digest, Sha256};
@@ -622,6 +630,293 @@ fn map_drill_shape(shape: IpcDrillShape) -> DrillShape {
     }
 }
 
+#[derive(Debug)]
+pub enum RoutingObservationError {
+    Model(ModelError),
+}
+
+impl std::fmt::Display for RoutingObservationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Model(error) => error.fmt(formatter),
+        }
+    }
+}
+impl std::error::Error for RoutingObservationError {}
+impl From<ModelError> for RoutingObservationError {
+    fn from(error: ModelError) -> Self {
+        Self::Model(error)
+    }
+}
+
+fn routing_coordinate(point: kicad_ipc::ObservedRoutingPoint) -> Coordinate {
+    Coordinate {
+        x: point.x_nm,
+        y: point.y_nm,
+        unit: Unit::Nanometres,
+        space: DocumentSpace::Board,
+    }
+}
+
+fn map_routing_net(
+    board_id: &StableId,
+    net: Option<kicad_ipc::ObservedRoutingNet>,
+) -> Option<ObservedRoutingNet> {
+    net.map(|net| ObservedRoutingNet {
+        net_id: (!net.name.is_empty()).then(|| board_net_id(board_id, &net.name)),
+        code: net.code,
+        name: net.name,
+    })
+}
+
+fn map_routing_drill(drill: kicad_ipc::ObservedViaDrill) -> ObservedViaDrill {
+    ObservedViaDrill {
+        start_layer: map_board_layer(drill.start_layer),
+        end_layer: map_board_layer(drill.end_layer),
+        size: SizeNm {
+            x_nm: drill.size_x_nm,
+            y_nm: drill.size_y_nm,
+        },
+        shape: map_drill_shape(drill.shape),
+        capping: match drill.capping {
+            kicad_ipc::ObservedViaDrillCappingMode::Unknown => ViaDrillCappingMode::Unknown,
+            kicad_ipc::ObservedViaDrillCappingMode::Capped => ViaDrillCappingMode::Capped,
+            kicad_ipc::ObservedViaDrillCappingMode::Uncapped => ViaDrillCappingMode::Uncapped,
+            kicad_ipc::ObservedViaDrillCappingMode::FromDesignRules => {
+                ViaDrillCappingMode::FromDesignRules
+            }
+        },
+        filling: match drill.filling {
+            kicad_ipc::ObservedViaDrillFillingMode::Unknown => ViaDrillFillingMode::Unknown,
+            kicad_ipc::ObservedViaDrillFillingMode::Filled => ViaDrillFillingMode::Filled,
+            kicad_ipc::ObservedViaDrillFillingMode::Unfilled => ViaDrillFillingMode::Unfilled,
+            kicad_ipc::ObservedViaDrillFillingMode::FromDesignRules => {
+                ViaDrillFillingMode::FromDesignRules
+            }
+        },
+    }
+}
+
+pub fn board_routing_observation(
+    board_id: StableId,
+    items: IpcBoardRoutingItems,
+) -> Result<ObservedBoardRouting, RoutingObservationError> {
+    let tracks = items
+        .tracks
+        .into_iter()
+        .map(|track| {
+            let source_uuid = StableId::new(track.source_uuid)?;
+            let geometry = match track.geometry {
+                IpcTrackGeometry::Segment { start, end } => ObservedTrackGeometry::Segment {
+                    start: routing_coordinate(start),
+                    end: routing_coordinate(end),
+                },
+                IpcTrackGeometry::Arc { start, mid, end } => ObservedTrackGeometry::Arc {
+                    start: routing_coordinate(start),
+                    mid: routing_coordinate(mid),
+                    end: routing_coordinate(end),
+                },
+            };
+            Ok(ObservedTrack {
+                track_id: board_track_id(&board_id, &source_uuid),
+                source_uuid,
+                geometry,
+                width_nm: track.width_nm,
+                layer: map_board_layer(track.layer),
+                lock_state: map_lock_state(track.lock_state),
+                net: map_routing_net(&board_id, track.net),
+                observed_revision: RevisionDigest::new("0".repeat(64))?,
+            })
+        })
+        .collect::<Result<Vec<_>, ModelError>>()?;
+    let vias = items
+        .vias
+        .into_iter()
+        .map(|via| map_routing_via(&board_id, via))
+        .collect::<Result<Vec<_>, ModelError>>()?;
+    ObservedBoardRouting::new(board_id, tracks, vias).map_err(Into::into)
+}
+
+fn map_post_machining(
+    properties: kicad_ipc::ObservedPostMachiningProperties,
+) -> ObservedPostMachiningProperties {
+    ObservedPostMachiningProperties {
+        mode: match properties.mode {
+            kicad_ipc::ObservedViaDrillPostMachiningMode::Unknown => {
+                ViaDrillPostMachiningMode::Unknown
+            }
+            kicad_ipc::ObservedViaDrillPostMachiningMode::NotPostMachined => {
+                ViaDrillPostMachiningMode::NotPostMachined
+            }
+            kicad_ipc::ObservedViaDrillPostMachiningMode::Counterbore => {
+                ViaDrillPostMachiningMode::Counterbore
+            }
+            kicad_ipc::ObservedViaDrillPostMachiningMode::Countersink => {
+                ViaDrillPostMachiningMode::Countersink
+            }
+        },
+        size: properties.size,
+        depth: properties.depth,
+        angle: properties.angle,
+    }
+}
+
+fn map_routing_via(board_id: &StableId, via: IpcVia) -> Result<ObservedVia, ModelError> {
+    let source_uuid = StableId::new(via.source_uuid)?;
+    let stack = via.pad_stack;
+    let outer = |outer: kicad_ipc::ObservedPadStackOuterLayer| -> Result<ObservedPadStackOuterLayer, ModelError> {
+        Ok(ObservedPadStackOuterLayer {
+        solder_mask_mode: match outer.solder_mask_mode {
+            kicad_ipc::ObservedSolderMaskMode::Unknown => SolderMaskMode::Unknown,
+            kicad_ipc::ObservedSolderMaskMode::Masked => SolderMaskMode::Masked,
+            kicad_ipc::ObservedSolderMaskMode::Unmasked => SolderMaskMode::Unmasked,
+            kicad_ipc::ObservedSolderMaskMode::FromDesignRules => SolderMaskMode::FromDesignRules,
+        },
+        solder_paste_mode: match outer.solder_paste_mode {
+            kicad_ipc::ObservedSolderPasteMode::Unknown => SolderPasteMode::Unknown,
+            kicad_ipc::ObservedSolderPasteMode::Paste => SolderPasteMode::Paste,
+            kicad_ipc::ObservedSolderPasteMode::NoPaste => SolderPasteMode::NoPaste,
+            kicad_ipc::ObservedSolderPasteMode::FromDesignRules => SolderPasteMode::FromDesignRules,
+        },
+        solder_mask_settings: outer
+            .solder_mask_settings
+            .map(|v| ObservedSolderMaskOverrides {
+                margin_nm: v.margin_nm,
+            }),
+        solder_paste_settings: outer
+            .solder_paste_settings
+            .map(|v| {
+                Ok::<_, ModelError>(ObservedSolderPasteOverrides {
+                    margin_nm: v.margin_nm,
+                    margin_ratio: v.margin_ratio.map(FiniteRatio::new).transpose()?,
+                })
+            })
+            .transpose()?,
+        plugging_mode: match outer.plugging_mode {
+            kicad_ipc::ObservedViaPluggingMode::Unknown => ViaPluggingMode::Unknown,
+            kicad_ipc::ObservedViaPluggingMode::Plugged => ViaPluggingMode::Plugged,
+            kicad_ipc::ObservedViaPluggingMode::Unplugged => ViaPluggingMode::Unplugged,
+            kicad_ipc::ObservedViaPluggingMode::FromDesignRules => ViaPluggingMode::FromDesignRules,
+        },
+        covering_mode: match outer.covering_mode {
+            kicad_ipc::ObservedViaCoveringMode::Unknown => ViaCoveringMode::Unknown,
+            kicad_ipc::ObservedViaCoveringMode::Covered => ViaCoveringMode::Covered,
+            kicad_ipc::ObservedViaCoveringMode::Uncovered => ViaCoveringMode::Uncovered,
+            kicad_ipc::ObservedViaCoveringMode::FromDesignRules => ViaCoveringMode::FromDesignRules,
+        },
+        })
+    };
+    Ok(ObservedVia {
+        via_id: board_via_id(board_id, &source_uuid),
+        source_uuid,
+        position: routing_coordinate(via.position),
+        pad_stack: ObservedViaPadStack {
+            stack_type: map_pad_stack_type(stack.stack_type),
+            layers: stack.layers.into_iter().map(map_board_layer).collect(),
+            primary_drill: stack.primary_drill.map(map_routing_drill),
+            unconnected_layer_removal: match stack.unconnected_layer_removal {
+                kicad_ipc::ObservedUnconnectedLayerRemoval::Unknown => {
+                    UnconnectedLayerRemoval::Unknown
+                }
+                kicad_ipc::ObservedUnconnectedLayerRemoval::Keep => UnconnectedLayerRemoval::Keep,
+                kicad_ipc::ObservedUnconnectedLayerRemoval::Remove => {
+                    UnconnectedLayerRemoval::Remove
+                }
+                kicad_ipc::ObservedUnconnectedLayerRemoval::RemoveExceptStartAndEnd => {
+                    UnconnectedLayerRemoval::RemoveExceptStartAndEnd
+                }
+                kicad_ipc::ObservedUnconnectedLayerRemoval::StartEndOnly => {
+                    UnconnectedLayerRemoval::StartEndOnly
+                }
+            },
+            copper_shapes: stack
+                .copper_shapes
+                .into_iter()
+                .map(|shape| {
+                    Ok(PadCopperShape {
+                        layer: map_board_layer(shape.layer),
+                        shape: map_pad_shape(shape.shape),
+                        size: SizeNm {
+                            x_nm: shape.size_x_nm,
+                            y_nm: shape.size_y_nm,
+                        },
+                        offset: LocalCoordinateNm {
+                            x_nm: shape.offset_x_nm,
+                            y_nm: shape.offset_y_nm,
+                        },
+                        corner_rounding_ratio: FiniteRatio::new(shape.corner_rounding_ratio)?,
+                        chamfer_ratio: FiniteRatio::new(shape.chamfer_ratio)?,
+                        chamfer_top_left: shape.chamfer_top_left,
+                        chamfer_top_right: shape.chamfer_top_right,
+                        chamfer_bottom_left: shape.chamfer_bottom_left,
+                        chamfer_bottom_right: shape.chamfer_bottom_right,
+                        trapezoid_delta: LocalCoordinateNm {
+                            x_nm: shape.trapezoid_delta_x_nm,
+                            y_nm: shape.trapezoid_delta_y_nm,
+                        },
+                        custom_anchor_shape: shape.custom_anchor_shape.map(map_pad_shape),
+                    })
+                })
+                .collect::<Result<Vec<_>, ModelError>>()?,
+            angle_degrees: ExactAngleDegrees::new(stack.angle_degrees)?,
+            front_outer_layers: stack.front_outer_layers.map(outer).transpose()?,
+            back_outer_layers: stack.back_outer_layers.map(outer).transpose()?,
+            zone_settings: stack
+                .zone_settings
+                .map(|settings| {
+                    Ok::<_, ModelError>(ObservedZoneConnectionSettings {
+                        style: match settings.style {
+                            kicad_ipc::ObservedZoneConnectionStyle::Unknown => {
+                                ZoneConnectionStyle::Unknown
+                            }
+                            kicad_ipc::ObservedZoneConnectionStyle::Inherited => {
+                                ZoneConnectionStyle::Inherited
+                            }
+                            kicad_ipc::ObservedZoneConnectionStyle::None => {
+                                ZoneConnectionStyle::None
+                            }
+                            kicad_ipc::ObservedZoneConnectionStyle::Thermal => {
+                                ZoneConnectionStyle::Thermal
+                            }
+                            kicad_ipc::ObservedZoneConnectionStyle::Full => {
+                                ZoneConnectionStyle::Full
+                            }
+                            kicad_ipc::ObservedZoneConnectionStyle::PlatedThroughHoleThermal => {
+                                ZoneConnectionStyle::PlatedThroughHoleThermal
+                            }
+                        },
+                        thermal_spokes: settings
+                            .thermal_spokes
+                            .map(|spokes| {
+                                Ok::<_, ModelError>(ObservedThermalSpokeSettings {
+                                    width_nm: spokes.width_nm,
+                                    angle_degrees: ExactAngleDegrees::new(spokes.angle_degrees)?,
+                                    gap_nm: spokes.gap_nm,
+                                })
+                            })
+                            .transpose()?,
+                    })
+                })
+                .transpose()?,
+            secondary_drill: stack.secondary_drill.map(map_routing_drill),
+            tertiary_drill: stack.tertiary_drill.map(map_routing_drill),
+            front_post_machining: stack.front_post_machining.map(map_post_machining),
+            back_post_machining: stack.back_post_machining.map(map_post_machining),
+        },
+        lock_state: map_lock_state(via.lock_state),
+        net: map_routing_net(board_id, via.net),
+        via_type: match via.via_type {
+            kicad_ipc::ObservedViaType::Unknown => ViaType::Unknown,
+            kicad_ipc::ObservedViaType::Through => ViaType::Through,
+            kicad_ipc::ObservedViaType::BlindBuried => ViaType::BlindBuried,
+            kicad_ipc::ObservedViaType::Micro => ViaType::Micro,
+            kicad_ipc::ObservedViaType::Blind => ViaType::Blind,
+            kicad_ipc::ObservedViaType::Buried => ViaType::Buried,
+        },
+        observed_revision: RevisionDigest::new("0".repeat(64))?,
+    })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LiveBoardObservation {
     pub snapshot: ProjectSnapshot,
@@ -669,6 +964,7 @@ pub fn live_board_observation(
     document: OpenDocument,
     graphics: Vec<ObservedBoardGraphicSegment>,
     native_footprints: ObservedBoardFootprints,
+    native_routing: ObservedBoardRouting,
     instance_token: InstanceToken,
 ) -> Result<LiveBoardObservation, LiveBoardObservationError> {
     let board_filename = match &document.kind {
@@ -747,6 +1043,13 @@ pub fn live_board_observation(
         )
         .into());
     }
+    native_routing.validate()?;
+    if native_routing.board_id != discovered.document_id {
+        return Err(ModelError::InvalidRoutingObservation(
+            "native routing board identity does not match the live board",
+        )
+        .into());
+    }
     let snapshot = ProjectSnapshot {
         project_id,
         kicad_version: version.full_version,
@@ -754,6 +1057,7 @@ pub fn live_board_observation(
             "pcb.board_graphics.read".to_owned(),
             "pcb.board_graphics.write".to_owned(),
             "pcb.native_footprints.read".to_owned(),
+            "pcb.native_routing.read".to_owned(),
         ],
         schematic: Schematic::default(),
         board: Board {
@@ -762,6 +1066,7 @@ pub fn live_board_observation(
             graphics,
         },
         native_footprints: Some(native_footprints),
+        native_routing: Some(native_routing),
     }
     .canonical();
     snapshot.validate()?;
@@ -1283,6 +1588,53 @@ mod tests {
     }
 
     #[test]
+    fn board_routing_mapping_preserves_empty_and_named_net_identity() {
+        let board_id = StableId::new("board-a").unwrap();
+        let track = |source_uuid: &str, name: &str| kicad_ipc::ObservedTrack {
+            source_uuid: source_uuid.to_owned(),
+            geometry: IpcTrackGeometry::Segment {
+                start: kicad_ipc::ObservedRoutingPoint { x_nm: 0, y_nm: 0 },
+                end: kicad_ipc::ObservedRoutingPoint { x_nm: 1, y_nm: 0 },
+            },
+            width_nm: 1,
+            layer: IpcBoardLayer::FrontCopper,
+            lock_state: IpcLockState::Unlocked,
+            net: Some(kicad_ipc::ObservedRoutingNet {
+                code: Some(0),
+                name: name.to_owned(),
+            }),
+        };
+        let observation = board_routing_observation(
+            board_id.clone(),
+            IpcBoardRoutingItems {
+                tracks: vec![track("empty-net", ""), track("named-net", "GND")],
+                vias: Vec::new(),
+            },
+        )
+        .unwrap();
+        let empty = observation
+            .tracks
+            .iter()
+            .find(|track| track.source_uuid.as_str() == "empty-net")
+            .unwrap()
+            .net
+            .as_ref()
+            .unwrap();
+        assert_eq!(empty.net_id, None);
+        assert_eq!(empty.code, Some(0));
+        assert_eq!(empty.name, "");
+        let named = observation
+            .tracks
+            .iter()
+            .find(|track| track.source_uuid.as_str() == "named-net")
+            .unwrap()
+            .net
+            .as_ref()
+            .unwrap();
+        assert_eq!(named.net_id, Some(board_net_id(&board_id, "GND")));
+    }
+
+    #[test]
     fn board_footprint_mapping_preserves_identity_geometry_and_revision() {
         let board_id = StableId::new("board-a").unwrap();
         let observation = board_footprint_observation(
@@ -1485,6 +1837,14 @@ mod tests {
             .unwrap()
     }
 
+    fn native_routing(document: &OpenDocument) -> ObservedBoardRouting {
+        let board_id = discovered_document(document.clone())
+            .unwrap()
+            .unwrap()
+            .document_id;
+        ObservedBoardRouting::new(board_id, Vec::new(), Vec::new()).unwrap()
+    }
+
     #[test]
     fn live_board_observation_maps_identity_geometry_and_capabilities() {
         let document = pcb();
@@ -1494,6 +1854,7 @@ mod tests {
             document,
             vec![observed_graphic("graphic-1", 1)],
             native_footprints,
+            native_routing(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap();
@@ -1509,7 +1870,8 @@ mod tests {
             [
                 "pcb.board_graphics.read",
                 "pcb.board_graphics.write",
-                "pcb.native_footprints.read"
+                "pcb.native_footprints.read",
+                "pcb.native_routing.read"
             ]
         );
         let native = observation.snapshot.native_footprints.as_ref().unwrap();
@@ -1549,6 +1911,7 @@ mod tests {
             document.clone(),
             vec![observed_graphic("b", 20), observed_graphic("a", 1)],
             first_native,
+            native_routing(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap();
@@ -1557,6 +1920,7 @@ mod tests {
             document.clone(),
             vec![observed_graphic("a", 1), observed_graphic("b", 20)],
             second_native,
+            native_routing(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap();
@@ -1583,6 +1947,7 @@ mod tests {
             document.clone(),
             Vec::new(),
             first_native,
+            native_routing(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap();
@@ -1591,6 +1956,7 @@ mod tests {
             document,
             Vec::new(),
             changed_native,
+            native_routing(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap();
@@ -1611,6 +1977,7 @@ mod tests {
                 vec![observed_footprint("footprint-a", "pad-a")],
             )
             .unwrap(),
+            native_routing(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();
@@ -1630,6 +1997,7 @@ mod tests {
             document.clone(),
             vec![observed_graphic("same", 1), observed_graphic("same", 20)],
             native_footprints(&document),
+            native_routing(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();
@@ -1642,6 +2010,7 @@ mod tests {
             document.clone(),
             vec![observed_graphic("", 1)],
             native_footprints(&document),
+            native_routing(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();
@@ -1661,6 +2030,7 @@ mod tests {
             document,
             Vec::new(),
             native_footprints(&pcb()),
+            native_routing(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();
@@ -1677,6 +2047,7 @@ mod tests {
             schematic("xLock.kicad_sch"),
             Vec::new(),
             native_footprints(&pcb()),
+            native_routing(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();
@@ -1689,6 +2060,7 @@ mod tests {
             document,
             Vec::new(),
             native_footprints(&pcb()),
+            native_routing(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();

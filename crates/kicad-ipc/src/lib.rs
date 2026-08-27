@@ -258,6 +258,212 @@ pub struct ObservedPad {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObservedRoutingNet {
+    pub code: Option<i32>,
+    pub name: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ObservedRoutingPoint {
+    pub x_nm: i64,
+    pub y_nm: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ObservedTrackGeometry {
+    Segment {
+        start: ObservedRoutingPoint,
+        end: ObservedRoutingPoint,
+    },
+    Arc {
+        start: ObservedRoutingPoint,
+        mid: ObservedRoutingPoint,
+        end: ObservedRoutingPoint,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObservedTrack {
+    pub source_uuid: String,
+    pub geometry: ObservedTrackGeometry,
+    pub width_nm: i64,
+    pub layer: ObservedBoardLayer,
+    pub lock_state: ObservedLockState,
+    pub net: Option<ObservedRoutingNet>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservedViaType {
+    Unknown,
+    Through,
+    BlindBuried,
+    Micro,
+    Blind,
+    Buried,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservedUnconnectedLayerRemoval {
+    Unknown,
+    Keep,
+    Remove,
+    RemoveExceptStartAndEnd,
+    StartEndOnly,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservedViaDrillCappingMode {
+    Unknown,
+    Capped,
+    Uncapped,
+    FromDesignRules,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservedViaDrillFillingMode {
+    Unknown,
+    Filled,
+    Unfilled,
+    FromDesignRules,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObservedViaDrill {
+    pub start_layer: ObservedBoardLayer,
+    pub end_layer: ObservedBoardLayer,
+    pub size_x_nm: i64,
+    pub size_y_nm: i64,
+    pub shape: ObservedDrillShape,
+    pub capping: ObservedViaDrillCappingMode,
+    pub filling: ObservedViaDrillFillingMode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservedSolderMaskMode {
+    Unknown,
+    Masked,
+    Unmasked,
+    FromDesignRules,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservedSolderPasteMode {
+    Unknown,
+    Paste,
+    NoPaste,
+    FromDesignRules,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservedViaPluggingMode {
+    Unknown,
+    Plugged,
+    Unplugged,
+    FromDesignRules,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservedViaCoveringMode {
+    Unknown,
+    Covered,
+    Uncovered,
+    FromDesignRules,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObservedSolderMaskOverrides {
+    pub margin_nm: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObservedSolderPasteOverrides {
+    pub margin_nm: Option<i64>,
+    pub margin_ratio: Option<f64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObservedPadStackOuterLayer {
+    pub solder_mask_mode: ObservedSolderMaskMode,
+    pub solder_paste_mode: ObservedSolderPasteMode,
+    pub solder_mask_settings: Option<ObservedSolderMaskOverrides>,
+    pub solder_paste_settings: Option<ObservedSolderPasteOverrides>,
+    pub plugging_mode: ObservedViaPluggingMode,
+    pub covering_mode: ObservedViaCoveringMode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservedZoneConnectionStyle {
+    Unknown,
+    Inherited,
+    None,
+    Thermal,
+    Full,
+    PlatedThroughHoleThermal,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObservedThermalSpokeSettings {
+    pub width_nm: i64,
+    pub angle_degrees: f64,
+    pub gap_nm: i64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObservedZoneConnectionSettings {
+    pub style: ObservedZoneConnectionStyle,
+    pub thermal_spokes: Option<ObservedThermalSpokeSettings>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservedViaDrillPostMachiningMode {
+    Unknown,
+    NotPostMachined,
+    Counterbore,
+    Countersink,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObservedPostMachiningProperties {
+    pub mode: ObservedViaDrillPostMachiningMode,
+    pub size: i32,
+    pub depth: i32,
+    pub angle: i32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObservedViaPadStack {
+    pub stack_type: ObservedPadStackType,
+    pub layers: Vec<ObservedBoardLayer>,
+    pub primary_drill: Option<ObservedViaDrill>,
+    pub unconnected_layer_removal: ObservedUnconnectedLayerRemoval,
+    pub copper_shapes: Vec<ObservedPadCopperShape>,
+    pub angle_degrees: f64,
+    pub front_outer_layers: Option<ObservedPadStackOuterLayer>,
+    pub back_outer_layers: Option<ObservedPadStackOuterLayer>,
+    pub zone_settings: Option<ObservedZoneConnectionSettings>,
+    pub secondary_drill: Option<ObservedViaDrill>,
+    pub tertiary_drill: Option<ObservedViaDrill>,
+    pub front_post_machining: Option<ObservedPostMachiningProperties>,
+    pub back_post_machining: Option<ObservedPostMachiningProperties>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObservedVia {
+    pub source_uuid: String,
+    pub position: ObservedRoutingPoint,
+    pub pad_stack: ObservedViaPadStack,
+    pub lock_state: ObservedLockState,
+    pub net: Option<ObservedRoutingNet>,
+    pub via_type: ObservedViaType,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ObservedBoardRoutingItems {
+    pub tracks: Vec<ObservedTrack>,
+    pub vias: Vec<ObservedVia>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommitId(String);
 
 impl CommitId {
@@ -346,6 +552,7 @@ pub enum IpcError {
     InvalidObservedBoardGraphic(&'static str),
     InvalidObservedFootprint(&'static str),
     InvalidObservedPad(&'static str),
+    InvalidObservedRouting(&'static str),
     UnknownPcbItemType(String),
     Status(ApiStatusCode, String),
     Transport(nng::Error),
@@ -377,6 +584,7 @@ impl IpcError {
             Self::InvalidObservedBoardGraphic(_) => "invalid_observed_board_graphic",
             Self::InvalidObservedFootprint(_) => "invalid_observed_footprint",
             Self::InvalidObservedPad(_) => "invalid_observed_pad",
+            Self::InvalidObservedRouting(_) => "invalid_observed_routing",
             Self::UnknownPcbItemType(_) => "unknown_pcb_item_type",
             Self::Status(status, _) => match status {
                 ApiStatusCode::AS_TIMEOUT => "connection_unavailable",
@@ -429,6 +637,9 @@ impl Display for IpcError {
                 write!(formatter, "{}: {message}", self.code())
             }
             Self::InvalidObservedPad(message) => {
+                write!(formatter, "{}: {message}", self.code())
+            }
+            Self::InvalidObservedRouting(message) => {
                 write!(formatter, "{}: {message}", self.code())
             }
             Self::UnknownPcbItemType(type_url) => {
@@ -760,6 +971,37 @@ impl<T: KiCadTransport> KiCadClient<T> {
         let pads = footprint_pads_from_response(&response, footprint_source_uuid)?;
         self.token = Some(token);
         Ok(pads)
+    }
+
+    pub fn get_board_routing(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<ObservedBoardRoutingItems, IpcError> {
+        let command = editor_commands::GetItems {
+            header: MessageField::some(board_item_header(board_filename)),
+            types: vec![
+                protobuf::EnumOrUnknown::new(enums::KiCadObjectType::KOT_PCB_TRACE),
+                protobuf::EnumOrUnknown::new(enums::KiCadObjectType::KOT_PCB_ARC),
+                protobuf::EnumOrUnknown::new(enums::KiCadObjectType::KOT_PCB_VIA),
+            ],
+            ..editor_commands::GetItems::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            GET_ITEMS_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let response = decode_any::<editor_commands::GetItemsResponse>(
+            &response,
+            GET_ITEMS_RESPONSE_TYPE_URL,
+        )?;
+        let routing = board_routing_from_response(&response)?;
+        self.token = Some(token);
+        Ok(routing)
     }
 
     pub fn get_board_graphics(
@@ -1321,6 +1563,11 @@ fn observed_pad_copper_shape(
             "custom pad geometry is unsupported",
         ));
     }
+    if layer.zone_settings.is_some() {
+        return Err(IpcError::InvalidObservedRouting(
+            "per-layer zone settings are reserved",
+        ));
+    }
     if !layer.corner_rounding_ratio.is_finite() || !layer.chamfer_ratio.is_finite() {
         return Err(IpcError::InvalidObservedPad(
             "pad shape ratios must be finite",
@@ -1445,6 +1692,655 @@ fn observed_pad_drill(
         size_x_nm: diameter.x_nm,
         size_y_nm: diameter.y_nm,
     }))
+}
+
+fn routing_kiid(id: Option<&base_types::KIID>) -> Result<String, IpcError> {
+    kiid_value(id).ok_or(IpcError::InvalidObservedRouting(
+        "routing identity is missing",
+    ))
+}
+
+fn observed_routing_net(net: &board_types::Net) -> ObservedRoutingNet {
+    ObservedRoutingNet {
+        code: net.code.as_ref().map(|code| code.value),
+        name: net.name.clone(),
+    }
+}
+
+fn routing_copper_layer(
+    layer: &protobuf::EnumOrUnknown<board_types::BoardLayer>,
+) -> Result<ObservedBoardLayer, IpcError> {
+    match layer.enum_value() {
+        Ok(board_types::BoardLayer::BL_F_Cu) => Ok(ObservedBoardLayer::FrontCopper),
+        Ok(board_types::BoardLayer::BL_B_Cu) => Ok(ObservedBoardLayer::BackCopper),
+        Ok(board_types::BoardLayer::BL_In1_Cu) => Ok(ObservedBoardLayer::InnerCopper(1)),
+        Ok(board_types::BoardLayer::BL_In2_Cu) => Ok(ObservedBoardLayer::InnerCopper(2)),
+        Ok(board_types::BoardLayer::BL_In3_Cu) => Ok(ObservedBoardLayer::InnerCopper(3)),
+        Ok(board_types::BoardLayer::BL_In4_Cu) => Ok(ObservedBoardLayer::InnerCopper(4)),
+        Ok(board_types::BoardLayer::BL_In5_Cu) => Ok(ObservedBoardLayer::InnerCopper(5)),
+        Ok(board_types::BoardLayer::BL_In6_Cu) => Ok(ObservedBoardLayer::InnerCopper(6)),
+        Ok(board_types::BoardLayer::BL_In7_Cu) => Ok(ObservedBoardLayer::InnerCopper(7)),
+        Ok(board_types::BoardLayer::BL_In8_Cu) => Ok(ObservedBoardLayer::InnerCopper(8)),
+        Ok(board_types::BoardLayer::BL_In9_Cu) => Ok(ObservedBoardLayer::InnerCopper(9)),
+        Ok(board_types::BoardLayer::BL_In10_Cu) => Ok(ObservedBoardLayer::InnerCopper(10)),
+        Ok(board_types::BoardLayer::BL_In11_Cu) => Ok(ObservedBoardLayer::InnerCopper(11)),
+        Ok(board_types::BoardLayer::BL_In12_Cu) => Ok(ObservedBoardLayer::InnerCopper(12)),
+        Ok(board_types::BoardLayer::BL_In13_Cu) => Ok(ObservedBoardLayer::InnerCopper(13)),
+        Ok(board_types::BoardLayer::BL_In14_Cu) => Ok(ObservedBoardLayer::InnerCopper(14)),
+        Ok(board_types::BoardLayer::BL_In15_Cu) => Ok(ObservedBoardLayer::InnerCopper(15)),
+        Ok(board_types::BoardLayer::BL_In16_Cu) => Ok(ObservedBoardLayer::InnerCopper(16)),
+        Ok(board_types::BoardLayer::BL_In17_Cu) => Ok(ObservedBoardLayer::InnerCopper(17)),
+        Ok(board_types::BoardLayer::BL_In18_Cu) => Ok(ObservedBoardLayer::InnerCopper(18)),
+        Ok(board_types::BoardLayer::BL_In19_Cu) => Ok(ObservedBoardLayer::InnerCopper(19)),
+        Ok(board_types::BoardLayer::BL_In20_Cu) => Ok(ObservedBoardLayer::InnerCopper(20)),
+        Ok(board_types::BoardLayer::BL_In21_Cu) => Ok(ObservedBoardLayer::InnerCopper(21)),
+        Ok(board_types::BoardLayer::BL_In22_Cu) => Ok(ObservedBoardLayer::InnerCopper(22)),
+        Ok(board_types::BoardLayer::BL_In23_Cu) => Ok(ObservedBoardLayer::InnerCopper(23)),
+        Ok(board_types::BoardLayer::BL_In24_Cu) => Ok(ObservedBoardLayer::InnerCopper(24)),
+        Ok(board_types::BoardLayer::BL_In25_Cu) => Ok(ObservedBoardLayer::InnerCopper(25)),
+        Ok(board_types::BoardLayer::BL_In26_Cu) => Ok(ObservedBoardLayer::InnerCopper(26)),
+        Ok(board_types::BoardLayer::BL_In27_Cu) => Ok(ObservedBoardLayer::InnerCopper(27)),
+        Ok(board_types::BoardLayer::BL_In28_Cu) => Ok(ObservedBoardLayer::InnerCopper(28)),
+        Ok(board_types::BoardLayer::BL_In29_Cu) => Ok(ObservedBoardLayer::InnerCopper(29)),
+        Ok(board_types::BoardLayer::BL_In30_Cu) => Ok(ObservedBoardLayer::InnerCopper(30)),
+        _ => Err(IpcError::InvalidObservedRouting(
+            "routing layer is not copper or is unknown",
+        )),
+    }
+}
+
+fn routing_lock_state(
+    lock: &protobuf::EnumOrUnknown<base_types::LockedState>,
+) -> Result<ObservedLockState, IpcError> {
+    match lock.enum_value() {
+        Ok(base_types::LockedState::LS_UNLOCKED) => Ok(ObservedLockState::Unlocked),
+        Ok(base_types::LockedState::LS_LOCKED) => Ok(ObservedLockState::Locked),
+        Ok(base_types::LockedState::LS_UNKNOWN) => Ok(ObservedLockState::Unknown),
+        Err(_) => Err(IpcError::InvalidObservedRouting("lock state is unknown")),
+    }
+}
+
+fn observed_via(item: &Any) -> Result<ObservedVia, IpcError> {
+    let value =
+        board_types::Via::parse_from_bytes(&item.value).map_err(|_| IpcError::MalformedEnvelope)?;
+    let source_uuid = routing_kiid(value.id.as_ref())?;
+    let position = routing_point(value.position.as_ref(), "via position is missing")?;
+    let pad_stack = value
+        .pad_stack
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedRouting("via pad stack is missing"))?;
+    let stack_type = match pad_stack.type_.enum_value() {
+        Ok(board_types::PadStackType::PST_UNKNOWN) => ObservedPadStackType::Unknown,
+        Ok(board_types::PadStackType::PST_NORMAL) => ObservedPadStackType::Normal,
+        Ok(board_types::PadStackType::PST_FRONT_INNER_BACK) => ObservedPadStackType::FrontInnerBack,
+        Ok(board_types::PadStackType::PST_CUSTOM) => ObservedPadStackType::Custom,
+        Err(_) => {
+            return Err(IpcError::InvalidObservedRouting(
+                "pad stack type is unknown",
+            ));
+        }
+    };
+    let mut layers = pad_stack
+        .layers
+        .iter()
+        .map(routing_copper_layer)
+        .collect::<Result<Vec<_>, _>>()?;
+    layers.sort();
+    if layers.windows(2).any(|p| p[0] == p[1]) {
+        return Err(IpcError::InvalidObservedRouting(
+            "via layers must be unique",
+        ));
+    }
+    let mut copper_shapes = pad_stack
+        .copper_layers
+        .iter()
+        .map(observed_pad_copper_shape)
+        .collect::<Result<Vec<_>, _>>()?;
+    copper_shapes.sort_by_key(|shape| shape.layer);
+    if copper_shapes
+        .windows(2)
+        .any(|pair| pair[0].layer == pair[1].layer)
+    {
+        return Err(IpcError::InvalidObservedRouting(
+            "via copper shape layers must be unique",
+        ));
+    }
+    if copper_shapes
+        .iter()
+        .any(|shape| !layers.contains(&shape.layer))
+    {
+        return Err(IpcError::InvalidObservedRouting(
+            "via copper shape layer must belong to the pad stack",
+        ));
+    }
+    let angle_degrees = pad_stack
+        .angle
+        .as_ref()
+        .map_or(Ok(0.0), |angle| finite_angle(angle.value_degrees))?;
+    let primary_drill = pad_stack
+        .drill
+        .as_ref()
+        .map(observed_via_drill)
+        .transpose()?;
+    let secondary_drill = pad_stack
+        .secondary_drill
+        .as_ref()
+        .map(observed_via_drill)
+        .transpose()?;
+    let tertiary_drill = pad_stack
+        .tertiary_drill
+        .as_ref()
+        .map(observed_via_drill)
+        .transpose()?;
+    for drill in [
+        primary_drill.as_ref(),
+        secondary_drill.as_ref(),
+        tertiary_drill.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if !layers.contains(&drill.start_layer) || !layers.contains(&drill.end_layer) {
+            return Err(IpcError::InvalidObservedRouting(
+                "via drill layers must belong to the pad stack",
+            ));
+        }
+    }
+    let front_outer_layers = pad_stack
+        .front_outer_layers
+        .as_ref()
+        .map(observed_outer_layer)
+        .transpose()?;
+    let back_outer_layers = pad_stack
+        .back_outer_layers
+        .as_ref()
+        .map(observed_outer_layer)
+        .transpose()?;
+    let zone_settings = pad_stack
+        .zone_settings
+        .as_ref()
+        .map(observed_zone_settings)
+        .transpose()?;
+    let front_post_machining = pad_stack
+        .front_post_machining
+        .as_ref()
+        .map(observed_post_machining)
+        .transpose()?;
+    let back_post_machining = pad_stack
+        .back_post_machining
+        .as_ref()
+        .map(observed_post_machining)
+        .transpose()?;
+    let via_type = match value.type_.enum_value() {
+        Ok(board_types::ViaType::VT_UNKNOWN) => ObservedViaType::Unknown,
+        Ok(board_types::ViaType::VT_THROUGH) => ObservedViaType::Through,
+        Ok(board_types::ViaType::VT_BLIND_BURIED) => ObservedViaType::BlindBuried,
+        Ok(board_types::ViaType::VT_MICRO) => ObservedViaType::Micro,
+        Ok(board_types::ViaType::VT_BLIND) => ObservedViaType::Blind,
+        Ok(board_types::ViaType::VT_BURIED) => ObservedViaType::Buried,
+        Err(_) => return Err(IpcError::InvalidObservedRouting("via type is unknown")),
+    };
+    Ok(ObservedVia {
+        source_uuid,
+        position,
+        pad_stack: ObservedViaPadStack {
+            stack_type,
+            layers,
+            primary_drill,
+            unconnected_layer_removal: routing_ulr(&pad_stack.unconnected_layer_removal)?,
+            copper_shapes,
+            angle_degrees,
+            front_outer_layers,
+            back_outer_layers,
+            zone_settings,
+            secondary_drill,
+            tertiary_drill,
+            front_post_machining,
+            back_post_machining,
+        },
+        lock_state: routing_lock_state(&value.locked)?,
+        net: value.net.as_ref().map(observed_routing_net),
+        via_type,
+    })
+}
+
+fn observed_outer_layer(
+    outer: &board_types::PadStackOuterLayer,
+) -> Result<ObservedPadStackOuterLayer, IpcError> {
+    Ok(ObservedPadStackOuterLayer {
+        solder_mask_mode: routing_mask_mode(&outer.solder_mask_mode)?,
+        solder_paste_mode: routing_paste_mode(&outer.solder_paste_mode)?,
+        solder_mask_settings: outer
+            .solder_mask_settings
+            .as_ref()
+            .map(observed_mask_overrides)
+            .transpose()?,
+        solder_paste_settings: outer
+            .solder_paste_settings
+            .as_ref()
+            .map(observed_paste_overrides)
+            .transpose()?,
+        plugging_mode: routing_plugging(&outer.plugging_mode)?,
+        covering_mode: routing_covering(&outer.covering_mode)?,
+    })
+}
+
+fn observed_mask_overrides(
+    value: &board_types::SolderMaskOverrides,
+) -> Result<ObservedSolderMaskOverrides, IpcError> {
+    Ok(ObservedSolderMaskOverrides {
+        margin_nm: value.solder_mask_margin.as_ref().map(|v| v.value_nm),
+    })
+}
+
+fn observed_paste_overrides(
+    value: &board_types::SolderPasteOverrides,
+) -> Result<ObservedSolderPasteOverrides, IpcError> {
+    let ratio = value.solder_paste_margin_ratio.as_ref().map(|v| v.value);
+    if ratio.is_some_and(|v| !v.is_finite()) {
+        return Err(IpcError::InvalidObservedRouting(
+            "paste ratio must be finite",
+        ));
+    }
+    Ok(ObservedSolderPasteOverrides {
+        margin_nm: value.solder_paste_margin.as_ref().map(|v| v.value_nm),
+        margin_ratio: ratio.map(|v| if v == 0.0 { 0.0 } else { v }),
+    })
+}
+
+fn observed_zone_settings(
+    value: &board_types::ZoneConnectionSettings,
+) -> Result<ObservedZoneConnectionSettings, IpcError> {
+    let style = match value.zone_connection.enum_value() {
+        Ok(board_types::ZoneConnectionStyle::ZCS_UNKNOWN) => ObservedZoneConnectionStyle::Unknown,
+        Ok(board_types::ZoneConnectionStyle::ZCS_INHERITED) => {
+            ObservedZoneConnectionStyle::Inherited
+        }
+        Ok(board_types::ZoneConnectionStyle::ZCS_NONE) => ObservedZoneConnectionStyle::None,
+        Ok(board_types::ZoneConnectionStyle::ZCS_THERMAL) => ObservedZoneConnectionStyle::Thermal,
+        Ok(board_types::ZoneConnectionStyle::ZCS_FULL) => ObservedZoneConnectionStyle::Full,
+        Ok(board_types::ZoneConnectionStyle::ZCS_PTH_THERMAL) => {
+            ObservedZoneConnectionStyle::PlatedThroughHoleThermal
+        }
+        Err(_) => {
+            return Err(IpcError::InvalidObservedRouting(
+                "zone connection style is unknown",
+            ));
+        }
+    };
+    let thermal_spokes = value
+        .thermal_spokes
+        .as_ref()
+        .map(|spokes| {
+            let width = spokes
+                .width
+                .as_ref()
+                .ok_or(IpcError::InvalidObservedRouting("thermal width is missing"))?;
+            let angle = spokes
+                .angle
+                .as_ref()
+                .ok_or(IpcError::InvalidObservedRouting("thermal angle is missing"))?;
+            let gap = spokes
+                .gap
+                .as_ref()
+                .ok_or(IpcError::InvalidObservedRouting("thermal gap is missing"))?;
+            if width.value_nm < 0 {
+                return Err(IpcError::InvalidObservedRouting(
+                    "thermal width must not be negative",
+                ));
+            }
+            if gap.value_nm < 0 {
+                return Err(IpcError::InvalidObservedRouting(
+                    "thermal gap must not be negative",
+                ));
+            }
+            Ok::<ObservedThermalSpokeSettings, IpcError>(ObservedThermalSpokeSettings {
+                width_nm: width.value_nm,
+                angle_degrees: finite_angle(angle.value_degrees)?,
+                gap_nm: gap.value_nm,
+            })
+        })
+        .transpose()?;
+    Ok(ObservedZoneConnectionSettings {
+        style,
+        thermal_spokes,
+    })
+}
+
+fn observed_post_machining(
+    value: &board_types::PostMachiningProperties,
+) -> Result<ObservedPostMachiningProperties, IpcError> {
+    let mode = match value.mode.enum_value() {
+        Ok(board_types::ViaDrillPostMachiningMode::VDPM_UNKNOWN) => {
+            ObservedViaDrillPostMachiningMode::Unknown
+        }
+        Ok(board_types::ViaDrillPostMachiningMode::VDPM_NOT_POST_MACHINED) => {
+            ObservedViaDrillPostMachiningMode::NotPostMachined
+        }
+        Ok(board_types::ViaDrillPostMachiningMode::VDPM_COUNTERBORE) => {
+            ObservedViaDrillPostMachiningMode::Counterbore
+        }
+        Ok(board_types::ViaDrillPostMachiningMode::VDPM_COUNTERSINK) => {
+            ObservedViaDrillPostMachiningMode::Countersink
+        }
+        Err(_) => {
+            return Err(IpcError::InvalidObservedRouting(
+                "post-machining mode is unknown",
+            ));
+        }
+    };
+    Ok(ObservedPostMachiningProperties {
+        mode,
+        size: value.size,
+        depth: value.depth,
+        angle: value.angle,
+    })
+}
+
+fn routing_mask_mode(
+    value: &protobuf::EnumOrUnknown<board_types::SolderMaskMode>,
+) -> Result<ObservedSolderMaskMode, IpcError> {
+    match value.enum_value() {
+        Ok(board_types::SolderMaskMode::SMM_UNKNOWN) => Ok(ObservedSolderMaskMode::Unknown),
+        Ok(board_types::SolderMaskMode::SMM_MASKED) => Ok(ObservedSolderMaskMode::Masked),
+        Ok(board_types::SolderMaskMode::SMM_UNMASKED) => Ok(ObservedSolderMaskMode::Unmasked),
+        Ok(board_types::SolderMaskMode::SMM_FROM_DESIGN_RULES) => {
+            Ok(ObservedSolderMaskMode::FromDesignRules)
+        }
+        Err(_) => Err(IpcError::InvalidObservedRouting("mask mode is unknown")),
+    }
+}
+fn routing_paste_mode(
+    value: &protobuf::EnumOrUnknown<board_types::SolderPasteMode>,
+) -> Result<ObservedSolderPasteMode, IpcError> {
+    match value.enum_value() {
+        Ok(board_types::SolderPasteMode::SPM_UNKNOWN) => Ok(ObservedSolderPasteMode::Unknown),
+        Ok(board_types::SolderPasteMode::SPM_PASTE) => Ok(ObservedSolderPasteMode::Paste),
+        Ok(board_types::SolderPasteMode::SPM_NO_PASTE) => Ok(ObservedSolderPasteMode::NoPaste),
+        Ok(board_types::SolderPasteMode::SPM_FROM_DESIGN_RULES) => {
+            Ok(ObservedSolderPasteMode::FromDesignRules)
+        }
+        Err(_) => Err(IpcError::InvalidObservedRouting("paste mode is unknown")),
+    }
+}
+fn routing_plugging(
+    value: &protobuf::EnumOrUnknown<board_types::ViaPluggingMode>,
+) -> Result<ObservedViaPluggingMode, IpcError> {
+    match value.enum_value() {
+        Ok(board_types::ViaPluggingMode::VPM_UNKNOWN) => Ok(ObservedViaPluggingMode::Unknown),
+        Ok(board_types::ViaPluggingMode::VPM_PLUGGED) => Ok(ObservedViaPluggingMode::Plugged),
+        Ok(board_types::ViaPluggingMode::VPM_UNPLUGGED) => Ok(ObservedViaPluggingMode::Unplugged),
+        Ok(board_types::ViaPluggingMode::VPM_FROM_DESIGN_RULES) => {
+            Ok(ObservedViaPluggingMode::FromDesignRules)
+        }
+        Err(_) => Err(IpcError::InvalidObservedRouting("plugging mode is unknown")),
+    }
+}
+fn routing_covering(
+    value: &protobuf::EnumOrUnknown<board_types::ViaCoveringMode>,
+) -> Result<ObservedViaCoveringMode, IpcError> {
+    match value.enum_value() {
+        Ok(board_types::ViaCoveringMode::VCM_UNKNOWN) => Ok(ObservedViaCoveringMode::Unknown),
+        Ok(board_types::ViaCoveringMode::VCM_COVERED) => Ok(ObservedViaCoveringMode::Covered),
+        Ok(board_types::ViaCoveringMode::VCM_UNCOVERED) => Ok(ObservedViaCoveringMode::Uncovered),
+        Ok(board_types::ViaCoveringMode::VCM_FROM_DESIGN_RULES) => {
+            Ok(ObservedViaCoveringMode::FromDesignRules)
+        }
+        Err(_) => Err(IpcError::InvalidObservedRouting("covering mode is unknown")),
+    }
+}
+
+fn finite_angle(value: f64) -> Result<f64, IpcError> {
+    if !value.is_finite() {
+        return Err(IpcError::InvalidObservedRouting("angle must be finite"));
+    }
+    Ok(if value == 0.0 { 0.0 } else { value })
+}
+
+fn routing_ulr(
+    value: &protobuf::EnumOrUnknown<board_types::UnconnectedLayerRemoval>,
+) -> Result<ObservedUnconnectedLayerRemoval, IpcError> {
+    match value.enum_value() {
+        Ok(board_types::UnconnectedLayerRemoval::ULR_UNKNOWN) => {
+            Ok(ObservedUnconnectedLayerRemoval::Unknown)
+        }
+        Ok(board_types::UnconnectedLayerRemoval::ULR_KEEP) => {
+            Ok(ObservedUnconnectedLayerRemoval::Keep)
+        }
+        Ok(board_types::UnconnectedLayerRemoval::ULR_REMOVE) => {
+            Ok(ObservedUnconnectedLayerRemoval::Remove)
+        }
+        Ok(board_types::UnconnectedLayerRemoval::ULR_REMOVE_EXCEPT_START_AND_END) => {
+            Ok(ObservedUnconnectedLayerRemoval::RemoveExceptStartAndEnd)
+        }
+        Ok(board_types::UnconnectedLayerRemoval::ULR_START_END_ONLY) => {
+            Ok(ObservedUnconnectedLayerRemoval::StartEndOnly)
+        }
+        Err(_) => Err(IpcError::InvalidObservedRouting(
+            "unconnected layer removal is unknown",
+        )),
+    }
+}
+
+fn observed_via_drill(drill: &board_types::DrillProperties) -> Result<ObservedViaDrill, IpcError> {
+    let start_layer = routing_copper_layer(&drill.start_layer)?;
+    let end_layer = routing_copper_layer(&drill.end_layer)?;
+    if start_layer >= end_layer {
+        return Err(IpcError::InvalidObservedRouting(
+            "via drill layers must run from front toward back",
+        ));
+    }
+    let diameter = drill
+        .diameter
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedRouting(
+            "via drill diameter is missing",
+        ))?;
+    if diameter.x_nm <= 0 || diameter.y_nm <= 0 {
+        return Err(IpcError::InvalidObservedRouting(
+            "via drill diameter must be positive",
+        ));
+    }
+    let shape = match drill.shape.enum_value() {
+        Ok(board_types::DrillShape::DS_UNKNOWN) => ObservedDrillShape::Unknown,
+        Ok(board_types::DrillShape::DS_CIRCLE) => ObservedDrillShape::Circle,
+        Ok(board_types::DrillShape::DS_OBLONG) => ObservedDrillShape::Oblong,
+        Ok(board_types::DrillShape::DS_UNDEFINED) => ObservedDrillShape::Undefined,
+        Err(_) => return Err(IpcError::InvalidObservedRouting("drill shape is unknown")),
+    };
+    let capping = routing_capping(&drill.capped)?;
+    let filling = routing_filling(&drill.filled)?;
+    Ok(ObservedViaDrill {
+        start_layer,
+        end_layer,
+        size_x_nm: diameter.x_nm,
+        size_y_nm: diameter.y_nm,
+        shape,
+        capping,
+        filling,
+    })
+}
+
+fn routing_capping(
+    value: &protobuf::EnumOrUnknown<board_types::ViaDrillCappingMode>,
+) -> Result<ObservedViaDrillCappingMode, IpcError> {
+    match value.enum_value() {
+        Ok(board_types::ViaDrillCappingMode::VDCM_UNKNOWN) => {
+            Ok(ObservedViaDrillCappingMode::Unknown)
+        }
+        Ok(board_types::ViaDrillCappingMode::VDCM_CAPPED) => {
+            Ok(ObservedViaDrillCappingMode::Capped)
+        }
+        Ok(board_types::ViaDrillCappingMode::VDCM_UNCAPPED) => {
+            Ok(ObservedViaDrillCappingMode::Uncapped)
+        }
+        Ok(board_types::ViaDrillCappingMode::VDCM_FROM_DESIGN_RULES) => {
+            Ok(ObservedViaDrillCappingMode::FromDesignRules)
+        }
+        Err(_) => Err(IpcError::InvalidObservedRouting("drill capping is unknown")),
+    }
+}
+fn routing_filling(
+    value: &protobuf::EnumOrUnknown<board_types::ViaDrillFillingMode>,
+) -> Result<ObservedViaDrillFillingMode, IpcError> {
+    match value.enum_value() {
+        Ok(board_types::ViaDrillFillingMode::VDFM_UNKNOWN) => {
+            Ok(ObservedViaDrillFillingMode::Unknown)
+        }
+        Ok(board_types::ViaDrillFillingMode::VDFM_FILLED) => {
+            Ok(ObservedViaDrillFillingMode::Filled)
+        }
+        Ok(board_types::ViaDrillFillingMode::VDFM_UNFILLED) => {
+            Ok(ObservedViaDrillFillingMode::Unfilled)
+        }
+        Ok(board_types::ViaDrillFillingMode::VDFM_FROM_DESIGN_RULES) => {
+            Ok(ObservedViaDrillFillingMode::FromDesignRules)
+        }
+        Err(_) => Err(IpcError::InvalidObservedRouting("drill filling is unknown")),
+    }
+}
+
+fn board_routing_from_response(
+    response: &editor_commands::GetItemsResponse,
+) -> Result<ObservedBoardRoutingItems, IpcError> {
+    if response.status.enum_value() != Ok(base_types::ItemRequestStatus::IRS_OK) {
+        return Err(IpcError::Status(
+            ApiStatusCode::AS_BAD_REQUEST,
+            format!("get items status: {:?}", response.status),
+        ));
+    }
+    let mut tracks = Vec::new();
+    let mut vias = Vec::new();
+    for item in &response.items {
+        match item.type_url.as_str() {
+            "type.googleapis.com/kiapi.board.types.Track" => {
+                tracks.push(observed_track(item, false)?)
+            }
+            "type.googleapis.com/kiapi.board.types.Arc" => tracks.push(observed_track(item, true)?),
+            "type.googleapis.com/kiapi.board.types.Via" => vias.push(observed_via(item)?),
+            _ => {
+                return Err(IpcError::UnexpectedMessageType {
+                    expected: "Track, Arc, or Via",
+                    actual: item.type_url.clone(),
+                });
+            }
+        }
+    }
+    tracks.sort_by(|a, b| a.source_uuid.cmp(&b.source_uuid));
+    vias.sort_by(|a, b| a.source_uuid.cmp(&b.source_uuid));
+    if tracks
+        .windows(2)
+        .any(|p| p[0].source_uuid == p[1].source_uuid)
+        || vias
+            .windows(2)
+            .any(|p| p[0].source_uuid == p[1].source_uuid)
+    {
+        return Err(IpcError::InvalidObservedRouting(
+            "routing identities must be unique",
+        ));
+    }
+    let mut ti = 0;
+    let mut vi = 0;
+    while ti < tracks.len() && vi < vias.len() {
+        match tracks[ti].source_uuid.cmp(&vias[vi].source_uuid) {
+            std::cmp::Ordering::Less => ti += 1,
+            std::cmp::Ordering::Greater => vi += 1,
+            std::cmp::Ordering::Equal => {
+                return Err(IpcError::InvalidObservedRouting(
+                    "tracks and vias must have unique source identities",
+                ));
+            }
+        }
+    }
+    Ok(ObservedBoardRoutingItems { tracks, vias })
+}
+
+fn observed_track(item: &Any, arc: bool) -> Result<ObservedTrack, IpcError> {
+    if arc {
+        let value = board_types::Arc::parse_from_bytes(&item.value)
+            .map_err(|_| IpcError::MalformedEnvelope)?;
+        let start = routing_point(value.start.as_ref(), "arc start is missing")?;
+        let mid = routing_point(value.mid.as_ref(), "arc midpoint is missing")?;
+        let end = routing_point(value.end.as_ref(), "arc end is missing")?;
+        if start == mid || mid == end || start == end {
+            return Err(IpcError::InvalidObservedRouting(
+                "arc points must be distinct",
+            ));
+        }
+        let cross = (i128::from(mid.x_nm) - i128::from(start.x_nm))
+            * (i128::from(end.y_nm) - i128::from(start.y_nm))
+            - (i128::from(mid.y_nm) - i128::from(start.y_nm))
+                * (i128::from(end.x_nm) - i128::from(start.x_nm));
+        if cross == 0 {
+            return Err(IpcError::InvalidObservedRouting(
+                "arc points must not be collinear",
+            ));
+        }
+        observed_track_parts(
+            value.id.as_ref(),
+            ObservedTrackGeometry::Arc { start, mid, end },
+            value.width.as_ref(),
+            &value.layer,
+            &value.locked,
+            value.net.as_ref(),
+        )
+    } else {
+        let value = board_types::Track::parse_from_bytes(&item.value)
+            .map_err(|_| IpcError::MalformedEnvelope)?;
+        let start = routing_point(value.start.as_ref(), "track start is missing")?;
+        let end = routing_point(value.end.as_ref(), "track end is missing")?;
+        if start == end {
+            return Err(IpcError::InvalidObservedRouting(
+                "track endpoints must differ",
+            ));
+        }
+        observed_track_parts(
+            value.id.as_ref(),
+            ObservedTrackGeometry::Segment { start, end },
+            value.width.as_ref(),
+            &value.layer,
+            &value.locked,
+            value.net.as_ref(),
+        )
+    }
+}
+
+fn observed_track_parts(
+    id: Option<&base_types::KIID>,
+    geometry: ObservedTrackGeometry,
+    width: Option<&base_types::Distance>,
+    layer: &protobuf::EnumOrUnknown<board_types::BoardLayer>,
+    locked: &protobuf::EnumOrUnknown<base_types::LockedState>,
+    net: Option<&board_types::Net>,
+) -> Result<ObservedTrack, IpcError> {
+    let source_uuid = routing_kiid(id)?;
+    let width_nm = width
+        .ok_or(IpcError::InvalidObservedRouting("track width is missing"))?
+        .value_nm;
+    if width_nm <= 0 {
+        return Err(IpcError::InvalidObservedRouting(
+            "track width must be positive",
+        ));
+    }
+    Ok(ObservedTrack {
+        source_uuid,
+        geometry,
+        width_nm,
+        layer: routing_copper_layer(layer)?,
+        lock_state: routing_lock_state(locked)?,
+        net: net.map(observed_routing_net),
+    })
+}
+
+fn routing_point(
+    point: Option<&base_types::Vector2>,
+    message: &'static str,
+) -> Result<ObservedRoutingPoint, IpcError> {
+    let point = point.ok_or(IpcError::InvalidObservedRouting(message))?;
+    Ok(ObservedRoutingPoint {
+        x_nm: point.x_nm,
+        y_nm: point.y_nm,
+    })
 }
 
 fn board_graphics_from_response(
@@ -2595,6 +3491,25 @@ mod tests {
     }
 
     #[test]
+    fn routing_copper_layer_supports_all_inner_copper_layers() {
+        for (layer, expected) in [
+            (
+                board_types::BoardLayer::BL_In29_Cu,
+                ObservedBoardLayer::InnerCopper(29),
+            ),
+            (
+                board_types::BoardLayer::BL_In30_Cu,
+                ObservedBoardLayer::InnerCopper(30),
+            ),
+        ] {
+            assert_eq!(
+                routing_copper_layer(&protobuf::EnumOrUnknown::new(layer)).unwrap(),
+                expected
+            );
+        }
+    }
+
+    #[test]
     fn pcb_item_probe_encodes_all_fixed_types_and_decodes_each_payload() {
         let items = vec![
             pcb_item_any(
@@ -3067,6 +3982,314 @@ mod tests {
             }
         );
         assert_eq!(documents[2].project_name, None);
+    }
+
+    fn routing_track_item(id: &str) -> Any {
+        let track = board_types::Track {
+            id: MessageField::some(base_types::KIID {
+                value: id.to_owned(),
+                ..Default::default()
+            }),
+            start: MessageField::some(base_types::Vector2 {
+                x_nm: 1,
+                y_nm: 2,
+                ..Default::default()
+            }),
+            end: MessageField::some(base_types::Vector2 {
+                x_nm: 3,
+                y_nm: 4,
+                ..Default::default()
+            }),
+            width: MessageField::some(base_types::Distance {
+                value_nm: 100,
+                ..Default::default()
+            }),
+            layer: protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_In30_Cu),
+            net: MessageField::some(board_types::Net {
+                name: "GND".to_owned(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        pcb_item_any(
+            "type.googleapis.com/kiapi.board.types.Track",
+            track.write_to_bytes().unwrap(),
+        )
+    }
+
+    fn routing_arc_item(id: &str) -> Any {
+        let arc = board_types::Arc {
+            id: MessageField::some(base_types::KIID {
+                value: id.to_owned(),
+                ..Default::default()
+            }),
+            start: MessageField::some(base_types::Vector2 {
+                x_nm: 0,
+                y_nm: 0,
+                ..Default::default()
+            }),
+            mid: MessageField::some(base_types::Vector2 {
+                x_nm: 1,
+                y_nm: 2,
+                ..Default::default()
+            }),
+            end: MessageField::some(base_types::Vector2 {
+                x_nm: 3,
+                y_nm: 0,
+                ..Default::default()
+            }),
+            width: MessageField::some(base_types::Distance {
+                value_nm: 200,
+                ..Default::default()
+            }),
+            layer: protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Cu),
+            ..Default::default()
+        };
+        pcb_item_any(
+            "type.googleapis.com/kiapi.board.types.Arc",
+            arc.write_to_bytes().unwrap(),
+        )
+    }
+
+    fn routing_via_item(id: &str) -> Any {
+        let board_layer = |value| protobuf::EnumOrUnknown::new(value);
+        let pad_shape = |value| protobuf::EnumOrUnknown::new(value);
+        let pad_stack_type = |value| protobuf::EnumOrUnknown::new(value);
+        let shape = board_types::PadStackLayer {
+            layer: board_layer(board_types::BoardLayer::BL_F_Cu),
+            shape: pad_shape(board_types::PadStackShape::PSS_CIRCLE),
+            size: MessageField::some(base_types::Vector2 {
+                x_nm: 500,
+                y_nm: 500,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let drill = board_types::DrillProperties {
+            start_layer: board_layer(board_types::BoardLayer::BL_F_Cu),
+            end_layer: board_layer(board_types::BoardLayer::BL_B_Cu),
+            diameter: MessageField::some(base_types::Vector2 {
+                x_nm: 200,
+                y_nm: 200,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let via = board_types::Via {
+            id: MessageField::some(base_types::KIID {
+                value: id.to_owned(),
+                ..Default::default()
+            }),
+            position: MessageField::some(base_types::Vector2 {
+                x_nm: 10,
+                y_nm: 20,
+                ..Default::default()
+            }),
+            pad_stack: MessageField::some(board_types::PadStack {
+                type_: pad_stack_type(board_types::PadStackType::PST_NORMAL),
+                layers: vec![
+                    board_layer(board_types::BoardLayer::BL_F_Cu),
+                    board_layer(board_types::BoardLayer::BL_B_Cu),
+                ],
+                copper_layers: vec![shape],
+                drill: MessageField::some(drill),
+                ..Default::default()
+            }),
+            net: MessageField::some(board_types::Net {
+                name: "".to_owned(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        pcb_item_any(
+            "type.googleapis.com/kiapi.board.types.Via",
+            via.write_to_bytes().unwrap(),
+        )
+    }
+
+    fn routing_client(response: ApiResponse) -> KiCadClient<FakeTransport> {
+        let config = ClientConfig::new("ipc:///tmp/kicad/api.sock", "test-client").unwrap();
+        KiCadClient::new(
+            FakeTransport {
+                responses: vec![response],
+                requests: Vec::new(),
+            },
+            config,
+        )
+    }
+
+    #[test]
+    fn get_board_routing_uses_exact_request_and_maps_items() {
+        let mut client = routing_client(get_items_response(
+            "new",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![
+                routing_via_item("via"),
+                routing_arc_item("arc"),
+                routing_track_item("track"),
+            ],
+        ));
+        let routing = client.get_board_routing("main.kicad_pcb").unwrap();
+        assert_eq!(
+            routing
+                .tracks
+                .iter()
+                .map(|item| item.source_uuid.as_str())
+                .collect::<Vec<_>>(),
+            ["arc", "track"]
+        );
+        assert_eq!(routing.vias[0].source_uuid, "via");
+        assert!(matches!(
+            routing.tracks[0].geometry,
+            ObservedTrackGeometry::Arc { .. }
+        ));
+        assert_eq!(routing.tracks[1].layer, ObservedBoardLayer::InnerCopper(30));
+        assert_eq!(routing.tracks[1].net.as_ref().unwrap().name, "GND");
+        assert_eq!(routing.vias[0].net.as_ref().unwrap().name, "");
+        assert!(routing.vias[0].pad_stack.primary_drill.is_some());
+        assert_eq!(
+            routing.vias[0].pad_stack.layers,
+            vec![
+                ObservedBoardLayer::FrontCopper,
+                ObservedBoardLayer::BackCopper
+            ]
+        );
+        let command = editor_commands::GetItems::parse_from_bytes(
+            &client.transport.requests[0].message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        assert_eq!(
+            command.types,
+            [
+                protobuf::EnumOrUnknown::new(enums::KiCadObjectType::KOT_PCB_TRACE),
+                protobuf::EnumOrUnknown::new(enums::KiCadObjectType::KOT_PCB_ARC),
+                protobuf::EnumOrUnknown::new(enums::KiCadObjectType::KOT_PCB_VIA),
+            ]
+        );
+        assert_eq!(
+            command
+                .header
+                .as_ref()
+                .unwrap()
+                .document
+                .as_ref()
+                .unwrap()
+                .board_filename(),
+            "main.kicad_pcb"
+        );
+        assert_eq!(client.token.as_ref().unwrap().as_str(), "new");
+    }
+
+    #[test]
+    fn get_board_routing_rejects_bad_responses_without_changing_token() {
+        let cases = vec![
+            get_items_response(
+                "new",
+                base_types::ItemRequestStatus::IRS_DOCUMENT_NOT_FOUND,
+                vec![],
+            ),
+            get_items_response(
+                "new",
+                base_types::ItemRequestStatus::IRS_OK,
+                vec![pcb_item_any("wrong", vec![])],
+            ),
+            get_items_response(
+                "new",
+                base_types::ItemRequestStatus::IRS_OK,
+                vec![routing_track_item("same"), routing_via_item("same")],
+            ),
+        ];
+        for response in cases {
+            let mut client = routing_client(response);
+            client.token = Some(InstanceToken::new("old").unwrap());
+            assert!(client.get_board_routing("main.kicad_pcb").is_err());
+            assert_eq!(client.token.as_ref().unwrap().as_str(), "old");
+        }
+    }
+
+    #[test]
+    fn routing_arc_extreme_coordinates_do_not_overflow() {
+        let mut item = routing_arc_item("extreme");
+        let mut arc = board_types::Arc::parse_from_bytes(&item.value).unwrap();
+        arc.start.as_mut().unwrap().x_nm = i64::MIN;
+        arc.mid.as_mut().unwrap().x_nm = 0;
+        arc.end.as_mut().unwrap().x_nm = i64::MAX;
+        item.value = arc.write_to_bytes().unwrap();
+        let mut client = routing_client(get_items_response(
+            "new",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![item],
+        ));
+        assert!(client.get_board_routing("main.kicad_pcb").is_ok());
+    }
+
+    #[test]
+    fn via_drills_and_copper_shapes_require_canonical_valid_layers() {
+        let mut item = routing_via_item("via");
+        let mut via = board_types::Via::parse_from_bytes(&item.value).unwrap();
+        {
+            let stack = via.pad_stack.as_mut().unwrap();
+            stack.drill.as_mut().unwrap().end_layer =
+                protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_In1_Cu);
+        }
+        item.value = via.write_to_bytes().unwrap();
+        let mut client = routing_client(get_items_response(
+            "new",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![item.clone()],
+        ));
+        client.token = Some(InstanceToken::new("old").unwrap());
+        assert!(client.get_board_routing("main.kicad_pcb").is_err());
+        assert_eq!(client.token.as_ref().unwrap().as_str(), "old");
+        {
+            let stack = via.pad_stack.as_mut().unwrap();
+            stack.drill.as_mut().unwrap().start_layer =
+                protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Cu);
+            stack.copper_layers.push(stack.copper_layers[0].clone());
+        }
+        item.value = via.write_to_bytes().unwrap();
+        let mut client = routing_client(get_items_response(
+            "new",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![item],
+        ));
+        assert!(client.get_board_routing("main.kicad_pcb").is_err());
+    }
+
+    #[test]
+    fn get_board_routing_rejects_negative_thermal_dimensions_without_changing_token() {
+        for negative_width in [true, false] {
+            let mut item = routing_via_item("via");
+            let mut via = board_types::Via::parse_from_bytes(&item.value).unwrap();
+            via.pad_stack.as_mut().unwrap().zone_settings =
+                MessageField::some(board_types::ZoneConnectionSettings {
+                    zone_connection: protobuf::EnumOrUnknown::new(
+                        board_types::ZoneConnectionStyle::ZCS_THERMAL,
+                    ),
+                    thermal_spokes: MessageField::some(board_types::ThermalSpokeSettings {
+                        width: MessageField::some(base_types::Distance {
+                            value_nm: if negative_width { -1 } else { 1 },
+                            ..Default::default()
+                        }),
+                        angle: MessageField::some(base_types::Angle::default()),
+                        gap: MessageField::some(base_types::Distance {
+                            value_nm: if negative_width { 1 } else { -1 },
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                });
+            item.value = via.write_to_bytes().unwrap();
+            let mut client = routing_client(get_items_response(
+                "new",
+                base_types::ItemRequestStatus::IRS_OK,
+                vec![item],
+            ));
+            client.token = Some(InstanceToken::new("old").unwrap());
+            assert!(client.get_board_routing("main.kicad_pcb").is_err());
+            assert_eq!(client.token.as_ref().unwrap().as_str(), "old");
+        }
     }
 
     #[test]

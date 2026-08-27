@@ -457,6 +457,44 @@ impl<'de> Deserialize<'de> for FiniteRatio {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExactAngleDegrees(u64);
+
+impl ExactAngleDegrees {
+    pub fn new(value: f64) -> Result<Self, ModelError> {
+        if !value.is_finite() {
+            return Err(ModelError::InvalidRoutingObservation(
+                "protobuf angle degrees must be finite",
+            ));
+        }
+        let value = if value == 0.0 { 0.0 } else { value };
+        Ok(Self(value.to_bits()))
+    }
+
+    pub fn as_f64(self) -> f64 {
+        f64::from_bits(self.0)
+    }
+}
+
+impl Serialize for ExactAngleDegrees {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_f64(self.as_f64())
+    }
+}
+
+impl<'de> Deserialize<'de> for ExactAngleDegrees {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = f64::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PadCopperShape {
     pub layer: BoardLayer,
@@ -755,6 +793,557 @@ impl ObservedBoardFootprints {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ObservedTrackGeometry {
+    Segment {
+        start: Coordinate,
+        end: Coordinate,
+    },
+    Arc {
+        start: Coordinate,
+        mid: Coordinate,
+        end: Coordinate,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedRoutingNet {
+    pub net_id: Option<StableId>,
+    pub code: Option<i32>,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedTrack {
+    pub track_id: StableId,
+    pub source_uuid: StableId,
+    pub geometry: ObservedTrackGeometry,
+    pub width_nm: i64,
+    pub layer: BoardLayer,
+    pub lock_state: LockState,
+    pub net: Option<ObservedRoutingNet>,
+    pub observed_revision: RevisionDigest,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ViaType {
+    Unknown,
+    Through,
+    BlindBuried,
+    Micro,
+    Blind,
+    Buried,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum UnconnectedLayerRemoval {
+    Unknown,
+    Keep,
+    Remove,
+    RemoveExceptStartAndEnd,
+    StartEndOnly,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ViaDrillCappingMode {
+    Unknown,
+    Capped,
+    Uncapped,
+    FromDesignRules,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ViaDrillFillingMode {
+    Unknown,
+    Filled,
+    Unfilled,
+    FromDesignRules,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedViaDrill {
+    pub start_layer: BoardLayer,
+    pub end_layer: BoardLayer,
+    pub size: SizeNm,
+    pub shape: DrillShape,
+    pub capping: ViaDrillCappingMode,
+    pub filling: ViaDrillFillingMode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum SolderMaskMode {
+    Unknown,
+    Masked,
+    Unmasked,
+    FromDesignRules,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum SolderPasteMode {
+    Unknown,
+    Paste,
+    NoPaste,
+    FromDesignRules,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ViaPluggingMode {
+    Unknown,
+    Plugged,
+    Unplugged,
+    FromDesignRules,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ViaCoveringMode {
+    Unknown,
+    Covered,
+    Uncovered,
+    FromDesignRules,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedSolderMaskOverrides {
+    pub margin_nm: Option<i64>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedSolderPasteOverrides {
+    pub margin_nm: Option<i64>,
+    pub margin_ratio: Option<FiniteRatio>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedPadStackOuterLayer {
+    pub solder_mask_mode: SolderMaskMode,
+    pub solder_paste_mode: SolderPasteMode,
+    pub solder_mask_settings: Option<ObservedSolderMaskOverrides>,
+    pub solder_paste_settings: Option<ObservedSolderPasteOverrides>,
+    pub plugging_mode: ViaPluggingMode,
+    pub covering_mode: ViaCoveringMode,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ZoneConnectionStyle {
+    Unknown,
+    Inherited,
+    None,
+    Thermal,
+    Full,
+    PlatedThroughHoleThermal,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedThermalSpokeSettings {
+    pub width_nm: i64,
+    pub angle_degrees: ExactAngleDegrees,
+    pub gap_nm: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedZoneConnectionSettings {
+    pub style: ZoneConnectionStyle,
+    pub thermal_spokes: Option<ObservedThermalSpokeSettings>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ViaDrillPostMachiningMode {
+    Unknown,
+    NotPostMachined,
+    Counterbore,
+    Countersink,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedPostMachiningProperties {
+    pub mode: ViaDrillPostMachiningMode,
+    pub size: i32,
+    pub depth: i32,
+    pub angle: i32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedViaPadStack {
+    pub stack_type: PadStackType,
+    pub layers: Vec<BoardLayer>,
+    pub primary_drill: Option<ObservedViaDrill>,
+    pub unconnected_layer_removal: UnconnectedLayerRemoval,
+    pub copper_shapes: Vec<PadCopperShape>,
+    pub angle_degrees: ExactAngleDegrees,
+    pub front_outer_layers: Option<ObservedPadStackOuterLayer>,
+    pub back_outer_layers: Option<ObservedPadStackOuterLayer>,
+    pub zone_settings: Option<ObservedZoneConnectionSettings>,
+    pub secondary_drill: Option<ObservedViaDrill>,
+    pub tertiary_drill: Option<ObservedViaDrill>,
+    pub front_post_machining: Option<ObservedPostMachiningProperties>,
+    pub back_post_machining: Option<ObservedPostMachiningProperties>,
+}
+
+impl ObservedViaPadStack {
+    pub fn canonical(&self) -> Self {
+        let mut stack = self.clone();
+        stack.layers.sort();
+        stack.copper_shapes.sort_by_key(|shape| shape.layer);
+        stack
+    }
+
+    fn validate(&self) -> Result<(), ModelError> {
+        if self.layers.iter().any(|layer| !valid_copper_layer(*layer)) {
+            return Err(ModelError::InvalidRoutingObservation(
+                "via pad stack layers must be valid copper layers",
+            ));
+        }
+        if self.layers.windows(2).any(|pair| pair[0] >= pair[1]) {
+            return Err(ModelError::InvalidRoutingObservation(
+                "via pad stack layers must be unique and canonically ordered",
+            ));
+        }
+        for shape in &self.copper_shapes {
+            validate_routing_copper_shape(shape)?;
+            if !self.layers.contains(&shape.layer) {
+                return Err(ModelError::InvalidRoutingObservation(
+                    "via copper shape layer must belong to its pad stack",
+                ));
+            }
+        }
+        if self
+            .copper_shapes
+            .windows(2)
+            .any(|pair| pair[0].layer >= pair[1].layer)
+        {
+            return Err(ModelError::InvalidRoutingObservation(
+                "via copper shapes must have unique canonical layers",
+            ));
+        }
+        for drill in [
+            &self.primary_drill,
+            &self.secondary_drill,
+            &self.tertiary_drill,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if !self.layers.contains(&drill.start_layer) || !self.layers.contains(&drill.end_layer)
+            {
+                return Err(ModelError::InvalidRoutingObservation(
+                    "via drill layers must belong to its pad stack",
+                ));
+            }
+            drill.validate()?;
+        }
+        if let Some(settings) = &self.zone_settings
+            && let Some(thermal) = &settings.thermal_spokes
+            && (thermal.width_nm < 0 || thermal.gap_nm < 0)
+        {
+            return Err(ModelError::InvalidRoutingObservation(
+                "thermal spoke width and gap must not be negative",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl ObservedViaDrill {
+    fn validate(&self) -> Result<(), ModelError> {
+        if !valid_copper_layer(self.start_layer) || !valid_copper_layer(self.end_layer) {
+            return Err(ModelError::InvalidRoutingObservation(
+                "via drill span must use valid copper layers",
+            ));
+        }
+        if self.start_layer >= self.end_layer {
+            return Err(ModelError::InvalidRoutingObservation(
+                "via drill span must run from front toward back",
+            ));
+        }
+        if self.size.x_nm <= 0 || self.size.y_nm <= 0 {
+            return Err(ModelError::InvalidRoutingObservation(
+                "via drill dimensions must be positive",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedVia {
+    pub via_id: StableId,
+    pub source_uuid: StableId,
+    pub position: Coordinate,
+    pub pad_stack: ObservedViaPadStack,
+    pub lock_state: LockState,
+    pub net: Option<ObservedRoutingNet>,
+    pub via_type: ViaType,
+    pub observed_revision: RevisionDigest,
+}
+
+impl ObservedVia {
+    pub fn canonical(&self) -> Self {
+        let mut via = self.clone();
+        via.pad_stack = via.pad_stack.canonical();
+        via
+    }
+
+    fn validate(
+        &self,
+        board_id: &StableId,
+        observed_revision: &RevisionDigest,
+    ) -> Result<(), ModelError> {
+        if self.via_id != board_via_id(board_id, &self.source_uuid) {
+            return Err(ModelError::InvalidRoutingObservation(
+                "via id does not match its board and source identity",
+            ));
+        }
+        validate_board_coordinate(
+            &self.position,
+            "via position must use nanometres in board space",
+        )?;
+        self.pad_stack.validate()?;
+        validate_routing_net(board_id, self.net.as_ref())?;
+        if &self.observed_revision != observed_revision {
+            return Err(ModelError::InvalidRoutingObservation(
+                "via revision does not match its observation",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl ObservedTrack {
+    fn validate(
+        &self,
+        board_id: &StableId,
+        observed_revision: &RevisionDigest,
+    ) -> Result<(), ModelError> {
+        if self.track_id != board_track_id(board_id, &self.source_uuid) {
+            return Err(ModelError::InvalidRoutingObservation(
+                "track id does not match its board and source identity",
+            ));
+        }
+        let points = match &self.geometry {
+            ObservedTrackGeometry::Segment { start, end } => vec![start, end],
+            ObservedTrackGeometry::Arc { start, mid, end } => vec![start, mid, end],
+        };
+        for point in &points {
+            validate_board_coordinate(
+                point,
+                "track coordinates must use nanometres in board space",
+            )?;
+        }
+        if points
+            .iter()
+            .enumerate()
+            .any(|(index, point)| points[..index].contains(point))
+        {
+            return Err(ModelError::InvalidRoutingObservation(
+                "track geometry points must differ",
+            ));
+        }
+        if let ObservedTrackGeometry::Arc { start, mid, end } = &self.geometry {
+            let start_mid_x = i128::from(mid.x) - i128::from(start.x);
+            let start_mid_y = i128::from(mid.y) - i128::from(start.y);
+            let start_end_x = i128::from(end.x) - i128::from(start.x);
+            let start_end_y = i128::from(end.y) - i128::from(start.y);
+            if start_mid_x * start_end_y == start_mid_y * start_end_x {
+                return Err(ModelError::InvalidRoutingObservation(
+                    "track arc points must not be collinear",
+                ));
+            }
+        }
+        if self.width_nm <= 0 {
+            return Err(ModelError::InvalidRoutingObservation(
+                "track width must be positive",
+            ));
+        }
+        if !valid_copper_layer(self.layer) {
+            return Err(ModelError::InvalidRoutingObservation(
+                "track layer must be a valid copper layer",
+            ));
+        }
+        validate_routing_net(board_id, self.net.as_ref())?;
+        if &self.observed_revision != observed_revision {
+            return Err(ModelError::InvalidRoutingObservation(
+                "track revision does not match its observation",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedBoardRouting {
+    pub board_id: StableId,
+    pub tracks: Vec<ObservedTrack>,
+    pub vias: Vec<ObservedVia>,
+    pub observed_revision: RevisionDigest,
+}
+
+impl ObservedBoardRouting {
+    pub fn new(
+        board_id: StableId,
+        tracks: Vec<ObservedTrack>,
+        vias: Vec<ObservedVia>,
+    ) -> Result<Self, ModelError> {
+        let mut observation = Self {
+            board_id,
+            tracks,
+            vias,
+            observed_revision: zero_revision_digest(),
+        }
+        .canonical();
+        let revision = observation.content_revision()?;
+        observation.bind_revision(&revision);
+        observation.validate()?;
+        Ok(observation)
+    }
+
+    pub fn canonical(&self) -> Self {
+        let mut observation = self.clone();
+        observation
+            .tracks
+            .sort_by(|left, right| left.source_uuid.cmp(&right.source_uuid));
+        observation.vias = observation
+            .vias
+            .iter()
+            .map(ObservedVia::canonical)
+            .collect();
+        observation
+            .vias
+            .sort_by(|left, right| left.source_uuid.cmp(&right.source_uuid));
+        observation
+    }
+
+    pub fn validate(&self) -> Result<(), ModelError> {
+        if self
+            .tracks
+            .windows(2)
+            .any(|pair| pair[0].source_uuid >= pair[1].source_uuid)
+        {
+            return Err(ModelError::InvalidRoutingObservation(
+                "tracks must have unique canonical source identities",
+            ));
+        }
+        if self
+            .vias
+            .windows(2)
+            .any(|pair| pair[0].source_uuid >= pair[1].source_uuid)
+        {
+            return Err(ModelError::InvalidRoutingObservation(
+                "vias must have unique canonical source identities",
+            ));
+        }
+        let mut track_index = 0;
+        let mut via_index = 0;
+        while track_index < self.tracks.len() && via_index < self.vias.len() {
+            match self.tracks[track_index]
+                .source_uuid
+                .cmp(&self.vias[via_index].source_uuid)
+            {
+                std::cmp::Ordering::Less => track_index += 1,
+                std::cmp::Ordering::Greater => via_index += 1,
+                std::cmp::Ordering::Equal => {
+                    return Err(ModelError::InvalidRoutingObservation(
+                        "tracks and vias must have unique source identities",
+                    ));
+                }
+            }
+        }
+        if self.observed_revision != self.content_revision()? {
+            return Err(ModelError::InvalidRoutingObservation(
+                "routing observation revision does not match its content",
+            ));
+        }
+        for track in &self.tracks {
+            track.validate(&self.board_id, &self.observed_revision)?;
+        }
+        for via in &self.vias {
+            via.validate(&self.board_id, &self.observed_revision)?;
+        }
+        Ok(())
+    }
+
+    fn content_revision(&self) -> Result<RevisionDigest, ModelError> {
+        let mut payload = self.canonical();
+        payload.bind_revision(&zero_revision_digest());
+        let bytes = serde_json::to_vec(&(
+            "observed-board-routing-v1",
+            &payload.board_id,
+            &payload.tracks,
+            &payload.vias,
+        ))
+        .map_err(ModelError::Serialization)?;
+        Ok(RevisionDigest(hex::encode(Sha256::digest(bytes))))
+    }
+
+    fn bind_revision(&mut self, revision: &RevisionDigest) {
+        self.observed_revision = revision.clone();
+        for track in &mut self.tracks {
+            track.observed_revision = revision.clone();
+        }
+        for via in &mut self.vias {
+            via.observed_revision = revision.clone();
+        }
+    }
+}
+
+fn validate_board_coordinate(
+    coordinate: &Coordinate,
+    message: &'static str,
+) -> Result<(), ModelError> {
+    if coordinate.unit != Unit::Nanometres || coordinate.space != DocumentSpace::Board {
+        return Err(ModelError::InvalidRoutingObservation(message));
+    }
+    Ok(())
+}
+
+fn valid_copper_layer(layer: BoardLayer) -> bool {
+    matches!(
+        layer,
+        BoardLayer::FrontCopper | BoardLayer::BackCopper | BoardLayer::InnerCopper(1..=30)
+    )
+}
+
+fn validate_routing_copper_shape(shape: &PadCopperShape) -> Result<(), ModelError> {
+    if !valid_copper_layer(shape.layer) {
+        return Err(ModelError::InvalidRoutingObservation(
+            "via copper shape must use a valid copper layer",
+        ));
+    }
+    if shape.size.x_nm <= 0 || shape.size.y_nm <= 0 {
+        return Err(ModelError::InvalidRoutingObservation(
+            "via copper shape dimensions must be positive",
+        ));
+    }
+    if !matches!(
+        shape.custom_anchor_shape,
+        None | Some(PadShape::Circle | PadShape::Rectangle)
+    ) {
+        return Err(ModelError::InvalidRoutingObservation(
+            "custom via anchor must be a circle or rectangle",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_routing_net(
+    board_id: &StableId,
+    net: Option<&ObservedRoutingNet>,
+) -> Result<(), ModelError> {
+    let Some(net) = net else {
+        return Ok(());
+    };
+    let valid_identity = if net.name.is_empty() {
+        net.net_id.is_none()
+    } else {
+        net.net_id.as_ref() == Some(&board_net_id(board_id, &net.name))
+    };
+    if !valid_identity {
+        return Err(ModelError::InvalidRoutingObservation(
+            "routing net identity does not match its board and name",
+        ));
+    }
+    Ok(())
+}
+
 fn zero_revision_digest() -> RevisionDigest {
     RevisionDigest("0".repeat(64))
 }
@@ -782,6 +1371,14 @@ pub fn footprint_pad_id(placement_id: &StableId, source_uuid: &StableId) -> Stab
 
 pub fn board_net_id(board_id: &StableId, name: &str) -> StableId {
     derived_stable_id("board-net-v1", &[board_id.as_str(), name])
+}
+
+pub fn board_track_id(board_id: &StableId, source_uuid: &StableId) -> StableId {
+    derived_stable_id("board-track-v1", &[board_id.as_str(), source_uuid.as_str()])
+}
+
+pub fn board_via_id(board_id: &StableId, source_uuid: &StableId) -> StableId {
+    derived_stable_id("board-via-v1", &[board_id.as_str(), source_uuid.as_str()])
 }
 
 pub fn schematic_symbol_id(
@@ -948,6 +1545,8 @@ pub struct ProjectSnapshot {
     pub board: Board,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_footprints: Option<ObservedBoardFootprints>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_routing: Option<ObservedBoardRouting>,
 }
 
 impl ProjectSnapshot {
@@ -990,6 +1589,10 @@ impl ProjectSnapshot {
             .native_footprints
             .as_ref()
             .map(ObservedBoardFootprints::canonical);
+        snapshot.native_routing = snapshot
+            .native_routing
+            .as_ref()
+            .map(ObservedBoardRouting::canonical);
         snapshot
     }
 
@@ -999,6 +1602,14 @@ impl ProjectSnapshot {
             if self.board.document_id.as_ref() != Some(&native_footprints.board_id) {
                 return Err(ModelError::InvalidFootprintObservation(
                     "native footprint board identity does not match the project board",
+                ));
+            }
+        }
+        if let Some(native_routing) = &self.native_routing {
+            native_routing.canonical().validate()?;
+            if self.board.document_id.as_ref() != Some(&native_routing.board_id) {
+                return Err(ModelError::InvalidRoutingObservation(
+                    "native routing board identity does not match the project board",
                 ));
             }
         }
@@ -1062,6 +1673,7 @@ pub enum ModelError {
     SchematicArtifactDigestMismatch,
     InvalidBoardGraphic(&'static str),
     InvalidFootprintObservation(&'static str),
+    InvalidRoutingObservation(&'static str),
     Serialization(serde_json::Error),
 }
 
@@ -1086,9 +1698,9 @@ impl Display for ModelError {
             Self::SchematicArtifactDigestMismatch => {
                 formatter.write_str("schematic artifact revision digest does not match its inputs")
             }
-            Self::InvalidBoardGraphic(message) | Self::InvalidFootprintObservation(message) => {
-                formatter.write_str(message)
-            }
+            Self::InvalidBoardGraphic(message)
+            | Self::InvalidFootprintObservation(message)
+            | Self::InvalidRoutingObservation(message) => formatter.write_str(message),
             Self::Serialization(error) => {
                 write!(formatter, "snapshot serialization failed: {error}")
             }
@@ -1121,6 +1733,7 @@ mod tests {
             },
             board: Board::default(),
             native_footprints: None,
+            native_routing: None,
         }
     }
 
@@ -1881,6 +2494,438 @@ mod tests {
         assert_eq!(first, board_net_id(&id("board"), "GND"));
         assert_ne!(first, board_net_id(&id("other-board"), "GND"));
         assert_ne!(first, board_net_id(&id("board"), "+3V3"));
+    }
+
+    fn board_coordinate(x: i64, y: i64) -> Coordinate {
+        Coordinate {
+            x,
+            y,
+            unit: Unit::Nanometres,
+            space: DocumentSpace::Board,
+        }
+    }
+
+    fn observed_track(board_id: &StableId, source: &str, arc: bool) -> ObservedTrack {
+        let source_uuid = id(source);
+        ObservedTrack {
+            track_id: board_track_id(board_id, &source_uuid),
+            source_uuid,
+            geometry: if arc {
+                ObservedTrackGeometry::Arc {
+                    start: board_coordinate(0, 0),
+                    mid: board_coordinate(500_000, 250_000),
+                    end: board_coordinate(1_000_000, 0),
+                }
+            } else {
+                ObservedTrackGeometry::Segment {
+                    start: board_coordinate(0, 0),
+                    end: board_coordinate(1_000_000, 0),
+                }
+            },
+            width_nm: 250_000,
+            layer: BoardLayer::FrontCopper,
+            lock_state: LockState::Unlocked,
+            net: Some(ObservedRoutingNet {
+                net_id: Some(board_net_id(board_id, "GND")),
+                code: Some(1),
+                name: "GND".to_owned(),
+            }),
+            observed_revision: revision('a'),
+        }
+    }
+
+    fn via_drill() -> ObservedViaDrill {
+        ObservedViaDrill {
+            start_layer: BoardLayer::FrontCopper,
+            end_layer: BoardLayer::BackCopper,
+            size: SizeNm {
+                x_nm: 300_000,
+                y_nm: 350_000,
+            },
+            shape: DrillShape::Oblong,
+            capping: ViaDrillCappingMode::FromDesignRules,
+            filling: ViaDrillFillingMode::Filled,
+        }
+    }
+
+    fn observed_via(board_id: &StableId) -> ObservedVia {
+        let source_uuid = id("via-source");
+        ObservedVia {
+            via_id: board_via_id(board_id, &source_uuid),
+            source_uuid,
+            position: board_coordinate(500_000, 750_000),
+            pad_stack: ObservedViaPadStack {
+                stack_type: PadStackType::FrontInnerBack,
+                layers: vec![
+                    BoardLayer::BackCopper,
+                    BoardLayer::InnerCopper(1),
+                    BoardLayer::FrontCopper,
+                ],
+                primary_drill: Some(via_drill()),
+                unconnected_layer_removal: UnconnectedLayerRemoval::RemoveExceptStartAndEnd,
+                copper_shapes: vec![
+                    copper_shape(BoardLayer::BackCopper, PadShape::Circle),
+                    copper_shape(BoardLayer::InnerCopper(1), PadShape::Rectangle),
+                    copper_shape(BoardLayer::FrontCopper, PadShape::Circle),
+                ],
+                angle_degrees: ExactAngleDegrees::new(45.000_000_1).unwrap(),
+                front_outer_layers: Some(ObservedPadStackOuterLayer {
+                    solder_mask_mode: SolderMaskMode::FromDesignRules,
+                    solder_paste_mode: SolderPasteMode::NoPaste,
+                    solder_mask_settings: Some(ObservedSolderMaskOverrides {
+                        margin_nm: Some(-25_000),
+                    }),
+                    solder_paste_settings: Some(ObservedSolderPasteOverrides {
+                        margin_nm: Some(10_000),
+                        margin_ratio: Some(FiniteRatio::new(-0.1).unwrap()),
+                    }),
+                    plugging_mode: ViaPluggingMode::Plugged,
+                    covering_mode: ViaCoveringMode::Covered,
+                }),
+                back_outer_layers: Some(ObservedPadStackOuterLayer {
+                    solder_mask_mode: SolderMaskMode::Unmasked,
+                    solder_paste_mode: SolderPasteMode::FromDesignRules,
+                    solder_mask_settings: None,
+                    solder_paste_settings: None,
+                    plugging_mode: ViaPluggingMode::Unplugged,
+                    covering_mode: ViaCoveringMode::Uncovered,
+                }),
+                zone_settings: Some(ObservedZoneConnectionSettings {
+                    style: ZoneConnectionStyle::Thermal,
+                    thermal_spokes: Some(ObservedThermalSpokeSettings {
+                        width_nm: 200_000,
+                        angle_degrees: ExactAngleDegrees::new(45.000_000_2).unwrap(),
+                        gap_nm: 100_000,
+                    }),
+                }),
+                secondary_drill: Some(ObservedViaDrill {
+                    end_layer: BoardLayer::InnerCopper(1),
+                    ..via_drill()
+                }),
+                tertiary_drill: Some(ObservedViaDrill {
+                    start_layer: BoardLayer::InnerCopper(1),
+                    ..via_drill()
+                }),
+                front_post_machining: Some(ObservedPostMachiningProperties {
+                    mode: ViaDrillPostMachiningMode::Counterbore,
+                    size: 1,
+                    depth: 2,
+                    angle: 3,
+                }),
+                back_post_machining: Some(ObservedPostMachiningProperties {
+                    mode: ViaDrillPostMachiningMode::Countersink,
+                    size: -4,
+                    depth: 5,
+                    angle: 6,
+                }),
+            },
+            lock_state: LockState::Locked,
+            net: Some(ObservedRoutingNet {
+                net_id: Some(board_net_id(board_id, "GND")),
+                code: Some(1),
+                name: "GND".to_owned(),
+            }),
+            via_type: ViaType::BlindBuried,
+            observed_revision: revision('a'),
+        }
+    }
+
+    #[test]
+    fn routing_observation_preserves_track_variants_and_is_order_independent() {
+        let board_id = id("board");
+        let segment = observed_track(&board_id, "segment", false);
+        let arc = observed_track(&board_id, "arc", true);
+        let first =
+            ObservedBoardRouting::new(board_id.clone(), vec![segment.clone(), arc.clone()], vec![])
+                .unwrap();
+        let reversed =
+            ObservedBoardRouting::new(board_id.clone(), vec![arc, segment], vec![]).unwrap();
+        assert_eq!(first, reversed);
+        assert!(matches!(
+            first.tracks[0].geometry,
+            ObservedTrackGeometry::Arc { .. }
+        ));
+        assert_eq!(first.tracks[0].observed_revision, first.observed_revision);
+        assert_ne!(
+            board_track_id(&board_id, &id("segment")),
+            board_track_id(&id("other-board"), &id("segment"))
+        );
+    }
+
+    #[test]
+    fn complete_via_metadata_round_trips_and_binds_content_revision() {
+        let board_id = id("board");
+        let observation =
+            ObservedBoardRouting::new(board_id.clone(), vec![], vec![observed_via(&board_id)])
+                .unwrap();
+        let json = serde_json::to_value(&observation).unwrap();
+        assert_eq!(
+            json["vias"][0]["pad_stack"]["angle_degrees"],
+            serde_json::json!(45.000_000_1)
+        );
+        assert_eq!(
+            json["vias"][0]["pad_stack"]["zone_settings"]["thermal_spokes"]["angle_degrees"],
+            serde_json::json!(45.000_000_2)
+        );
+        let decoded: ObservedBoardRouting = serde_json::from_value(json).unwrap();
+        assert_eq!(decoded, observation);
+        assert_eq!(decoded.vias[0].observed_revision, decoded.observed_revision);
+        assert_eq!(
+            ExactAngleDegrees::new(-0.0).unwrap(),
+            ExactAngleDegrees::new(0.0).unwrap()
+        );
+        assert!(ExactAngleDegrees::new(f64::NAN).is_err());
+        assert!(ExactAngleDegrees::new(f64::INFINITY).is_err());
+        assert_ne!(
+            board_via_id(&board_id, &id("via-source")),
+            board_via_id(&id("other-board"), &id("via-source"))
+        );
+        let mut changed = observed_via(&board_id);
+        changed.pad_stack.angle_degrees = ExactAngleDegrees::new(45.000_000_2).unwrap();
+        let changed = ObservedBoardRouting::new(board_id, vec![], vec![changed]).unwrap();
+        assert_ne!(observation.observed_revision, changed.observed_revision);
+    }
+
+    #[test]
+    fn via_rejects_drill_layers_outside_pad_stack() {
+        let board_id = id("board");
+        let mut missing_start = observed_via(&board_id);
+        missing_start
+            .pad_stack
+            .primary_drill
+            .as_mut()
+            .unwrap()
+            .start_layer = BoardLayer::InnerCopper(2);
+        assert!(matches!(
+            ObservedBoardRouting::new(board_id.clone(), vec![], vec![missing_start]),
+            Err(ModelError::InvalidRoutingObservation(
+                "via drill layers must belong to its pad stack"
+            ))
+        ));
+
+        let mut missing_end = observed_via(&board_id);
+        missing_end
+            .pad_stack
+            .primary_drill
+            .as_mut()
+            .unwrap()
+            .end_layer = BoardLayer::InnerCopper(2);
+        assert!(matches!(
+            ObservedBoardRouting::new(board_id, vec![], vec![missing_end]),
+            Err(ModelError::InvalidRoutingObservation(
+                "via drill layers must belong to its pad stack"
+            ))
+        ));
+    }
+
+    #[test]
+    fn via_preserves_present_empty_net_and_zero_thermal_settings() {
+        let board_id = id("board");
+        let mut via = observed_via(&board_id);
+        via.net = Some(ObservedRoutingNet {
+            net_id: None,
+            code: Some(0),
+            name: String::new(),
+        });
+        let thermal = via
+            .pad_stack
+            .zone_settings
+            .as_mut()
+            .unwrap()
+            .thermal_spokes
+            .as_mut()
+            .unwrap();
+        thermal.width_nm = 0;
+        thermal.gap_nm = 0;
+        let observation = ObservedBoardRouting::new(board_id, vec![], vec![via]).unwrap();
+        let json = serde_json::to_value(&observation).unwrap();
+        assert_eq!(
+            json["vias"][0]["net"],
+            serde_json::json!({"net_id": null, "code": 0, "name": ""})
+        );
+        assert_eq!(
+            serde_json::from_value::<ObservedBoardRouting>(json).unwrap(),
+            observation
+        );
+    }
+
+    #[test]
+    fn solder_override_presence_round_trips_and_changes_revision() {
+        let board_id = id("board");
+        let revisions = [None, Some(None), Some(Some(0))].map(|state| {
+            let mut via = observed_via(&board_id);
+            via.pad_stack
+                .front_outer_layers
+                .as_mut()
+                .unwrap()
+                .solder_mask_settings =
+                state.map(|margin_nm| ObservedSolderMaskOverrides { margin_nm });
+            let observation =
+                ObservedBoardRouting::new(board_id.clone(), vec![], vec![via]).unwrap();
+            let json = serde_json::to_value(&observation).unwrap();
+            let settings =
+                &json["vias"][0]["pad_stack"]["front_outer_layers"]["solder_mask_settings"];
+            match state {
+                None => assert!(settings.is_null()),
+                Some(None) => assert_eq!(settings, &serde_json::json!({"margin_nm": null})),
+                Some(Some(0)) => assert_eq!(settings, &serde_json::json!({"margin_nm": 0})),
+                Some(Some(_)) => unreachable!(),
+            }
+            assert_eq!(
+                serde_json::from_value::<ObservedBoardRouting>(json).unwrap(),
+                observation
+            );
+            observation.observed_revision
+        });
+        assert_ne!(revisions[0], revisions[1]);
+        assert_ne!(revisions[1], revisions[2]);
+        assert_ne!(revisions[0], revisions[2]);
+    }
+
+    #[test]
+    fn routing_net_presence_code_and_name_round_trip_and_change_revision() {
+        let board_id = id("board");
+        let states = [
+            None,
+            Some(ObservedRoutingNet {
+                net_id: None,
+                code: None,
+                name: String::new(),
+            }),
+            Some(ObservedRoutingNet {
+                net_id: None,
+                code: Some(0),
+                name: String::new(),
+            }),
+            Some(ObservedRoutingNet {
+                net_id: Some(board_net_id(&board_id, "GND")),
+                code: Some(42),
+                name: "GND".to_owned(),
+            }),
+        ];
+        let revisions = states.map(|net| {
+            let mut track = observed_track(&board_id, "track", false);
+            track.net = net.clone();
+            let observation =
+                ObservedBoardRouting::new(board_id.clone(), vec![track], vec![]).unwrap();
+            let json = serde_json::to_value(&observation).unwrap();
+            assert_eq!(
+                &json["tracks"][0]["net"],
+                &serde_json::to_value(net).unwrap()
+            );
+            assert_eq!(
+                serde_json::from_value::<ObservedBoardRouting>(json).unwrap(),
+                observation
+            );
+            observation.observed_revision
+        });
+        for left in 0..revisions.len() {
+            for right in left + 1..revisions.len() {
+                assert_ne!(revisions[left], revisions[right]);
+            }
+        }
+    }
+
+    #[test]
+    fn routing_observation_rejects_forged_and_invalid_content() {
+        let board_id = id("board");
+        let track = observed_track(&board_id, "track", false);
+        assert!(
+            ObservedBoardRouting::new(board_id.clone(), vec![track.clone(), track.clone()], vec![])
+                .is_err()
+        );
+        let mut colliding_via = observed_via(&board_id);
+        colliding_via.source_uuid = track.source_uuid.clone();
+        colliding_via.via_id = board_via_id(&board_id, &colliding_via.source_uuid);
+        assert!(matches!(
+            ObservedBoardRouting::new(board_id.clone(), vec![track.clone()], vec![colliding_via]),
+            Err(ModelError::InvalidRoutingObservation(
+                "tracks and vias must have unique source identities"
+            ))
+        ));
+        let mut invalid = track.clone();
+        invalid.track_id = id("forged");
+        assert!(ObservedBoardRouting::new(board_id.clone(), vec![invalid], vec![]).is_err());
+        let mut invalid = track.clone();
+        invalid.net.as_mut().unwrap().net_id = Some(id("forged-net"));
+        assert!(ObservedBoardRouting::new(board_id.clone(), vec![invalid], vec![]).is_err());
+        let mut invalid = track.clone();
+        invalid.net.as_mut().unwrap().net_id = None;
+        assert!(ObservedBoardRouting::new(board_id.clone(), vec![invalid], vec![]).is_err());
+        let mut invalid = track.clone();
+        let net = invalid.net.as_mut().unwrap();
+        net.name.clear();
+        net.net_id = Some(board_net_id(&board_id, "GND"));
+        net.code = Some(42);
+        assert!(ObservedBoardRouting::new(board_id.clone(), vec![invalid], vec![]).is_err());
+        let mut invalid = track.clone();
+        invalid.width_nm = 0;
+        assert!(ObservedBoardRouting::new(board_id.clone(), vec![invalid], vec![]).is_err());
+        let mut invalid = track;
+        invalid.layer = BoardLayer::FrontMask;
+        assert!(ObservedBoardRouting::new(board_id.clone(), vec![invalid], vec![]).is_err());
+        let mut invalid = observed_track(&board_id, "arc", true);
+        invalid.geometry = ObservedTrackGeometry::Arc {
+            start: board_coordinate(0, 0),
+            mid: board_coordinate(1, 1),
+            end: board_coordinate(2, 2),
+        };
+        assert!(ObservedBoardRouting::new(board_id.clone(), vec![invalid], vec![]).is_err());
+        let valid =
+            ObservedBoardRouting::new(board_id.clone(), vec![], vec![observed_via(&board_id)])
+                .unwrap();
+        let mut forged = valid.clone();
+        forged.observed_revision = revision('f');
+        assert!(forged.validate().is_err());
+        let mut invalid = observed_via(&board_id);
+        invalid.via_id = id("forged");
+        assert!(ObservedBoardRouting::new(board_id.clone(), vec![], vec![invalid]).is_err());
+        let mut invalid = observed_via(&board_id);
+        invalid.pad_stack.layers.push(BoardLayer::FrontMask);
+        assert!(ObservedBoardRouting::new(board_id.clone(), vec![], vec![invalid]).is_err());
+        let mut invalid = observed_via(&board_id);
+        invalid.pad_stack.primary_drill.as_mut().unwrap().size.x_nm = 0;
+        assert!(ObservedBoardRouting::new(board_id, vec![], vec![invalid]).is_err());
+    }
+
+    #[test]
+    fn project_snapshot_native_routing_is_optional_board_bound_and_revision_visible() {
+        let old_json = serde_json::json!({
+            "project_id": "project", "kicad_version": "10.0.5", "capabilities": [],
+            "schematic": {"nets": [], "symbols": []}, "board": {"footprints": []}
+        });
+        let old: ProjectSnapshot = serde_json::from_value(old_json).unwrap();
+        assert_eq!(old.native_routing, None);
+        assert!(
+            serde_json::to_value(&old)
+                .unwrap()
+                .get("native_routing")
+                .is_none()
+        );
+        let board_id = id("board");
+        let routing = ObservedBoardRouting::new(
+            board_id.clone(),
+            vec![observed_track(&board_id, "track", false)],
+            vec![observed_via(&board_id)],
+        )
+        .unwrap();
+        let mut with_routing = snapshot(Vec::new());
+        with_routing.board.document_id = Some(board_id.clone());
+        with_routing.native_routing = Some(routing.clone());
+        assert!(with_routing.validate().is_ok());
+        assert_ne!(old.revision().unwrap(), with_routing.revision().unwrap());
+        let mut mismatched = with_routing.clone();
+        mismatched.board.document_id = Some(id("other-board"));
+        assert!(matches!(
+            mismatched.validate(),
+            Err(ModelError::InvalidRoutingObservation(
+                "native routing board identity does not match the project board"
+            ))
+        ));
+        let mut reordered = with_routing;
+        reordered.native_routing.as_mut().unwrap().tracks.reverse();
+        reordered.native_routing.as_mut().unwrap().vias.reverse();
+        assert_eq!(reordered.canonical().native_routing, Some(routing));
     }
 
     #[test]
