@@ -1,14 +1,21 @@
 use kicad_engine::{MAX_GRAPHIC_BOUNDING_AREA_NM2, MAX_GRAPHIC_SPAN_NM, OperationKind};
 use kicad_ipc::{
     BoardGraphicLayer as IpcBoardGraphicLayer, BoardGraphicSegment as IpcBoardGraphicSegment,
-    CommitId, InstanceToken, KiCadClient, KiCadTransport, ObservedBoardGraphicSegment,
-    OpenDocument, OpenDocumentKind, VersionInfo,
+    CommitId, FootprintSide as IpcFootprintSide, InstanceToken, KiCadClient, KiCadTransport,
+    ObservedBoardGraphicSegment, ObservedBoardLayer as IpcBoardLayer,
+    ObservedDrillShape as IpcDrillShape, ObservedFootprintInstance as IpcFootprintInstance,
+    ObservedLockState as IpcLockState, ObservedPad as IpcPad, ObservedPadKind as IpcPadKind,
+    ObservedPadShape as IpcPadShape, ObservedPadStackType as IpcPadStackType, OpenDocument,
+    OpenDocumentKind, VersionInfo,
 };
 use kicad_model::{
-    Board, BoardGraphicLayer, BoardGraphicSegment, CapabilityObservation, CapabilityStatus,
-    Coordinate, Diagnostic, DiscoveredDocument, DiscoveredDocumentKind, DiscoverySnapshot,
-    DocumentSpace, ModelError, ObservedSchematicSymbol, ProjectSnapshot, RevisionDigest, Schematic,
-    StableId, Unit,
+    Board, BoardGraphicLayer, BoardGraphicSegment, BoardLayer, BoardSide, CapabilityObservation,
+    CapabilityStatus, Coordinate, Diagnostic, DiscoveredDocument, DiscoveredDocumentKind,
+    DiscoverySnapshot, DocumentSpace, Drill, DrillShape, FiniteRatio, FootprintLibraryIdentifier,
+    LocalCoordinateNm, LockState, ModelError, ObservedBoardFootprints, ObservedFootprintPlacement,
+    ObservedNetIdentity, ObservedPad, ObservedSchematicSymbol, PadCopperShape, PadKind, PadShape,
+    PadStackType, ProjectSnapshot, RevisionDigest, Schematic, SizeNm, StableId, Unit, board_net_id,
+    footprint_definition_id, footprint_pad_id, footprint_placement_id,
 };
 use kicad_schematic::{NetlistDocument, ParsedSchematicProject, join_netlist_connectivity};
 use sha2::{Digest, Sha256};
@@ -349,6 +356,270 @@ pub fn schematic_observation(
         diagnostics,
         baseline_eligible: !locked,
     })
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObservedFootprintWithPads {
+    pub footprint: IpcFootprintInstance,
+    pub pads: Vec<IpcPad>,
+}
+
+#[derive(Debug)]
+pub enum FootprintObservationError {
+    DuplicateFootprintId(String),
+    DuplicatePadId {
+        footprint_id: String,
+        pad_id: String,
+    },
+    PadParentMismatch {
+        footprint_id: String,
+        pad_id: String,
+        actual_parent_id: String,
+    },
+    Model(ModelError),
+}
+
+impl std::fmt::Display for FootprintObservationError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::DuplicateFootprintId(id) => write!(formatter, "duplicate footprint id: {id}"),
+            Self::DuplicatePadId {
+                footprint_id,
+                pad_id,
+            } => write!(
+                formatter,
+                "duplicate pad id {pad_id} in footprint {footprint_id}"
+            ),
+            Self::PadParentMismatch {
+                footprint_id,
+                pad_id,
+                actual_parent_id,
+            } => write!(
+                formatter,
+                "pad {pad_id} belongs to footprint {actual_parent_id}, not {footprint_id}"
+            ),
+            Self::Model(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl std::error::Error for FootprintObservationError {}
+
+impl From<ModelError> for FootprintObservationError {
+    fn from(error: ModelError) -> Self {
+        Self::Model(error)
+    }
+}
+
+pub fn board_footprint_observation(
+    board_id: StableId,
+    observed: Vec<ObservedFootprintWithPads>,
+) -> Result<ObservedBoardFootprints, FootprintObservationError> {
+    let mut footprint_ids = BTreeSet::new();
+    let mut placements = Vec::with_capacity(observed.len());
+    let unbound_revision = RevisionDigest::new("0".repeat(64))?;
+
+    for group in observed {
+        let footprint_source = group.footprint.source_uuid.clone();
+        if !footprint_ids.insert(footprint_source.clone()) {
+            return Err(FootprintObservationError::DuplicateFootprintId(
+                footprint_source,
+            ));
+        }
+        let source_uuid = StableId::new(footprint_source.clone())?;
+        let placement_id = footprint_placement_id(&board_id, &source_uuid);
+        let library_identifier = FootprintLibraryIdentifier {
+            nickname: group.footprint.library_identifier.nickname,
+            entry_name: group.footprint.library_identifier.entry_name,
+        };
+        let definition_id = footprint_definition_id(&library_identifier);
+        let mut pad_ids = BTreeSet::new();
+        let mut pads = Vec::with_capacity(group.pads.len());
+        for pad in group.pads {
+            if pad.footprint_source_uuid != footprint_source {
+                return Err(FootprintObservationError::PadParentMismatch {
+                    footprint_id: footprint_source,
+                    pad_id: pad.source_uuid,
+                    actual_parent_id: pad.footprint_source_uuid,
+                });
+            }
+            if !pad_ids.insert(pad.source_uuid.clone()) {
+                return Err(FootprintObservationError::DuplicatePadId {
+                    footprint_id: footprint_source,
+                    pad_id: pad.source_uuid,
+                });
+            }
+            pads.push(map_observed_pad(
+                &board_id,
+                &placement_id,
+                pad,
+                &unbound_revision,
+            )?);
+        }
+        placements.push(ObservedFootprintPlacement {
+            placement_id,
+            source_uuid,
+            definition_id,
+            library_identifier,
+            reference: group.footprint.reference,
+            value: group.footprint.value,
+            position: Coordinate {
+                x: group.footprint.position_x_nm,
+                y: group.footprint.position_y_nm,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            },
+            orientation_mdeg: group.footprint.orientation_mdeg,
+            side: map_footprint_side(group.footprint.side),
+            lock_state: map_lock_state(group.footprint.lock_state),
+            symbol_sheet_path: group
+                .footprint
+                .symbol_sheet_path
+                .into_iter()
+                .map(StableId::new)
+                .collect::<Result<Vec<_>, _>>()?,
+            pads,
+            observed_revision: unbound_revision.clone(),
+        });
+    }
+
+    ObservedBoardFootprints::new(board_id, placements).map_err(Into::into)
+}
+
+fn map_observed_pad(
+    board_id: &StableId,
+    placement_id: &StableId,
+    pad: IpcPad,
+    observed_revision: &RevisionDigest,
+) -> Result<ObservedPad, ModelError> {
+    let source_uuid = StableId::new(pad.source_uuid)?;
+    let copper_shapes = pad
+        .copper_shapes
+        .into_iter()
+        .map(|shape| {
+            Ok(PadCopperShape {
+                layer: map_board_layer(shape.layer),
+                shape: map_pad_shape(shape.shape),
+                size: SizeNm {
+                    x_nm: shape.size_x_nm,
+                    y_nm: shape.size_y_nm,
+                },
+                offset: LocalCoordinateNm {
+                    x_nm: shape.offset_x_nm,
+                    y_nm: shape.offset_y_nm,
+                },
+                corner_rounding_ratio: FiniteRatio::new(shape.corner_rounding_ratio)?,
+                chamfer_ratio: FiniteRatio::new(shape.chamfer_ratio)?,
+                chamfer_top_left: shape.chamfer_top_left,
+                chamfer_top_right: shape.chamfer_top_right,
+                chamfer_bottom_left: shape.chamfer_bottom_left,
+                chamfer_bottom_right: shape.chamfer_bottom_right,
+                trapezoid_delta: LocalCoordinateNm {
+                    x_nm: shape.trapezoid_delta_x_nm,
+                    y_nm: shape.trapezoid_delta_y_nm,
+                },
+                custom_anchor_shape: shape.custom_anchor_shape.map(map_pad_shape),
+            })
+        })
+        .collect::<Result<Vec<_>, ModelError>>()?;
+    let drill = pad.drill.map(|drill| Drill {
+        shape: map_drill_shape(drill.shape),
+        size: SizeNm {
+            x_nm: drill.size_x_nm,
+            y_nm: drill.size_y_nm,
+        },
+    });
+    let net = pad.net_name.map(|name| ObservedNetIdentity {
+        net_id: board_net_id(board_id, &name),
+        name,
+    });
+    Ok(ObservedPad {
+        pad_id: footprint_pad_id(placement_id, &source_uuid),
+        source_uuid,
+        footprint_placement_id: placement_id.clone(),
+        number: pad.number,
+        kind: map_pad_kind(pad.kind),
+        lock_state: map_lock_state(pad.lock_state),
+        position: LocalCoordinateNm {
+            x_nm: pad.position_x_nm,
+            y_nm: pad.position_y_nm,
+        },
+        stack_type: map_pad_stack_type(pad.stack_type),
+        orientation_mdeg: pad.orientation_mdeg,
+        layers: pad.layers.into_iter().map(map_board_layer).collect(),
+        copper_shapes,
+        drill,
+        net,
+        observed_revision: observed_revision.clone(),
+    })
+}
+
+fn map_footprint_side(side: IpcFootprintSide) -> BoardSide {
+    match side {
+        IpcFootprintSide::Front => BoardSide::Front,
+        IpcFootprintSide::Back => BoardSide::Back,
+    }
+}
+
+fn map_lock_state(state: IpcLockState) -> LockState {
+    match state {
+        IpcLockState::Unknown => LockState::Unknown,
+        IpcLockState::Unlocked => LockState::Unlocked,
+        IpcLockState::Locked => LockState::Locked,
+    }
+}
+
+fn map_board_layer(layer: IpcBoardLayer) -> BoardLayer {
+    match layer {
+        IpcBoardLayer::FrontCopper => BoardLayer::FrontCopper,
+        IpcBoardLayer::InnerCopper(index) => BoardLayer::InnerCopper(index),
+        IpcBoardLayer::BackCopper => BoardLayer::BackCopper,
+        IpcBoardLayer::FrontMask => BoardLayer::FrontMask,
+        IpcBoardLayer::BackMask => BoardLayer::BackMask,
+        IpcBoardLayer::FrontPaste => BoardLayer::FrontPaste,
+        IpcBoardLayer::BackPaste => BoardLayer::BackPaste,
+    }
+}
+
+fn map_pad_kind(kind: IpcPadKind) -> PadKind {
+    match kind {
+        IpcPadKind::Unknown => PadKind::Unknown,
+        IpcPadKind::PlatedThroughHole => PadKind::PlatedThroughHole,
+        IpcPadKind::SurfaceMount => PadKind::SurfaceMount,
+        IpcPadKind::EdgeConnector => PadKind::EdgeConnector,
+        IpcPadKind::NonPlatedThroughHole => PadKind::NonPlatedThroughHole,
+    }
+}
+
+fn map_pad_stack_type(stack_type: IpcPadStackType) -> PadStackType {
+    match stack_type {
+        IpcPadStackType::Unknown => PadStackType::Unknown,
+        IpcPadStackType::Normal => PadStackType::Normal,
+        IpcPadStackType::FrontInnerBack => PadStackType::FrontInnerBack,
+        IpcPadStackType::Custom => PadStackType::Custom,
+    }
+}
+
+fn map_pad_shape(shape: IpcPadShape) -> PadShape {
+    match shape {
+        IpcPadShape::Unknown => PadShape::Unknown,
+        IpcPadShape::Circle => PadShape::Circle,
+        IpcPadShape::Rectangle => PadShape::Rectangle,
+        IpcPadShape::Oval => PadShape::Oval,
+        IpcPadShape::Trapezoid => PadShape::Trapezoid,
+        IpcPadShape::RoundedRectangle => PadShape::RoundedRectangle,
+        IpcPadShape::ChamferedRectangle => PadShape::ChamferedRectangle,
+        IpcPadShape::Custom => PadShape::Custom,
+    }
+}
+
+fn map_drill_shape(shape: IpcDrillShape) -> DrillShape {
+    match shape {
+        IpcDrillShape::Unknown => DrillShape::Unknown,
+        IpcDrillShape::Circle => DrillShape::Circle,
+        IpcDrillShape::Oblong => DrillShape::Oblong,
+        IpcDrillShape::Undefined => DrillShape::Undefined,
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -884,6 +1155,264 @@ mod tests {
                 kicad_schematic::ConnectivityJoinError::UnknownNode { .. }
             ))
         ));
+    }
+
+    fn observed_footprint(source_uuid: &str, pad_source_uuid: &str) -> ObservedFootprintWithPads {
+        ObservedFootprintWithPads {
+            footprint: IpcFootprintInstance {
+                source_uuid: source_uuid.to_owned(),
+                position_x_nm: 12_000_000,
+                position_y_nm: 34_000_000,
+                orientation_mdeg: 90_000,
+                side: IpcFootprintSide::Back,
+                lock_state: IpcLockState::Locked,
+                library_identifier: kicad_ipc::ObservedFootprintLibraryIdentifier {
+                    nickname: "Package_QFP".to_owned(),
+                    entry_name: "LQFP-48".to_owned(),
+                },
+                reference: "U1".to_owned(),
+                value: "MCU".to_owned(),
+                symbol_sheet_path: vec!["root-kiid".to_owned(), "child-kiid".to_owned()],
+            },
+            pads: vec![IpcPad {
+                source_uuid: pad_source_uuid.to_owned(),
+                footprint_source_uuid: source_uuid.to_owned(),
+                number: "1".to_owned(),
+                kind: IpcPadKind::PlatedThroughHole,
+                lock_state: IpcLockState::Unlocked,
+                position_x_nm: -750_000,
+                position_y_nm: 250_000,
+                stack_type: IpcPadStackType::FrontInnerBack,
+                orientation_mdeg: 45_000,
+                layers: vec![
+                    IpcBoardLayer::FrontCopper,
+                    IpcBoardLayer::InnerCopper(1),
+                    IpcBoardLayer::BackCopper,
+                ],
+                copper_shapes: vec![
+                    kicad_ipc::ObservedPadCopperShape {
+                        layer: IpcBoardLayer::FrontCopper,
+                        shape: IpcPadShape::RoundedRectangle,
+                        size_x_nm: 1_200_000,
+                        size_y_nm: 800_000,
+                        offset_x_nm: 10_000,
+                        offset_y_nm: -20_000,
+                        corner_rounding_ratio: 0.25,
+                        chamfer_ratio: 0.0,
+                        chamfer_top_left: false,
+                        chamfer_top_right: false,
+                        chamfer_bottom_left: false,
+                        chamfer_bottom_right: false,
+                        trapezoid_delta_x_nm: 0,
+                        trapezoid_delta_y_nm: 0,
+                        custom_anchor_shape: None,
+                    },
+                    kicad_ipc::ObservedPadCopperShape {
+                        layer: IpcBoardLayer::InnerCopper(1),
+                        shape: IpcPadShape::ChamferedRectangle,
+                        size_x_nm: 1_000_000,
+                        size_y_nm: 700_000,
+                        offset_x_nm: 0,
+                        offset_y_nm: 0,
+                        corner_rounding_ratio: 0.0,
+                        chamfer_ratio: 0.2,
+                        chamfer_top_left: true,
+                        chamfer_top_right: false,
+                        chamfer_bottom_left: false,
+                        chamfer_bottom_right: true,
+                        trapezoid_delta_x_nm: 50_000,
+                        trapezoid_delta_y_nm: 0,
+                        custom_anchor_shape: Some(IpcPadShape::Rectangle),
+                    },
+                ],
+                drill: Some(kicad_ipc::ObservedPadDrill {
+                    shape: IpcDrillShape::Oblong,
+                    size_x_nm: 400_000,
+                    size_y_nm: 600_000,
+                }),
+                net_name: Some("GND".to_owned()),
+            }],
+        }
+    }
+
+    #[test]
+    fn board_footprint_mapping_preserves_identity_geometry_and_revision() {
+        let board_id = StableId::new("board-a").unwrap();
+        let observation = board_footprint_observation(
+            board_id.clone(),
+            vec![observed_footprint("footprint-a", "pad-a")],
+        )
+        .unwrap();
+        assert!(observation.validate().is_ok());
+        let placement = &observation.placements[0];
+        assert_eq!(
+            placement.placement_id,
+            footprint_placement_id(&board_id, &placement.source_uuid)
+        );
+        assert_eq!(
+            placement.definition_id,
+            footprint_definition_id(&placement.library_identifier)
+        );
+        assert_eq!(
+            (placement.position.x, placement.position.y),
+            (12_000_000, 34_000_000)
+        );
+        assert_eq!(placement.position.unit, Unit::Nanometres);
+        assert_eq!(placement.position.space, DocumentSpace::Board);
+        assert_eq!(placement.orientation_mdeg, 90_000);
+        assert_eq!(placement.side, BoardSide::Back);
+        assert_eq!(placement.lock_state, LockState::Locked);
+        assert_eq!(placement.reference, "U1");
+        assert_eq!(placement.value, "MCU");
+        assert_eq!(placement.library_identifier.nickname, "Package_QFP");
+        assert_eq!(placement.library_identifier.entry_name, "LQFP-48");
+        assert_eq!(
+            placement
+                .symbol_sheet_path
+                .iter()
+                .map(StableId::as_str)
+                .collect::<Vec<_>>(),
+            ["root-kiid", "child-kiid"]
+        );
+        let pad = &placement.pads[0];
+        assert_eq!(
+            pad.pad_id,
+            footprint_pad_id(&placement.placement_id, &pad.source_uuid)
+        );
+        assert_eq!(
+            pad.position,
+            LocalCoordinateNm {
+                x_nm: -750_000,
+                y_nm: 250_000
+            }
+        );
+        assert_eq!(pad.kind, PadKind::PlatedThroughHole);
+        assert_eq!(pad.lock_state, LockState::Unlocked);
+        assert_eq!(pad.stack_type, PadStackType::FrontInnerBack);
+        assert_eq!(pad.orientation_mdeg, 45_000);
+        assert_eq!(
+            pad.layers,
+            [
+                BoardLayer::FrontCopper,
+                BoardLayer::InnerCopper(1),
+                BoardLayer::BackCopper
+            ]
+        );
+        assert_eq!(pad.copper_shapes.len(), 2);
+        assert_eq!(pad.copper_shapes[0].corner_rounding_ratio.as_f64(), 0.25);
+        assert_eq!(pad.copper_shapes[1].layer, BoardLayer::InnerCopper(1));
+        assert_eq!(pad.copper_shapes[1].chamfer_ratio.as_f64(), 0.2);
+        assert!(pad.copper_shapes[1].chamfer_top_left);
+        assert!(pad.copper_shapes[1].chamfer_bottom_right);
+        assert_eq!(
+            pad.copper_shapes[1].trapezoid_delta,
+            LocalCoordinateNm {
+                x_nm: 50_000,
+                y_nm: 0
+            }
+        );
+        assert_eq!(
+            pad.copper_shapes[1].custom_anchor_shape,
+            Some(PadShape::Rectangle)
+        );
+        assert_eq!(pad.drill.unwrap().shape, DrillShape::Oblong);
+        assert_eq!(
+            pad.net.as_ref().unwrap().net_id,
+            board_net_id(&board_id, "GND")
+        );
+        assert_eq!(placement.observed_revision, observation.observed_revision);
+        assert_eq!(pad.observed_revision, observation.observed_revision);
+    }
+
+    #[test]
+    fn board_footprint_mapping_is_order_independent_and_board_scoped() {
+        let board_id = StableId::new("board-a").unwrap();
+        let first = observed_footprint("footprint-a", "pad-a");
+        let second = observed_footprint("footprint-b", "pad-b");
+        let forward =
+            board_footprint_observation(board_id.clone(), vec![first.clone(), second.clone()])
+                .unwrap();
+        let reverse = board_footprint_observation(board_id.clone(), vec![second, first]).unwrap();
+        assert_eq!(forward, reverse);
+        assert_eq!(
+            forward.placements[0].pads[0].net.as_ref().unwrap().net_id,
+            forward.placements[1].pads[0].net.as_ref().unwrap().net_id
+        );
+        let other_board = board_footprint_observation(
+            StableId::new("board-b").unwrap(),
+            vec![observed_footprint("footprint-a", "pad-a")],
+        )
+        .unwrap();
+        assert_ne!(
+            forward.placements[0].pads[0].net.as_ref().unwrap().net_id,
+            other_board.placements[0].pads[0]
+                .net
+                .as_ref()
+                .unwrap()
+                .net_id
+        );
+    }
+
+    #[test]
+    fn board_footprint_mapping_rejects_duplicate_and_mismatched_identity() {
+        let board_id = StableId::new("board-a").unwrap();
+        let group = observed_footprint("footprint-a", "pad-a");
+        assert!(matches!(
+            board_footprint_observation(board_id.clone(), vec![group.clone(), group]),
+            Err(FootprintObservationError::DuplicateFootprintId(_))
+        ));
+        let mut duplicate_pad = observed_footprint("footprint-a", "pad-a");
+        duplicate_pad.pads.push(duplicate_pad.pads[0].clone());
+        assert!(matches!(
+            board_footprint_observation(board_id.clone(), vec![duplicate_pad]),
+            Err(FootprintObservationError::DuplicatePadId { .. })
+        ));
+        let mut mismatched = observed_footprint("footprint-a", "pad-a");
+        mismatched.pads[0].footprint_source_uuid = "other-footprint".to_owned();
+        assert!(matches!(
+            board_footprint_observation(board_id, vec![mismatched]),
+            Err(FootprintObservationError::PadParentMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn board_footprint_mapping_rejects_invalid_values() {
+        let board_id = StableId::new("board-a").unwrap();
+        let mut invalid_ratio = observed_footprint("footprint-a", "pad-a");
+        invalid_ratio.pads[0].copper_shapes[0].corner_rounding_ratio = f64::NAN;
+        assert!(matches!(
+            board_footprint_observation(board_id.clone(), vec![invalid_ratio]),
+            Err(FootprintObservationError::Model(_))
+        ));
+        let mut invalid_anchor = observed_footprint("footprint-a", "pad-a");
+        invalid_anchor.pads[0].copper_shapes[0].custom_anchor_shape = Some(IpcPadShape::Oval);
+        assert!(matches!(
+            board_footprint_observation(board_id.clone(), vec![invalid_anchor]),
+            Err(FootprintObservationError::Model(_))
+        ));
+        let invalid_id = observed_footprint("", "pad-a");
+        assert!(matches!(
+            board_footprint_observation(board_id, vec![invalid_id]),
+            Err(FootprintObservationError::Model(_))
+        ));
+    }
+
+    #[test]
+    fn board_footprint_mapping_allows_empty_and_repeated_pad_numbers() {
+        let mut group = observed_footprint("footprint-a", "pad-a");
+        group.pads[0].number.clear();
+        let mut second = group.pads[0].clone();
+        second.source_uuid = "pad-b".to_owned();
+        group.pads.push(second);
+        let observation =
+            board_footprint_observation(StableId::new("board-a").unwrap(), vec![group]).unwrap();
+        assert_eq!(observation.placements[0].pads.len(), 2);
+        assert!(
+            observation.placements[0]
+                .pads
+                .iter()
+                .all(|pad| pad.number.is_empty())
+        );
     }
 
     fn observed_graphic(id: &str, x: i64) -> ObservedBoardGraphicSegment {

@@ -4,7 +4,7 @@ use std::fmt::{Display, Formatter};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
 pub struct StableId(String);
 
@@ -19,6 +19,16 @@ impl StableId {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl<'de> Deserialize<'de> for StableId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
     }
 }
 
@@ -409,12 +419,58 @@ pub enum PadShape {
     Custom,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct FiniteRatio(u64);
+
+impl FiniteRatio {
+    pub fn new(value: f64) -> Result<Self, ModelError> {
+        if !value.is_finite() {
+            return Err(ModelError::InvalidFootprintObservation(
+                "pad geometry ratio must be finite",
+            ));
+        }
+        let value = if value == 0.0 { 0.0 } else { value };
+        Ok(Self(value.to_bits()))
+    }
+
+    pub fn as_f64(self) -> f64 {
+        f64::from_bits(self.0)
+    }
+}
+
+impl Serialize for FiniteRatio {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_f64(self.as_f64())
+    }
+}
+
+impl<'de> Deserialize<'de> for FiniteRatio {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = f64::deserialize(deserializer)?;
+        Self::new(value).map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PadCopperShape {
     pub layer: BoardLayer,
     pub shape: PadShape,
     pub size: SizeNm,
     pub offset: LocalCoordinateNm,
+    pub corner_rounding_ratio: FiniteRatio,
+    pub chamfer_ratio: FiniteRatio,
+    pub chamfer_top_left: bool,
+    pub chamfer_top_right: bool,
+    pub chamfer_bottom_left: bool,
+    pub chamfer_bottom_right: bool,
+    pub trapezoid_delta: LocalCoordinateNm,
+    pub custom_anchor_shape: Option<PadShape>,
 }
 
 impl PadCopperShape {
@@ -425,7 +481,16 @@ impl PadCopperShape {
                 "pad copper shape must use a copper layer",
             ));
         }
-        self.size.validate()
+        self.size.validate()?;
+        if !matches!(
+            self.custom_anchor_shape,
+            None | Some(PadShape::Circle | PadShape::Rectangle)
+        ) {
+            return Err(ModelError::InvalidFootprintObservation(
+                "custom pad anchor must be a circle or rectangle",
+            ));
+        }
+        Ok(())
     }
 }
 
@@ -455,6 +520,14 @@ pub struct ObservedNetIdentity {
     pub name: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum PadStackType {
+    Unknown,
+    Normal,
+    FrontInnerBack,
+    Custom,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ObservedPad {
     pub pad_id: StableId,
@@ -464,6 +537,8 @@ pub struct ObservedPad {
     pub kind: PadKind,
     pub lock_state: LockState,
     pub position: LocalCoordinateNm,
+    pub stack_type: PadStackType,
+    pub orientation_mdeg: i64,
     pub layers: Vec<BoardLayer>,
     pub copper_shapes: Vec<PadCopperShape>,
     pub drill: Option<Drill>,
@@ -481,6 +556,7 @@ impl ObservedPad {
 
     pub fn validate(
         &self,
+        board_id: &StableId,
         footprint_placement_id: &StableId,
         observed_revision: &RevisionDigest,
     ) -> Result<(), ModelError> {
@@ -521,6 +597,13 @@ impl ObservedPad {
         }
         if let Some(drill) = self.drill {
             drill.validate()?;
+        }
+        if let Some(net) = &self.net
+            && (net.name.is_empty() || net.net_id != board_net_id(board_id, &net.name))
+        {
+            return Err(ModelError::InvalidFootprintObservation(
+                "pad net identity does not match its board and name",
+            ));
         }
         Ok(())
     }
@@ -580,10 +663,100 @@ impl ObservedFootprintPlacement {
             ));
         }
         for pad in &self.pads {
-            pad.validate(&self.placement_id, &self.observed_revision)?;
+            pad.validate(board_id, &self.placement_id, &self.observed_revision)?;
         }
         Ok(())
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedBoardFootprints {
+    pub board_id: StableId,
+    pub placements: Vec<ObservedFootprintPlacement>,
+    pub observed_revision: RevisionDigest,
+}
+
+impl ObservedBoardFootprints {
+    pub fn new(
+        board_id: StableId,
+        placements: Vec<ObservedFootprintPlacement>,
+    ) -> Result<Self, ModelError> {
+        let mut observation = Self {
+            board_id,
+            placements,
+            observed_revision: zero_revision_digest(),
+        }
+        .canonical();
+        let revision = observation.content_revision()?;
+        observation.bind_revision(&revision);
+        observation.validate()?;
+        Ok(observation)
+    }
+
+    pub fn canonical(&self) -> Self {
+        let mut observation = self.clone();
+        observation.placements = observation
+            .placements
+            .iter()
+            .map(ObservedFootprintPlacement::canonical)
+            .collect();
+        observation
+            .placements
+            .sort_by(|left, right| left.source_uuid.cmp(&right.source_uuid));
+        observation
+    }
+
+    pub fn validate(&self) -> Result<(), ModelError> {
+        if self
+            .placements
+            .windows(2)
+            .any(|pair| pair[0].source_uuid >= pair[1].source_uuid)
+        {
+            return Err(ModelError::InvalidFootprintObservation(
+                "footprint placements must have unique canonical source identities",
+            ));
+        }
+        if self.observed_revision != self.content_revision()? {
+            return Err(ModelError::InvalidFootprintObservation(
+                "footprint observation revision does not match its content",
+            ));
+        }
+        for placement in &self.placements {
+            if placement.observed_revision != self.observed_revision {
+                return Err(ModelError::InvalidFootprintObservation(
+                    "footprint placement revision does not match its observation",
+                ));
+            }
+            placement.validate(&self.board_id)?;
+        }
+        Ok(())
+    }
+
+    fn content_revision(&self) -> Result<RevisionDigest, ModelError> {
+        let mut payload = self.canonical();
+        payload.bind_revision(&zero_revision_digest());
+        let bytes = serde_json::to_vec(&(
+            "observed-board-footprints-v1",
+            &payload.board_id,
+            &payload.placements,
+        ))
+        .map_err(ModelError::Serialization)?;
+        Ok(RevisionDigest(hex::encode(Sha256::digest(bytes))))
+    }
+
+    fn bind_revision(&mut self, revision: &RevisionDigest) {
+        self.observed_revision = revision.clone();
+        for placement in &mut self.placements {
+            placement.observed_revision = revision.clone();
+            for pad in &mut placement.pads {
+                pad.observed_revision = revision.clone();
+            }
+        }
+    }
+}
+
+fn zero_revision_digest() -> RevisionDigest {
+    RevisionDigest("0".repeat(64))
 }
 
 pub fn footprint_placement_id(board_id: &StableId, source_uuid: &StableId) -> StableId {
@@ -605,6 +778,10 @@ pub fn footprint_pad_id(placement_id: &StableId, source_uuid: &StableId) -> Stab
         "footprint-pad-v1",
         &[placement_id.as_str(), source_uuid.as_str()],
     )
+}
+
+pub fn board_net_id(board_id: &StableId, name: &str) -> StableId {
+    derived_stable_id("board-net-v1", &[board_id.as_str(), name])
 }
 
 pub fn schematic_symbol_id(
@@ -952,6 +1129,15 @@ mod tests {
     }
 
     #[test]
+    fn stable_id_deserialization_preserves_nonempty_invariant() {
+        assert!(serde_json::from_str::<StableId>("\"\"").is_err());
+        assert_eq!(
+            serde_json::from_str::<StableId>("\"source\"").unwrap(),
+            id("source")
+        );
+    }
+
+    #[test]
     fn stable_id_is_separate_from_human_label() {
         let first = snapshot(vec![symbol("a", "R1")]);
         let second = snapshot(vec![symbol("a", "R2")]);
@@ -1220,6 +1406,14 @@ mod tests {
                 y_nm: 500_000,
             },
             offset: LocalCoordinateNm { x_nm: 0, y_nm: 0 },
+            corner_rounding_ratio: FiniteRatio::new(0.0).unwrap(),
+            chamfer_ratio: FiniteRatio::new(0.0).unwrap(),
+            chamfer_top_left: false,
+            chamfer_top_right: false,
+            chamfer_bottom_left: false,
+            chamfer_bottom_right: false,
+            trapezoid_delta: LocalCoordinateNm { x_nm: 0, y_nm: 0 },
+            custom_anchor_shape: None,
         }
     }
 
@@ -1244,6 +1438,8 @@ mod tests {
                 x_nm: -750_000,
                 y_nm: 0,
             },
+            stack_type: PadStackType::Normal,
+            orientation_mdeg: 0,
             layers: vec![
                 BoardLayer::FrontCopper,
                 BoardLayer::FrontMask,
@@ -1252,7 +1448,7 @@ mod tests {
             copper_shapes: vec![copper_shape(BoardLayer::FrontCopper, PadShape::Rectangle)],
             drill: None,
             net: Some(ObservedNetIdentity {
-                net_id: id("net-gnd"),
+                net_id: board_net_id(&board_id, "GND"),
                 name: "GND".to_owned(),
             }),
             observed_revision: observed_revision.clone(),
@@ -1327,6 +1523,8 @@ mod tests {
             &second_placement.placement_id,
             &second_placement.pads[0].source_uuid,
         );
+        second_placement.pads[0].net.as_mut().unwrap().net_id =
+            board_net_id(&second_board_id, "GND");
 
         assert!(footprint.validate(&first_board_id).is_ok());
         assert!(second_placement.validate(&second_board_id).is_ok());
@@ -1445,6 +1643,157 @@ mod tests {
         cases.push(invalid);
 
         assert!(cases.iter().all(|case| case.validate(&board_id).is_err()));
+    }
+
+    #[test]
+    fn finite_ratio_is_canonical_and_numeric_in_json() {
+        let zero = FiniteRatio::new(0.0).unwrap();
+        let negative_zero = FiniteRatio::new(-0.0).unwrap();
+        assert_eq!(zero, negative_zero);
+        assert_eq!(serde_json::to_value(zero).unwrap(), serde_json::json!(0.0));
+        for value in [-0.1, 0.25, 1.1] {
+            let ratio = FiniteRatio::new(value).unwrap();
+            assert_eq!(
+                serde_json::from_value::<FiniteRatio>(serde_json::json!(value)).unwrap(),
+                ratio
+            );
+        }
+        for invalid in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(FiniteRatio::new(invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn extended_pad_geometry_and_stack_semantics_are_preserved() {
+        let (board_id, mut footprint) = observed_footprint();
+        let pad = &mut footprint.pads[0];
+        pad.stack_type = PadStackType::FrontInnerBack;
+        pad.orientation_mdeg = 45_000;
+        pad.copper_shapes = vec![
+            {
+                let mut shape = copper_shape(BoardLayer::FrontCopper, PadShape::RoundedRectangle);
+                shape.corner_rounding_ratio = FiniteRatio::new(0.25).unwrap();
+                shape
+            },
+            copper_shape(BoardLayer::InnerCopper(1), PadShape::Oval),
+            {
+                let mut shape = copper_shape(BoardLayer::BackCopper, PadShape::ChamferedRectangle);
+                shape.chamfer_ratio = FiniteRatio::new(0.2).unwrap();
+                shape.chamfer_top_left = true;
+                shape.chamfer_bottom_right = true;
+                shape
+            },
+        ];
+        let canonical = footprint.canonical();
+        assert!(canonical.validate(&board_id).is_ok());
+        assert_eq!(canonical.pads[0].stack_type, PadStackType::FrontInnerBack);
+        assert_eq!(canonical.pads[0].orientation_mdeg, 45_000);
+        assert_eq!(canonical.pads[0].copper_shapes.len(), 3);
+        assert_eq!(
+            canonical.pads[0].copper_shapes[1].layer,
+            BoardLayer::InnerCopper(1),
+            "the representative inner-layer entry must not be expanded"
+        );
+        let decoded: ObservedFootprintPlacement =
+            serde_json::from_value(serde_json::to_value(&canonical).unwrap()).unwrap();
+        assert_eq!(decoded, canonical);
+    }
+
+    #[test]
+    fn custom_anchor_shape_is_limited_to_supported_values() {
+        let mut invalid = copper_shape(BoardLayer::FrontCopper, PadShape::Custom);
+        invalid.custom_anchor_shape = Some(PadShape::Oval);
+        assert!(invalid.validate().is_err());
+
+        let mut valid = copper_shape(BoardLayer::FrontCopper, PadShape::Custom);
+        valid.custom_anchor_shape = Some(PadShape::Circle);
+        assert!(valid.validate().is_ok());
+        valid.custom_anchor_shape = Some(PadShape::Rectangle);
+        assert!(valid.validate().is_ok());
+    }
+
+    fn second_observed_footprint(
+        board_id: &StableId,
+        footprint: &ObservedFootprintPlacement,
+    ) -> ObservedFootprintPlacement {
+        let mut second = footprint.clone();
+        second.source_uuid = id("second-footprint-source");
+        second.placement_id = footprint_placement_id(board_id, &second.source_uuid);
+        second.reference = "R2".to_owned();
+        second.pads[0].source_uuid = id("second-footprint-pad-source");
+        second.pads[0].footprint_placement_id = second.placement_id.clone();
+        second.pads[0].pad_id = footprint_pad_id(&second.placement_id, &second.pads[0].source_uuid);
+        second
+    }
+
+    #[test]
+    fn board_footprint_observation_revision_is_order_independent_and_content_bound() {
+        let (board_id, footprint) = observed_footprint();
+        let second = second_observed_footprint(&board_id, &footprint);
+        let first_order =
+            ObservedBoardFootprints::new(board_id.clone(), vec![footprint.clone(), second.clone()])
+                .unwrap();
+        let reverse_order =
+            ObservedBoardFootprints::new(board_id.clone(), vec![second, footprint]).unwrap();
+        assert_eq!(first_order, reverse_order);
+        assert!(first_order.validate().is_ok());
+        assert!(first_order.placements.iter().all(|placement| {
+            placement.observed_revision == first_order.observed_revision
+                && placement
+                    .pads
+                    .iter()
+                    .all(|pad| pad.observed_revision == first_order.observed_revision)
+        }));
+
+        let mut changed_placement = first_order.placements[0].clone();
+        changed_placement.orientation_mdeg += 1;
+        let changed = ObservedBoardFootprints::new(
+            board_id,
+            vec![changed_placement, first_order.placements[1].clone()],
+        )
+        .unwrap();
+        assert_ne!(first_order.observed_revision, changed.observed_revision);
+    }
+
+    #[test]
+    fn board_footprint_observation_rejects_forged_net_identity() {
+        let (board_id, footprint) = observed_footprint();
+        let observation = ObservedBoardFootprints::new(board_id.clone(), vec![footprint]).unwrap();
+
+        let mut forged = observation.placements[0].clone();
+        forged.pads[0].net.as_mut().unwrap().net_id = id("forged-net");
+        assert!(ObservedBoardFootprints::new(board_id.clone(), vec![forged]).is_err());
+
+        let mut forged = observation.placements[0].clone();
+        forged.pads[0].net.as_mut().unwrap().name = "+3V3".to_owned();
+        assert!(ObservedBoardFootprints::new(board_id.clone(), vec![forged]).is_err());
+
+        let mut forged = observation.placements[0].clone();
+        forged.pads[0].net.as_mut().unwrap().name.clear();
+        assert!(ObservedBoardFootprints::new(board_id, vec![forged]).is_err());
+    }
+
+    #[test]
+    fn board_footprint_observation_rejects_forged_revisions() {
+        let (board_id, footprint) = observed_footprint();
+        let observation = ObservedBoardFootprints::new(board_id, vec![footprint]).unwrap();
+
+        let mut forged = observation.clone();
+        forged.observed_revision = revision('f');
+        assert!(forged.validate().is_err());
+
+        let mut forged = observation;
+        forged.placements[0].observed_revision = revision('f');
+        forged.placements[0].pads[0].observed_revision = revision('f');
+        assert!(forged.validate().is_err());
+    }
+
+    #[test]
+    fn board_net_identity_is_stable_and_board_scoped() {
+        let first = board_net_id(&id("board"), "GND");
+        assert_eq!(first, board_net_id(&id("board"), "GND"));
+        assert_ne!(first, board_net_id(&id("other-board"), "GND"));
+        assert_ne!(first, board_net_id(&id("board"), "+3V3"));
     }
 
     #[test]
