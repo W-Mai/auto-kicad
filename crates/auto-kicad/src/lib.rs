@@ -146,31 +146,78 @@ impl std::fmt::Display for ObserveLiveBoardError {
     }
 }
 
-fn observe_live_board<T: kicad_ipc::KiCadTransport>(
-    client: &mut KiCadClient<T>,
+trait LiveBoardObservationSource {
+    fn board_graphics(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<Vec<kicad_ipc::ObservedBoardGraphicSegment>, kicad_ipc::IpcError>;
+
+    fn footprint_instances(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<Vec<kicad_ipc::ObservedFootprintInstance>, kicad_ipc::IpcError>;
+
+    fn footprint_pads(
+        &mut self,
+        board_filename: &str,
+        footprint_source_uuid: &str,
+    ) -> Result<Vec<kicad_ipc::ObservedPad>, kicad_ipc::IpcError>;
+
+    fn latest_instance_token(&mut self) -> Option<kicad_ipc::InstanceToken>;
+}
+
+impl<T: kicad_ipc::KiCadTransport> LiveBoardObservationSource for KiCadClient<T> {
+    fn board_graphics(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<Vec<kicad_ipc::ObservedBoardGraphicSegment>, kicad_ipc::IpcError> {
+        self.get_board_graphics(board_filename)
+    }
+
+    fn footprint_instances(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<Vec<kicad_ipc::ObservedFootprintInstance>, kicad_ipc::IpcError> {
+        self.get_footprint_instances(board_filename)
+    }
+
+    fn footprint_pads(
+        &mut self,
+        board_filename: &str,
+        footprint_source_uuid: &str,
+    ) -> Result<Vec<kicad_ipc::ObservedPad>, kicad_ipc::IpcError> {
+        self.get_footprint_pads(board_filename, footprint_source_uuid)
+    }
+
+    fn latest_instance_token(&mut self) -> Option<kicad_ipc::InstanceToken> {
+        self.instance_token().cloned()
+    }
+}
+
+fn observe_live_board<S: LiveBoardObservationSource>(
+    source: &mut S,
     version: kicad_ipc::VersionInfo,
     document: kicad_ipc::OpenDocument,
     board_filename: &str,
 ) -> Result<LiveBoardObservation, ObserveLiveBoardError> {
-    let graphics = client
-        .get_board_graphics(board_filename)
+    let graphics = source
+        .board_graphics(board_filename)
         .map_err(ObserveLiveBoardError::Ipc)?;
-    let footprints = client
-        .get_footprint_instances(board_filename)
+    let footprints = source
+        .footprint_instances(board_filename)
         .map_err(ObserveLiveBoardError::Ipc)?;
     let mut observed = Vec::with_capacity(footprints.len());
     for footprint in footprints {
-        let pads = client
-            .get_footprint_pads(board_filename, &footprint.source_uuid)
+        let pads = source
+            .footprint_pads(board_filename, &footprint.source_uuid)
             .map_err(ObserveLiveBoardError::Ipc)?;
         observed.push(ObservedFootprintWithPads { footprint, pads });
     }
     let board_id = board_document_id(&document).map_err(ObserveLiveBoardError::LiveBoard)?;
     let native_footprints = board_footprint_observation(board_id, observed)
         .map_err(ObserveLiveBoardError::Footprints)?;
-    let instance_token = client
-        .instance_token()
-        .cloned()
+    let instance_token = source
+        .latest_instance_token()
         .ok_or(ObserveLiveBoardError::MissingInstanceToken)?;
     live_board_observation(
         version,
@@ -1077,6 +1124,287 @@ mod tests {
     struct TestClient;
 
     impl ClientHandler for TestClient {}
+
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    enum LiveReadCall {
+        Graphics(String),
+        Footprints(String),
+        Pads {
+            board_filename: String,
+            footprint_source_uuid: String,
+        },
+        Token,
+    }
+
+    #[derive(Clone)]
+    struct FakeLiveBoardSource {
+        calls: Vec<LiveReadCall>,
+        footprints: Vec<kicad_ipc::ObservedFootprintInstance>,
+        pads: BTreeMap<String, Vec<kicad_ipc::ObservedPad>>,
+        failing_pad_parent: Option<String>,
+        token: Option<kicad_ipc::InstanceToken>,
+    }
+
+    impl LiveBoardObservationSource for FakeLiveBoardSource {
+        fn board_graphics(
+            &mut self,
+            board_filename: &str,
+        ) -> Result<Vec<kicad_ipc::ObservedBoardGraphicSegment>, kicad_ipc::IpcError> {
+            self.calls
+                .push(LiveReadCall::Graphics(board_filename.to_owned()));
+            Ok(Vec::new())
+        }
+
+        fn footprint_instances(
+            &mut self,
+            board_filename: &str,
+        ) -> Result<Vec<kicad_ipc::ObservedFootprintInstance>, kicad_ipc::IpcError> {
+            self.calls
+                .push(LiveReadCall::Footprints(board_filename.to_owned()));
+            Ok(self.footprints.clone())
+        }
+
+        fn footprint_pads(
+            &mut self,
+            board_filename: &str,
+            footprint_source_uuid: &str,
+        ) -> Result<Vec<kicad_ipc::ObservedPad>, kicad_ipc::IpcError> {
+            self.calls.push(LiveReadCall::Pads {
+                board_filename: board_filename.to_owned(),
+                footprint_source_uuid: footprint_source_uuid.to_owned(),
+            });
+            if self.failing_pad_parent.as_deref() == Some(footprint_source_uuid) {
+                return Err(kicad_ipc::IpcError::InvalidObservedPad(
+                    "fixture pad read failed",
+                ));
+            }
+            Ok(self
+                .pads
+                .get(footprint_source_uuid)
+                .cloned()
+                .unwrap_or_default())
+        }
+
+        fn latest_instance_token(&mut self) -> Option<kicad_ipc::InstanceToken> {
+            self.calls.push(LiveReadCall::Token);
+            self.token.clone()
+        }
+    }
+
+    fn live_version() -> kicad_ipc::VersionInfo {
+        kicad_ipc::VersionInfo {
+            major: 10,
+            minor: 0,
+            patch: 4,
+            full_version: "10.0.4".to_owned(),
+        }
+    }
+
+    fn live_document() -> kicad_ipc::OpenDocument {
+        kicad_ipc::OpenDocument {
+            project_name: Some("main".to_owned()),
+            project_path: Some("/projects/main".to_owned()),
+            kind: kicad_ipc::OpenDocumentKind::Pcb {
+                board_filename: "main.kicad_pcb".to_owned(),
+            },
+        }
+    }
+
+    fn live_footprint(source_uuid: &str, reference: &str) -> kicad_ipc::ObservedFootprintInstance {
+        kicad_ipc::ObservedFootprintInstance {
+            source_uuid: source_uuid.to_owned(),
+            position_x_nm: 12_000_000,
+            position_y_nm: 34_000_000,
+            orientation_mdeg: 90_000,
+            side: kicad_ipc::FootprintSide::Front,
+            lock_state: kicad_ipc::ObservedLockState::Unlocked,
+            library_identifier: kicad_ipc::ObservedFootprintLibraryIdentifier {
+                nickname: "Package_QFP".to_owned(),
+                entry_name: "LQFP-48".to_owned(),
+            },
+            reference: reference.to_owned(),
+            value: "MCU".to_owned(),
+            symbol_sheet_path: vec!["root-kiid".to_owned()],
+        }
+    }
+
+    fn live_pad(source_uuid: &str, footprint_source_uuid: &str) -> kicad_ipc::ObservedPad {
+        kicad_ipc::ObservedPad {
+            source_uuid: source_uuid.to_owned(),
+            footprint_source_uuid: footprint_source_uuid.to_owned(),
+            number: "1".to_owned(),
+            kind: kicad_ipc::ObservedPadKind::SurfaceMount,
+            lock_state: kicad_ipc::ObservedLockState::Unlocked,
+            position_x_nm: -750_000,
+            position_y_nm: 250_000,
+            stack_type: kicad_ipc::ObservedPadStackType::Normal,
+            orientation_mdeg: 0,
+            layers: vec![kicad_ipc::ObservedBoardLayer::FrontCopper],
+            copper_shapes: vec![kicad_ipc::ObservedPadCopperShape {
+                layer: kicad_ipc::ObservedBoardLayer::FrontCopper,
+                shape: kicad_ipc::ObservedPadShape::Rectangle,
+                size_x_nm: 1_200_000,
+                size_y_nm: 800_000,
+                offset_x_nm: 0,
+                offset_y_nm: 0,
+                corner_rounding_ratio: 0.0,
+                chamfer_ratio: 0.0,
+                chamfer_top_left: false,
+                chamfer_top_right: false,
+                chamfer_bottom_left: false,
+                chamfer_bottom_right: false,
+                trapezoid_delta_x_nm: 0,
+                trapezoid_delta_y_nm: 0,
+                custom_anchor_shape: None,
+            }],
+            drill: None,
+            net_name: Some("GND".to_owned()),
+        }
+    }
+
+    fn fake_live_source() -> FakeLiveBoardSource {
+        FakeLiveBoardSource {
+            calls: Vec::new(),
+            footprints: vec![
+                live_footprint("footprint-a", "U1"),
+                live_footprint("footprint-b", "U2"),
+            ],
+            pads: BTreeMap::from([
+                (
+                    "footprint-a".to_owned(),
+                    vec![live_pad("pad-a", "footprint-a")],
+                ),
+                (
+                    "footprint-b".to_owned(),
+                    vec![live_pad("pad-b", "footprint-b")],
+                ),
+            ]),
+            failing_pad_parent: None,
+            token: Some(kicad_ipc::InstanceToken::new("token").unwrap()),
+        }
+    }
+
+    fn expected_live_read_calls() -> Vec<LiveReadCall> {
+        vec![
+            LiveReadCall::Graphics("main.kicad_pcb".to_owned()),
+            LiveReadCall::Footprints("main.kicad_pcb".to_owned()),
+            LiveReadCall::Pads {
+                board_filename: "main.kicad_pcb".to_owned(),
+                footprint_source_uuid: "footprint-a".to_owned(),
+            },
+            LiveReadCall::Pads {
+                board_filename: "main.kicad_pcb".to_owned(),
+                footprint_source_uuid: "footprint-b".to_owned(),
+            },
+            LiveReadCall::Token,
+        ]
+    }
+
+    #[test]
+    fn live_board_observation_reads_each_parent_and_is_stable() {
+        let mut first_source = fake_live_source();
+        let first = observe_live_board(
+            &mut first_source,
+            live_version(),
+            live_document(),
+            "main.kicad_pcb",
+        )
+        .unwrap();
+        let mut second_source = fake_live_source();
+        let second = observe_live_board(
+            &mut second_source,
+            live_version(),
+            live_document(),
+            "main.kicad_pcb",
+        )
+        .unwrap();
+
+        assert_eq!(first_source.calls, expected_live_read_calls());
+        assert_eq!(second_source.calls, expected_live_read_calls());
+        let first_native = first.snapshot.native_footprints.as_ref().unwrap();
+        let second_native = second.snapshot.native_footprints.as_ref().unwrap();
+        assert_eq!(first_native, second_native);
+        assert_eq!(
+            first.snapshot.revision().unwrap(),
+            second.snapshot.revision().unwrap()
+        );
+        assert_eq!(
+            first_native
+                .placements
+                .iter()
+                .map(|placement| placement.source_uuid.as_str())
+                .collect::<Vec<_>>(),
+            ["footprint-a", "footprint-b"]
+        );
+        assert_eq!(
+            first_native
+                .placements
+                .iter()
+                .flat_map(|placement| placement.pads.iter())
+                .map(|pad| pad.source_uuid.as_str())
+                .collect::<Vec<_>>(),
+            ["pad-a", "pad-b"]
+        );
+    }
+
+    #[test]
+    fn live_board_observation_stops_on_parent_pad_failure() {
+        let mut source = fake_live_source();
+        source.failing_pad_parent = Some("footprint-b".to_owned());
+
+        let error = observe_live_board(
+            &mut source,
+            live_version(),
+            live_document(),
+            "main.kicad_pcb",
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, ObserveLiveBoardError::Ipc(_)));
+        let mut expected = expected_live_read_calls();
+        expected.pop();
+        assert_eq!(source.calls, expected);
+    }
+
+    #[test]
+    fn live_board_observation_rejects_parent_mismatch_before_token() {
+        let mut source = fake_live_source();
+        source.pads.insert(
+            "footprint-b".to_owned(),
+            vec![live_pad("pad-b", "footprint-a")],
+        );
+
+        let error = observe_live_board(
+            &mut source,
+            live_version(),
+            live_document(),
+            "main.kicad_pcb",
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ObserveLiveBoardError::Footprints(FootprintObservationError::PadParentMismatch { .. })
+        ));
+        assert!(!source.calls.contains(&LiveReadCall::Token));
+    }
+
+    #[test]
+    fn live_board_observation_reports_missing_token_last() {
+        let mut source = fake_live_source();
+        source.token = None;
+
+        let error = observe_live_board(
+            &mut source,
+            live_version(),
+            live_document(),
+            "main.kicad_pcb",
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, ObserveLiveBoardError::MissingInstanceToken));
+        assert_eq!(source.calls, expected_live_read_calls());
+    }
 
     #[derive(Clone, Default)]
     struct FakeDiscovery {
