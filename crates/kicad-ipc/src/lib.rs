@@ -166,6 +166,97 @@ pub struct ObservedFootprintInstance {
     pub symbol_sheet_path: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub enum ObservedBoardLayer {
+    FrontCopper,
+    InnerCopper(u8),
+    BackCopper,
+    FrontMask,
+    BackMask,
+    FrontPaste,
+    BackPaste,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservedPadKind {
+    Unknown,
+    PlatedThroughHole,
+    SurfaceMount,
+    EdgeConnector,
+    NonPlatedThroughHole,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservedPadStackType {
+    Unknown,
+    Normal,
+    FrontInnerBack,
+    Custom,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservedPadShape {
+    Unknown,
+    Circle,
+    Rectangle,
+    Oval,
+    Trapezoid,
+    RoundedRectangle,
+    ChamferedRectangle,
+    Custom,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ObservedPadCopperShape {
+    pub layer: ObservedBoardLayer,
+    pub shape: ObservedPadShape,
+    pub size_x_nm: i64,
+    pub size_y_nm: i64,
+    pub offset_x_nm: i64,
+    pub offset_y_nm: i64,
+    pub corner_rounding_ratio: f64,
+    pub chamfer_ratio: f64,
+    pub chamfer_top_left: bool,
+    pub chamfer_top_right: bool,
+    pub chamfer_bottom_left: bool,
+    pub chamfer_bottom_right: bool,
+    pub trapezoid_delta_x_nm: i64,
+    pub trapezoid_delta_y_nm: i64,
+    pub custom_anchor_shape: Option<ObservedPadShape>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservedDrillShape {
+    Unknown,
+    Circle,
+    Oblong,
+    Undefined,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ObservedPadDrill {
+    pub shape: ObservedDrillShape,
+    pub size_x_nm: i64,
+    pub size_y_nm: i64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObservedPad {
+    pub source_uuid: String,
+    pub footprint_source_uuid: String,
+    pub number: String,
+    pub kind: ObservedPadKind,
+    pub lock_state: ObservedLockState,
+    pub position_x_nm: i64,
+    pub position_y_nm: i64,
+    pub stack_type: ObservedPadStackType,
+    pub orientation_mdeg: i64,
+    pub layers: Vec<ObservedBoardLayer>,
+    pub copper_shapes: Vec<ObservedPadCopperShape>,
+    pub drill: Option<ObservedPadDrill>,
+    pub net_name: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommitId(String);
 
@@ -254,6 +345,7 @@ pub enum IpcError {
     InvalidBoardGraphic(&'static str),
     InvalidObservedBoardGraphic(&'static str),
     InvalidObservedFootprint(&'static str),
+    InvalidObservedPad(&'static str),
     UnknownPcbItemType(String),
     Status(ApiStatusCode, String),
     Transport(nng::Error),
@@ -284,6 +376,7 @@ impl IpcError {
             Self::InvalidBoardGraphic(_) => "invalid_board_graphic",
             Self::InvalidObservedBoardGraphic(_) => "invalid_observed_board_graphic",
             Self::InvalidObservedFootprint(_) => "invalid_observed_footprint",
+            Self::InvalidObservedPad(_) => "invalid_observed_pad",
             Self::UnknownPcbItemType(_) => "unknown_pcb_item_type",
             Self::Status(status, _) => match status {
                 ApiStatusCode::AS_TIMEOUT => "connection_unavailable",
@@ -333,6 +426,9 @@ impl Display for IpcError {
                 write!(formatter, "{}: {message}", self.code())
             }
             Self::InvalidObservedFootprint(message) => {
+                write!(formatter, "{}: {message}", self.code())
+            }
+            Self::InvalidObservedPad(message) => {
                 write!(formatter, "{}: {message}", self.code())
             }
             Self::UnknownPcbItemType(type_url) => {
@@ -628,6 +724,44 @@ impl<T: KiCadTransport> KiCadClient<T> {
         Ok(footprints)
     }
 
+    pub fn get_footprint_pads(
+        &mut self,
+        board_filename: &str,
+        footprint_source_uuid: &str,
+    ) -> Result<Vec<ObservedPad>, IpcError> {
+        if footprint_source_uuid.is_empty() {
+            return Err(IpcError::InvalidObservedPad(
+                "parent footprint identity is missing",
+            ));
+        }
+        let command = editor_commands::GetItems {
+            header: MessageField::some(footprint_item_header(
+                board_filename,
+                footprint_source_uuid,
+            )),
+            types: vec![protobuf::EnumOrUnknown::new(
+                enums::KiCadObjectType::KOT_PCB_PAD,
+            )],
+            ..editor_commands::GetItems::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            GET_ITEMS_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let response = decode_any::<editor_commands::GetItemsResponse>(
+            &response,
+            GET_ITEMS_RESPONSE_TYPE_URL,
+        )?;
+        let pads = footprint_pads_from_response(&response, footprint_source_uuid)?;
+        self.token = Some(token);
+        Ok(pads)
+    }
+
     pub fn get_board_graphics(
         &mut self,
         board_filename: &str,
@@ -743,6 +877,20 @@ fn board_document(board_filename: &str) -> base_types::DocumentSpecifier {
 fn board_item_header(board_filename: &str) -> base_types::ItemHeader {
     base_types::ItemHeader {
         document: MessageField::some(board_document(board_filename)),
+        ..base_types::ItemHeader::default()
+    }
+}
+
+fn footprint_item_header(
+    board_filename: &str,
+    footprint_source_uuid: &str,
+) -> base_types::ItemHeader {
+    base_types::ItemHeader {
+        document: MessageField::some(board_document(board_filename)),
+        container: MessageField::some(base_types::KIID {
+            value: footprint_source_uuid.to_owned(),
+            ..base_types::KIID::default()
+        }),
         ..base_types::ItemHeader::default()
     }
 }
@@ -996,6 +1144,307 @@ fn field_text(field: Option<&board_types::Field>) -> Result<String, IpcError> {
         .ok_or(IpcError::InvalidObservedFootprint(
             "footprint field text is missing",
         ))
+}
+
+fn footprint_pads_from_response(
+    response: &editor_commands::GetItemsResponse,
+    footprint_source_uuid: &str,
+) -> Result<Vec<ObservedPad>, IpcError> {
+    if response.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
+        return Err(IpcError::Status(
+            ApiStatusCode::AS_BAD_REQUEST,
+            format!(
+                "get items status: {:?}",
+                response.status.enum_value_or_default()
+            ),
+        ));
+    }
+    if let Some(container) = response
+        .header
+        .as_ref()
+        .and_then(|header| header.container.as_ref())
+        && container.value != footprint_source_uuid
+    {
+        return Err(IpcError::InvalidObservedPad(
+            "response container does not match parent footprint",
+        ));
+    }
+    let mut pads = response
+        .items
+        .iter()
+        .map(|item| footprint_pad_from_any(item, footprint_source_uuid))
+        .collect::<Result<Vec<_>, _>>()?;
+    pads.sort_by(|left, right| left.source_uuid.cmp(&right.source_uuid));
+    if pads
+        .windows(2)
+        .any(|pair| pair[0].source_uuid == pair[1].source_uuid)
+    {
+        return Err(IpcError::InvalidObservedPad(
+            "pad identities must be unique",
+        ));
+    }
+    Ok(pads)
+}
+
+fn footprint_pad_from_any(
+    item: &Any,
+    footprint_source_uuid: &str,
+) -> Result<ObservedPad, IpcError> {
+    if item.type_url != "type.googleapis.com/kiapi.board.types.Pad" {
+        return Err(IpcError::UnexpectedMessageType {
+            expected: "type.googleapis.com/kiapi.board.types.Pad",
+            actual: item.type_url.clone(),
+        });
+    }
+    let pad =
+        board_types::Pad::parse_from_bytes(&item.value).map_err(|_| IpcError::MalformedEnvelope)?;
+    let source_uuid = kiid_value(pad.id.as_ref())
+        .ok_or(IpcError::InvalidObservedPad("pad identity is missing"))?;
+    let position = pad
+        .position
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedPad("pad position is missing"))?;
+    let stack = pad
+        .pad_stack
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedPad("pad stack is missing"))?;
+    if stack.secondary_drill.is_some() || stack.tertiary_drill.is_some() {
+        return Err(IpcError::InvalidObservedPad(
+            "secondary and tertiary drills are unsupported",
+        ));
+    }
+    let stack_type = match stack.type_.enum_value() {
+        Ok(board_types::PadStackType::PST_NORMAL) => ObservedPadStackType::Normal,
+        Ok(board_types::PadStackType::PST_FRONT_INNER_BACK) => ObservedPadStackType::FrontInnerBack,
+        Ok(board_types::PadStackType::PST_CUSTOM) => ObservedPadStackType::Custom,
+        _ => ObservedPadStackType::Unknown,
+    };
+    let orientation_mdeg = match stack.angle.as_ref() {
+        Some(angle) => angle_to_mdeg(angle.value_degrees)?,
+        None => 0,
+    };
+    let mut layers = stack
+        .layers
+        .iter()
+        .map(observed_board_layer)
+        .collect::<Result<Vec<_>, _>>()?;
+    layers.sort();
+    if layers.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(IpcError::InvalidObservedPad("pad layers must be unique"));
+    }
+    let mut copper_shapes = stack
+        .copper_layers
+        .iter()
+        .map(observed_pad_copper_shape)
+        .collect::<Result<Vec<_>, _>>()?;
+    copper_shapes.sort_by_key(|shape| shape.layer);
+    if copper_shapes
+        .windows(2)
+        .any(|pair| pair[0].layer == pair[1].layer)
+    {
+        return Err(IpcError::InvalidObservedPad(
+            "pad copper shape layers must be unique",
+        ));
+    }
+    let drill = stack
+        .drill
+        .as_ref()
+        .map(observed_pad_drill)
+        .transpose()?
+        .flatten();
+    let kind = match pad.type_.enum_value() {
+        Ok(board_types::PadType::PT_PTH) => ObservedPadKind::PlatedThroughHole,
+        Ok(board_types::PadType::PT_SMD) => ObservedPadKind::SurfaceMount,
+        Ok(board_types::PadType::PT_EDGE_CONNECTOR) => ObservedPadKind::EdgeConnector,
+        Ok(board_types::PadType::PT_NPTH) => ObservedPadKind::NonPlatedThroughHole,
+        _ => ObservedPadKind::Unknown,
+    };
+    let lock_state = match pad.locked.enum_value() {
+        Ok(base_types::LockedState::LS_UNLOCKED) => ObservedLockState::Unlocked,
+        Ok(base_types::LockedState::LS_LOCKED) => ObservedLockState::Locked,
+        _ => ObservedLockState::Unknown,
+    };
+    Ok(ObservedPad {
+        source_uuid,
+        footprint_source_uuid: footprint_source_uuid.to_owned(),
+        number: pad.number,
+        kind,
+        lock_state,
+        position_x_nm: position.x_nm,
+        position_y_nm: position.y_nm,
+        stack_type,
+        orientation_mdeg,
+        layers,
+        copper_shapes,
+        drill,
+        net_name: pad
+            .net
+            .as_ref()
+            .map(|net| net.name.clone())
+            .filter(|name| !name.is_empty()),
+    })
+}
+
+fn angle_to_mdeg(degrees: f64) -> Result<i64, IpcError> {
+    let millidegrees = (degrees * 1000.0).round();
+    if !millidegrees.is_finite()
+        || !(-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&millidegrees)
+    {
+        return Err(IpcError::InvalidObservedPad(
+            "pad stack orientation is invalid",
+        ));
+    }
+    Ok(millidegrees as i64)
+}
+
+fn observed_board_layer(
+    layer: &protobuf::EnumOrUnknown<board_types::BoardLayer>,
+) -> Result<ObservedBoardLayer, IpcError> {
+    let value = layer.value();
+    match value {
+        3 => Ok(ObservedBoardLayer::FrontCopper),
+        4..=33 => Ok(ObservedBoardLayer::InnerCopper((value - 3) as u8)),
+        34 => Ok(ObservedBoardLayer::BackCopper),
+        37 => Ok(ObservedBoardLayer::BackPaste),
+        38 => Ok(ObservedBoardLayer::FrontPaste),
+        41 => Ok(ObservedBoardLayer::BackMask),
+        42 => Ok(ObservedBoardLayer::FrontMask),
+        _ => Err(IpcError::InvalidObservedPad("pad layer is unsupported")),
+    }
+}
+
+fn observed_pad_copper_shape(
+    layer: &board_types::PadStackLayer,
+) -> Result<ObservedPadCopperShape, IpcError> {
+    if !layer.custom_shapes.is_empty() {
+        return Err(IpcError::InvalidObservedPad(
+            "custom pad geometry is unsupported",
+        ));
+    }
+    if !layer.corner_rounding_ratio.is_finite() || !layer.chamfer_ratio.is_finite() {
+        return Err(IpcError::InvalidObservedPad(
+            "pad shape ratios must be finite",
+        ));
+    }
+    let board_layer = observed_board_layer(&layer.layer)?;
+    if !matches!(
+        board_layer,
+        ObservedBoardLayer::FrontCopper
+            | ObservedBoardLayer::InnerCopper(_)
+            | ObservedBoardLayer::BackCopper
+    ) {
+        return Err(IpcError::InvalidObservedPad(
+            "pad copper shape must use a copper layer",
+        ));
+    }
+    let size = layer
+        .size
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedPad("pad shape size is missing"))?;
+    if size.x_nm <= 0 || size.y_nm <= 0 {
+        return Err(IpcError::InvalidObservedPad(
+            "pad shape size must be positive",
+        ));
+    }
+    let (offset_x_nm, offset_y_nm) = layer
+        .offset
+        .as_ref()
+        .map(|offset| (offset.x_nm, offset.y_nm))
+        .unwrap_or_default();
+    let chamfered_corners = layer.chamfered_corners.as_ref();
+    let (trapezoid_delta_x_nm, trapezoid_delta_y_nm) = layer
+        .trapezoid_delta
+        .as_ref()
+        .map(|delta| (delta.x_nm, delta.y_nm))
+        .unwrap_or_default();
+    let custom_anchor_shape = match layer.custom_anchor_shape.enum_value() {
+        Ok(board_types::PadStackShape::PSS_UNKNOWN) => None,
+        Ok(board_types::PadStackShape::PSS_CIRCLE) => Some(ObservedPadShape::Circle),
+        Ok(board_types::PadStackShape::PSS_RECTANGLE) => Some(ObservedPadShape::Rectangle),
+        _ => {
+            return Err(IpcError::InvalidObservedPad(
+                "custom pad anchor shape is unsupported",
+            ));
+        }
+    };
+    let shape = match layer.shape.enum_value() {
+        Ok(board_types::PadStackShape::PSS_CIRCLE) => ObservedPadShape::Circle,
+        Ok(board_types::PadStackShape::PSS_RECTANGLE) => ObservedPadShape::Rectangle,
+        Ok(board_types::PadStackShape::PSS_OVAL) => ObservedPadShape::Oval,
+        Ok(board_types::PadStackShape::PSS_TRAPEZOID) => ObservedPadShape::Trapezoid,
+        Ok(board_types::PadStackShape::PSS_ROUNDRECT) => ObservedPadShape::RoundedRectangle,
+        Ok(board_types::PadStackShape::PSS_CHAMFEREDRECT) => ObservedPadShape::ChamferedRectangle,
+        Ok(board_types::PadStackShape::PSS_CUSTOM) => {
+            return Err(IpcError::InvalidObservedPad(
+                "custom pad geometry is unsupported",
+            ));
+        }
+        _ => ObservedPadShape::Unknown,
+    };
+    Ok(ObservedPadCopperShape {
+        layer: board_layer,
+        shape,
+        size_x_nm: size.x_nm,
+        size_y_nm: size.y_nm,
+        offset_x_nm,
+        offset_y_nm,
+        corner_rounding_ratio: layer.corner_rounding_ratio,
+        chamfer_ratio: layer.chamfer_ratio,
+        chamfer_top_left: chamfered_corners.is_some_and(|corners| corners.top_left),
+        chamfer_top_right: chamfered_corners.is_some_and(|corners| corners.top_right),
+        chamfer_bottom_left: chamfered_corners.is_some_and(|corners| corners.bottom_left),
+        chamfer_bottom_right: chamfered_corners.is_some_and(|corners| corners.bottom_right),
+        trapezoid_delta_x_nm,
+        trapezoid_delta_y_nm,
+        custom_anchor_shape,
+    })
+}
+
+fn observed_pad_drill(
+    drill: &board_types::DrillProperties,
+) -> Result<Option<ObservedPadDrill>, IpcError> {
+    let is_empty_metadata = (drill.start_layer.value() == 0
+        && drill.end_layer.value() == 0
+        && drill.shape.value() == 0
+        || drill.start_layer.value() == board_types::BoardLayer::BL_F_Cu as i32
+            && drill.end_layer.value() == board_types::BoardLayer::BL_B_Cu as i32
+            && drill.shape.value() == board_types::DrillShape::DS_CIRCLE as i32)
+        && drill.capped.value() == 0
+        && drill.filled.value() == 0;
+    let Some(diameter) = drill.diameter.as_ref() else {
+        return if !is_empty_metadata {
+            Err(IpcError::InvalidObservedPad(
+                "pad drill metadata requires a positive size",
+            ))
+        } else {
+            Ok(None)
+        };
+    };
+    if diameter.x_nm == 0 && diameter.y_nm == 0 {
+        return if !is_empty_metadata {
+            Err(IpcError::InvalidObservedPad(
+                "pad drill metadata requires a positive size",
+            ))
+        } else {
+            Ok(None)
+        };
+    }
+    if diameter.x_nm <= 0 || diameter.y_nm <= 0 {
+        return Err(IpcError::InvalidObservedPad(
+            "pad drill size must be positive",
+        ));
+    }
+    let shape = match drill.shape.enum_value() {
+        Ok(board_types::DrillShape::DS_CIRCLE) => ObservedDrillShape::Circle,
+        Ok(board_types::DrillShape::DS_OBLONG) => ObservedDrillShape::Oblong,
+        Ok(board_types::DrillShape::DS_UNDEFINED) => ObservedDrillShape::Undefined,
+        _ => ObservedDrillShape::Unknown,
+    };
+    Ok(Some(ObservedPadDrill {
+        shape,
+        size_x_nm: diameter.x_nm,
+        size_y_nm: diameter.y_nm,
+    }))
 }
 
 fn board_graphics_from_response(
@@ -1532,6 +1981,97 @@ mod tests {
             },
             config,
         )
+    }
+
+    fn pad_item(id: &str, number: &str) -> Any {
+        let pad = board_types::Pad {
+            id: MessageField::some(base_types::KIID {
+                value: id.to_owned(),
+                ..base_types::KIID::default()
+            }),
+            locked: protobuf::EnumOrUnknown::new(base_types::LockedState::LS_LOCKED),
+            number: number.to_owned(),
+            net: MessageField::some(board_types::Net {
+                name: "GND".to_owned(),
+                ..board_types::Net::default()
+            }),
+            type_: protobuf::EnumOrUnknown::new(board_types::PadType::PT_PTH),
+            pad_stack: MessageField::some(board_types::PadStack {
+                type_: protobuf::EnumOrUnknown::new(board_types::PadStackType::PST_NORMAL),
+                layers: vec![
+                    protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Mask),
+                    protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_B_Cu),
+                    protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Cu),
+                    protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Paste),
+                    protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_In2_Cu),
+                ],
+                drill: MessageField::some(board_types::DrillProperties {
+                    diameter: MessageField::some(base_types::Vector2 {
+                        x_nm: 300_000,
+                        y_nm: 400_000,
+                        ..base_types::Vector2::default()
+                    }),
+                    shape: protobuf::EnumOrUnknown::new(board_types::DrillShape::DS_OBLONG),
+                    ..board_types::DrillProperties::default()
+                }),
+                copper_layers: vec![
+                    board_types::PadStackLayer {
+                        layer: protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_B_Cu),
+                        shape: protobuf::EnumOrUnknown::new(board_types::PadStackShape::PSS_OVAL),
+                        size: MessageField::some(base_types::Vector2 {
+                            x_nm: 900_000,
+                            y_nm: 700_000,
+                            ..base_types::Vector2::default()
+                        }),
+                        offset: MessageField::some(base_types::Vector2 {
+                            x_nm: 2,
+                            y_nm: -3,
+                            ..base_types::Vector2::default()
+                        }),
+                        ..board_types::PadStackLayer::default()
+                    },
+                    board_types::PadStackLayer {
+                        layer: protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Cu),
+                        shape: protobuf::EnumOrUnknown::new(
+                            board_types::PadStackShape::PSS_ROUNDRECT,
+                        ),
+                        corner_rounding_ratio: 0.25,
+                        size: MessageField::some(base_types::Vector2 {
+                            x_nm: 800_000,
+                            y_nm: 800_000,
+                            ..base_types::Vector2::default()
+                        }),
+                        ..board_types::PadStackLayer::default()
+                    },
+                ],
+                angle: MessageField::some(base_types::Angle {
+                    value_degrees: -1.2346,
+                    ..base_types::Angle::default()
+                }),
+                ..board_types::PadStack::default()
+            }),
+            position: MessageField::some(base_types::Vector2 {
+                x_nm: 10,
+                y_nm: -20,
+                ..base_types::Vector2::default()
+            }),
+            ..board_types::Pad::default()
+        };
+        Any {
+            type_url: "type.googleapis.com/kiapi.board.types.Pad".to_owned(),
+            value: pad.write_to_bytes().unwrap(),
+            ..Any::default()
+        }
+    }
+
+    fn pad_client(response: ApiResponse) -> KiCadClient<FakeTransport> {
+        footprint_client(response)
+    }
+
+    fn update_pad(item: &mut Any, update: impl FnOnce(&mut board_types::Pad)) {
+        let mut pad = board_types::Pad::parse_from_bytes(&item.value).unwrap();
+        update(&mut pad);
+        item.value = pad.write_to_bytes().unwrap();
     }
 
     fn observed_segment_item(layer: board_types::BoardLayer) -> Any {
@@ -2188,6 +2728,261 @@ mod tests {
             error.to_string(),
             "unknown_pcb_item_type: type.googleapis.com/kiapi.board.types.Unknown"
         );
+    }
+
+    #[test]
+    fn get_footprint_pads_maps_and_sorts_container_bound_observations() {
+        let mut client = pad_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![pad_item("b", "2"), pad_item("a", "1")],
+        ));
+        let pads = client
+            .get_footprint_pads("main.kicad_pcb", "footprint-1")
+            .unwrap();
+        assert_eq!(pads[0].source_uuid, "a");
+        assert_eq!(pads[0].footprint_source_uuid, "footprint-1");
+        assert_eq!((pads[0].position_x_nm, pads[0].position_y_nm), (10, -20));
+        assert_eq!(pads[0].stack_type, ObservedPadStackType::Normal);
+        assert_eq!(pads[0].orientation_mdeg, -1235);
+        assert_eq!(pads[0].kind, ObservedPadKind::PlatedThroughHole);
+        assert_eq!(pads[0].lock_state, ObservedLockState::Locked);
+        assert_eq!(pads[0].net_name.as_deref(), Some("GND"));
+        assert!(pads[0].layers.contains(&ObservedBoardLayer::InnerCopper(2)));
+        assert!(pads[0].layers.contains(&ObservedBoardLayer::FrontMask));
+        assert!(pads[0].layers.contains(&ObservedBoardLayer::FrontPaste));
+        assert_eq!(pads[0].copper_shapes[0].offset_x_nm, 0);
+        assert_eq!(pads[0].copper_shapes[0].corner_rounding_ratio, 0.25);
+        assert_eq!(pads[0].copper_shapes[1].offset_y_nm, -3);
+        assert_eq!(pads[0].drill.unwrap().shape, ObservedDrillShape::Oblong);
+        let command = editor_commands::GetItems::parse_from_bytes(
+            &client.transport.requests[0].message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        assert_eq!(
+            command.types,
+            [protobuf::EnumOrUnknown::new(
+                enums::KiCadObjectType::KOT_PCB_PAD
+            )]
+        );
+        let header = command.header.as_ref().unwrap();
+        assert_eq!(header.container.as_ref().unwrap().value, "footprint-1");
+        assert_eq!(
+            header.document.as_ref().unwrap().board_filename(),
+            "main.kicad_pcb"
+        );
+        assert_eq!(client.token.as_ref().unwrap().as_str(), "token");
+    }
+
+    #[test]
+    fn get_footprint_pads_accepts_empty_numbers_results_and_unknown_enums() {
+        let mut empty = pad_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            Vec::new(),
+        ));
+        assert!(
+            empty
+                .get_footprint_pads("main.kicad_pcb", "footprint-1")
+                .unwrap()
+                .is_empty()
+        );
+        let mut first = pad_item("a", "");
+        update_pad(&mut first, |pad| {
+            pad.type_ = protobuf::EnumOrUnknown::from_i32(999);
+            pad.locked = protobuf::EnumOrUnknown::from_i32(999);
+            let stack = pad.pad_stack.as_mut().unwrap();
+            stack.type_ = protobuf::EnumOrUnknown::from_i32(999);
+            stack.copper_layers[0].shape = protobuf::EnumOrUnknown::from_i32(999);
+            stack.drill.as_mut().unwrap().shape = protobuf::EnumOrUnknown::from_i32(999);
+            pad.net = MessageField::none();
+        });
+        let mut no_drill = pad_item("b", "");
+        update_pad(&mut no_drill, |pad| {
+            pad.pad_stack.as_mut().unwrap().drill =
+                MessageField::some(board_types::DrillProperties {
+                    start_layer: protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Cu),
+                    end_layer: protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_B_Cu),
+                    diameter: MessageField::some(base_types::Vector2::default()),
+                    shape: protobuf::EnumOrUnknown::new(board_types::DrillShape::DS_CIRCLE),
+                    ..board_types::DrillProperties::default()
+                });
+        });
+        let mut client = pad_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![first, no_drill],
+        ));
+        let pads = client
+            .get_footprint_pads("main.kicad_pcb", "footprint-1")
+            .unwrap();
+        assert_eq!((pads[0].number.as_str(), pads[1].number.as_str()), ("", ""));
+        assert_eq!(pads[0].kind, ObservedPadKind::Unknown);
+        assert_eq!(pads[0].lock_state, ObservedLockState::Unknown);
+        assert_eq!(pads[0].stack_type, ObservedPadStackType::Unknown);
+        assert_eq!(pads[0].copper_shapes[1].shape, ObservedPadShape::Unknown);
+        assert_eq!(pads[0].drill.unwrap().shape, ObservedDrillShape::Unknown);
+        assert_eq!(pads[0].net_name, None);
+        assert_eq!(pads[1].drill, None);
+    }
+
+    #[test]
+    fn get_footprint_pads_rejects_protocol_status_duplicates_and_preserves_token() {
+        let mut empty_parent = pad_client(get_items_response(
+            "new",
+            base_types::ItemRequestStatus::IRS_OK,
+            Vec::new(),
+        ));
+        assert_eq!(
+            empty_parent
+                .get_footprint_pads("main.kicad_pcb", "")
+                .unwrap_err()
+                .code(),
+            "invalid_observed_pad"
+        );
+        assert!(empty_parent.transport.requests.is_empty());
+        let mut status = pad_client(get_items_response(
+            "new",
+            base_types::ItemRequestStatus::IRS_DOCUMENT_NOT_FOUND,
+            Vec::new(),
+        ));
+        assert_eq!(
+            status
+                .get_footprint_pads("main.kicad_pcb", "f")
+                .unwrap_err()
+                .code(),
+            "kicad_status_error"
+        );
+        assert!(status.token.is_none());
+        let mut wrong = pad_item("a", "1");
+        wrong.type_url = "type.googleapis.com/kiapi.board.types.FootprintInstance".to_owned();
+        let mut protocol = pad_client(get_items_response(
+            "new",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![wrong],
+        ));
+        protocol.token = Some(InstanceToken::new("old").unwrap());
+        assert_eq!(
+            protocol
+                .get_footprint_pads("main.kicad_pcb", "f")
+                .unwrap_err()
+                .code(),
+            "protocol_decode_failed"
+        );
+        assert_eq!(protocol.token.as_ref().unwrap().as_str(), "old");
+        let mismatched = editor_commands::GetItemsResponse {
+            header: MessageField::some(base_types::ItemHeader {
+                container: MessageField::some(base_types::KIID {
+                    value: "other-footprint".to_owned(),
+                    ..base_types::KIID::default()
+                }),
+                ..base_types::ItemHeader::default()
+            }),
+            status: protobuf::EnumOrUnknown::new(base_types::ItemRequestStatus::IRS_OK),
+            ..editor_commands::GetItemsResponse::default()
+        };
+        assert_eq!(
+            footprint_pads_from_response(&mismatched, "footprint-1")
+                .unwrap_err()
+                .code(),
+            "invalid_observed_pad"
+        );
+        let mut duplicate = pad_client(get_items_response(
+            "new",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![pad_item("a", "1"), pad_item("a", "2")],
+        ));
+        assert_eq!(
+            duplicate
+                .get_footprint_pads("main.kicad_pcb", "f")
+                .unwrap_err()
+                .code(),
+            "invalid_observed_pad"
+        );
+        assert!(duplicate.token.is_none());
+    }
+
+    #[test]
+    fn get_footprint_pads_rejects_missing_invalid_and_lossy_geometry() {
+        let mut cases = Vec::new();
+        let mut missing = pad_item("a", "1");
+        update_pad(&mut missing, |pad| pad.position = MessageField::none());
+        cases.push(missing);
+        let mut size = pad_item("b", "1");
+        update_pad(&mut size, |pad| {
+            pad.pad_stack.as_mut().unwrap().copper_layers[0]
+                .size
+                .as_mut()
+                .unwrap()
+                .x_nm = 0
+        });
+        cases.push(size);
+        let mut layer = pad_item("c", "1");
+        update_pad(&mut layer, |pad| {
+            pad.pad_stack.as_mut().unwrap().layers[0] =
+                protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_Dwgs_User)
+        });
+        cases.push(layer);
+        let mut duplicate_layer = pad_item("d", "1");
+        update_pad(&mut duplicate_layer, |pad| {
+            let stack = pad.pad_stack.as_mut().unwrap();
+            stack.layers.push(stack.layers[0]);
+        });
+        cases.push(duplicate_layer);
+        let mut custom = pad_item("e", "1");
+        update_pad(&mut custom, |pad| {
+            pad.pad_stack.as_mut().unwrap().copper_layers[0]
+                .custom_shapes
+                .push(board_types::BoardGraphicShape::default())
+        });
+        cases.push(custom);
+        let mut custom_shape = pad_item("f", "1");
+        update_pad(&mut custom_shape, |pad| {
+            pad.pad_stack.as_mut().unwrap().copper_layers[0].shape =
+                protobuf::EnumOrUnknown::new(board_types::PadStackShape::PSS_CUSTOM);
+        });
+        cases.push(custom_shape);
+        let mut custom_anchor = pad_item("g", "1");
+        update_pad(&mut custom_anchor, |pad| {
+            pad.pad_stack.as_mut().unwrap().copper_layers[0].custom_anchor_shape =
+                protobuf::EnumOrUnknown::new(board_types::PadStackShape::PSS_OVAL);
+        });
+        cases.push(custom_anchor);
+        let mut invalid_ratio = pad_item("h", "1");
+        update_pad(&mut invalid_ratio, |pad| {
+            pad.pad_stack.as_mut().unwrap().copper_layers[0].corner_rounding_ratio = f64::NAN;
+        });
+        cases.push(invalid_ratio);
+        let mut contradictory_drill = pad_item("i", "1");
+        update_pad(&mut contradictory_drill, |pad| {
+            pad.pad_stack.as_mut().unwrap().drill =
+                MessageField::some(board_types::DrillProperties {
+                    shape: protobuf::EnumOrUnknown::new(board_types::DrillShape::DS_OBLONG),
+                    ..board_types::DrillProperties::default()
+                });
+        });
+        cases.push(contradictory_drill);
+        let mut secondary = pad_item("j", "1");
+        update_pad(&mut secondary, |pad| {
+            pad.pad_stack.as_mut().unwrap().secondary_drill =
+                MessageField::some(board_types::DrillProperties::default())
+        });
+        cases.push(secondary);
+        for item in cases {
+            let mut client = pad_client(get_items_response(
+                "new",
+                base_types::ItemRequestStatus::IRS_OK,
+                vec![item],
+            ));
+            assert_eq!(
+                client
+                    .get_footprint_pads("main.kicad_pcb", "footprint-1")
+                    .unwrap_err()
+                    .code(),
+                "invalid_observed_pad"
+            );
+            assert!(client.token.is_none());
+        }
     }
 
     #[test]
