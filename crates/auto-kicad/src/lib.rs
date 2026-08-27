@@ -1,6 +1,8 @@
 use kicad_adapter::{
     BoardGraphicsCommitOutcome, BoardGraphicsExecutor, DiscoveryInput, DocumentObservation,
-    LiveBoardObservation, artifact_discovery_snapshot, discovery_snapshot, live_board_observation,
+    FootprintObservationError, LiveBoardObservation, LiveBoardObservationError,
+    ObservedFootprintWithPads, artifact_discovery_snapshot, board_document_id,
+    board_footprint_observation, discovery_snapshot, live_board_observation,
 };
 use kicad_checks::{CheckResult, DrcPolicy, DrcReport, compare_drc, run_pcb_drc};
 use kicad_engine::{
@@ -114,20 +116,70 @@ impl DiscoveryService for IpcDiscoveryService {
         let document = documents.pop().expect("document count checked");
         let board_filename = match &document.kind {
             kicad_ipc::OpenDocumentKind::Pcb { board_filename } if !board_filename.is_empty() => {
-                board_filename.as_str()
+                board_filename.clone()
             }
             _ => return Err("open PCB document has no usable filename".into()),
         };
-        let graphics = client
-            .get_board_graphics(board_filename)
-            .map_err(|error| error.to_string())?;
-        let instance_token = client
-            .instance_token()
-            .cloned()
-            .ok_or_else(|| "KiCad instance token was not observed".to_owned())?;
-        live_board_observation(version, document, graphics, instance_token)
+        observe_live_board(&mut client, version, document, &board_filename)
             .map_err(|error| error.to_string())
     }
+}
+
+#[derive(Debug)]
+enum ObserveLiveBoardError {
+    Ipc(kicad_ipc::IpcError),
+    MissingInstanceToken,
+    Footprints(FootprintObservationError),
+    LiveBoard(LiveBoardObservationError),
+}
+
+impl std::fmt::Display for ObserveLiveBoardError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Ipc(error) => error.fmt(formatter),
+            Self::MissingInstanceToken => {
+                formatter.write_str("KiCad instance token was not observed")
+            }
+            Self::Footprints(error) => error.fmt(formatter),
+            Self::LiveBoard(error) => error.fmt(formatter),
+        }
+    }
+}
+
+fn observe_live_board<T: kicad_ipc::KiCadTransport>(
+    client: &mut KiCadClient<T>,
+    version: kicad_ipc::VersionInfo,
+    document: kicad_ipc::OpenDocument,
+    board_filename: &str,
+) -> Result<LiveBoardObservation, ObserveLiveBoardError> {
+    let graphics = client
+        .get_board_graphics(board_filename)
+        .map_err(ObserveLiveBoardError::Ipc)?;
+    let footprints = client
+        .get_footprint_instances(board_filename)
+        .map_err(ObserveLiveBoardError::Ipc)?;
+    let mut observed = Vec::with_capacity(footprints.len());
+    for footprint in footprints {
+        let pads = client
+            .get_footprint_pads(board_filename, &footprint.source_uuid)
+            .map_err(ObserveLiveBoardError::Ipc)?;
+        observed.push(ObservedFootprintWithPads { footprint, pads });
+    }
+    let board_id = board_document_id(&document).map_err(ObserveLiveBoardError::LiveBoard)?;
+    let native_footprints = board_footprint_observation(board_id, observed)
+        .map_err(ObserveLiveBoardError::Footprints)?;
+    let instance_token = client
+        .instance_token()
+        .cloned()
+        .ok_or(ObserveLiveBoardError::MissingInstanceToken)?;
+    live_board_observation(
+        version,
+        document,
+        graphics,
+        native_footprints,
+        instance_token,
+    )
+    .map_err(ObserveLiveBoardError::LiveBoard)
 }
 
 fn is_unsupported(observation: &DocumentObservation) -> bool {
@@ -267,25 +319,24 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
                 reason: "board filename changed".into(),
             };
         }
-        let graphics = match client.get_board_graphics(board_filename) {
-            Ok(graphics) => graphics,
-            Err(reason) => {
+        let observation = match observe_live_board(&mut client, version, document, board_filename) {
+            Ok(observation) => observation,
+            Err(ObserveLiveBoardError::Ipc(reason)) => {
                 return BoardGraphicsCommitOutcome::Unknown {
                     reason: reason.to_string(),
                 };
             }
-        };
-        let token = match client.instance_token().cloned() {
-            Some(token) => token,
-            None => {
+            Err(ObserveLiveBoardError::MissingInstanceToken) => {
                 return BoardGraphicsCommitOutcome::Unknown {
                     reason: "KiCad instance token was not observed".into(),
                 };
             }
-        };
-        let observation = match live_board_observation(version, document, graphics, token) {
-            Ok(observation) => observation,
-            Err(reason) => {
+            Err(ObserveLiveBoardError::Footprints(reason)) => {
+                return BoardGraphicsCommitOutcome::Rejected {
+                    reason: reason.to_string(),
+                };
+            }
+            Err(ObserveLiveBoardError::LiveBoard(reason)) => {
                 return BoardGraphicsCommitOutcome::Rejected {
                     reason: reason.to_string(),
                 };
@@ -1015,7 +1066,7 @@ mod tests {
     use kicad_checks::{CheckFailure, DrcItem, DrcViolation, Position, ViolationIdentity};
     use kicad_model::{
         Board, BoardGraphicLayer, CapabilityObservation, CapabilityStatus, Coordinate, Diagnostic,
-        DocumentSpace, ProjectSnapshot, Schematic, Unit,
+        DocumentSpace, ObservedBoardFootprints, ProjectSnapshot, Schematic, Unit,
     };
     use rmcp::{ClientHandler, ServiceExt, model::CallToolRequestParams};
     use std::collections::VecDeque;
@@ -1224,6 +1275,9 @@ mod tests {
                 footprints: Vec::new(),
                 graphics: Vec::new(),
             },
+            native_footprints: Some(
+                ObservedBoardFootprints::new(StableId::new("board").unwrap(), Vec::new()).unwrap(),
+            ),
         }
     }
 
@@ -1582,9 +1636,10 @@ mod tests {
     #[tokio::test]
     async fn commit_requires_preview_and_exact_approval_and_executes_once() {
         let calls = Arc::new(Mutex::new(0));
-        let execution = Arc::new(FakeExecution {
-            outcome: BoardGraphicsCommitOutcome::CommittedAndSaved,
+        let revisions = Arc::new(Mutex::new(Vec::new()));
+        let execution = Arc::new(CapturingExecution {
             calls: calls.clone(),
+            revisions: revisions.clone(),
         });
         let server = Server::with_discovery_and_execution(
             Arc::new(FakeDiscovery {
@@ -1605,6 +1660,16 @@ mod tests {
         };
         let plan_id = planned["data"]["plan_id"].as_str().unwrap().to_owned();
         let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
+        let expected_revision = {
+            let sessions = server.sessions.lock().unwrap();
+            let stored = &sessions[&plan_id].session;
+            assert!(stored.snapshot.native_footprints.is_some());
+            assert_eq!(
+                stored.plan.base_revision,
+                stored.snapshot.revision().unwrap()
+            );
+            stored.plan.base_revision.clone()
+        };
         let early = server
             .kicad_commit_change(Parameters(CommitChangeRequest {
                 plan_id: plan_id.clone(),
@@ -1643,6 +1708,7 @@ mod tests {
             .unwrap();
         assert!(matches!(committed, CallToolResponse::Complete(_)));
         assert_eq!(*calls.lock().unwrap(), 1);
+        assert_eq!(*revisions.lock().unwrap(), [expected_revision]);
         let replay = server
             .kicad_commit_change(Parameters(CommitChangeRequest {
                 plan_id,
@@ -1808,6 +1874,30 @@ mod tests {
             StoredExecutionState::Committed
         );
         assert_eq!(*saved_calls.lock().unwrap(), 1);
+    }
+
+    #[derive(Clone)]
+    struct CapturingExecution {
+        calls: Arc<Mutex<usize>>,
+        revisions: Arc<Mutex<Vec<RevisionDigest>>>,
+    }
+
+    impl BoardGraphicsExecutionService for CapturingExecution {
+        fn execute(
+            &self,
+            _endpoint: &str,
+            _board_filename: &str,
+            _expected_token: &str,
+            expected_revision: &RevisionDigest,
+            _operation: &OperationKind,
+        ) -> BoardGraphicsCommitOutcome {
+            *self.calls.lock().unwrap() += 1;
+            self.revisions
+                .lock()
+                .unwrap()
+                .push(expected_revision.clone());
+            BoardGraphicsCommitOutcome::CommittedAndSaved
+        }
     }
 
     #[derive(Clone)]

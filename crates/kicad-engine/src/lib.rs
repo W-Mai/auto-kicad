@@ -582,6 +582,7 @@ mod tests {
                 document_id: Some(id("board")),
                 ..Board::default()
             },
+            native_footprints: None,
         }
     }
     fn symbol(uuid: &str) -> Symbol {

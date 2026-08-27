@@ -946,6 +946,8 @@ pub struct ProjectSnapshot {
     pub capabilities: Vec<String>,
     pub schematic: Schematic,
     pub board: Board,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_footprints: Option<ObservedBoardFootprints>,
 }
 
 impl ProjectSnapshot {
@@ -984,7 +986,23 @@ impl ProjectSnapshot {
                 graphic.graphic_id.clone(),
             )
         });
+        snapshot.native_footprints = snapshot
+            .native_footprints
+            .as_ref()
+            .map(ObservedBoardFootprints::canonical);
         snapshot
+    }
+
+    pub fn validate(&self) -> Result<(), ModelError> {
+        if let Some(native_footprints) = &self.native_footprints {
+            native_footprints.canonical().validate()?;
+            if self.board.document_id.as_ref() != Some(&native_footprints.board_id) {
+                return Err(ModelError::InvalidFootprintObservation(
+                    "native footprint board identity does not match the project board",
+                ));
+            }
+        }
+        Ok(())
     }
 
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, ModelError> {
@@ -992,6 +1010,7 @@ impl ProjectSnapshot {
     }
 
     pub fn revision(&self) -> Result<RevisionDigest, ModelError> {
+        self.validate()?;
         let mut hasher = Sha256::new();
         hasher.update(self.canonical_bytes()?);
         Ok(RevisionDigest(hex::encode(hasher.finalize())))
@@ -1101,6 +1120,7 @@ mod tests {
                 symbols,
             },
             board: Board::default(),
+            native_footprints: None,
         }
     }
 
@@ -1307,6 +1327,17 @@ mod tests {
         });
         let snapshot: ProjectSnapshot = serde_json::from_value(old).unwrap();
         assert!(snapshot.schematic.symbols.is_empty());
+        assert_eq!(snapshot.native_footprints, None);
+        assert!(
+            serde_json::to_value(&snapshot)
+                .unwrap()
+                .get("native_footprints")
+                .is_none()
+        );
+        assert_eq!(
+            snapshot.canonical_bytes().unwrap(),
+            br#"{"project_id":"project","kicad_version":"10.0.5","capabilities":[],"schematic":{"nets":[],"symbols":[]},"board":{"document_id":null,"footprints":[],"graphics":[]}}"#
+        );
     }
 
     #[test]
@@ -1477,6 +1508,62 @@ mod tests {
                 observed_revision,
             },
         )
+    }
+
+    fn snapshot_with_native(native_footprints: ObservedBoardFootprints) -> ProjectSnapshot {
+        let mut snapshot = snapshot(Vec::new());
+        snapshot.board.document_id = Some(native_footprints.board_id.clone());
+        snapshot.native_footprints = Some(native_footprints);
+        snapshot
+    }
+
+    #[test]
+    fn project_snapshot_native_footprints_are_canonical_and_revision_bound() {
+        let (board_id, mut footprint) = observed_footprint();
+        let mut second_pad = footprint.pads[0].clone();
+        second_pad.source_uuid = id("another-pad");
+        second_pad.pad_id = footprint_pad_id(&footprint.placement_id, &second_pad.source_uuid);
+        footprint.pads.push(second_pad);
+        let native = ObservedBoardFootprints::new(board_id, vec![footprint]).unwrap();
+        let first = snapshot_with_native(native.clone());
+        let mut reordered_native = native;
+        reordered_native.placements[0].pads.reverse();
+        let reordered = snapshot_with_native(reordered_native);
+        assert_eq!(first.revision().unwrap(), reordered.revision().unwrap());
+        assert_eq!(first.canonical(), reordered.canonical());
+
+        let mut changed_placement = first.native_footprints.as_ref().unwrap().placements[0].clone();
+        changed_placement.value = "changed".to_owned();
+        let changed_native = ObservedBoardFootprints::new(
+            first.board.document_id.clone().unwrap(),
+            vec![changed_placement],
+        )
+        .unwrap();
+        let changed = snapshot_with_native(changed_native);
+        assert_ne!(first.revision().unwrap(), changed.revision().unwrap());
+    }
+
+    #[test]
+    fn project_snapshot_rejects_mismatched_or_forged_native_footprints() {
+        let (board_id, footprint) = observed_footprint();
+        let native = ObservedBoardFootprints::new(board_id, vec![footprint]).unwrap();
+        let mut mismatched = snapshot_with_native(native.clone());
+        mismatched.board.document_id = Some(id("other-board"));
+        assert!(matches!(
+            mismatched.validate(),
+            Err(ModelError::InvalidFootprintObservation(
+                "native footprint board identity does not match the project board"
+            ))
+        ));
+
+        let mut forged = snapshot_with_native(native);
+        forged.native_footprints.as_mut().unwrap().observed_revision = revision('f');
+        assert!(matches!(
+            forged.revision(),
+            Err(ModelError::InvalidFootprintObservation(
+                "footprint observation revision does not match its content"
+            ))
+        ));
     }
 
     #[test]

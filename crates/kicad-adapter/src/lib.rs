@@ -668,6 +668,7 @@ pub fn live_board_observation(
     version: VersionInfo,
     document: OpenDocument,
     graphics: Vec<ObservedBoardGraphicSegment>,
+    native_footprints: ObservedBoardFootprints,
     instance_token: InstanceToken,
 ) -> Result<LiveBoardObservation, LiveBoardObservationError> {
     let board_filename = match &document.kind {
@@ -739,12 +740,20 @@ pub fn live_board_observation(
             Ok(graphic)
         })
         .collect::<Result<Vec<_>, LiveBoardObservationError>>()?;
+    native_footprints.validate()?;
+    if native_footprints.board_id != discovered.document_id {
+        return Err(ModelError::InvalidFootprintObservation(
+            "native footprint board identity does not match the live board",
+        )
+        .into());
+    }
     let snapshot = ProjectSnapshot {
         project_id,
         kicad_version: version.full_version,
         capabilities: vec![
             "pcb.board_graphics.read".to_owned(),
             "pcb.board_graphics.write".to_owned(),
+            "pcb.native_footprints.read".to_owned(),
         ],
         schematic: Schematic::default(),
         board: Board {
@@ -752,8 +761,10 @@ pub fn live_board_observation(
             footprints: Vec::new(),
             graphics,
         },
+        native_footprints: Some(native_footprints),
     }
     .canonical();
+    snapshot.validate()?;
     Ok(LiveBoardObservation {
         snapshot,
         instance_token,
@@ -761,6 +772,19 @@ pub fn live_board_observation(
         board_path,
         project_dir: project_path,
     })
+}
+
+pub fn board_document_id(document: &OpenDocument) -> Result<StableId, LiveBoardObservationError> {
+    match &document.kind {
+        OpenDocumentKind::Pcb { board_filename } if !board_filename.is_empty() => {}
+        OpenDocumentKind::Pcb { .. } => {
+            return Err(LiveBoardObservationError::MissingDocumentIdentity);
+        }
+        _ => return Err(LiveBoardObservationError::NonPcbDocument),
+    }
+    discovered_document(document.clone())?
+        .map(|document| document.document_id)
+        .ok_or(LiveBoardObservationError::MissingDocumentIdentity)
 }
 
 fn discovered_document(document: OpenDocument) -> Result<Option<DiscoveredDocument>, ModelError> {
@@ -1026,6 +1050,29 @@ mod tests {
                 board_filename: "xLock.kicad_pcb".to_owned(),
             },
         }
+    }
+
+    #[test]
+    fn board_document_id_accepts_only_usable_pcb_documents() {
+        let document = pcb();
+        let expected = discovered_document(document.clone())
+            .unwrap()
+            .unwrap()
+            .document_id;
+        assert_eq!(board_document_id(&document).unwrap(), expected);
+
+        let mut missing_identity = document;
+        missing_identity.kind = OpenDocumentKind::Pcb {
+            board_filename: String::new(),
+        };
+        assert!(matches!(
+            board_document_id(&missing_identity),
+            Err(LiveBoardObservationError::MissingDocumentIdentity)
+        ));
+        assert!(matches!(
+            board_document_id(&schematic("xLock.kicad_sch")),
+            Err(LiveBoardObservationError::NonPcbDocument)
+        ));
     }
 
     fn schematic_fixture(locked: bool) -> (ParsedSchematicProject, NetlistDocument) {
@@ -1429,12 +1476,24 @@ mod tests {
         }
     }
 
+    fn native_footprints(document: &OpenDocument) -> ObservedBoardFootprints {
+        let board_id = discovered_document(document.clone())
+            .unwrap()
+            .unwrap()
+            .document_id;
+        board_footprint_observation(board_id, vec![observed_footprint("footprint-a", "pad-a")])
+            .unwrap()
+    }
+
     #[test]
     fn live_board_observation_maps_identity_geometry_and_capabilities() {
+        let document = pcb();
+        let native_footprints = native_footprints(&document);
         let observation = live_board_observation(
             version(),
-            pcb(),
+            document,
             vec![observed_graphic("graphic-1", 1)],
+            native_footprints,
             InstanceToken::new("token").unwrap(),
         )
         .unwrap();
@@ -1447,8 +1506,18 @@ mod tests {
         );
         assert_eq!(
             observation.snapshot.capabilities,
-            ["pcb.board_graphics.read", "pcb.board_graphics.write"]
+            [
+                "pcb.board_graphics.read",
+                "pcb.board_graphics.write",
+                "pcb.native_footprints.read"
+            ]
         );
+        let native = observation.snapshot.native_footprints.as_ref().unwrap();
+        assert_eq!(
+            observation.snapshot.board.document_id.as_ref(),
+            Some(&native.board_id)
+        );
+        assert_eq!(native.placements.len(), 1);
         assert!(observation.snapshot.schematic.nets.is_empty());
         assert!(observation.snapshot.schematic.symbols.is_empty());
         assert!(observation.snapshot.board.footprints.is_empty());
@@ -1460,18 +1529,34 @@ mod tests {
     }
 
     #[test]
-    fn live_board_revision_is_independent_of_graphic_order() {
+    fn live_board_revision_is_independent_of_graphic_and_footprint_order() {
+        let document = pcb();
+        let board_id = discovered_document(document.clone())
+            .unwrap()
+            .unwrap()
+            .document_id;
+        let footprint_a = observed_footprint("footprint-a", "pad-a");
+        let footprint_b = observed_footprint("footprint-b", "pad-b");
+        let first_native = board_footprint_observation(
+            board_id.clone(),
+            vec![footprint_b.clone(), footprint_a.clone()],
+        )
+        .unwrap();
+        let second_native =
+            board_footprint_observation(board_id, vec![footprint_a, footprint_b]).unwrap();
         let first = live_board_observation(
             version(),
-            pcb(),
+            document.clone(),
             vec![observed_graphic("b", 20), observed_graphic("a", 1)],
+            first_native,
             InstanceToken::new("token").unwrap(),
         )
         .unwrap();
         let second = live_board_observation(
             version(),
-            pcb(),
+            document.clone(),
             vec![observed_graphic("a", 1), observed_graphic("b", 20)],
+            second_native,
             InstanceToken::new("token").unwrap(),
         )
         .unwrap();
@@ -1483,11 +1568,68 @@ mod tests {
     }
 
     #[test]
-    fn live_board_observation_rejects_duplicate_or_invalid_graphic_ids() {
-        let duplicate = live_board_observation(
+    fn live_board_revision_changes_with_native_pad_content() {
+        let document = pcb();
+        let board_id = discovered_document(document.clone())
+            .unwrap()
+            .unwrap()
+            .document_id;
+        let first_native = native_footprints(&document);
+        let mut changed = observed_footprint("footprint-a", "pad-a");
+        changed.pads[0].number = "2".to_owned();
+        let changed_native = board_footprint_observation(board_id, vec![changed]).unwrap();
+        let first = live_board_observation(
+            version(),
+            document.clone(),
+            Vec::new(),
+            first_native,
+            InstanceToken::new("token").unwrap(),
+        )
+        .unwrap();
+        let changed = live_board_observation(
+            version(),
+            document,
+            Vec::new(),
+            changed_native,
+            InstanceToken::new("token").unwrap(),
+        )
+        .unwrap();
+        assert_ne!(
+            first.snapshot.revision().unwrap(),
+            changed.snapshot.revision().unwrap()
+        );
+    }
+
+    #[test]
+    fn live_board_observation_rejects_native_footprints_from_another_board() {
+        let error = live_board_observation(
             version(),
             pcb(),
+            Vec::new(),
+            board_footprint_observation(
+                StableId::new("other-board").unwrap(),
+                vec![observed_footprint("footprint-a", "pad-a")],
+            )
+            .unwrap(),
+            InstanceToken::new("token").unwrap(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            LiveBoardObservationError::Model(ModelError::InvalidFootprintObservation(
+                "native footprint board identity does not match the live board"
+            ))
+        ));
+    }
+
+    #[test]
+    fn live_board_observation_rejects_duplicate_or_invalid_graphic_ids() {
+        let document = pcb();
+        let duplicate = live_board_observation(
+            version(),
+            document.clone(),
             vec![observed_graphic("same", 1), observed_graphic("same", 20)],
+            native_footprints(&document),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();
@@ -1497,8 +1639,9 @@ mod tests {
         ));
         let invalid = live_board_observation(
             version(),
-            pcb(),
+            document.clone(),
             vec![observed_graphic("", 1)],
+            native_footprints(&document),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();
@@ -1517,6 +1660,7 @@ mod tests {
             version(),
             document,
             Vec::new(),
+            native_footprints(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();
@@ -1532,6 +1676,7 @@ mod tests {
             version(),
             schematic("xLock.kicad_sch"),
             Vec::new(),
+            native_footprints(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();
@@ -1543,6 +1688,7 @@ mod tests {
             version(),
             document,
             Vec::new(),
+            native_footprints(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();
