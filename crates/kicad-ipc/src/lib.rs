@@ -224,6 +224,20 @@ pub struct CreatedThroughViaReceipt {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FootprintInstanceTemplate {
     bytes: Vec<u8>,
+    metadata: FootprintInstanceTemplateMetadata,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FootprintInstanceTemplateMetadata {
+    pub library_identifier: ObservedFootprintLibraryIdentifier,
+    pub orientation_mdeg: i64,
+    pub side: FootprintSide,
+}
+
+impl FootprintInstanceTemplate {
+    pub fn metadata(&self) -> &FootprintInstanceTemplateMetadata {
+        &self.metadata
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1851,8 +1865,14 @@ fn footprint_templates_from_response(
             let instance = board_types::FootprintInstance::parse_from_bytes(&item.value)
                 .map_err(|_| IpcError::MalformedEnvelope)?;
             validate_footprint_instance(&instance)?;
+            let observed = footprint_instance_from_any(item)?;
             Ok(FootprintInstanceTemplate {
                 bytes: item.value.clone(),
+                metadata: FootprintInstanceTemplateMetadata {
+                    library_identifier: observed.library_identifier,
+                    orientation_mdeg: observed.orientation_mdeg,
+                    side: observed.side,
+                },
             })
         })
         .collect()
@@ -4644,6 +4664,14 @@ mod tests {
                 .unwrap();
         let template = FootprintInstanceTemplate {
             bytes: source.write_to_bytes().unwrap(),
+            metadata: FootprintInstanceTemplateMetadata {
+                library_identifier: ObservedFootprintLibraryIdentifier {
+                    nickname: "Resistor_SMD".into(),
+                    entry_name: "R_0603".into(),
+                },
+                orientation_mdeg: -1235,
+                side: FootprintSide::Front,
+            },
         };
         assert_eq!(
             client
