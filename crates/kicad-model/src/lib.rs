@@ -1413,6 +1413,232 @@ fn derived_stable_id(domain: &str, parts: &[&str]) -> StableId {
     StableId(hex::encode(hasher.finalize()))
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub enum ObservedStackupLayerIdentity {
+    Undefined,
+    FrontCopper,
+    InnerCopper(u8),
+    BackCopper,
+    BackPaste,
+    FrontPaste,
+    BackSilkscreen,
+    FrontSilkscreen,
+    BackSoldermask,
+    FrontSoldermask,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum ObservedStackupLayerType {
+    Unknown,
+    Copper,
+    Dielectric,
+    Silkscreen,
+    Soldermask,
+    Solderpaste,
+    Undefined,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExactFiniteFloat(u64);
+
+impl ExactFiniteFloat {
+    pub fn new(value: f64) -> Result<Self, ModelError> {
+        if !value.is_finite() {
+            return Err(ModelError::InvalidStackupObservation(
+                "stackup floating-point values must be finite",
+            ));
+        }
+        let value = if value == 0.0 { 0.0 } else { value };
+        Ok(Self(value.to_bits()))
+    }
+
+    pub fn as_f64(self) -> f64 {
+        f64::from_bits(self.0)
+    }
+}
+
+impl Serialize for ExactFiniteFloat {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_f64(self.as_f64())
+    }
+}
+
+impl<'de> Deserialize<'de> for ExactFiniteFloat {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        Self::new(f64::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ExactFiniteRgba {
+    pub red: ExactFiniteFloat,
+    pub green: ExactFiniteFloat,
+    pub blue: ExactFiniteFloat,
+    pub alpha: ExactFiniteFloat,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedStackupDielectricProperties {
+    pub epsilon_r: ExactFiniteFloat,
+    pub loss_tangent: ExactFiniteFloat,
+    pub material_name: String,
+    pub thickness_nm: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedStackupLayer {
+    pub layer: ObservedStackupLayerIdentity,
+    pub enabled: bool,
+    pub layer_type: ObservedStackupLayerType,
+    pub thickness_nm: i64,
+    pub material_name: String,
+    pub user_name: String,
+    pub color: Option<ExactFiniteRgba>,
+    pub dielectric: Option<Vec<ObservedStackupDielectricProperties>>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedStackupFinish {
+    pub type_name: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedStackupImpedance {
+    pub is_controlled: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedStackupEdge {
+    pub connector_present: bool,
+    pub castellation: Option<bool>,
+    pub plating: Option<bool>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ObservedBoardStackup {
+    pub board_id: StableId,
+    pub observed_revision: RevisionDigest,
+    pub finish: Option<ObservedStackupFinish>,
+    pub impedance: Option<ObservedStackupImpedance>,
+    pub edge: Option<ObservedStackupEdge>,
+    pub layers: Vec<ObservedStackupLayer>,
+}
+
+impl ObservedBoardStackup {
+    pub fn new(
+        board_id: StableId,
+        finish: Option<ObservedStackupFinish>,
+        impedance: Option<ObservedStackupImpedance>,
+        edge: Option<ObservedStackupEdge>,
+        layers: Vec<ObservedStackupLayer>,
+    ) -> Result<Self, ModelError> {
+        let mut observation = Self {
+            board_id,
+            observed_revision: zero_revision_digest(),
+            finish,
+            impedance,
+            edge,
+            layers,
+        };
+        observation.observed_revision = observation.content_revision()?;
+        observation.validate()?;
+        Ok(observation)
+    }
+
+    pub fn canonical(&self) -> Self {
+        self.clone()
+    }
+
+    pub fn validate(&self) -> Result<(), ModelError> {
+        if self.layers.is_empty() {
+            return Err(ModelError::InvalidStackupObservation(
+                "stackup must contain at least one layer",
+            ));
+        }
+        let mut concrete_identities = BTreeSet::new();
+        for layer in &self.layers {
+            if layer.layer != ObservedStackupLayerIdentity::Undefined
+                && !concrete_identities.insert(layer.layer)
+            {
+                return Err(ModelError::InvalidStackupObservation(
+                    "concrete stackup layer identities must be unique",
+                ));
+            }
+            if layer.thickness_nm < 0
+                || (layer.layer_type == ObservedStackupLayerType::Dielectric)
+                    != layer.dielectric.is_some()
+            {
+                return Err(ModelError::InvalidStackupObservation(
+                    "layer thickness or dielectric metadata is invalid",
+                ));
+            }
+            let compatible = match layer.layer {
+                ObservedStackupLayerIdentity::Undefined => matches!(
+                    layer.layer_type,
+                    ObservedStackupLayerType::Unknown
+                        | ObservedStackupLayerType::Dielectric
+                        | ObservedStackupLayerType::Undefined
+                ),
+                ObservedStackupLayerIdentity::FrontCopper
+                | ObservedStackupLayerIdentity::InnerCopper(1..=30)
+                | ObservedStackupLayerIdentity::BackCopper => {
+                    layer.layer_type == ObservedStackupLayerType::Copper
+                }
+                ObservedStackupLayerIdentity::InnerCopper(_) => false,
+                ObservedStackupLayerIdentity::BackPaste
+                | ObservedStackupLayerIdentity::FrontPaste => {
+                    layer.layer_type == ObservedStackupLayerType::Solderpaste
+                }
+                ObservedStackupLayerIdentity::BackSilkscreen
+                | ObservedStackupLayerIdentity::FrontSilkscreen => {
+                    layer.layer_type == ObservedStackupLayerType::Silkscreen
+                }
+                ObservedStackupLayerIdentity::BackSoldermask
+                | ObservedStackupLayerIdentity::FrontSoldermask => {
+                    layer.layer_type == ObservedStackupLayerType::Soldermask
+                }
+            };
+            if !compatible {
+                return Err(ModelError::InvalidStackupObservation(
+                    "stackup layer identity is incompatible with its type",
+                ));
+            }
+            if layer.dielectric.as_ref().is_some_and(|properties| {
+                properties.iter().any(|property| property.thickness_nm < 0)
+            }) {
+                return Err(ModelError::InvalidStackupObservation(
+                    "dielectric thickness must not be negative",
+                ));
+            }
+        }
+        if self.observed_revision != self.content_revision()? {
+            return Err(ModelError::InvalidStackupObservation(
+                "stackup observation revision does not match its board and content",
+            ));
+        }
+        Ok(())
+    }
+
+    fn content_revision(&self) -> Result<RevisionDigest, ModelError> {
+        let bytes = serde_json::to_vec(&(
+            "observed-board-stackup-v1",
+            &self.board_id,
+            &self.finish,
+            &self.impedance,
+            &self.edge,
+            &self.layers,
+        ))
+        .map_err(ModelError::Serialization)?;
+        Ok(RevisionDigest(hex::encode(Sha256::digest(bytes))))
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum BoardGraphicLayer {
     DwgsUser,
@@ -1547,6 +1773,8 @@ pub struct ProjectSnapshot {
     pub native_footprints: Option<ObservedBoardFootprints>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub native_routing: Option<ObservedBoardRouting>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub native_stackup: Option<ObservedBoardStackup>,
 }
 
 impl ProjectSnapshot {
@@ -1593,6 +1821,10 @@ impl ProjectSnapshot {
             .native_routing
             .as_ref()
             .map(ObservedBoardRouting::canonical);
+        snapshot.native_stackup = snapshot
+            .native_stackup
+            .as_ref()
+            .map(ObservedBoardStackup::canonical);
         snapshot
     }
 
@@ -1610,6 +1842,14 @@ impl ProjectSnapshot {
             if self.board.document_id.as_ref() != Some(&native_routing.board_id) {
                 return Err(ModelError::InvalidRoutingObservation(
                     "native routing board identity does not match the project board",
+                ));
+            }
+        }
+        if let Some(native_stackup) = &self.native_stackup {
+            native_stackup.validate()?;
+            if self.board.document_id.as_ref() != Some(&native_stackup.board_id) {
+                return Err(ModelError::InvalidStackupObservation(
+                    "native stackup board identity does not match the project board",
                 ));
             }
         }
@@ -1674,6 +1914,7 @@ pub enum ModelError {
     InvalidBoardGraphic(&'static str),
     InvalidFootprintObservation(&'static str),
     InvalidRoutingObservation(&'static str),
+    InvalidStackupObservation(&'static str),
     Serialization(serde_json::Error),
 }
 
@@ -1700,7 +1941,8 @@ impl Display for ModelError {
             }
             Self::InvalidBoardGraphic(message)
             | Self::InvalidFootprintObservation(message)
-            | Self::InvalidRoutingObservation(message) => formatter.write_str(message),
+            | Self::InvalidRoutingObservation(message)
+            | Self::InvalidStackupObservation(message) => formatter.write_str(message),
             Self::Serialization(error) => {
                 write!(formatter, "snapshot serialization failed: {error}")
             }
@@ -1734,6 +1976,7 @@ mod tests {
             board: Board::default(),
             native_footprints: None,
             native_routing: None,
+            native_stackup: None,
         }
     }
 
@@ -2926,6 +3169,193 @@ mod tests {
         reordered.native_routing.as_mut().unwrap().tracks.reverse();
         reordered.native_routing.as_mut().unwrap().vias.reverse();
         assert_eq!(reordered.canonical().native_routing, Some(routing));
+    }
+
+    fn stackup_layer(
+        layer: ObservedStackupLayerIdentity,
+        layer_type: ObservedStackupLayerType,
+        thickness_nm: i64,
+    ) -> ObservedStackupLayer {
+        ObservedStackupLayer {
+            layer,
+            enabled: true,
+            layer_type,
+            thickness_nm,
+            material_name: String::new(),
+            user_name: String::new(),
+            color: None,
+            dielectric: (layer_type == ObservedStackupLayerType::Dielectric).then(Vec::new),
+        }
+    }
+
+    fn observed_stackup(
+        board_id: StableId,
+        layers: Vec<ObservedStackupLayer>,
+    ) -> Result<ObservedBoardStackup, ModelError> {
+        ObservedBoardStackup::new(board_id, None, None, None, layers)
+    }
+
+    #[test]
+    fn stackup_observation_is_board_and_order_revision_bound() {
+        let front = stackup_layer(
+            ObservedStackupLayerIdentity::FrontCopper,
+            ObservedStackupLayerType::Copper,
+            35_000,
+        );
+        let back = stackup_layer(
+            ObservedStackupLayerIdentity::BackCopper,
+            ObservedStackupLayerType::Copper,
+            35_000,
+        );
+        let first = observed_stackup(id("board-a"), vec![front.clone(), back.clone()]).unwrap();
+        let reordered = observed_stackup(id("board-a"), vec![back, front]).unwrap();
+        let other_board = observed_stackup(id("board-b"), first.layers.clone()).unwrap();
+        assert_ne!(first.observed_revision, reordered.observed_revision);
+        assert_ne!(first.observed_revision, other_board.observed_revision);
+        assert_eq!(first.canonical(), first);
+
+        let mut forged = first;
+        forged.observed_revision = revision('f');
+        assert!(matches!(
+            forged.validate(),
+            Err(ModelError::InvalidStackupObservation(
+                "stackup observation revision does not match its board and content"
+            ))
+        ));
+    }
+
+    #[test]
+    fn stackup_accepts_zero_thickness_and_repeated_undefined_layers() {
+        let observation = observed_stackup(
+            id("board"),
+            vec![
+                stackup_layer(
+                    ObservedStackupLayerIdentity::Undefined,
+                    ObservedStackupLayerType::Dielectric,
+                    0,
+                ),
+                stackup_layer(
+                    ObservedStackupLayerIdentity::Undefined,
+                    ObservedStackupLayerType::Dielectric,
+                    0,
+                ),
+                stackup_layer(
+                    ObservedStackupLayerIdentity::FrontSilkscreen,
+                    ObservedStackupLayerType::Silkscreen,
+                    0,
+                ),
+            ],
+        )
+        .unwrap();
+        assert_eq!(observation.layers.len(), 3);
+    }
+
+    #[test]
+    fn stackup_rejects_negative_duplicate_and_incompatible_layers() {
+        let negative = stackup_layer(
+            ObservedStackupLayerIdentity::FrontCopper,
+            ObservedStackupLayerType::Copper,
+            -1,
+        );
+        assert!(observed_stackup(id("board"), vec![negative]).is_err());
+
+        let concrete = stackup_layer(
+            ObservedStackupLayerIdentity::FrontCopper,
+            ObservedStackupLayerType::Copper,
+            0,
+        );
+        assert!(observed_stackup(id("board"), vec![concrete.clone(), concrete]).is_err());
+
+        let mismatch = stackup_layer(
+            ObservedStackupLayerIdentity::FrontCopper,
+            ObservedStackupLayerType::Silkscreen,
+            0,
+        );
+        assert!(observed_stackup(id("board"), vec![mismatch]).is_err());
+
+        let invalid_inner = stackup_layer(
+            ObservedStackupLayerIdentity::InnerCopper(31),
+            ObservedStackupLayerType::Copper,
+            0,
+        );
+        assert!(observed_stackup(id("board"), vec![invalid_inner]).is_err());
+    }
+
+    #[test]
+    fn stackup_exact_values_and_color_round_trip_and_change_revision() {
+        assert!(ExactFiniteFloat::new(f64::NAN).is_err());
+        assert!(ExactFiniteFloat::new(f64::INFINITY).is_err());
+        assert_eq!(ExactFiniteFloat::new(-0.0).unwrap().as_f64().to_bits(), 0);
+
+        let mut layer = stackup_layer(
+            ObservedStackupLayerIdentity::Undefined,
+            ObservedStackupLayerType::Dielectric,
+            100,
+        );
+        layer.color = Some(ExactFiniteRgba {
+            red: ExactFiniteFloat::new(0.1).unwrap(),
+            green: ExactFiniteFloat::new(0.2).unwrap(),
+            blue: ExactFiniteFloat::new(0.3).unwrap(),
+            alpha: ExactFiniteFloat::new(1.0).unwrap(),
+        });
+        layer.dielectric = Some(vec![ObservedStackupDielectricProperties {
+            epsilon_r: ExactFiniteFloat::new(4.2).unwrap(),
+            loss_tangent: ExactFiniteFloat::new(0.01).unwrap(),
+            material_name: "FR4".to_owned(),
+            thickness_nm: 0,
+        }]);
+        let first = observed_stackup(id("board"), vec![layer]).unwrap();
+        let json = serde_json::to_value(&first).unwrap();
+        assert_eq!(json["layers"][0]["color"]["red"], serde_json::json!(0.1));
+        assert_eq!(
+            serde_json::from_value::<ObservedBoardStackup>(json).unwrap(),
+            first
+        );
+
+        let mut changed_layer = first.layers[0].clone();
+        changed_layer.color.as_mut().unwrap().red = ExactFiniteFloat::new(0.4).unwrap();
+        let changed = observed_stackup(id("board"), vec![changed_layer]).unwrap();
+        assert_ne!(first.observed_revision, changed.observed_revision);
+    }
+
+    #[test]
+    fn project_snapshot_stackup_is_optional_board_bound_and_revision_visible() {
+        let old_json = serde_json::json!({
+            "project_id": "project", "kicad_version": "10.0.5", "capabilities": [],
+            "schematic": {"nets": [], "symbols": []}, "board": {"footprints": []}
+        });
+        let old: ProjectSnapshot = serde_json::from_value(old_json).unwrap();
+        assert_eq!(old.native_stackup, None);
+        assert!(
+            serde_json::to_value(&old)
+                .unwrap()
+                .get("native_stackup")
+                .is_none()
+        );
+
+        let board_id = id("board");
+        let stackup = observed_stackup(
+            board_id.clone(),
+            vec![stackup_layer(
+                ObservedStackupLayerIdentity::FrontCopper,
+                ObservedStackupLayerType::Copper,
+                0,
+            )],
+        )
+        .unwrap();
+        let mut with_stackup = snapshot(Vec::new());
+        with_stackup.board.document_id = Some(board_id);
+        with_stackup.native_stackup = Some(stackup);
+        assert!(with_stackup.validate().is_ok());
+        assert_ne!(old.revision().unwrap(), with_stackup.revision().unwrap());
+
+        with_stackup.board.document_id = Some(id("other-board"));
+        assert!(matches!(
+            with_stackup.validate(),
+            Err(ModelError::InvalidStackupObservation(
+                "native stackup board identity does not match the project board"
+            ))
+        ));
     }
 
     #[test]

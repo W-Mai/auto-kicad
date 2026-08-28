@@ -131,6 +131,7 @@ enum ObserveLiveBoardError {
     MissingInstanceToken,
     Footprints(FootprintObservationError),
     Routing(kicad_adapter::RoutingObservationError),
+    Stackup(kicad_model::ModelError),
     LiveBoard(LiveBoardObservationError),
 }
 
@@ -143,6 +144,7 @@ impl std::fmt::Display for ObserveLiveBoardError {
             }
             Self::Footprints(error) => error.fmt(formatter),
             Self::Routing(error) => error.fmt(formatter),
+            Self::Stackup(error) => error.fmt(formatter),
             Self::LiveBoard(error) => error.fmt(formatter),
         }
     }
@@ -169,6 +171,11 @@ trait LiveBoardObservationSource {
         &mut self,
         board_filename: &str,
     ) -> Result<kicad_ipc::ObservedBoardRoutingItems, kicad_ipc::IpcError>;
+
+    fn board_stackup(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<kicad_ipc::ObservedBoardStackup, kicad_ipc::IpcError>;
 
     fn latest_instance_token(&mut self) -> Option<kicad_ipc::InstanceToken>;
 }
@@ -203,6 +210,13 @@ impl<T: kicad_ipc::KiCadTransport> LiveBoardObservationSource for KiCadClient<T>
         self.get_board_routing(board_filename)
     }
 
+    fn board_stackup(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<kicad_ipc::ObservedBoardStackup, kicad_ipc::IpcError> {
+        self.get_board_stackup(board_filename)
+    }
+
     fn latest_instance_token(&mut self) -> Option<kicad_ipc::InstanceToken> {
         self.instance_token().cloned()
     }
@@ -233,8 +247,13 @@ fn observe_live_board<S: LiveBoardObservationSource>(
     let routing = source
         .board_routing(board_filename)
         .map_err(ObserveLiveBoardError::Ipc)?;
-    let native_routing = kicad_adapter::board_routing_observation(board_id, routing)
+    let native_routing = kicad_adapter::board_routing_observation(board_id.clone(), routing)
         .map_err(ObserveLiveBoardError::Routing)?;
+    let stackup = source
+        .board_stackup(board_filename)
+        .map_err(ObserveLiveBoardError::Ipc)?;
+    let native_stackup = kicad_adapter::board_stackup_observation(board_id, stackup)
+        .map_err(ObserveLiveBoardError::Stackup)?;
     let instance_token = source
         .latest_instance_token()
         .ok_or(ObserveLiveBoardError::MissingInstanceToken)?;
@@ -244,6 +263,7 @@ fn observe_live_board<S: LiveBoardObservationSource>(
         graphics,
         native_footprints,
         native_routing,
+        native_stackup,
         instance_token,
     )
     .map_err(ObserveLiveBoardError::LiveBoard)
@@ -404,6 +424,11 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
                 };
             }
             Err(ObserveLiveBoardError::Routing(reason)) => {
+                return BoardGraphicsCommitOutcome::Rejected {
+                    reason: reason.to_string(),
+                };
+            }
+            Err(ObserveLiveBoardError::Stackup(reason)) => {
                 return BoardGraphicsCommitOutcome::Rejected {
                     reason: reason.to_string(),
                 };
@@ -1159,6 +1184,7 @@ mod tests {
             footprint_source_uuid: String,
         },
         Routing(String),
+        Stackup(String),
         Token,
     }
 
@@ -1168,6 +1194,8 @@ mod tests {
         footprints: Vec<kicad_ipc::ObservedFootprintInstance>,
         pads: BTreeMap<String, Vec<kicad_ipc::ObservedPad>>,
         failing_pad_parent: Option<String>,
+        stackup: kicad_ipc::ObservedBoardStackup,
+        failing_stackup: bool,
         token: Option<kicad_ipc::InstanceToken>,
     }
 
@@ -1218,6 +1246,20 @@ mod tests {
             self.calls
                 .push(LiveReadCall::Routing(board_filename.to_owned()));
             Ok(kicad_ipc::ObservedBoardRoutingItems::default())
+        }
+
+        fn board_stackup(
+            &mut self,
+            board_filename: &str,
+        ) -> Result<kicad_ipc::ObservedBoardStackup, kicad_ipc::IpcError> {
+            self.calls
+                .push(LiveReadCall::Stackup(board_filename.to_owned()));
+            if self.failing_stackup {
+                return Err(kicad_ipc::IpcError::InvalidObservedStackup(
+                    "fixture stackup read failed",
+                ));
+            }
+            Ok(self.stackup.clone())
         }
 
         fn latest_instance_token(&mut self) -> Option<kicad_ipc::InstanceToken> {
@@ -1297,6 +1339,39 @@ mod tests {
         }
     }
 
+    fn live_stackup() -> kicad_ipc::ObservedBoardStackup {
+        use kicad_ipc::ObservedStackupLayerIdentity as Identity;
+        use kicad_ipc::ObservedStackupLayerType as LayerType;
+
+        kicad_ipc::ObservedBoardStackup {
+            finish: None,
+            impedance: None,
+            edge: None,
+            layers: vec![
+                kicad_ipc::ObservedStackupLayer {
+                    layer: Identity::FrontCopper,
+                    enabled: true,
+                    layer_type: LayerType::Copper,
+                    thickness_nm: Some(35_000),
+                    color: None,
+                    material_name: "Copper".to_owned(),
+                    user_name: "F.Cu".to_owned(),
+                    dielectric: None,
+                },
+                kicad_ipc::ObservedStackupLayer {
+                    layer: Identity::BackCopper,
+                    enabled: true,
+                    layer_type: LayerType::Copper,
+                    thickness_nm: Some(35_000),
+                    color: None,
+                    material_name: "Copper".to_owned(),
+                    user_name: "B.Cu".to_owned(),
+                    dielectric: None,
+                },
+            ],
+        }
+    }
+
     fn fake_live_source() -> FakeLiveBoardSource {
         FakeLiveBoardSource {
             calls: Vec::new(),
@@ -1315,6 +1390,8 @@ mod tests {
                 ),
             ]),
             failing_pad_parent: None,
+            stackup: live_stackup(),
+            failing_stackup: false,
             token: Some(kicad_ipc::InstanceToken::new("token").unwrap()),
         }
     }
@@ -1332,6 +1409,7 @@ mod tests {
                 footprint_source_uuid: "footprint-b".to_owned(),
             },
             LiveReadCall::Routing("main.kicad_pcb".to_owned()),
+            LiveReadCall::Stackup("main.kicad_pcb".to_owned()),
             LiveReadCall::Token,
         ]
     }
@@ -1360,6 +1438,10 @@ mod tests {
         let first_native = first.snapshot.native_footprints.as_ref().unwrap();
         let second_native = second.snapshot.native_footprints.as_ref().unwrap();
         assert_eq!(first_native, second_native);
+        assert_eq!(
+            first.snapshot.native_stackup,
+            second.snapshot.native_stackup
+        );
         assert_eq!(
             first.snapshot.revision().unwrap(),
             second.snapshot.revision().unwrap()
@@ -1398,7 +1480,7 @@ mod tests {
 
         assert!(matches!(error, ObserveLiveBoardError::Ipc(_)));
         let mut expected = expected_live_read_calls();
-        expected.truncate(expected.len() - 2);
+        expected.truncate(expected.len() - 3);
         assert_eq!(source.calls, expected);
     }
 
@@ -1423,6 +1505,78 @@ mod tests {
             ObserveLiveBoardError::Footprints(FootprintObservationError::PadParentMismatch { .. })
         ));
         assert!(!source.calls.contains(&LiveReadCall::Token));
+    }
+
+    #[test]
+    fn live_board_observation_stackup_ipc_failure_stops_before_token() {
+        let mut source = fake_live_source();
+        source.failing_stackup = true;
+
+        let error = observe_live_board(
+            &mut source,
+            live_version(),
+            live_document(),
+            "main.kicad_pcb",
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, ObserveLiveBoardError::Ipc(_)));
+        let mut expected = expected_live_read_calls();
+        expected.pop();
+        assert_eq!(source.calls, expected);
+    }
+
+    #[test]
+    fn live_board_observation_stackup_domain_failure_stops_before_token() {
+        let mut source = fake_live_source();
+        source.stackup.layers[0].thickness_nm = None;
+
+        let error = observe_live_board(
+            &mut source,
+            live_version(),
+            live_document(),
+            "main.kicad_pcb",
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ObserveLiveBoardError::Stackup(kicad_model::ModelError::InvalidStackupObservation(
+                "required layer thickness is missing"
+            ))
+        ));
+        let mut expected = expected_live_read_calls();
+        expected.pop();
+        assert_eq!(source.calls, expected);
+    }
+
+    #[test]
+    fn live_board_observation_stackup_order_changes_full_snapshot_revision() {
+        let mut first_source = fake_live_source();
+        let first = observe_live_board(
+            &mut first_source,
+            live_version(),
+            live_document(),
+            "main.kicad_pcb",
+        )
+        .unwrap();
+        let mut reordered_source = fake_live_source();
+        reordered_source.stackup.layers.swap(0, 1);
+        let reordered = observe_live_board(
+            &mut reordered_source,
+            live_version(),
+            live_document(),
+            "main.kicad_pcb",
+        )
+        .unwrap();
+
+        assert_ne!(first.snapshot, reordered.snapshot);
+        assert_ne!(
+            first.snapshot.revision().unwrap(),
+            reordered.snapshot.revision().unwrap()
+        );
+        assert_eq!(first_source.calls, expected_live_read_calls());
+        assert_eq!(reordered_source.calls, expected_live_read_calls());
     }
 
     #[test]
@@ -1643,6 +1797,7 @@ mod tests {
                 ObservedBoardFootprints::new(StableId::new("board").unwrap(), Vec::new()).unwrap(),
             ),
             native_routing: None,
+            native_stackup: None,
         }
     }
 

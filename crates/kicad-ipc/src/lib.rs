@@ -16,6 +16,10 @@ pub const GET_OPEN_DOCUMENTS_TYPE_URL: &str =
 pub const GET_NETS_TYPE_URL: &str = "type.googleapis.com/kiapi.board.commands.GetNets";
 pub const GET_NETS_RESPONSE_TYPE_URL: &str =
     "type.googleapis.com/kiapi.board.commands.NetsResponse";
+pub const GET_BOARD_STACKUP_TYPE_URL: &str =
+    "type.googleapis.com/kiapi.board.commands.GetBoardStackup";
+pub const GET_BOARD_STACKUP_RESPONSE_TYPE_URL: &str =
+    "type.googleapis.com/kiapi.board.commands.BoardStackupResponse";
 pub const GET_ITEMS_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.GetItems";
 pub const GET_ITEMS_RESPONSE_TYPE_URL: &str =
     "type.googleapis.com/kiapi.common.commands.GetItemsResponse";
@@ -69,6 +73,84 @@ pub struct OpenDocument {
 pub struct BoardNet {
     pub code: Option<i32>,
     pub name: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum ObservedStackupLayerIdentity {
+    Undefined,
+    FrontCopper,
+    InnerCopper(u8),
+    BackCopper,
+    BackPaste,
+    FrontPaste,
+    BackSilkscreen,
+    FrontSilkscreen,
+    BackSoldermask,
+    FrontSoldermask,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ObservedStackupLayerType {
+    Unknown,
+    Copper,
+    Dielectric,
+    Silkscreen,
+    Soldermask,
+    Solderpaste,
+    Undefined,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ObservedStackupColor {
+    pub red: f64,
+    pub green: f64,
+    pub blue: f64,
+    pub alpha: f64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObservedStackupDielectricProperties {
+    pub epsilon_r: f64,
+    pub loss_tangent: f64,
+    pub material_name: String,
+    pub thickness_nm: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObservedStackupLayer {
+    pub layer: ObservedStackupLayerIdentity,
+    pub enabled: bool,
+    pub layer_type: ObservedStackupLayerType,
+    pub thickness_nm: Option<i64>,
+    pub color: Option<ObservedStackupColor>,
+    pub material_name: String,
+    pub user_name: String,
+    pub dielectric: Option<Vec<ObservedStackupDielectricProperties>>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObservedStackupFinish {
+    pub type_name: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObservedStackupImpedance {
+    pub is_controlled: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObservedStackupEdge {
+    pub connector: Option<()>,
+    pub castellation: Option<bool>,
+    pub plating: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ObservedBoardStackup {
+    pub finish: Option<ObservedStackupFinish>,
+    pub impedance: Option<ObservedStackupImpedance>,
+    pub edge: Option<ObservedStackupEdge>,
+    pub layers: Vec<ObservedStackupLayer>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -553,6 +635,7 @@ pub enum IpcError {
     InvalidObservedFootprint(&'static str),
     InvalidObservedPad(&'static str),
     InvalidObservedRouting(&'static str),
+    InvalidObservedStackup(&'static str),
     UnknownPcbItemType(String),
     Status(ApiStatusCode, String),
     Transport(nng::Error),
@@ -585,6 +668,7 @@ impl IpcError {
             Self::InvalidObservedFootprint(_) => "invalid_observed_footprint",
             Self::InvalidObservedPad(_) => "invalid_observed_pad",
             Self::InvalidObservedRouting(_) => "invalid_observed_routing",
+            Self::InvalidObservedStackup(_) => "invalid_observed_stackup",
             Self::UnknownPcbItemType(_) => "unknown_pcb_item_type",
             Self::Status(status, _) => match status {
                 ApiStatusCode::AS_TIMEOUT => "connection_unavailable",
@@ -640,6 +724,9 @@ impl Display for IpcError {
                 write!(formatter, "{}: {message}", self.code())
             }
             Self::InvalidObservedRouting(message) => {
+                write!(formatter, "{}: {message}", self.code())
+            }
+            Self::InvalidObservedStackup(message) => {
                 write!(formatter, "{}: {message}", self.code())
             }
             Self::UnknownPcbItemType(type_url) => {
@@ -843,6 +930,37 @@ impl<T: KiCadTransport> KiCadClient<T> {
         )?;
         self.token = Some(token);
         Ok(())
+    }
+
+    pub fn get_board_stackup(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<ObservedBoardStackup, IpcError> {
+        let command = board_commands::GetBoardStackup {
+            board: MessageField::some(board_basename_document(board_filename)?),
+            ..board_commands::GetBoardStackup::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            GET_BOARD_STACKUP_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let response = decode_any::<board_commands::BoardStackupResponse>(
+            &response,
+            GET_BOARD_STACKUP_RESPONSE_TYPE_URL,
+        )?;
+        let stackup = observed_board_stackup(
+            response
+                .stackup
+                .as_ref()
+                .ok_or(IpcError::InvalidObservedStackup("stackup is missing"))?,
+        )?;
+        self.token = Some(token);
+        Ok(stackup)
     }
 
     pub fn get_board_nets(&mut self, board_filename: &str) -> Result<Vec<BoardNet>, IpcError> {
@@ -1107,6 +1225,26 @@ pub fn get_version_request(config: &ClientConfig, token: Option<&InstanceToken>)
     }
 }
 
+fn board_basename_document(
+    board_filename: &str,
+) -> Result<base_types::DocumentSpecifier, IpcError> {
+    let filename = board_filename
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or_default();
+    if filename.is_empty() {
+        return Err(IpcError::InvalidObservedStackup(
+            "board filename basename is missing",
+        ));
+    }
+    let mut board = base_types::DocumentSpecifier {
+        type_: protobuf::EnumOrUnknown::new(base_types::DocumentType::DOCTYPE_PCB),
+        ..base_types::DocumentSpecifier::default()
+    };
+    board.set_board_filename(filename.to_owned());
+    Ok(board)
+}
+
 fn board_document(board_filename: &str) -> base_types::DocumentSpecifier {
     let mut board = base_types::DocumentSpecifier {
         type_: protobuf::EnumOrUnknown::new(base_types::DocumentType::DOCTYPE_PCB),
@@ -1135,6 +1273,224 @@ fn footprint_item_header(
         }),
         ..base_types::ItemHeader::default()
     }
+}
+
+fn stackup_layer_identity(
+    value: &protobuf::EnumOrUnknown<board_types::BoardLayer>,
+) -> Result<ObservedStackupLayerIdentity, IpcError> {
+    use board_types::BoardLayer::*;
+
+    let identity = match value.enum_value() {
+        Ok(BL_UNDEFINED) => ObservedStackupLayerIdentity::Undefined,
+        Ok(BL_F_Cu) => ObservedStackupLayerIdentity::FrontCopper,
+        Ok(BL_In1_Cu) => ObservedStackupLayerIdentity::InnerCopper(1),
+        Ok(BL_In2_Cu) => ObservedStackupLayerIdentity::InnerCopper(2),
+        Ok(BL_In3_Cu) => ObservedStackupLayerIdentity::InnerCopper(3),
+        Ok(BL_In4_Cu) => ObservedStackupLayerIdentity::InnerCopper(4),
+        Ok(BL_In5_Cu) => ObservedStackupLayerIdentity::InnerCopper(5),
+        Ok(BL_In6_Cu) => ObservedStackupLayerIdentity::InnerCopper(6),
+        Ok(BL_In7_Cu) => ObservedStackupLayerIdentity::InnerCopper(7),
+        Ok(BL_In8_Cu) => ObservedStackupLayerIdentity::InnerCopper(8),
+        Ok(BL_In9_Cu) => ObservedStackupLayerIdentity::InnerCopper(9),
+        Ok(BL_In10_Cu) => ObservedStackupLayerIdentity::InnerCopper(10),
+        Ok(BL_In11_Cu) => ObservedStackupLayerIdentity::InnerCopper(11),
+        Ok(BL_In12_Cu) => ObservedStackupLayerIdentity::InnerCopper(12),
+        Ok(BL_In13_Cu) => ObservedStackupLayerIdentity::InnerCopper(13),
+        Ok(BL_In14_Cu) => ObservedStackupLayerIdentity::InnerCopper(14),
+        Ok(BL_In15_Cu) => ObservedStackupLayerIdentity::InnerCopper(15),
+        Ok(BL_In16_Cu) => ObservedStackupLayerIdentity::InnerCopper(16),
+        Ok(BL_In17_Cu) => ObservedStackupLayerIdentity::InnerCopper(17),
+        Ok(BL_In18_Cu) => ObservedStackupLayerIdentity::InnerCopper(18),
+        Ok(BL_In19_Cu) => ObservedStackupLayerIdentity::InnerCopper(19),
+        Ok(BL_In20_Cu) => ObservedStackupLayerIdentity::InnerCopper(20),
+        Ok(BL_In21_Cu) => ObservedStackupLayerIdentity::InnerCopper(21),
+        Ok(BL_In22_Cu) => ObservedStackupLayerIdentity::InnerCopper(22),
+        Ok(BL_In23_Cu) => ObservedStackupLayerIdentity::InnerCopper(23),
+        Ok(BL_In24_Cu) => ObservedStackupLayerIdentity::InnerCopper(24),
+        Ok(BL_In25_Cu) => ObservedStackupLayerIdentity::InnerCopper(25),
+        Ok(BL_In26_Cu) => ObservedStackupLayerIdentity::InnerCopper(26),
+        Ok(BL_In27_Cu) => ObservedStackupLayerIdentity::InnerCopper(27),
+        Ok(BL_In28_Cu) => ObservedStackupLayerIdentity::InnerCopper(28),
+        Ok(BL_In29_Cu) => ObservedStackupLayerIdentity::InnerCopper(29),
+        Ok(BL_In30_Cu) => ObservedStackupLayerIdentity::InnerCopper(30),
+        Ok(BL_B_Cu) => ObservedStackupLayerIdentity::BackCopper,
+        Ok(BL_B_Paste) => ObservedStackupLayerIdentity::BackPaste,
+        Ok(BL_F_Paste) => ObservedStackupLayerIdentity::FrontPaste,
+        Ok(BL_B_SilkS) => ObservedStackupLayerIdentity::BackSilkscreen,
+        Ok(BL_F_SilkS) => ObservedStackupLayerIdentity::FrontSilkscreen,
+        Ok(BL_B_Mask) => ObservedStackupLayerIdentity::BackSoldermask,
+        Ok(BL_F_Mask) => ObservedStackupLayerIdentity::FrontSoldermask,
+        _ => {
+            return Err(IpcError::InvalidObservedStackup(
+                "stackup layer identity is unknown or not stackup-relevant",
+            ));
+        }
+    };
+    Ok(identity)
+}
+
+fn stackup_layer_type(
+    value: &protobuf::EnumOrUnknown<board::BoardStackupLayerType>,
+) -> Result<ObservedStackupLayerType, IpcError> {
+    match value.enum_value() {
+        Ok(board::BoardStackupLayerType::BSLT_UNKNOWN) => Ok(ObservedStackupLayerType::Unknown),
+        Ok(board::BoardStackupLayerType::BSLT_COPPER) => Ok(ObservedStackupLayerType::Copper),
+        Ok(board::BoardStackupLayerType::BSLT_DIELECTRIC) => {
+            Ok(ObservedStackupLayerType::Dielectric)
+        }
+        Ok(board::BoardStackupLayerType::BSLT_SILKSCREEN) => {
+            Ok(ObservedStackupLayerType::Silkscreen)
+        }
+        Ok(board::BoardStackupLayerType::BSLT_SOLDERMASK) => {
+            Ok(ObservedStackupLayerType::Soldermask)
+        }
+        Ok(board::BoardStackupLayerType::BSLT_SOLDERPASTE) => {
+            Ok(ObservedStackupLayerType::Solderpaste)
+        }
+        Ok(board::BoardStackupLayerType::BSLT_UNDEFINED) => Ok(ObservedStackupLayerType::Undefined),
+        Err(_) => Err(IpcError::InvalidObservedStackup(
+            "stackup layer type is unknown",
+        )),
+    }
+}
+
+fn validate_stackup_layer_compatibility(
+    identity: ObservedStackupLayerIdentity,
+    layer_type: ObservedStackupLayerType,
+) -> Result<(), IpcError> {
+    let expected = match identity {
+        ObservedStackupLayerIdentity::Undefined => return Ok(()),
+        ObservedStackupLayerIdentity::FrontCopper
+        | ObservedStackupLayerIdentity::InnerCopper(_)
+        | ObservedStackupLayerIdentity::BackCopper => ObservedStackupLayerType::Copper,
+        ObservedStackupLayerIdentity::BackPaste | ObservedStackupLayerIdentity::FrontPaste => {
+            ObservedStackupLayerType::Solderpaste
+        }
+        ObservedStackupLayerIdentity::BackSilkscreen
+        | ObservedStackupLayerIdentity::FrontSilkscreen => ObservedStackupLayerType::Silkscreen,
+        ObservedStackupLayerIdentity::BackSoldermask
+        | ObservedStackupLayerIdentity::FrontSoldermask => ObservedStackupLayerType::Soldermask,
+    };
+    if layer_type != expected {
+        return Err(IpcError::InvalidObservedStackup(
+            "stackup layer type contradicts concrete layer identity",
+        ));
+    }
+    Ok(())
+}
+
+fn stackup_dimension(value: Option<&base_types::Distance>) -> Result<Option<i64>, IpcError> {
+    let value = value.map(|distance| distance.value_nm);
+    if value.is_some_and(|value| value < 0) {
+        return Err(IpcError::InvalidObservedStackup(
+            "thickness must not be negative",
+        ));
+    }
+    Ok(value)
+}
+
+fn observed_stackup_color(color: &base_types::Color) -> Result<ObservedStackupColor, IpcError> {
+    if ![color.r, color.g, color.b, color.a]
+        .into_iter()
+        .all(f64::is_finite)
+    {
+        return Err(IpcError::InvalidObservedStackup(
+            "color channels must be finite",
+        ));
+    }
+    Ok(ObservedStackupColor {
+        red: color.r,
+        green: color.g,
+        blue: color.b,
+        alpha: color.a,
+    })
+}
+
+fn observed_stackup_dielectric(
+    dielectric: &board::BoardStackupDielectricLayer,
+) -> Result<Vec<ObservedStackupDielectricProperties>, IpcError> {
+    dielectric
+        .layer
+        .iter()
+        .map(|property| {
+            if !property.epsilon_r.is_finite() || !property.loss_tangent.is_finite() {
+                return Err(IpcError::InvalidObservedStackup(
+                    "dielectric values must be finite",
+                ));
+            }
+            Ok(ObservedStackupDielectricProperties {
+                epsilon_r: property.epsilon_r,
+                loss_tangent: property.loss_tangent,
+                material_name: property.material_name.clone(),
+                thickness_nm: stackup_dimension(property.thickness.as_ref())?,
+            })
+        })
+        .collect()
+}
+
+fn observed_board_stackup(stackup: &board::BoardStackup) -> Result<ObservedBoardStackup, IpcError> {
+    let finish = stackup.finish.as_ref().map(|finish| ObservedStackupFinish {
+        type_name: finish.type_name.clone(),
+    });
+    let impedance = stackup
+        .impedance
+        .as_ref()
+        .map(|impedance| ObservedStackupImpedance {
+            is_controlled: impedance.is_controlled,
+        });
+    let edge = stackup
+        .edge
+        .as_ref()
+        .map(|edge| {
+            Ok::<_, IpcError>(ObservedStackupEdge {
+                connector: edge.connector.as_ref().map(|_| ()),
+                castellation: edge
+                    .castellation
+                    .as_ref()
+                    .map(|value| value.has_castellated_pads),
+                plating: edge.plating.as_ref().map(|value| value.has_edge_plating),
+            })
+        })
+        .transpose()?;
+    if stackup.layers.is_empty() {
+        return Err(IpcError::InvalidObservedStackup("layers are missing"));
+    }
+    let mut layers = Vec::with_capacity(stackup.layers.len());
+    let mut identities = std::collections::HashSet::new();
+    for layer in &stackup.layers {
+        let identity = stackup_layer_identity(&layer.layer)?;
+        if identity != ObservedStackupLayerIdentity::Undefined && !identities.insert(identity) {
+            return Err(IpcError::InvalidObservedStackup(
+                "concrete layer identities must be unique",
+            ));
+        }
+        let layer_type = stackup_layer_type(&layer.type_)?;
+        validate_stackup_layer_compatibility(identity, layer_type)?;
+        layers.push(ObservedStackupLayer {
+            layer: identity,
+            enabled: layer.enabled,
+            layer_type,
+            thickness_nm: stackup_dimension(layer.thickness.as_ref())?,
+            color: layer
+                .color
+                .as_ref()
+                .map(observed_stackup_color)
+                .transpose()?,
+            material_name: layer.material_name.clone(),
+            user_name: layer.user_name.clone(),
+            dielectric: layer
+                .dielectric
+                .as_ref()
+                .map(observed_stackup_dielectric)
+                .transpose()?,
+        });
+    }
+    Ok(ObservedBoardStackup {
+        finish,
+        impedance,
+        edge,
+        layers,
+    })
 }
 
 fn validate_create_items_response(
@@ -2661,6 +3017,7 @@ fn decode_any<M: Message + Default>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use protobuf::Enum;
 
     struct FakeTransport {
         responses: Vec<ApiResponse>,
@@ -2775,6 +3132,122 @@ mod tests {
                 ..Any::default()
             }),
             ..ApiResponse::default()
+        }
+    }
+
+    fn stackup_response(token: &str, stackup: board::BoardStackup) -> ApiResponse {
+        let response = board_commands::BoardStackupResponse {
+            stackup: MessageField::some(stackup),
+            ..board_commands::BoardStackupResponse::default()
+        };
+        ApiResponse {
+            header: MessageField::some(envelope::ApiResponseHeader {
+                kicad_token: token.to_owned(),
+                ..envelope::ApiResponseHeader::default()
+            }),
+            status: MessageField::some(envelope::ApiResponseStatus {
+                status: protobuf::EnumOrUnknown::new(ApiStatusCode::AS_OK),
+                ..envelope::ApiResponseStatus::default()
+            }),
+            message: MessageField::some(Any {
+                type_url: GET_BOARD_STACKUP_RESPONSE_TYPE_URL.to_owned(),
+                value: response.write_to_bytes().unwrap(),
+                ..Any::default()
+            }),
+            ..ApiResponse::default()
+        }
+    }
+
+    fn stackup_layer(
+        layer: board_types::BoardLayer,
+        layer_type: board::BoardStackupLayerType,
+        thickness_nm: i64,
+    ) -> board::BoardStackupLayer {
+        board::BoardStackupLayer {
+            thickness: MessageField::some(base_types::Distance {
+                value_nm: thickness_nm,
+                ..base_types::Distance::default()
+            }),
+            layer: protobuf::EnumOrUnknown::new(layer),
+            enabled: false,
+            type_: protobuf::EnumOrUnknown::new(layer_type),
+            ..board::BoardStackupLayer::default()
+        }
+    }
+
+    fn xlock_stackup() -> board::BoardStackup {
+        let mut front_mask = stackup_layer(
+            board_types::BoardLayer::BL_F_Mask,
+            board::BoardStackupLayerType::BSLT_SOLDERMASK,
+            10_000,
+        );
+        front_mask.color = MessageField::some(base_types::Color {
+            r: 0.125,
+            g: 0.0,
+            b: 0.75,
+            a: 0.0,
+            ..base_types::Color::default()
+        });
+        let mut dielectric_present_empty = stackup_layer(
+            board_types::BoardLayer::BL_UNDEFINED,
+            board::BoardStackupLayerType::BSLT_DIELECTRIC,
+            100_000,
+        );
+        dielectric_present_empty.dielectric =
+            MessageField::some(board::BoardStackupDielectricLayer::default());
+        board::BoardStackup {
+            finish: MessageField::some(board::BoardFinish {
+                type_name: "ENIG".to_owned(),
+                ..board::BoardFinish::default()
+            }),
+            impedance: MessageField::some(board::BoardImpedanceControl {
+                is_controlled: true,
+                ..board::BoardImpedanceControl::default()
+            }),
+            layers: vec![
+                stackup_layer(
+                    board_types::BoardLayer::BL_F_SilkS,
+                    board::BoardStackupLayerType::BSLT_SILKSCREEN,
+                    0,
+                ),
+                front_mask,
+                stackup_layer(
+                    board_types::BoardLayer::BL_F_Cu,
+                    board::BoardStackupLayerType::BSLT_COPPER,
+                    35_000,
+                ),
+                dielectric_present_empty,
+                stackup_layer(
+                    board_types::BoardLayer::BL_B_Cu,
+                    board::BoardStackupLayerType::BSLT_COPPER,
+                    35_000,
+                ),
+                stackup_layer(
+                    board_types::BoardLayer::BL_UNDEFINED,
+                    board::BoardStackupLayerType::BSLT_DIELECTRIC,
+                    900_000,
+                ),
+                stackup_layer(
+                    board_types::BoardLayer::BL_B_Mask,
+                    board::BoardStackupLayerType::BSLT_SOLDERMASK,
+                    10_000,
+                ),
+                stackup_layer(
+                    board_types::BoardLayer::BL_F_Paste,
+                    board::BoardStackupLayerType::BSLT_SOLDERPASTE,
+                    0,
+                ),
+                {
+                    let mut layer = stackup_layer(
+                        board_types::BoardLayer::BL_B_SilkS,
+                        board::BoardStackupLayerType::BSLT_SILKSCREEN,
+                        0,
+                    );
+                    layer.thickness = MessageField::none();
+                    layer
+                },
+            ],
+            ..board::BoardStackup::default()
         }
     }
 
@@ -4116,6 +4589,290 @@ mod tests {
             },
             config,
         )
+    }
+
+    #[test]
+    fn stackup_layer_identity_maps_every_supported_protocol_value() {
+        let cases = [
+            (
+                board_types::BoardLayer::BL_UNDEFINED,
+                ObservedStackupLayerIdentity::Undefined,
+            ),
+            (
+                board_types::BoardLayer::BL_F_Cu,
+                ObservedStackupLayerIdentity::FrontCopper,
+            ),
+            (
+                board_types::BoardLayer::BL_B_Cu,
+                ObservedStackupLayerIdentity::BackCopper,
+            ),
+            (
+                board_types::BoardLayer::BL_B_Paste,
+                ObservedStackupLayerIdentity::BackPaste,
+            ),
+            (
+                board_types::BoardLayer::BL_F_Paste,
+                ObservedStackupLayerIdentity::FrontPaste,
+            ),
+            (
+                board_types::BoardLayer::BL_B_SilkS,
+                ObservedStackupLayerIdentity::BackSilkscreen,
+            ),
+            (
+                board_types::BoardLayer::BL_F_SilkS,
+                ObservedStackupLayerIdentity::FrontSilkscreen,
+            ),
+            (
+                board_types::BoardLayer::BL_B_Mask,
+                ObservedStackupLayerIdentity::BackSoldermask,
+            ),
+            (
+                board_types::BoardLayer::BL_F_Mask,
+                ObservedStackupLayerIdentity::FrontSoldermask,
+            ),
+        ];
+        for (wire, expected) in cases {
+            assert_eq!(
+                stackup_layer_identity(&protobuf::EnumOrUnknown::new(wire)).unwrap(),
+                expected
+            );
+        }
+        for index in 1..=30 {
+            assert_eq!(
+                stackup_layer_identity(&protobuf::EnumOrUnknown::from_i32(index + 3)).unwrap(),
+                ObservedStackupLayerIdentity::InnerCopper(index as u8)
+            );
+        }
+        for invalid in [
+            board_types::BoardLayer::BL_UNKNOWN.value(),
+            board_types::BoardLayer::BL_Dwgs_User.value(),
+            999,
+        ] {
+            assert_eq!(
+                stackup_layer_identity(&protobuf::EnumOrUnknown::from_i32(invalid)).unwrap_err(),
+                IpcError::InvalidObservedStackup(
+                    "stackup layer identity is unknown or not stackup-relevant"
+                )
+            );
+        }
+    }
+
+    #[test]
+    fn get_board_stackup_preserves_xlock_wire_data_and_token_lifecycle() {
+        let config = ClientConfig::new("ipc:///tmp/kicad/api.sock", "test-client").unwrap();
+        let fake = FakeTransport {
+            responses: vec![
+                stackup_response("adopted", xlock_stackup()),
+                stackup_response("reused", xlock_stackup()),
+            ],
+            requests: Vec::new(),
+        };
+        let mut client = KiCadClient::new(fake, config);
+        let observed = client.get_board_stackup("/tmp/xLock.kicad_pcb").unwrap();
+        assert_eq!(observed.finish.unwrap().type_name, "ENIG");
+        assert!(observed.impedance.unwrap().is_controlled);
+        assert_eq!(
+            observed
+                .layers
+                .iter()
+                .map(|layer| layer.layer)
+                .collect::<Vec<_>>(),
+            vec![
+                ObservedStackupLayerIdentity::FrontSilkscreen,
+                ObservedStackupLayerIdentity::FrontSoldermask,
+                ObservedStackupLayerIdentity::FrontCopper,
+                ObservedStackupLayerIdentity::Undefined,
+                ObservedStackupLayerIdentity::BackCopper,
+                ObservedStackupLayerIdentity::Undefined,
+                ObservedStackupLayerIdentity::BackSoldermask,
+                ObservedStackupLayerIdentity::FrontPaste,
+                ObservedStackupLayerIdentity::BackSilkscreen,
+            ]
+        );
+        assert!(observed.layers.iter().all(|layer| !layer.enabled));
+        assert_eq!(observed.layers[0].thickness_nm, Some(0));
+        assert_eq!(observed.layers[7].thickness_nm, Some(0));
+        assert_eq!(observed.layers[8].thickness_nm, None);
+        assert_eq!(observed.layers[3].dielectric, Some(Vec::new()));
+        assert_eq!(observed.layers[5].dielectric, None);
+        assert_eq!(
+            observed.layers[1].color,
+            Some(ObservedStackupColor {
+                red: 0.125,
+                green: 0.0,
+                blue: 0.75,
+                alpha: 0.0,
+            })
+        );
+        assert_eq!(observed.layers[0].color, None);
+        assert_eq!(client.instance_token().unwrap().as_str(), "adopted");
+
+        client
+            .get_board_stackup(r"C:\boards\xLock.kicad_pcb")
+            .unwrap();
+        assert_eq!(client.instance_token().unwrap().as_str(), "reused");
+        assert_eq!(
+            client.transport.requests[1]
+                .header
+                .as_ref()
+                .unwrap()
+                .kicad_token,
+            "adopted"
+        );
+        for request in &client.transport.requests {
+            let message = request.message.as_ref().unwrap();
+            assert_eq!(message.type_url, GET_BOARD_STACKUP_TYPE_URL);
+            let command =
+                board_commands::GetBoardStackup::parse_from_bytes(&message.value).unwrap();
+            assert_eq!(command.board.unwrap().board_filename(), "xLock.kicad_pcb");
+        }
+    }
+
+    #[test]
+    fn get_board_stackup_accepts_plain_unix_and_windows_basenames() {
+        for filename in [
+            "xLock.kicad_pcb",
+            "/boards/xLock.kicad_pcb",
+            r"C:\boards\xLock.kicad_pcb",
+        ] {
+            let mut client = routing_client(stackup_response("next", xlock_stackup()));
+            client.get_board_stackup(filename).unwrap();
+            let message = client.transport.requests[0].message.as_ref().unwrap();
+            let command =
+                board_commands::GetBoardStackup::parse_from_bytes(&message.value).unwrap();
+            assert_eq!(command.board.unwrap().board_filename(), "xLock.kicad_pcb");
+        }
+    }
+
+    #[test]
+    fn get_board_stackup_rejects_missing_basename_before_transport() {
+        for filename in ["", "/", r"\", "/boards/", r"C:\boards\"] {
+            let config = ClientConfig::new("ipc:///tmp/kicad/api.sock", "test-client").unwrap();
+            let fake = FakeTransport {
+                responses: Vec::new(),
+                requests: Vec::new(),
+            };
+            let mut client = KiCadClient::new(fake, config);
+            assert_eq!(
+                client.get_board_stackup(filename).unwrap_err(),
+                IpcError::InvalidObservedStackup("board filename basename is missing")
+            );
+            assert!(client.transport.requests.is_empty());
+            assert!(client.instance_token().is_none());
+        }
+    }
+
+    #[test]
+    fn get_board_stackup_rejects_envelope_failures_before_token_adoption() {
+        let mut bad_status = stackup_response("untrusted", xlock_stackup());
+        bad_status.status.as_mut().unwrap().status =
+            protobuf::EnumOrUnknown::new(ApiStatusCode::AS_BAD_REQUEST);
+
+        let mut missing_header = stackup_response("untrusted", xlock_stackup());
+        missing_header.header = MessageField::none();
+
+        let mut wrong_type = stackup_response("untrusted", xlock_stackup());
+        wrong_type.message.as_mut().unwrap().type_url = GET_ITEMS_RESPONSE_TYPE_URL.to_owned();
+
+        let mut malformed = stackup_response("untrusted", xlock_stackup());
+        malformed.message.as_mut().unwrap().value = vec![0xff];
+
+        let envelope = stackup_response("untrusted", xlock_stackup());
+        let missing_stackup = ApiResponse {
+            message: MessageField::some(Any {
+                type_url: GET_BOARD_STACKUP_RESPONSE_TYPE_URL.to_owned(),
+                value: board_commands::BoardStackupResponse::default()
+                    .write_to_bytes()
+                    .unwrap(),
+                ..Any::default()
+            }),
+            ..envelope
+        };
+
+        for response in [
+            bad_status,
+            missing_header,
+            wrong_type,
+            malformed,
+            missing_stackup,
+        ] {
+            let mut client = routing_client(response);
+            client.token = Some(InstanceToken::new("old").unwrap());
+            assert!(client.get_board_stackup("xLock.kicad_pcb").is_err());
+            assert_eq!(client.instance_token().unwrap().as_str(), "old");
+        }
+    }
+
+    #[test]
+    fn get_board_stackup_rejects_every_invalid_response_before_token_adoption() {
+        let mut cases = Vec::new();
+
+        let mut negative = xlock_stackup();
+        negative.layers[0].thickness.as_mut().unwrap().value_nm = -1;
+        cases.push(negative);
+
+        let mut negative_dielectric = xlock_stackup();
+        negative_dielectric.layers[3]
+            .dielectric
+            .as_mut()
+            .unwrap()
+            .layer
+            .push(board::BoardStackupDielectricProperties {
+                thickness: MessageField::some(base_types::Distance {
+                    value_nm: -1,
+                    ..base_types::Distance::default()
+                }),
+                ..board::BoardStackupDielectricProperties::default()
+            });
+        cases.push(negative_dielectric);
+
+        let mut nonfinite_dielectric = xlock_stackup();
+        nonfinite_dielectric.layers[3]
+            .dielectric
+            .as_mut()
+            .unwrap()
+            .layer
+            .push(board::BoardStackupDielectricProperties {
+                epsilon_r: f64::INFINITY,
+                ..board::BoardStackupDielectricProperties::default()
+            });
+        cases.push(nonfinite_dielectric);
+
+        let mut duplicate = xlock_stackup();
+        duplicate.layers.push(duplicate.layers[2].clone());
+        cases.push(duplicate);
+
+        let mut nonfinite_color = xlock_stackup();
+        nonfinite_color.layers[1].color.as_mut().unwrap().g = f64::NAN;
+        cases.push(nonfinite_color);
+
+        let mut future_layer = xlock_stackup();
+        future_layer.layers[0].layer = protobuf::EnumOrUnknown::from_i32(999);
+        cases.push(future_layer);
+
+        let mut future_type = xlock_stackup();
+        future_type.layers[0].type_ = protobuf::EnumOrUnknown::from_i32(999);
+        cases.push(future_type);
+
+        let mut incompatible = xlock_stackup();
+        incompatible.layers[0].type_ =
+            protobuf::EnumOrUnknown::new(board::BoardStackupLayerType::BSLT_COPPER);
+        cases.push(incompatible);
+
+        cases.push(board::BoardStackup::default());
+
+        for stackup in cases {
+            let mut client = routing_client(stackup_response("untrusted", stackup));
+            client.token = Some(InstanceToken::new("old").unwrap());
+            assert_eq!(
+                client
+                    .get_board_stackup("xLock.kicad_pcb")
+                    .unwrap_err()
+                    .code(),
+                "invalid_observed_stackup"
+            );
+            assert_eq!(client.instance_token().unwrap().as_str(), "old");
+        }
     }
 
     #[test]

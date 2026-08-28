@@ -3,26 +3,30 @@ use kicad_ipc::{
     BoardGraphicLayer as IpcBoardGraphicLayer, BoardGraphicSegment as IpcBoardGraphicSegment,
     CommitId, FootprintSide as IpcFootprintSide, InstanceToken, KiCadClient, KiCadTransport,
     ObservedBoardGraphicSegment, ObservedBoardLayer as IpcBoardLayer,
-    ObservedBoardRoutingItems as IpcBoardRoutingItems, ObservedDrillShape as IpcDrillShape,
-    ObservedFootprintInstance as IpcFootprintInstance, ObservedLockState as IpcLockState,
-    ObservedPad as IpcPad, ObservedPadKind as IpcPadKind, ObservedPadShape as IpcPadShape,
-    ObservedPadStackType as IpcPadStackType, ObservedTrackGeometry as IpcTrackGeometry,
-    ObservedVia as IpcVia, OpenDocument, OpenDocumentKind, VersionInfo,
+    ObservedBoardRoutingItems as IpcBoardRoutingItems, ObservedBoardStackup as IpcBoardStackup,
+    ObservedDrillShape as IpcDrillShape, ObservedFootprintInstance as IpcFootprintInstance,
+    ObservedLockState as IpcLockState, ObservedPad as IpcPad, ObservedPadKind as IpcPadKind,
+    ObservedPadShape as IpcPadShape, ObservedPadStackType as IpcPadStackType,
+    ObservedTrackGeometry as IpcTrackGeometry, ObservedVia as IpcVia, OpenDocument,
+    OpenDocumentKind, VersionInfo,
 };
 use kicad_model::{
     Board, BoardGraphicLayer, BoardGraphicSegment, BoardLayer, BoardSide, CapabilityObservation,
     CapabilityStatus, Coordinate, Diagnostic, DiscoveredDocument, DiscoveredDocumentKind,
-    DiscoverySnapshot, DocumentSpace, Drill, DrillShape, ExactAngleDegrees, FiniteRatio,
-    FootprintLibraryIdentifier, LocalCoordinateNm, LockState, ModelError, ObservedBoardFootprints,
-    ObservedBoardRouting, ObservedFootprintPlacement, ObservedNetIdentity, ObservedPad,
-    ObservedPadStackOuterLayer, ObservedPostMachiningProperties, ObservedRoutingNet,
-    ObservedSchematicSymbol, ObservedSolderMaskOverrides, ObservedSolderPasteOverrides,
-    ObservedThermalSpokeSettings, ObservedTrack, ObservedTrackGeometry, ObservedVia,
-    ObservedViaDrill, ObservedViaPadStack, ObservedZoneConnectionSettings, PadCopperShape, PadKind,
-    PadShape, PadStackType, ProjectSnapshot, RevisionDigest, Schematic, SizeNm, SolderMaskMode,
-    SolderPasteMode, StableId, UnconnectedLayerRemoval, Unit, ViaCoveringMode, ViaDrillCappingMode,
-    ViaDrillFillingMode, ViaDrillPostMachiningMode, ViaPluggingMode, ViaType, ZoneConnectionStyle,
-    board_net_id, board_track_id, board_via_id, footprint_definition_id, footprint_pad_id,
+    DiscoverySnapshot, DocumentSpace, Drill, DrillShape, ExactAngleDegrees, ExactFiniteFloat,
+    ExactFiniteRgba, FiniteRatio, FootprintLibraryIdentifier, LocalCoordinateNm, LockState,
+    ModelError, ObservedBoardFootprints, ObservedBoardRouting, ObservedBoardStackup,
+    ObservedFootprintPlacement, ObservedNetIdentity, ObservedPad, ObservedPadStackOuterLayer,
+    ObservedPostMachiningProperties, ObservedRoutingNet, ObservedSchematicSymbol,
+    ObservedSolderMaskOverrides, ObservedSolderPasteOverrides, ObservedStackupDielectricProperties,
+    ObservedStackupEdge, ObservedStackupFinish, ObservedStackupImpedance, ObservedStackupLayer,
+    ObservedStackupLayerIdentity, ObservedStackupLayerType, ObservedThermalSpokeSettings,
+    ObservedTrack, ObservedTrackGeometry, ObservedVia, ObservedViaDrill, ObservedViaPadStack,
+    ObservedZoneConnectionSettings, PadCopperShape, PadKind, PadShape, PadStackType,
+    ProjectSnapshot, RevisionDigest, Schematic, SizeNm, SolderMaskMode, SolderPasteMode, StableId,
+    UnconnectedLayerRemoval, Unit, ViaCoveringMode, ViaDrillCappingMode, ViaDrillFillingMode,
+    ViaDrillPostMachiningMode, ViaPluggingMode, ViaType, ZoneConnectionStyle, board_net_id,
+    board_track_id, board_via_id, footprint_definition_id, footprint_pad_id,
     footprint_placement_id,
 };
 use kicad_schematic::{NetlistDocument, ParsedSchematicProject, join_netlist_connectivity};
@@ -959,12 +963,124 @@ impl From<ModelError> for LiveBoardObservationError {
     }
 }
 
+pub fn board_stackup_observation(
+    board_id: StableId,
+    stackup: IpcBoardStackup,
+) -> Result<ObservedBoardStackup, ModelError> {
+    let layer_identity = |value| match value {
+        kicad_ipc::ObservedStackupLayerIdentity::Undefined => {
+            ObservedStackupLayerIdentity::Undefined
+        }
+        kicad_ipc::ObservedStackupLayerIdentity::FrontCopper => {
+            ObservedStackupLayerIdentity::FrontCopper
+        }
+        kicad_ipc::ObservedStackupLayerIdentity::InnerCopper(index) => {
+            ObservedStackupLayerIdentity::InnerCopper(index)
+        }
+        kicad_ipc::ObservedStackupLayerIdentity::BackCopper => {
+            ObservedStackupLayerIdentity::BackCopper
+        }
+        kicad_ipc::ObservedStackupLayerIdentity::BackPaste => {
+            ObservedStackupLayerIdentity::BackPaste
+        }
+        kicad_ipc::ObservedStackupLayerIdentity::FrontPaste => {
+            ObservedStackupLayerIdentity::FrontPaste
+        }
+        kicad_ipc::ObservedStackupLayerIdentity::BackSilkscreen => {
+            ObservedStackupLayerIdentity::BackSilkscreen
+        }
+        kicad_ipc::ObservedStackupLayerIdentity::FrontSilkscreen => {
+            ObservedStackupLayerIdentity::FrontSilkscreen
+        }
+        kicad_ipc::ObservedStackupLayerIdentity::BackSoldermask => {
+            ObservedStackupLayerIdentity::BackSoldermask
+        }
+        kicad_ipc::ObservedStackupLayerIdentity::FrontSoldermask => {
+            ObservedStackupLayerIdentity::FrontSoldermask
+        }
+    };
+    let layer_type = |value| match value {
+        kicad_ipc::ObservedStackupLayerType::Unknown => ObservedStackupLayerType::Unknown,
+        kicad_ipc::ObservedStackupLayerType::Copper => ObservedStackupLayerType::Copper,
+        kicad_ipc::ObservedStackupLayerType::Dielectric => ObservedStackupLayerType::Dielectric,
+        kicad_ipc::ObservedStackupLayerType::Silkscreen => ObservedStackupLayerType::Silkscreen,
+        kicad_ipc::ObservedStackupLayerType::Soldermask => ObservedStackupLayerType::Soldermask,
+        kicad_ipc::ObservedStackupLayerType::Solderpaste => ObservedStackupLayerType::Solderpaste,
+        kicad_ipc::ObservedStackupLayerType::Undefined => ObservedStackupLayerType::Undefined,
+    };
+    let finish = stackup.finish.map(|finish| ObservedStackupFinish {
+        type_name: finish.type_name,
+    });
+    let impedance = stackup.impedance.map(|impedance| ObservedStackupImpedance {
+        is_controlled: impedance.is_controlled,
+    });
+    let edge = stackup.edge.map(|edge| ObservedStackupEdge {
+        connector_present: edge.connector.is_some(),
+        castellation: edge.castellation,
+        plating: edge.plating,
+    });
+    let layers = stackup
+        .layers
+        .into_iter()
+        .map(|layer| {
+            let thickness_nm = layer
+                .thickness_nm
+                .ok_or(ModelError::InvalidStackupObservation(
+                    "required layer thickness is missing",
+                ))?;
+            let color = layer
+                .color
+                .map(|color| {
+                    Ok(ExactFiniteRgba {
+                        red: ExactFiniteFloat::new(color.red)?,
+                        green: ExactFiniteFloat::new(color.green)?,
+                        blue: ExactFiniteFloat::new(color.blue)?,
+                        alpha: ExactFiniteFloat::new(color.alpha)?,
+                    })
+                })
+                .transpose()?;
+            let dielectric = layer
+                .dielectric
+                .map(|properties| {
+                    properties
+                        .into_iter()
+                        .map(|property| {
+                            Ok(ObservedStackupDielectricProperties {
+                                epsilon_r: ExactFiniteFloat::new(property.epsilon_r)?,
+                                loss_tangent: ExactFiniteFloat::new(property.loss_tangent)?,
+                                material_name: property.material_name,
+                                thickness_nm: property.thickness_nm.ok_or(
+                                    ModelError::InvalidStackupObservation(
+                                        "required dielectric thickness is missing",
+                                    ),
+                                )?,
+                            })
+                        })
+                        .collect::<Result<Vec<_>, ModelError>>()
+                })
+                .transpose()?;
+            Ok(ObservedStackupLayer {
+                layer: layer_identity(layer.layer),
+                enabled: layer.enabled,
+                layer_type: layer_type(layer.layer_type),
+                thickness_nm,
+                material_name: layer.material_name,
+                user_name: layer.user_name,
+                color,
+                dielectric,
+            })
+        })
+        .collect::<Result<Vec<_>, ModelError>>()?;
+    ObservedBoardStackup::new(board_id, finish, impedance, edge, layers)
+}
+
 pub fn live_board_observation(
     version: VersionInfo,
     document: OpenDocument,
     graphics: Vec<ObservedBoardGraphicSegment>,
     native_footprints: ObservedBoardFootprints,
     native_routing: ObservedBoardRouting,
+    native_stackup: ObservedBoardStackup,
     instance_token: InstanceToken,
 ) -> Result<LiveBoardObservation, LiveBoardObservationError> {
     let board_filename = match &document.kind {
@@ -1050,6 +1166,13 @@ pub fn live_board_observation(
         )
         .into());
     }
+    native_stackup.validate()?;
+    if native_stackup.board_id != discovered.document_id {
+        return Err(ModelError::InvalidStackupObservation(
+            "native stackup board identity does not match the live board",
+        )
+        .into());
+    }
     let snapshot = ProjectSnapshot {
         project_id,
         kicad_version: version.full_version,
@@ -1058,6 +1181,7 @@ pub fn live_board_observation(
             "pcb.board_graphics.write".to_owned(),
             "pcb.native_footprints.read".to_owned(),
             "pcb.native_routing.read".to_owned(),
+            "pcb.stackup.read".to_owned(),
         ],
         schematic: Schematic::default(),
         board: Board {
@@ -1067,6 +1191,7 @@ pub fn live_board_observation(
         },
         native_footprints: Some(native_footprints),
         native_routing: Some(native_routing),
+        native_stackup: Some(native_stackup),
     }
     .canonical();
     snapshot.validate()?;
@@ -1845,6 +1970,213 @@ mod tests {
         ObservedBoardRouting::new(board_id, Vec::new(), Vec::new()).unwrap()
     }
 
+    fn native_stackup(document: &OpenDocument) -> ObservedBoardStackup {
+        let board_id = discovered_document(document.clone())
+            .unwrap()
+            .unwrap()
+            .document_id;
+        ObservedBoardStackup::new(
+            board_id,
+            None,
+            None,
+            None,
+            vec![ObservedStackupLayer {
+                layer: ObservedStackupLayerIdentity::FrontCopper,
+                enabled: true,
+                layer_type: ObservedStackupLayerType::Copper,
+                thickness_nm: 35_000,
+                material_name: "Copper".to_owned(),
+                user_name: "F.Cu".to_owned(),
+                color: None,
+                dielectric: None,
+            }],
+        )
+        .unwrap()
+    }
+
+    fn ipc_stackup_layer(
+        layer: kicad_ipc::ObservedStackupLayerIdentity,
+        layer_type: kicad_ipc::ObservedStackupLayerType,
+        thickness_nm: i64,
+        user_name: &str,
+    ) -> kicad_ipc::ObservedStackupLayer {
+        kicad_ipc::ObservedStackupLayer {
+            layer,
+            enabled: true,
+            layer_type,
+            thickness_nm: Some(thickness_nm),
+            color: None,
+            material_name: String::new(),
+            user_name: user_name.to_owned(),
+            dielectric: (layer_type == kicad_ipc::ObservedStackupLayerType::Dielectric)
+                .then(Vec::new),
+        }
+    }
+
+    fn xlock_ipc_stackup() -> IpcBoardStackup {
+        use kicad_ipc::ObservedStackupLayerIdentity as Identity;
+        use kicad_ipc::ObservedStackupLayerType as LayerType;
+
+        let mut front_mask = ipc_stackup_layer(
+            Identity::FrontSoldermask,
+            LayerType::Soldermask,
+            10_000,
+            "F.Mask",
+        );
+        front_mask.color = Some(kicad_ipc::ObservedStackupColor {
+            red: 0.0,
+            green: 0.5,
+            blue: 1.0,
+            alpha: 0.0,
+        });
+        let mut core =
+            ipc_stackup_layer(Identity::Undefined, LayerType::Dielectric, 100_000, "Core");
+        core.material_name = "FR4".to_owned();
+        core.dielectric = Some(vec![kicad_ipc::ObservedStackupDielectricProperties {
+            epsilon_r: 4.2,
+            loss_tangent: 0.0,
+            material_name: "FR4".to_owned(),
+            thickness_nm: Some(100_000),
+        }]);
+        let mut disabled_inner =
+            ipc_stackup_layer(Identity::InnerCopper(1), LayerType::Copper, 0, "In1.Cu");
+        disabled_inner.enabled = false;
+        let zero_prepreg =
+            ipc_stackup_layer(Identity::Undefined, LayerType::Dielectric, 0, "Prepreg");
+        IpcBoardStackup {
+            finish: Some(kicad_ipc::ObservedStackupFinish {
+                type_name: "ENIG".to_owned(),
+            }),
+            impedance: Some(kicad_ipc::ObservedStackupImpedance {
+                is_controlled: false,
+            }),
+            edge: Some(kicad_ipc::ObservedStackupEdge {
+                connector: Some(()),
+                castellation: Some(false),
+                plating: None,
+            }),
+            layers: vec![
+                ipc_stackup_layer(
+                    Identity::FrontSilkscreen,
+                    LayerType::Silkscreen,
+                    12_000,
+                    "F.SilkS",
+                ),
+                front_mask,
+                ipc_stackup_layer(Identity::FrontCopper, LayerType::Copper, 35_000, "F.Cu"),
+                core,
+                disabled_inner,
+                zero_prepreg,
+                ipc_stackup_layer(Identity::BackCopper, LayerType::Copper, 35_000, "B.Cu"),
+                ipc_stackup_layer(
+                    Identity::BackSoldermask,
+                    LayerType::Soldermask,
+                    10_000,
+                    "B.Mask",
+                ),
+                ipc_stackup_layer(
+                    Identity::BackSilkscreen,
+                    LayerType::Silkscreen,
+                    12_000,
+                    "B.SilkS",
+                ),
+            ],
+        }
+    }
+
+    #[test]
+    fn board_stackup_mapping_preserves_xlock_fields_order_and_presence() {
+        let board_id = StableId::new("xlock-board").unwrap();
+        let observation = board_stackup_observation(board_id.clone(), xlock_ipc_stackup()).unwrap();
+        assert_eq!(observation.board_id, board_id);
+        assert_eq!(observation.finish.as_ref().unwrap().type_name, "ENIG");
+        assert!(!observation.impedance.as_ref().unwrap().is_controlled);
+        assert_eq!(
+            observation.edge,
+            Some(ObservedStackupEdge {
+                connector_present: true,
+                castellation: Some(false),
+                plating: None,
+            })
+        );
+        assert_eq!(
+            observation
+                .layers
+                .iter()
+                .map(|layer| layer.layer)
+                .collect::<Vec<_>>(),
+            [
+                ObservedStackupLayerIdentity::FrontSilkscreen,
+                ObservedStackupLayerIdentity::FrontSoldermask,
+                ObservedStackupLayerIdentity::FrontCopper,
+                ObservedStackupLayerIdentity::Undefined,
+                ObservedStackupLayerIdentity::InnerCopper(1),
+                ObservedStackupLayerIdentity::Undefined,
+                ObservedStackupLayerIdentity::BackCopper,
+                ObservedStackupLayerIdentity::BackSoldermask,
+                ObservedStackupLayerIdentity::BackSilkscreen,
+            ]
+        );
+        let color = observation.layers[1].color.unwrap();
+        assert_eq!(
+            [
+                color.red.as_f64(),
+                color.green.as_f64(),
+                color.blue.as_f64(),
+                color.alpha.as_f64(),
+            ],
+            [0.0, 0.5, 1.0, 0.0]
+        );
+        let dielectric = observation.layers[3].dielectric.as_ref().unwrap();
+        assert_eq!(dielectric[0].epsilon_r.as_f64(), 4.2);
+        assert_eq!(dielectric[0].loss_tangent.as_f64(), 0.0);
+        assert_eq!(dielectric[0].thickness_nm, 100_000);
+        assert!(!observation.layers[4].enabled);
+        assert_eq!(observation.layers[4].thickness_nm, 0);
+        assert_eq!(observation.layers[5].thickness_nm, 0);
+        assert_eq!(observation.layers[5].dielectric, Some(Vec::new()));
+    }
+
+    #[test]
+    fn board_stackup_revision_is_board_scoped_content_sensitive_and_not_forgeable() {
+        let first =
+            board_stackup_observation(StableId::new("board-a").unwrap(), xlock_ipc_stackup())
+                .unwrap();
+        let other_board =
+            board_stackup_observation(StableId::new("board-b").unwrap(), xlock_ipc_stackup())
+                .unwrap();
+        let mut changed_ipc = xlock_ipc_stackup();
+        changed_ipc.layers.swap(3, 5);
+        let changed =
+            board_stackup_observation(StableId::new("board-a").unwrap(), changed_ipc).unwrap();
+        assert_ne!(first.observed_revision, other_board.observed_revision);
+        assert_ne!(first.observed_revision, changed.observed_revision);
+
+        let mut forged = first;
+        forged.observed_revision = other_board.observed_revision;
+        assert!(matches!(
+            forged.validate(),
+            Err(ModelError::InvalidStackupObservation(
+                "stackup observation revision does not match its board and content"
+            ))
+        ));
+    }
+
+    #[test]
+    fn board_stackup_mapping_preserves_legacy_optional_absence() {
+        let mut legacy = xlock_ipc_stackup();
+        legacy.finish = None;
+        legacy.impedance = None;
+        legacy.edge = None;
+        legacy.layers[1].color = None;
+        let observation =
+            board_stackup_observation(StableId::new("board").unwrap(), legacy).unwrap();
+        assert_eq!(observation.finish, None);
+        assert_eq!(observation.impedance, None);
+        assert_eq!(observation.edge, None);
+        assert_eq!(observation.layers[1].color, None);
+    }
+
     #[test]
     fn live_board_observation_maps_identity_geometry_and_capabilities() {
         let document = pcb();
@@ -1855,6 +2187,7 @@ mod tests {
             vec![observed_graphic("graphic-1", 1)],
             native_footprints,
             native_routing(&pcb()),
+            native_stackup(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap();
@@ -1871,9 +2204,12 @@ mod tests {
                 "pcb.board_graphics.read",
                 "pcb.board_graphics.write",
                 "pcb.native_footprints.read",
-                "pcb.native_routing.read"
+                "pcb.native_routing.read",
+                "pcb.stackup.read",
             ]
         );
+        let stackup = observation.snapshot.native_stackup.as_ref().unwrap();
+        assert_eq!(stackup.layers[0].user_name, "F.Cu");
         let native = observation.snapshot.native_footprints.as_ref().unwrap();
         assert_eq!(
             observation.snapshot.board.document_id.as_ref(),
@@ -1912,6 +2248,7 @@ mod tests {
             vec![observed_graphic("b", 20), observed_graphic("a", 1)],
             first_native,
             native_routing(&pcb()),
+            native_stackup(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap();
@@ -1921,6 +2258,7 @@ mod tests {
             vec![observed_graphic("a", 1), observed_graphic("b", 20)],
             second_native,
             native_routing(&pcb()),
+            native_stackup(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap();
@@ -1948,6 +2286,7 @@ mod tests {
             Vec::new(),
             first_native,
             native_routing(&pcb()),
+            native_stackup(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap();
@@ -1957,6 +2296,7 @@ mod tests {
             Vec::new(),
             changed_native,
             native_routing(&pcb()),
+            native_stackup(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap();
@@ -1978,6 +2318,7 @@ mod tests {
             )
             .unwrap(),
             native_routing(&pcb()),
+            native_stackup(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();
@@ -1990,6 +2331,109 @@ mod tests {
     }
 
     #[test]
+    fn live_board_observation_rejects_stackup_from_another_board_or_forged_revision() {
+        let document = pcb();
+        let wrong_board = ObservedBoardStackup::new(
+            StableId::new("other-board").unwrap(),
+            None,
+            None,
+            None,
+            native_stackup(&document).layers,
+        )
+        .unwrap();
+        let error = live_board_observation(
+            version(),
+            document.clone(),
+            Vec::new(),
+            native_footprints(&document),
+            native_routing(&document),
+            wrong_board,
+            InstanceToken::new("token").unwrap(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            LiveBoardObservationError::Model(ModelError::InvalidStackupObservation(
+                "native stackup board identity does not match the live board"
+            ))
+        ));
+
+        let mut forged = native_stackup(&document);
+        forged.observed_revision = RevisionDigest::new("0".repeat(64)).unwrap();
+        let error = live_board_observation(
+            version(),
+            document.clone(),
+            Vec::new(),
+            native_footprints(&document),
+            native_routing(&document),
+            forged,
+            InstanceToken::new("token").unwrap(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            LiveBoardObservationError::Model(ModelError::InvalidStackupObservation(
+                "stackup observation revision does not match its board and content"
+            ))
+        ));
+    }
+
+    #[test]
+    fn live_board_snapshot_is_stackup_content_and_order_sensitive() {
+        let document = pcb();
+        let board_id = board_document_id(&document).unwrap();
+        let first_stackup =
+            board_stackup_observation(board_id.clone(), xlock_ipc_stackup()).unwrap();
+        let mut changed_ipc = xlock_ipc_stackup();
+        changed_ipc.layers.swap(3, 5);
+        let reordered_stackup = board_stackup_observation(board_id, changed_ipc).unwrap();
+        let first = live_board_observation(
+            version(),
+            document.clone(),
+            Vec::new(),
+            native_footprints(&document),
+            native_routing(&document),
+            first_stackup,
+            InstanceToken::new("token").unwrap(),
+        )
+        .unwrap();
+        let reordered = live_board_observation(
+            version(),
+            document.clone(),
+            Vec::new(),
+            native_footprints(&document),
+            native_routing(&document),
+            reordered_stackup,
+            InstanceToken::new("token").unwrap(),
+        )
+        .unwrap();
+        assert_ne!(first.snapshot, reordered.snapshot);
+        assert_ne!(
+            first.snapshot.revision().unwrap(),
+            reordered.snapshot.revision().unwrap()
+        );
+    }
+
+    #[test]
+    fn legacy_project_snapshot_keeps_stackup_absent() {
+        let legacy = serde_json::json!({
+            "project_id": "project",
+            "kicad_version": "10.0.5",
+            "capabilities": [],
+            "schematic": {"nets": [], "symbols": []},
+            "board": {"footprints": []}
+        });
+        let snapshot: ProjectSnapshot = serde_json::from_value(legacy).unwrap();
+        assert_eq!(snapshot.native_stackup, None);
+        assert!(
+            serde_json::to_value(snapshot)
+                .unwrap()
+                .get("native_stackup")
+                .is_none()
+        );
+    }
+
+    #[test]
     fn live_board_observation_rejects_duplicate_or_invalid_graphic_ids() {
         let document = pcb();
         let duplicate = live_board_observation(
@@ -1998,6 +2442,7 @@ mod tests {
             vec![observed_graphic("same", 1), observed_graphic("same", 20)],
             native_footprints(&document),
             native_routing(&pcb()),
+            native_stackup(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();
@@ -2011,6 +2456,7 @@ mod tests {
             vec![observed_graphic("", 1)],
             native_footprints(&document),
             native_routing(&pcb()),
+            native_stackup(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();
@@ -2031,6 +2477,7 @@ mod tests {
             Vec::new(),
             native_footprints(&pcb()),
             native_routing(&pcb()),
+            native_stackup(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();
@@ -2048,6 +2495,7 @@ mod tests {
             Vec::new(),
             native_footprints(&pcb()),
             native_routing(&pcb()),
+            native_stackup(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();
@@ -2061,6 +2509,7 @@ mod tests {
             Vec::new(),
             native_footprints(&pcb()),
             native_routing(&pcb()),
+            native_stackup(&pcb()),
             InstanceToken::new("token").unwrap(),
         )
         .unwrap_err();

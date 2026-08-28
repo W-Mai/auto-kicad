@@ -584,6 +584,7 @@ mod tests {
             },
             native_footprints: None,
             native_routing: None,
+            native_stackup: None,
         }
     }
     fn symbol(uuid: &str) -> Symbol {
