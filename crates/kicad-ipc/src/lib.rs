@@ -29,6 +29,8 @@ pub const BEGIN_COMMIT_RESPONSE_TYPE_URL: &str =
 pub const CREATE_ITEMS_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.CreateItems";
 pub const CREATE_ITEMS_RESPONSE_TYPE_URL: &str =
     "type.googleapis.com/kiapi.common.commands.CreateItemsResponse";
+pub const TRACK_TYPE_URL: &str = "type.googleapis.com/kiapi.board.types.Track";
+pub const VIA_TYPE_URL: &str = "type.googleapis.com/kiapi.board.types.Via";
 pub const END_COMMIT_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.EndCommit";
 pub const END_COMMIT_RESPONSE_TYPE_URL: &str =
     "type.googleapis.com/kiapi.common.commands.EndCommitResponse";
@@ -181,6 +183,39 @@ pub struct CreatedBoardGraphicReceipt {
     pub request_index: usize,
     pub graphic_id: String,
     pub segment: BoardGraphicSegment,
+    pub lock_state: ObservedLockState,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CreateTrack {
+    pub start_x_nm: i64,
+    pub start_y_nm: i64,
+    pub end_x_nm: i64,
+    pub end_y_nm: i64,
+    pub width_nm: i64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CreateThroughVia {
+    pub position_x_nm: i64,
+    pub position_y_nm: i64,
+    pub pad_diameter_nm: i64,
+    pub drill_diameter_nm: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreatedTrackReceipt {
+    pub request_index: usize,
+    pub source_uuid: String,
+    pub track: CreateTrack,
+    pub lock_state: ObservedLockState,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreatedThroughViaReceipt {
+    pub request_index: usize,
+    pub source_uuid: String,
+    pub via: CreateThroughVia,
     pub lock_state: ObservedLockState,
 }
 
@@ -878,6 +913,56 @@ impl<T: KiCadTransport> KiCadClient<T> {
         let receipts = created_board_graphic_receipts(&response, graphics)?;
         self.token = Some(token);
         Ok(receipts)
+    }
+
+    pub fn create_track(
+        &mut self,
+        board_filename: &str,
+        track: &CreateTrack,
+    ) -> Result<CreatedTrackReceipt, IpcError> {
+        let item = create_track_item(track)?;
+        let response = self.create_items(board_filename, vec![item])?;
+        let receipt = created_track_receipt(&response, track)?;
+        self.token = Some(response.1);
+        Ok(receipt)
+    }
+
+    pub fn create_through_via(
+        &mut self,
+        board_filename: &str,
+        via: &CreateThroughVia,
+    ) -> Result<CreatedThroughViaReceipt, IpcError> {
+        let item = create_through_via_item(via)?;
+        let response = self.create_items(board_filename, vec![item])?;
+        let receipt = created_through_via_receipt(&response, via)?;
+        self.token = Some(response.1);
+        Ok(receipt)
+    }
+
+    fn create_items(
+        &mut self,
+        board_filename: &str,
+        items: Vec<Any>,
+    ) -> Result<(editor_commands::CreateItemsResponse, InstanceToken), IpcError> {
+        let command = editor_commands::CreateItems {
+            header: MessageField::some(board_item_header(board_filename)),
+            items,
+            ..editor_commands::CreateItems::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            CREATE_ITEMS_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let decoded = decode_any::<editor_commands::CreateItemsResponse>(
+            &response,
+            CREATE_ITEMS_RESPONSE_TYPE_URL,
+        )?;
+        Ok((decoded, token))
     }
 
     pub fn commit_changes(&mut self, commit: &CommitId, message: &str) -> Result<(), IpcError> {
@@ -2942,6 +3027,279 @@ fn decoded_board_graphic_value(
             layer,
         },
         lock_state,
+    })
+}
+
+fn create_track_item(track: &CreateTrack) -> Result<Any, IpcError> {
+    if track.width_nm <= 0 {
+        return Err(IpcError::InvalidObservedRouting(
+            "track width must be positive",
+        ));
+    }
+    if track.start_x_nm == track.end_x_nm && track.start_y_nm == track.end_y_nm {
+        return Err(IpcError::InvalidObservedRouting(
+            "track endpoints must differ",
+        ));
+    }
+    let value = board_types::Track {
+        start: MessageField::some(base_types::Vector2 {
+            x_nm: track.start_x_nm,
+            y_nm: track.start_y_nm,
+            ..base_types::Vector2::default()
+        }),
+        end: MessageField::some(base_types::Vector2 {
+            x_nm: track.end_x_nm,
+            y_nm: track.end_y_nm,
+            ..base_types::Vector2::default()
+        }),
+        width: MessageField::some(base_types::Distance {
+            value_nm: track.width_nm,
+            ..base_types::Distance::default()
+        }),
+        layer: protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Cu),
+        ..board_types::Track::default()
+    };
+    Ok(Any {
+        type_url: TRACK_TYPE_URL.to_owned(),
+        value: value
+            .write_to_bytes()
+            .map_err(|_| IpcError::MalformedEnvelope)?,
+        ..Any::default()
+    })
+}
+
+fn create_through_via_item(via: &CreateThroughVia) -> Result<Any, IpcError> {
+    if via.pad_diameter_nm <= 0 || via.drill_diameter_nm <= 0 {
+        return Err(IpcError::InvalidObservedRouting(
+            "via pad and drill diameters must be positive",
+        ));
+    }
+    if via.drill_diameter_nm > via.pad_diameter_nm {
+        return Err(IpcError::InvalidObservedRouting(
+            "via drill diameter must not exceed pad diameter",
+        ));
+    }
+    let circle = |layer| board_types::PadStackLayer {
+        layer: protobuf::EnumOrUnknown::new(layer),
+        shape: protobuf::EnumOrUnknown::new(board_types::PadStackShape::PSS_CIRCLE),
+        size: MessageField::some(base_types::Vector2 {
+            x_nm: via.pad_diameter_nm,
+            y_nm: via.pad_diameter_nm,
+            ..base_types::Vector2::default()
+        }),
+        ..board_types::PadStackLayer::default()
+    };
+    let value = board_types::Via {
+        position: MessageField::some(base_types::Vector2 {
+            x_nm: via.position_x_nm,
+            y_nm: via.position_y_nm,
+            ..base_types::Vector2::default()
+        }),
+        pad_stack: MessageField::some(board_types::PadStack {
+            type_: protobuf::EnumOrUnknown::new(board_types::PadStackType::PST_NORMAL),
+            layers: vec![
+                protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Cu),
+                protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_B_Cu),
+            ],
+            drill: MessageField::some(board_types::DrillProperties {
+                start_layer: protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Cu),
+                end_layer: protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_B_Cu),
+                diameter: MessageField::some(base_types::Vector2 {
+                    x_nm: via.drill_diameter_nm,
+                    y_nm: via.drill_diameter_nm,
+                    ..base_types::Vector2::default()
+                }),
+                shape: protobuf::EnumOrUnknown::new(board_types::DrillShape::DS_CIRCLE),
+                ..board_types::DrillProperties::default()
+            }),
+            copper_layers: vec![
+                circle(board_types::BoardLayer::BL_F_Cu),
+                circle(board_types::BoardLayer::BL_B_Cu),
+            ],
+            ..board_types::PadStack::default()
+        }),
+        type_: protobuf::EnumOrUnknown::new(board_types::ViaType::VT_THROUGH),
+        ..board_types::Via::default()
+    };
+    Ok(Any {
+        type_url: VIA_TYPE_URL.to_owned(),
+        value: value
+            .write_to_bytes()
+            .map_err(|_| IpcError::MalformedEnvelope)?,
+        ..Any::default()
+    })
+}
+
+fn created_item_status(
+    result: &editor_commands::ItemCreationResult,
+    index: usize,
+) -> Result<&Any, IpcError> {
+    let status = result.status.as_ref();
+    let code = status.map_or(0, |status| status.code.value());
+    if code != editor_commands::ItemStatusCode::ISC_OK as i32 {
+        return Err(IpcError::CreateItemFailed {
+            index,
+            status: code,
+            message: status.map_or_else(String::new, |status| status.error_message.clone()),
+        });
+    }
+    result.item.as_ref().ok_or(IpcError::MissingResponseMessage)
+}
+
+fn created_track_receipt(
+    response: &(editor_commands::CreateItemsResponse, InstanceToken),
+    requested: &CreateTrack,
+) -> Result<CreatedTrackReceipt, IpcError> {
+    if response.0.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
+        return Err(IpcError::Status(
+            ApiStatusCode::AS_BAD_REQUEST,
+            format!(
+                "create items status: {:?}",
+                response.0.status.enum_value_or_default()
+            ),
+        ));
+    }
+    if response.0.created_items.len() != 1 {
+        return Err(IpcError::CreateItemsCountMismatch {
+            expected: 1,
+            actual: response.0.created_items.len(),
+        });
+    }
+    let item = created_item_status(&response.0.created_items[0], 0)?;
+    if item.type_url != TRACK_TYPE_URL {
+        return Err(IpcError::UnexpectedMessageType {
+            expected: TRACK_TYPE_URL,
+            actual: item.type_url.clone(),
+        });
+    }
+    let track = board_types::Track::parse_from_bytes(&item.value)
+        .map_err(|_| IpcError::MalformedEnvelope)?;
+    let id = routing_kiid(track.id.as_ref())?;
+    let observed = CreateTrack {
+        start_x_nm: track
+            .start
+            .as_ref()
+            .ok_or(IpcError::InvalidObservedRouting(
+                "created track start is missing",
+            ))?
+            .x_nm,
+        start_y_nm: track.start.as_ref().unwrap().y_nm,
+        end_x_nm: track
+            .end
+            .as_ref()
+            .ok_or(IpcError::InvalidObservedRouting(
+                "created track end is missing",
+            ))?
+            .x_nm,
+        end_y_nm: track.end.as_ref().unwrap().y_nm,
+        width_nm: track
+            .width
+            .as_ref()
+            .ok_or(IpcError::InvalidObservedRouting(
+                "created track width is missing",
+            ))?
+            .value_nm,
+    };
+    if &observed != requested || track.layer.enum_value() != Ok(board_types::BoardLayer::BL_F_Cu) {
+        return Err(IpcError::InvalidObservedRouting(
+            "created track does not match the request",
+        ));
+    }
+    Ok(CreatedTrackReceipt {
+        request_index: 0,
+        source_uuid: id,
+        track: observed,
+        lock_state: routing_lock_state(&track.locked)?,
+    })
+}
+
+fn created_through_via_receipt(
+    response: &(editor_commands::CreateItemsResponse, InstanceToken),
+    requested: &CreateThroughVia,
+) -> Result<CreatedThroughViaReceipt, IpcError> {
+    if response.0.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
+        return Err(IpcError::Status(
+            ApiStatusCode::AS_BAD_REQUEST,
+            format!(
+                "create items status: {:?}",
+                response.0.status.enum_value_or_default()
+            ),
+        ));
+    }
+    if response.0.created_items.len() != 1 {
+        return Err(IpcError::CreateItemsCountMismatch {
+            expected: 1,
+            actual: response.0.created_items.len(),
+        });
+    }
+    let item = created_item_status(&response.0.created_items[0], 0)?;
+    if item.type_url != VIA_TYPE_URL {
+        return Err(IpcError::UnexpectedMessageType {
+            expected: VIA_TYPE_URL,
+            actual: item.type_url.clone(),
+        });
+    }
+    let via =
+        board_types::Via::parse_from_bytes(&item.value).map_err(|_| IpcError::MalformedEnvelope)?;
+    let id = routing_kiid(via.id.as_ref())?;
+    let position = via
+        .position
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedRouting(
+            "created via position is missing",
+        ))?;
+    let stack = via
+        .pad_stack
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedRouting(
+            "created via pad stack is missing",
+        ))?;
+    let drill = stack
+        .drill
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedRouting(
+            "created via drill is missing",
+        ))?;
+    let pad = stack
+        .copper_layers
+        .iter()
+        .find(|layer| layer.layer.enum_value() == Ok(board_types::BoardLayer::BL_F_Cu))
+        .ok_or(IpcError::InvalidObservedRouting(
+            "created via F.Cu pad is missing",
+        ))?;
+    let pad_size = pad.size.as_ref().ok_or(IpcError::InvalidObservedRouting(
+        "created via pad size is missing",
+    ))?;
+    let drill_size = drill
+        .diameter
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedRouting(
+            "created via drill size is missing",
+        ))?;
+    let observed = CreateThroughVia {
+        position_x_nm: position.x_nm,
+        position_y_nm: position.y_nm,
+        pad_diameter_nm: pad_size.x_nm,
+        drill_diameter_nm: drill_size.x_nm,
+    };
+    if &observed != requested
+        || via.type_.enum_value() != Ok(board_types::ViaType::VT_THROUGH)
+        || stack.type_.enum_value() != Ok(board_types::PadStackType::PST_NORMAL)
+        || drill.start_layer.enum_value() != Ok(board_types::BoardLayer::BL_F_Cu)
+        || drill.end_layer.enum_value() != Ok(board_types::BoardLayer::BL_B_Cu)
+        || drill.shape.enum_value() != Ok(board_types::DrillShape::DS_CIRCLE)
+        || pad_size.x_nm != pad_size.y_nm
+        || drill_size.x_nm != drill_size.y_nm
+    {
+        return Err(IpcError::InvalidObservedRouting(
+            "created via does not match the request",
+        ));
+    }
+    Ok(CreatedThroughViaReceipt {
+        request_index: 0,
+        source_uuid: id,
+        via: observed,
+        lock_state: routing_lock_state(&via.locked)?,
     })
 }
 
