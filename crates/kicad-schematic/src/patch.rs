@@ -1,0 +1,737 @@
+use std::fs::{self, File};
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use kicad_model::{RevisionDigest, SchematicArtifactFile};
+use kiutils_sexpr::{Node, parse_one};
+use sha2::{Digest, Sha256};
+use tempfile::Builder;
+
+use crate::{NetlistDocument, NetlistRunner, parse_schematic};
+
+const SUPPORTED_FORMAT: &str = "20231120";
+const MAX_CANDIDATE_BYTES: usize = 32 * 1024 * 1024;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SchematicPatchOutcome {
+    Committed { artifact: SchematicArtifactFile },
+    Rejected { reason: SchematicPatchRejection },
+    Unknown { reason: String },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SchematicPatchRejection {
+    InvalidProjectRoot,
+    InvalidRootSchematic,
+    EditorLockPresent,
+    RevisionMismatch,
+    UnsupportedFormat,
+    UnsupportedStructure,
+    CandidateInvalid,
+    ConnectivityNotProven,
+    ErcFailed,
+}
+
+pub fn create_two_resistor_circuit(
+    project_root: &Path,
+    root_schematic: &Path,
+    expected_artifact: &SchematicArtifactFile,
+) -> SchematicPatchOutcome {
+    let runner = match NetlistRunner::production() {
+        Ok(runner) => runner,
+        Err(error) => {
+            return SchematicPatchOutcome::Unknown {
+                reason: error.to_string(),
+            };
+        }
+    };
+    create_two_resistor_circuit_with_runner(
+        project_root,
+        root_schematic,
+        expected_artifact,
+        &runner,
+    )
+}
+
+fn create_two_resistor_circuit_with_runner(
+    project_root: &Path,
+    root_schematic: &Path,
+    expected_artifact: &SchematicArtifactFile,
+    runner: &NetlistRunner,
+) -> SchematicPatchOutcome {
+    match create_two_resistor_circuit_inner(project_root, root_schematic, expected_artifact, runner)
+    {
+        Ok(artifact) => SchematicPatchOutcome::Committed { artifact },
+        Err(PatchFailure::Rejected(reason)) => SchematicPatchOutcome::Rejected { reason },
+        Err(PatchFailure::Unknown(reason)) => SchematicPatchOutcome::Unknown { reason },
+    }
+}
+
+#[derive(Debug)]
+enum PatchFailure {
+    Rejected(SchematicPatchRejection),
+    Unknown(String),
+}
+
+fn create_two_resistor_circuit_inner(
+    project_root: &Path,
+    root_schematic: &Path,
+    expected_artifact: &SchematicArtifactFile,
+    runner: &NetlistRunner,
+) -> Result<SchematicArtifactFile, PatchFailure> {
+    let root = canonical_project_root(project_root)?;
+    let schematic = canonical_root_schematic(&root, root_schematic)?;
+    let relative_path = relative_schematic_path(&root, &schematic)?;
+    if expected_artifact.relative_path != relative_path {
+        return Err(rejected(SchematicPatchRejection::RevisionMismatch));
+    }
+    let _lock = reserve_lock(&schematic)?;
+
+    let original = read_root(&schematic)?;
+    let observed_artifact = artifact(&relative_path, &original)?;
+    if &observed_artifact != expected_artifact {
+        return Err(rejected(SchematicPatchRejection::RevisionMismatch));
+    }
+    let candidate_bytes = build_candidate(&original)?;
+    if candidate_bytes.len() > MAX_CANDIDATE_BYTES {
+        return Err(rejected(SchematicPatchRejection::CandidateInvalid));
+    }
+
+    let parent = schematic
+        .parent()
+        .ok_or_else(|| rejected(SchematicPatchRejection::InvalidRootSchematic))?;
+    let mut candidate = Builder::new()
+        .prefix(".auto-kicad-schematic-")
+        .suffix(".kicad_sch")
+        .tempfile_in(parent)
+        .map_err(|error| unknown("create candidate", error))?;
+    candidate
+        .write_all(&candidate_bytes)
+        .map_err(|error| unknown("write candidate", error))?;
+    candidate
+        .as_file()
+        .sync_all()
+        .map_err(|error| unknown("sync candidate", error))?;
+
+    validate_candidate(
+        &relative_path,
+        candidate.path(),
+        &candidate_bytes,
+        runner,
+        &root,
+    )?;
+
+    let current = read_root(&schematic)?;
+    if artifact(&relative_path, &current)? != *expected_artifact {
+        return Err(rejected(SchematicPatchRejection::RevisionMismatch));
+    }
+
+    let candidate_path = candidate.into_temp_path();
+    fs::rename(&candidate_path, &schematic)
+        .map_err(|error| unknown("atomically replace schematic", error))?;
+    if let Err(error) = sync_directory(parent) {
+        return Err(unknown("sync schematic directory", error));
+    }
+
+    let committed = read_root(&schematic)
+        .map_err(|_| PatchFailure::Unknown("reopen committed schematic failed".into()))?;
+    let committed_artifact = artifact(&relative_path, &committed)
+        .map_err(|_| PatchFailure::Unknown("observe committed schematic failed".into()))?;
+    if committed != candidate_bytes {
+        return Err(PatchFailure::Unknown(
+            "committed schematic differs from validated candidate".into(),
+        ));
+    }
+    parse_schematic(relative_path, &committed)
+        .map_err(|_| PatchFailure::Unknown("committed schematic no longer parses".into()))?;
+    Ok(committed_artifact)
+}
+
+fn validate_candidate(
+    relative_path: &str,
+    candidate_path: &Path,
+    bytes: &[u8],
+    runner: &NetlistRunner,
+    project_root: &Path,
+) -> Result<(), PatchFailure> {
+    let parsed = parse_schematic(relative_path, bytes)
+        .map_err(|_| rejected(SchematicPatchRejection::CandidateInvalid))?;
+    let mut references = parsed
+        .symbols
+        .iter()
+        .map(|symbol| symbol.reference.as_str())
+        .collect::<Vec<_>>();
+    references.sort_unstable();
+    if references != ["R1", "R2"]
+        || parsed.symbols.iter().any(|symbol| {
+            symbol.lib_id != "Device:R" || symbol.value != "1k" || symbol.pins.len() != 2
+        })
+        || !has_exact_fixed_topology(bytes)
+    {
+        return Err(rejected(SchematicPatchRejection::CandidateInvalid));
+    }
+    let netlist = runner
+        .run(project_root, candidate_path)
+        .map_err(|_| rejected(SchematicPatchRejection::ConnectivityNotProven))?;
+    prove_connectivity(&netlist.document)?;
+    runner
+        .run_erc(project_root, candidate_path)
+        .map_err(|_| rejected(SchematicPatchRejection::ErcFailed))?;
+    Ok(())
+}
+
+fn prove_connectivity(document: &NetlistDocument) -> Result<(), PatchFailure> {
+    let mut components = document
+        .components
+        .iter()
+        .map(|component| {
+            (
+                component.reference.as_str(),
+                component.value.as_str(),
+                component.library.as_str(),
+                component.library_part.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    components.sort_unstable();
+    if components != [("R1", "1k", "Device", "R"), ("R2", "1k", "Device", "R")] {
+        return Err(rejected(SchematicPatchRejection::ConnectivityNotProven));
+    }
+
+    let intended_nodes = [("R1", "2"), ("R2", "1")];
+    if document.nets.len() != 1 {
+        return Err(rejected(SchematicPatchRejection::ConnectivityNotProven));
+    }
+    let mut nodes = document.nets[0]
+        .nodes
+        .iter()
+        .map(|node| (node.reference.as_str(), node.pin.as_str()))
+        .collect::<Vec<_>>();
+    nodes.sort_unstable();
+    if nodes != intended_nodes {
+        return Err(rejected(SchematicPatchRejection::ConnectivityNotProven));
+    }
+    Ok(())
+}
+
+fn has_exact_fixed_topology(bytes: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+    text.matches("(wire (pts (xy 50 53.81) (xy 50 56.35))")
+        .count()
+        == 1
+        && text.matches("(no_connect (at 50 46.19)").count() == 1
+        && text.matches("(no_connect (at 50 63.97)").count() == 1
+        && text.matches("(no_connect ").count() == 2
+}
+
+fn build_candidate(original: &[u8]) -> Result<Vec<u8>, PatchFailure> {
+    let text = std::str::from_utf8(original)
+        .map_err(|_| rejected(SchematicPatchRejection::UnsupportedStructure))?;
+    let document =
+        parse_one(text).map_err(|_| rejected(SchematicPatchRejection::UnsupportedStructure))?;
+    let root = document
+        .nodes
+        .first()
+        .ok_or_else(|| rejected(SchematicPatchRejection::UnsupportedStructure))?;
+    let Node::List {
+        items: root_items,
+        span: root_span,
+    } = root
+    else {
+        return Err(rejected(SchematicPatchRejection::UnsupportedStructure));
+    };
+    if tag(root_items) != Some("kicad_sch") || root_span.end != text.trim_end().len() {
+        return Err(rejected(SchematicPatchRejection::UnsupportedStructure));
+    }
+
+    let mut format = None;
+    let mut root_uuid = None;
+    let mut lib_symbols_span = None;
+    let mut existing_no_connects = 0;
+    for node in &root_items[1..] {
+        let Node::List { items, span } = node else {
+            return Err(rejected(SchematicPatchRejection::UnsupportedStructure));
+        };
+        match tag(items) {
+            Some("version") => format = value(items, 1),
+            Some("uuid") => root_uuid = value(items, 1),
+            Some("lib_symbols") if items.len() == 1 && lib_symbols_span.is_none() => {
+                lib_symbols_span = Some(*span)
+            }
+            Some("no_connect") => existing_no_connects += 1,
+            Some(
+                "symbol" | "sheet" | "wire" | "junction" | "bus_entry" | "bus" | "label"
+                | "hierarchical_label" | "global_label",
+            ) => return Err(rejected(SchematicPatchRejection::UnsupportedStructure)),
+            _ => {}
+        }
+    }
+    if format != Some(SUPPORTED_FORMAT) {
+        return Err(rejected(SchematicPatchRejection::UnsupportedFormat));
+    }
+    if existing_no_connects != 0 {
+        return Err(rejected(SchematicPatchRejection::UnsupportedStructure));
+    }
+    let root_uuid = root_uuid
+        .filter(|uuid| !uuid.is_empty())
+        .ok_or_else(|| rejected(SchematicPatchRejection::UnsupportedStructure))?;
+    let lib_span =
+        lib_symbols_span.ok_or_else(|| rejected(SchematicPatchRejection::UnsupportedStructure))?;
+    let ids = FreshIds::new();
+    let library = resistor_library_definition();
+    let additions = circuit_forms(root_uuid, &ids);
+
+    let mut result = Vec::with_capacity(original.len() + library.len() + additions.len());
+    let library_insert = lib_span.end - 1;
+    let root_insert = root_span.end - 1;
+    result.extend_from_slice(&original[..library_insert]);
+    result.extend_from_slice(library.as_bytes());
+    result.extend_from_slice(&original[library_insert..root_insert]);
+    result.extend_from_slice(additions.as_bytes());
+    result.extend_from_slice(&original[root_insert..]);
+    Ok(result)
+}
+
+fn resistor_library_definition() -> &'static str {
+    r#"
+    (symbol "Device:R"
+      (pin_numbers hide)
+      (pin_names (offset 0))
+      (exclude_from_sim no)
+      (in_bom yes)
+      (on_board yes)
+      (property "Reference" "R" (at 2.032 0 90) (effects (font (size 1.27 1.27))))
+      (property "Value" "R" (at 0 0 90) (effects (font (size 1.27 1.27))))
+      (property "Footprint" "" (at -1.778 0 90) (effects (font (size 1.27 1.27)) (hide yes)))
+      (property "Datasheet" "~" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+      (property "Description" "Resistor" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+      (symbol "R_0_1"
+        (rectangle (start -1.016 -2.54) (end 1.016 2.54)
+          (stroke (width 0.254) (type default)) (fill (type none))))
+      (symbol "R_1_1"
+        (pin passive line (at 0 3.81 270) (length 1.27)
+          (name "~" (effects (font (size 1.27 1.27))))
+          (number "1" (effects (font (size 1.27 1.27)))))
+        (pin passive line (at 0 -3.81 90) (length 1.27)
+          (name "~" (effects (font (size 1.27 1.27))))
+          (number "2" (effects (font (size 1.27 1.27)))))))
+"#
+}
+
+fn circuit_forms(root_uuid: &str, ids: &FreshIds) -> String {
+    format!(
+        r#"
+  (wire (pts (xy 50 53.81) (xy 50 56.35))
+    (stroke (width 0) (type default)) (uuid "{}"))
+  (no_connect (at 50 46.19) (uuid "{}"))
+  (no_connect (at 50 63.97) (uuid "{}"))
+  (symbol
+    (lib_id "Device:R") (at 50 50 0) (unit 1) (exclude_from_sim no)
+    (in_bom yes) (on_board yes) (dnp no) (uuid "{}")
+    (property "Reference" "R1" (at 52.54 48.73 0) (effects (font (size 1.27 1.27))))
+    (property "Value" "1k" (at 52.54 51.27 0) (effects (font (size 1.27 1.27))))
+    (property "Footprint" "" (at 48.22 50 90) (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Datasheet" "~" (at 50 50 0) (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Description" "Resistor" (at 50 50 0) (effects (font (size 1.27 1.27)) (hide yes)))
+    (pin "1" (uuid "{}")) (pin "2" (uuid "{}"))
+    (instances (project "" (path "/{}" (reference "R1") (unit 1)))))
+  (symbol
+    (lib_id "Device:R") (at 50 60.16 0) (unit 1) (exclude_from_sim no)
+    (in_bom yes) (on_board yes) (dnp no) (uuid "{}")
+    (property "Reference" "R2" (at 52.54 58.89 0) (effects (font (size 1.27 1.27))))
+    (property "Value" "1k" (at 52.54 61.43 0) (effects (font (size 1.27 1.27))))
+    (property "Footprint" "" (at 48.22 60.16 90) (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Datasheet" "~" (at 50 60.16 0) (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Description" "Resistor" (at 50 60.16 0) (effects (font (size 1.27 1.27)) (hide yes)))
+    (pin "1" (uuid "{}")) (pin "2" (uuid "{}"))
+    (instances (project "" (path "/{}" (reference "R2") (unit 1)))))
+"#,
+        ids.wire,
+        ids.nc1,
+        ids.nc2,
+        ids.r1,
+        ids.r1_pin1,
+        ids.r1_pin2,
+        root_uuid,
+        ids.r2,
+        ids.r2_pin1,
+        ids.r2_pin2,
+        root_uuid
+    )
+}
+
+struct FreshIds {
+    wire: String,
+    nc1: String,
+    nc2: String,
+    r1: String,
+    r1_pin1: String,
+    r1_pin2: String,
+    r2: String,
+    r2_pin1: String,
+    r2_pin2: String,
+}
+
+impl FreshIds {
+    fn new() -> Self {
+        Self {
+            wire: fresh_uuid(),
+            nc1: fresh_uuid(),
+            nc2: fresh_uuid(),
+            r1: fresh_uuid(),
+            r1_pin1: fresh_uuid(),
+            r1_pin2: fresh_uuid(),
+            r2: fresh_uuid(),
+            r2_pin1: fresh_uuid(),
+            r2_pin2: fresh_uuid(),
+        }
+    }
+}
+
+fn fresh_uuid() -> String {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let mut hasher = Sha256::new();
+    hasher.update(now.to_le_bytes());
+    hasher.update(std::process::id().to_le_bytes());
+    hasher.update(NEXT.fetch_add(1, Ordering::Relaxed).to_le_bytes());
+    let digest = hasher.finalize();
+    format!(
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-4{:02x}{:02x}-8{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        digest[0],
+        digest[1],
+        digest[2],
+        digest[3],
+        digest[4],
+        digest[5],
+        digest[6] & 0x0f,
+        digest[7],
+        digest[8] & 0x3f,
+        digest[9],
+        digest[10],
+        digest[11],
+        digest[12],
+        digest[13],
+        digest[14],
+        digest[15]
+    )
+}
+
+fn canonical_project_root(path: &Path) -> Result<PathBuf, PatchFailure> {
+    let canonical = fs::canonicalize(path)
+        .map_err(|_| rejected(SchematicPatchRejection::InvalidProjectRoot))?;
+    if canonical != path || !canonical.is_dir() {
+        return Err(rejected(SchematicPatchRejection::InvalidProjectRoot));
+    }
+    Ok(canonical)
+}
+
+fn canonical_root_schematic(root: &Path, path: &Path) -> Result<PathBuf, PatchFailure> {
+    let canonical = fs::canonicalize(path)
+        .map_err(|_| rejected(SchematicPatchRejection::InvalidRootSchematic))?;
+    if canonical != path
+        || !canonical.starts_with(root)
+        || !canonical.is_file()
+        || canonical.extension().and_then(|value| value.to_str()) != Some("kicad_sch")
+    {
+        return Err(rejected(SchematicPatchRejection::InvalidRootSchematic));
+    }
+    Ok(canonical)
+}
+
+fn relative_schematic_path(root: &Path, path: &Path) -> Result<String, PatchFailure> {
+    path.strip_prefix(root)
+        .ok()
+        .and_then(|relative| relative.to_str())
+        .filter(|relative| !relative.is_empty() && !relative.contains('\\'))
+        .map(str::to_owned)
+        .ok_or_else(|| rejected(SchematicPatchRejection::InvalidRootSchematic))
+}
+
+struct LockReservation {
+    path: PathBuf,
+}
+
+impl Drop for LockReservation {
+    fn drop(&mut self) {
+        if fs::remove_file(&self.path).is_ok()
+            && let Some(parent) = self.path.parent()
+        {
+            let _ = sync_directory(parent);
+        }
+    }
+}
+
+fn reserve_lock(schematic: &Path) -> Result<LockReservation, PatchFailure> {
+    let name = schematic
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| rejected(SchematicPatchRejection::InvalidRootSchematic))?;
+    let path = schematic.with_file_name(format!("~{name}.lck"));
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+    {
+        Ok(file) => {
+            let reservation = LockReservation { path };
+            file.sync_all()
+                .map_err(|error| unknown("sync schematic lock", error))?;
+            if let Some(parent) = reservation.path.parent() {
+                sync_directory(parent)
+                    .map_err(|error| unknown("sync schematic lock directory", error))?;
+            }
+            Ok(reservation)
+        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            Err(rejected(SchematicPatchRejection::EditorLockPresent))
+        }
+        Err(error) => Err(unknown("reserve schematic lock", error)),
+    }
+}
+
+fn read_root(path: &Path) -> Result<Vec<u8>, PatchFailure> {
+    let metadata = fs::metadata(path).map_err(|error| unknown("read schematic metadata", error))?;
+    if metadata.len() > MAX_CANDIDATE_BYTES as u64 {
+        return Err(rejected(SchematicPatchRejection::UnsupportedStructure));
+    }
+    fs::read(path).map_err(|error| unknown("read schematic", error))
+}
+
+fn artifact(relative_path: &str, bytes: &[u8]) -> Result<SchematicArtifactFile, PatchFailure> {
+    let digest = RevisionDigest::new(hex::encode(Sha256::digest(bytes)))
+        .map_err(|error| PatchFailure::Unknown(error.to_string()))?;
+    SchematicArtifactFile::new(relative_path, bytes.len() as u64, digest)
+        .map_err(|error| PatchFailure::Unknown(error.to_string()))
+}
+
+fn tag(items: &[Node]) -> Option<&str> {
+    value(items, 0)
+}
+
+fn value(items: &[Node], index: usize) -> Option<&str> {
+    match items.get(index) {
+        Some(Node::Atom {
+            atom: kiutils_sexpr::Atom::Symbol(value) | kiutils_sexpr::Atom::Quoted(value),
+            ..
+        }) => Some(value),
+        _ => None,
+    }
+}
+
+fn sync_directory(path: &Path) -> io::Result<()> {
+    File::open(path)?.sync_all()
+}
+
+fn rejected(reason: SchematicPatchRejection) -> PatchFailure {
+    PatchFailure::Rejected(reason)
+}
+
+fn unknown(context: &str, error: impl std::fmt::Display) -> PatchFailure {
+    PatchFailure::Unknown(format!("{context}: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    const EMPTY: &str = r#"(kicad_sch
+  (version 20231120)
+  (generator "eeschema")
+  (generator_version "8.0")
+  (uuid "11111111-1111-4111-8111-111111111111")
+  (paper "A4")
+  (lib_symbols)
+)
+"#;
+
+    struct Fixture {
+        dir: tempfile::TempDir,
+        root: PathBuf,
+        runner: NetlistRunner,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let dir = tempfile::tempdir().unwrap();
+            let root = dir.path().join("root.kicad_sch");
+            fs::write(&root, EMPTY).unwrap();
+            let cli = dir.path().join("kicad-cli");
+            fs::write(
+                &cli,
+                r#"#!/bin/sh
+if [ "$1" = "sch" ] && [ "$2" = "export" ]; then
+cat <<'XML'
+<export version="E"><design><sheet number="1" name="/" tstamps="/"/></design><components><comp ref="R1"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp><comp ref="R2"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp></components><nets><net code="1" name="Net-(R1-Pad2)"><node ref="R1" pin="2" pinfunction="~" pintype="passive"/><node ref="R2" pin="1" pinfunction="~" pintype="passive"/></net></nets></export>
+XML
+exit 0
+fi
+if [ "$1" = "sch" ] && [ "$2" = "erc" ]; then
+while [ "$1" != "" ]; do
+  if [ "$1" = "-o" ]; then shift; printf 'ERC passed\n' > "$1"; fi
+  shift
+done
+exit 0
+fi
+exit 1
+"#,
+            )
+            .unwrap();
+            fs::set_permissions(&cli, fs::Permissions::from_mode(0o755)).unwrap();
+            Self {
+                dir,
+                root,
+                runner: NetlistRunner::new(cli),
+            }
+        }
+
+        fn artifact(&self) -> SchematicArtifactFile {
+            artifact("root.kicad_sch", &fs::read(&self.root).unwrap()).unwrap()
+        }
+
+        fn run(&self, expected: &SchematicArtifactFile) -> SchematicPatchOutcome {
+            create_two_resistor_circuit_with_runner(
+                &fs::canonicalize(self.dir.path()).unwrap(),
+                &fs::canonicalize(&self.root).unwrap(),
+                expected,
+                &self.runner,
+            )
+        }
+    }
+
+    #[test]
+    fn rejects_revision_mismatch_without_change() {
+        let fixture = Fixture::new();
+        let original = fs::read(&fixture.root).unwrap();
+        let mut expected = fixture.artifact();
+        expected.size += 1;
+        assert_eq!(
+            fixture.run(&expected),
+            SchematicPatchOutcome::Rejected {
+                reason: SchematicPatchRejection::RevisionMismatch
+            }
+        );
+        assert_eq!(fs::read(&fixture.root).unwrap(), original);
+    }
+
+    #[test]
+    fn rejects_editor_lock_without_change() {
+        let fixture = Fixture::new();
+        let original = fs::read(&fixture.root).unwrap();
+        fs::write(fixture.dir.path().join("~root.kicad_sch.lck"), "lock").unwrap();
+        assert_eq!(
+            fixture.run(&fixture.artifact()),
+            SchematicPatchOutcome::Rejected {
+                reason: SchematicPatchRejection::EditorLockPresent
+            }
+        );
+        assert_eq!(fs::read(&fixture.root).unwrap(), original);
+    }
+
+    #[test]
+    fn rejects_unsupported_existing_structure_without_change() {
+        let fixture = Fixture::new();
+        fs::write(
+            &fixture.root,
+            EMPTY.replace(
+                "  (lib_symbols)\n",
+                "  (lib_symbols)\n  (wire (pts (xy 1 1) (xy 2 2)))\n",
+            ),
+        )
+        .unwrap();
+        let original = fs::read(&fixture.root).unwrap();
+        assert_eq!(
+            fixture.run(&fixture.artifact()),
+            SchematicPatchOutcome::Rejected {
+                reason: SchematicPatchRejection::UnsupportedStructure
+            }
+        );
+        assert_eq!(fs::read(&fixture.root).unwrap(), original);
+    }
+
+    #[test]
+    fn reservation_blocks_competitors_and_cleans_up_on_drop() {
+        let fixture = Fixture::new();
+        let root = fs::canonicalize(&fixture.root).unwrap();
+        let lock_path = fixture.dir.path().join("~root.kicad_sch.lck");
+        let reservation = reserve_lock(&root).unwrap();
+        assert!(lock_path.is_file());
+        assert!(matches!(
+            reserve_lock(&root),
+            Err(PatchFailure::Rejected(
+                SchematicPatchRejection::EditorLockPresent
+            ))
+        ));
+        drop(reservation);
+        assert!(!lock_path.exists());
+        assert!(reserve_lock(&root).is_ok());
+    }
+
+    #[test]
+    fn rejects_extra_topology_and_missing_no_connect() {
+        let candidate = build_candidate(EMPTY.as_bytes()).unwrap();
+        assert!(has_exact_fixed_topology(&candidate));
+        assert!(!has_exact_fixed_topology(
+            &String::from_utf8(candidate.clone())
+                .unwrap()
+                .replacen(
+                    "  (no_connect (at 50 46.19)",
+                    "  (junction (at 50 46.19)",
+                    1
+                )
+                .into_bytes()
+        ));
+
+        let xml = br#"<export version="E"><design><sheet number="1" name="/" tstamps="/"/></design><components><comp ref="R1"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp><comp ref="R2"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp><comp ref="R3"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp></components><nets><net code="1" name="n"><node ref="R1" pin="2" pinfunction="~" pintype="passive"/><node ref="R2" pin="1" pinfunction="~" pintype="passive"/><node ref="R3" pin="1" pinfunction="~" pintype="passive"/></net></nets></export>"#;
+        let document = crate::parse_netlist_xml(xml, crate::NetlistLimits::default()).unwrap();
+        assert!(matches!(
+            prove_connectivity(&document),
+            Err(PatchFailure::Rejected(
+                SchematicPatchRejection::ConnectivityNotProven
+            ))
+        ));
+
+        let xml_with_extra_net = br#"<export version="E"><design><sheet number="1" name="/" tstamps="/"/></design><components><comp ref="R1"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp><comp ref="R2"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp></components><nets><net code="1" name="n"><node ref="R1" pin="2" pinfunction="~" pintype="passive"/><node ref="R2" pin="1" pinfunction="~" pintype="passive"/></net><net code="2" name="other"/></nets></export>"#;
+        let document =
+            crate::parse_netlist_xml(xml_with_extra_net, crate::NetlistLimits::default()).unwrap();
+        assert!(matches!(
+            prove_connectivity(&document),
+            Err(PatchFailure::Rejected(
+                SchematicPatchRejection::ConnectivityNotProven
+            ))
+        ));
+    }
+
+    #[test]
+    fn commits_validated_fixed_circuit() {
+        let fixture = Fixture::new();
+        let original = fs::read(&fixture.root).unwrap();
+        let outcome = fixture.run(&fixture.artifact());
+        let SchematicPatchOutcome::Committed { artifact } = outcome else {
+            panic!("unexpected outcome: {outcome:?}");
+        };
+        let committed = fs::read(&fixture.root).unwrap();
+        assert_ne!(committed, original);
+        assert_eq!(
+            artifact,
+            super::artifact("root.kicad_sch", &committed).unwrap()
+        );
+        let parsed = parse_schematic("root.kicad_sch", &committed).unwrap();
+        let mut references = parsed
+            .symbols
+            .iter()
+            .map(|symbol| symbol.reference.as_str())
+            .collect::<Vec<_>>();
+        references.sort_unstable();
+        assert_eq!(references, vec!["R1", "R2"]);
+        assert!(!fixture.dir.path().join("~root.kicad_sch.lck").exists());
+    }
+}

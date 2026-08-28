@@ -12,11 +12,13 @@ use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 mod netlist;
+mod patch;
 
 pub use netlist::{
     NetlistComponent, NetlistDocument, NetlistLimits, NetlistNet, NetlistNode, NetlistRun,
     NetlistRunner, NetlistRunnerError, NetlistSheet, parse_netlist_xml,
 };
+pub use patch::{SchematicPatchOutcome, SchematicPatchRejection, create_two_resistor_circuit};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Limits {

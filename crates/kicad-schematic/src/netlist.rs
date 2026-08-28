@@ -4,13 +4,12 @@ use std::io::{self, BufReader, Read};
 use std::os::unix::{fs::PermissionsExt, process::CommandExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 use tempfile::Builder;
 use thiserror::Error;
-use wait_timeout::ChildExt;
 
 const DEFAULT_MAX_STDOUT_BYTES: u64 = 32 * 1024 * 1024;
 const DEFAULT_MAX_STDERR_BYTES: u64 = 1024 * 1024;
@@ -98,7 +97,24 @@ pub struct NetlistRunner {
 }
 
 impl NetlistRunner {
-    pub fn new(executable: impl Into<PathBuf>) -> Self {
+    pub(crate) fn production() -> Result<Self, NetlistRunnerError> {
+        let executable = [
+            PathBuf::from("/opt/homebrew/bin/kicad-cli"),
+            PathBuf::from("/usr/local/bin/kicad-cli"),
+            PathBuf::from("/usr/bin/kicad-cli"),
+        ]
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or(NetlistRunnerError::ExecutableNotFound)?;
+        Ok(Self::from_executable(executable))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new(executable: impl Into<PathBuf>) -> Self {
+        Self::from_executable(executable)
+    }
+
+    fn from_executable(executable: impl Into<PathBuf>) -> Self {
         Self {
             executable: executable.into(),
             timeout: Duration::from_secs(30),
@@ -163,20 +179,14 @@ impl NetlistRunner {
         let mut child = command
             .spawn()
             .map_err(|error| NetlistRunnerError::Spawn(error.to_string()))?;
-        let status = match child.wait_timeout(self.timeout) {
-            Ok(Some(status)) => status,
-            Ok(None) => {
-                terminate_child_tree(&mut child);
-                return Err(NetlistRunnerError::Timeout {
-                    stdout: read_diagnostic(&stdout_path, self.max_stdout_bytes),
-                    stderr: read_diagnostic(&stderr_path, self.max_stderr_bytes),
-                });
-            }
-            Err(error) => {
-                terminate_child_tree(&mut child);
-                return Err(NetlistRunnerError::Wait(error.to_string()));
-            }
-        };
+        let status = wait_with_output_limits(
+            &mut child,
+            self.timeout,
+            &stdout_path,
+            self.max_stdout_bytes,
+            &stderr_path,
+            self.max_stderr_bytes,
+        )?;
 
         enforce_output_size(&stdout_path, self.max_stdout_bytes, true)?;
         enforce_output_size(&stderr_path, self.max_stderr_bytes, false)?;
@@ -193,6 +203,66 @@ impl NetlistRunner {
         let document = parse_netlist_xml(&stdout, self.limits)?;
         Ok(NetlistRun { document, stderr })
     }
+
+    pub fn run_erc(
+        &self,
+        project_root: &Path,
+        root_schematic: &Path,
+    ) -> Result<(), NetlistRunnerError> {
+        if !cfg!(unix) {
+            return Err(NetlistRunnerError::UnsupportedPlatform);
+        }
+        let root = canonical_directory(project_root)?;
+        let schematic = canonical_schematic(&root, root_schematic)?;
+        let executable = canonical_executable(&self.executable)?;
+        let output_dir = Builder::new()
+            .prefix(".auto-kicad-erc-")
+            .tempdir_in(&root)
+            .map_err(|error| NetlistRunnerError::TemporaryOutput(error.to_string()))?;
+        let report_path = output_dir.path().join("erc.rpt");
+        let stderr_path = output_dir.path().join("stderr.log");
+        let stderr = File::create(&stderr_path)
+            .map_err(|error| NetlistRunnerError::TemporaryOutput(error.to_string()))?;
+
+        let mut command = Command::new(executable);
+        command
+            .arg("sch")
+            .arg("erc")
+            .arg("--format")
+            .arg("report")
+            .arg("--severity-error")
+            .arg("--exit-code-violations")
+            .arg("-o")
+            .arg(&report_path)
+            .arg(&schematic)
+            .stdout(Stdio::null())
+            .stderr(Stdio::from(stderr));
+        configure_process_group(&mut command);
+
+        let mut child = command
+            .spawn()
+            .map_err(|error| NetlistRunnerError::Spawn(error.to_string()))?;
+        let status = wait_with_output_limits(
+            &mut child,
+            self.timeout,
+            &report_path,
+            self.max_stdout_bytes,
+            &stderr_path,
+            self.max_stderr_bytes,
+        )?;
+
+        enforce_output_size(&report_path, self.max_stdout_bytes, true)?;
+        enforce_output_size(&stderr_path, self.max_stderr_bytes, false)?;
+        let stderr = read_utf8_file(&stderr_path, self.max_stderr_bytes)?;
+        if !status.success() {
+            return Err(NetlistRunnerError::ProcessFailed {
+                status: status.code(),
+                stdout: read_diagnostic(&report_path, self.max_stdout_bytes),
+                stderr,
+            });
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Error)]
@@ -203,6 +273,8 @@ pub enum NetlistRunnerError {
     InvalidProjectRoot,
     #[error("root schematic must be a canonical .kicad_sch file inside the project root")]
     InvalidSchematic,
+    #[error("KiCad CLI executable was not found at a verified system path")]
+    ExecutableNotFound,
     #[error("KiCad CLI executable must be a canonical regular file")]
     InvalidExecutable,
     #[error("failed to create netlist output capture: {0}")]
@@ -440,6 +512,45 @@ fn configure_process_group(command: &mut Command) {
                 Err(io::Error::last_os_error())
             }
         });
+    }
+}
+
+fn wait_with_output_limits(
+    child: &mut Child,
+    timeout: Duration,
+    stdout_path: &Path,
+    max_stdout_bytes: u64,
+    stderr_path: &Path,
+    max_stderr_bytes: u64,
+) -> Result<std::process::ExitStatus, NetlistRunnerError> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| NetlistRunnerError::Wait(error.to_string()))?
+        {
+            return Ok(status);
+        }
+        if stdout_path.exists()
+            && let Err(error) = enforce_output_size(stdout_path, max_stdout_bytes, true)
+        {
+            terminate_child_tree(child);
+            return Err(error);
+        }
+        if stderr_path.exists()
+            && let Err(error) = enforce_output_size(stderr_path, max_stderr_bytes, false)
+        {
+            terminate_child_tree(child);
+            return Err(error);
+        }
+        if Instant::now() >= deadline {
+            terminate_child_tree(child);
+            return Err(NetlistRunnerError::Timeout {
+                stdout: read_diagnostic(stdout_path, max_stdout_bytes),
+                stderr: read_diagnostic(stderr_path, max_stderr_bytes),
+            });
+        }
+        std::thread::sleep(Duration::from_millis(10));
     }
 }
 
@@ -903,9 +1014,12 @@ mod tests {
             .unwrap_err();
         assert!(matches!(error, NetlistRunnerError::Timeout { .. }));
 
-        let (_cli_dir, executable, _args, _stderr) = fake_cli("#!/bin/sh\nprintf '1234567890'\n");
+        let (_cli_dir, executable, _args, _stderr) =
+            fake_cli("#!/bin/sh\nprintf '1234567890'\nsleep 2\n");
         let (project_root, schematic) = project();
+        let started = Instant::now();
         let error = NetlistRunner::new(executable)
+            .with_timeout(Duration::from_secs(1))
             .with_output_limits(3, 100)
             .run(&fs::canonicalize(project_root.path()).unwrap(), &schematic)
             .unwrap_err();
@@ -913,5 +1027,6 @@ mod tests {
             error,
             NetlistRunnerError::StdoutTooLarge { limit: 3 }
         ));
+        assert!(started.elapsed() < Duration::from_millis(500));
     }
 }
