@@ -743,9 +743,9 @@ mod tests {
         let mut repeated = good.clone();
         repeated.pad_numbers = vec!["S1".to_owned(), "S1".to_owned()];
         assert!(repeated.matches(&prepared));
-        let mut bad = good.clone();
-        bad.pad_numbers = vec!["1".to_owned(), String::new()];
-        assert!(!bad.matches(&prepared));
+        let mut empty = good.clone();
+        empty.pad_numbers = vec!["1".to_owned(), String::new()];
+        assert!(!empty.matches(&prepared));
         fs::remove_dir_all(root).unwrap();
     }
 
