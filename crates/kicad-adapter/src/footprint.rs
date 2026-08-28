@@ -735,6 +735,9 @@ mod tests {
         bad.reopened = false;
         assert!(!bad.matches(&prepared));
         let mut bad = good.clone();
+        bad.footprint_uuid.replace_range(8..9, "0");
+        assert!(!bad.matches(&prepared));
+        let mut bad = good.clone();
         bad.reference = "P2".to_owned();
         assert!(!bad.matches(&prepared));
         let mut repeated = good.clone();
