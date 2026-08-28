@@ -887,6 +887,100 @@ pub struct ObservedRoutingNet {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct StraightTrackIntent {
+    pub source_uuid: StableId,
+    pub start: Coordinate,
+    pub end: Coordinate,
+    pub width_nm: i64,
+}
+
+impl StraightTrackIntent {
+    pub fn new(
+        source_uuid: StableId,
+        start: Coordinate,
+        end: Coordinate,
+        width_nm: i64,
+    ) -> Result<Self, ModelError> {
+        let intent = Self {
+            source_uuid,
+            start,
+            end,
+            width_nm,
+        };
+        intent.validate()?;
+        Ok(intent)
+    }
+
+    pub fn validate(&self) -> Result<(), ModelError> {
+        if self.start.unit != Unit::Nanometres
+            || self.end.unit != Unit::Nanometres
+            || self.start.space != DocumentSpace::Board
+            || self.end.space != DocumentSpace::Board
+        {
+            return Err(ModelError::InvalidRoutingObservation(
+                "track coordinates must use nanometres in board space",
+            ));
+        }
+        if self.start == self.end {
+            return Err(ModelError::InvalidRoutingObservation(
+                "track endpoints must differ",
+            ));
+        }
+        if self.width_nm <= 0 {
+            return Err(ModelError::InvalidRoutingObservation(
+                "track width must be positive",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ThroughViaIntent {
+    pub source_uuid: StableId,
+    pub position: Coordinate,
+    pub size_nm: i64,
+    pub drill_nm: i64,
+}
+
+impl ThroughViaIntent {
+    pub fn new(
+        source_uuid: StableId,
+        position: Coordinate,
+        size_nm: i64,
+        drill_nm: i64,
+    ) -> Result<Self, ModelError> {
+        let intent = Self {
+            source_uuid,
+            position,
+            size_nm,
+            drill_nm,
+        };
+        intent.validate()?;
+        Ok(intent)
+    }
+
+    pub fn validate(&self) -> Result<(), ModelError> {
+        if self.position.unit != Unit::Nanometres || self.position.space != DocumentSpace::Board {
+            return Err(ModelError::InvalidRoutingObservation(
+                "via position must use nanometres in board space",
+            ));
+        }
+        if self.size_nm <= 0 || self.drill_nm <= 0 {
+            return Err(ModelError::InvalidRoutingObservation(
+                "via size and drill must be positive",
+            ));
+        }
+        if self.drill_nm > self.size_nm {
+            return Err(ModelError::InvalidRoutingObservation(
+                "via drill must not exceed via size",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ObservedTrack {
     pub track_id: StableId,
     pub source_uuid: StableId,
@@ -2107,6 +2201,120 @@ mod tests {
         assert_eq!(coordinate.space, DocumentSpace::Schematic);
     }
 
+    fn board_coordinate(x: i64, y: i64) -> Coordinate {
+        Coordinate {
+            x,
+            y,
+            unit: Unit::Nanometres,
+            space: DocumentSpace::Board,
+        }
+    }
+
+    #[test]
+    fn straight_track_intent_round_trips() {
+        let intent = StraightTrackIntent::new(
+            id("track"),
+            board_coordinate(10, 20),
+            board_coordinate(30, 40),
+            5,
+        )
+        .unwrap();
+
+        let round_tripped: StraightTrackIntent =
+            serde_json::from_value(serde_json::to_value(&intent).unwrap()).unwrap();
+        assert_eq!(round_tripped, intent);
+    }
+
+    #[test]
+    fn straight_track_intent_rejects_wrong_space_and_invalid_dimensions() {
+        let schematic_coordinate = Coordinate {
+            space: DocumentSpace::Schematic,
+            ..board_coordinate(10, 20)
+        };
+        assert!(matches!(
+            StraightTrackIntent::new(
+                id("track"),
+                schematic_coordinate,
+                board_coordinate(30, 40),
+                5
+            ),
+            Err(ModelError::InvalidRoutingObservation(
+                "track coordinates must use nanometres in board space"
+            ))
+        ));
+
+        for width_nm in [0, -1] {
+            assert!(matches!(
+                StraightTrackIntent::new(
+                    id("track"),
+                    board_coordinate(10, 20),
+                    board_coordinate(30, 40),
+                    width_nm,
+                ),
+                Err(ModelError::InvalidRoutingObservation(
+                    "track width must be positive"
+                ))
+            ));
+        }
+    }
+
+    #[test]
+    fn straight_track_intent_rejects_equal_endpoints() {
+        assert!(matches!(
+            StraightTrackIntent::new(
+                id("track"),
+                board_coordinate(10, 20),
+                board_coordinate(10, 20),
+                5
+            ),
+            Err(ModelError::InvalidRoutingObservation(
+                "track endpoints must differ"
+            ))
+        ));
+    }
+
+    #[test]
+    fn through_via_intent_round_trips() {
+        let intent = ThroughViaIntent::new(id("via"), board_coordinate(10, 20), 20, 10).unwrap();
+
+        let round_tripped: ThroughViaIntent =
+            serde_json::from_value(serde_json::to_value(&intent).unwrap()).unwrap();
+        assert_eq!(round_tripped, intent);
+    }
+
+    #[test]
+    fn through_via_intent_rejects_wrong_space_and_invalid_dimensions() {
+        let schematic_coordinate = Coordinate {
+            space: DocumentSpace::Schematic,
+            ..board_coordinate(10, 20)
+        };
+        assert!(matches!(
+            ThroughViaIntent::new(id("via"), schematic_coordinate, 20, 10),
+            Err(ModelError::InvalidRoutingObservation(
+                "via position must use nanometres in board space"
+            ))
+        ));
+
+        for (size_nm, drill_nm) in [(0, 1), (-1, 1), (10, 0), (10, -1)] {
+            assert!(matches!(
+                ThroughViaIntent::new(id("via"), board_coordinate(10, 20), size_nm, drill_nm),
+                Err(ModelError::InvalidRoutingObservation(
+                    "via size and drill must be positive"
+                ))
+            ));
+        }
+    }
+
+    #[test]
+    fn through_via_intent_rejects_drill_greater_than_size() {
+        assert!(matches!(
+            ThroughViaIntent::new(id("via"), board_coordinate(10, 20), 10, 11),
+            Err(ModelError::InvalidRoutingObservation(
+                "via drill must not exceed via size"
+            ))
+        ));
+    }
+
     #[test]
     fn allowlisted_footprint_placement_enforces_typed_context() {
         let placement = AllowlistedFootprintPlacement::new(
@@ -2848,15 +3056,6 @@ mod tests {
         assert_eq!(first, board_net_id(&id("board"), "GND"));
         assert_ne!(first, board_net_id(&id("other-board"), "GND"));
         assert_ne!(first, board_net_id(&id("board"), "+3V3"));
-    }
-
-    fn board_coordinate(x: i64, y: i64) -> Coordinate {
-        Coordinate {
-            x,
-            y,
-            unit: Unit::Nanometres,
-            space: DocumentSpace::Board,
-        }
     }
 
     fn observed_track(board_id: &StableId, source: &str, arc: bool) -> ObservedTrack {
