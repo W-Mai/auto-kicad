@@ -11,7 +11,7 @@ use kicad_engine::{
 use kicad_ipc::{ClientConfig, DocumentQuery, KiCadClient, NngTransport};
 use kicad_model::{
     AllowlistedFootprintPlacement, DiscoverySnapshot, FootprintLibraryIdentifier, ProjectSnapshot,
-    RevisionDigest, StableId,
+    RevisionDigest, StableId, StraightTrackIntent, ThroughViaIntent,
 };
 use rmcp::{
     ErrorData, ServerHandler,
@@ -297,7 +297,28 @@ pub struct PlanBoardGraphicsRequest {
     pub segments: Option<Value>,
     pub outline: Option<BoardOutlineRequest>,
     pub footprint: Option<BoardFootprintRequest>,
+    pub track: Option<BoardTrackRequest>,
+    pub via: Option<BoardViaRequest>,
     pub request_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+pub struct BoardTrackRequest {
+    pub source_uuid: String,
+    pub start_x_nm: i64,
+    pub start_y_nm: i64,
+    pub end_x_nm: i64,
+    pub end_y_nm: i64,
+    pub width_nm: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+pub struct BoardViaRequest {
+    pub source_uuid: String,
+    pub x_nm: i64,
+    pub y_nm: i64,
+    pub pad_diameter_nm: i64,
+    pub drill_diameter_nm: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -871,7 +892,7 @@ impl Server {
 
     #[tool(
         name = "kicad_plan_change",
-        description = "Plan bounded board graphics or a rectangular Edge.Cuts outline without mutating KiCad."
+        description = "Plan bounded board graphics, a rectangular Edge.Cuts outline, an allowlisted footprint, a straight track, or a through via without mutating KiCad."
     )]
     pub async fn kicad_plan_change(
         &self,
@@ -898,13 +919,19 @@ impl Server {
             .document_id
             .clone()
             .ok_or_else(|| ErrorData::internal_error("board identity is unavailable", None))?;
-        let kind = match (arguments.segments, arguments.outline, arguments.footprint) {
-            (Some(segments), None, None) => OperationKind::AddBoardGraphicSegments {
+        let kind = match (
+            arguments.segments,
+            arguments.outline,
+            arguments.footprint,
+            arguments.track,
+            arguments.via,
+        ) {
+            (Some(segments), None, None, None, None) => OperationKind::AddBoardGraphicSegments {
                 board: board.clone(),
                 segments: serde_json::from_value(segments)
                     .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?,
             },
-            (None, Some(outline), None) => OperationKind::AddBoardOutline {
+            (None, Some(outline), None, None, None) => OperationKind::AddBoardOutline {
                 board: board.clone(),
                 top_left: kicad_model::Coordinate {
                     x: outline.top_left_x_nm,
@@ -920,7 +947,7 @@ impl Server {
                 },
                 width_nm: outline.width_nm,
             },
-            (None, None, Some(footprint)) => {
+            (None, None, Some(footprint), None, None) => {
                 let target_id = StableId::new(footprint.target_id)
                     .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
                 let library_identifier = FootprintLibraryIdentifier {
@@ -945,9 +972,52 @@ impl Server {
                     placement,
                 }
             }
+            (None, None, None, Some(track), None) => {
+                let intent = StraightTrackIntent::new(
+                    StableId::new(track.source_uuid)
+                        .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?,
+                    kicad_model::Coordinate {
+                        x: track.start_x_nm,
+                        y: track.start_y_nm,
+                        unit: kicad_model::Unit::Nanometres,
+                        space: kicad_model::DocumentSpace::Board,
+                    },
+                    kicad_model::Coordinate {
+                        x: track.end_x_nm,
+                        y: track.end_y_nm,
+                        unit: kicad_model::Unit::Nanometres,
+                        space: kicad_model::DocumentSpace::Board,
+                    },
+                    track.width_nm,
+                )
+                .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+                OperationKind::AddStraightTrack {
+                    board: board.clone(),
+                    intent,
+                }
+            }
+            (None, None, None, None, Some(via)) => {
+                let intent = ThroughViaIntent::new(
+                    StableId::new(via.source_uuid)
+                        .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?,
+                    kicad_model::Coordinate {
+                        x: via.x_nm,
+                        y: via.y_nm,
+                        unit: kicad_model::Unit::Nanometres,
+                        space: kicad_model::DocumentSpace::Board,
+                    },
+                    via.pad_diameter_nm,
+                    via.drill_diameter_nm,
+                )
+                .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+                OperationKind::AddThroughVia {
+                    board: board.clone(),
+                    intent,
+                }
+            }
             _ => {
                 return Err(ErrorData::invalid_params(
-                    "exactly one of segments or outline is required",
+                    "exactly one of segments, outline, footprint, track, or via is required",
                     None,
                 ));
             }
@@ -1903,6 +1973,8 @@ mod tests {
             segments: Some(serde_json::to_value(vec![graphic("g1")]).unwrap()),
             outline: None,
             footprint: None,
+            track: None,
+            via: None,
             request_id: request_id.into(),
         }
     }
@@ -2146,6 +2218,114 @@ mod tests {
         assert_eq!(structured["request_id"], "req_inspect");
         assert_eq!(structured["data"]["kicad_version"], "10.0.4");
         assert!(structured["project_revision"].as_str().is_some());
+    }
+
+    #[tokio::test]
+    async fn plan_converts_typed_routing_requests_to_routing_operations() {
+        let server = Server::with_discovery(Arc::new(FakeDiscovery {
+            write_capability: true,
+        }));
+        let mut track_request = plan_request(project_snapshot(true), "req_track");
+        track_request.segments = None;
+        track_request.track = Some(BoardTrackRequest {
+            source_uuid: "track-1".into(),
+            start_x_nm: 1_000_000,
+            start_y_nm: 2_000_000,
+            end_x_nm: 3_000_000,
+            end_y_nm: 4_000_000,
+            width_nm: 250_000,
+        });
+        server
+            .kicad_plan_change(Parameters(track_request))
+            .await
+            .unwrap();
+
+        let mut via_request = plan_request(project_snapshot(true), "req_via");
+        via_request.segments = None;
+        via_request.via = Some(BoardViaRequest {
+            source_uuid: "via-1".into(),
+            x_nm: 5_000_000,
+            y_nm: 6_000_000,
+            pad_diameter_nm: 800_000,
+            drill_diameter_nm: 400_000,
+        });
+        server
+            .kicad_plan_change(Parameters(via_request))
+            .await
+            .unwrap();
+
+        let sessions = server.sessions.lock().unwrap();
+        let track = &sessions["plan:req_track"].session.plan.operations[0].kind;
+        assert_eq!(
+            track,
+            &OperationKind::AddStraightTrack {
+                board: StableId::new("board").unwrap(),
+                intent: StraightTrackIntent::new(
+                    StableId::new("track-1").unwrap(),
+                    Coordinate {
+                        x: 1_000_000,
+                        y: 2_000_000,
+                        unit: Unit::Nanometres,
+                        space: DocumentSpace::Board,
+                    },
+                    Coordinate {
+                        x: 3_000_000,
+                        y: 4_000_000,
+                        unit: Unit::Nanometres,
+                        space: DocumentSpace::Board,
+                    },
+                    250_000,
+                )
+                .unwrap(),
+            }
+        );
+        let via = &sessions["plan:req_via"].session.plan.operations[0].kind;
+        assert_eq!(
+            via,
+            &OperationKind::AddThroughVia {
+                board: StableId::new("board").unwrap(),
+                intent: ThroughViaIntent::new(
+                    StableId::new("via-1").unwrap(),
+                    Coordinate {
+                        x: 5_000_000,
+                        y: 6_000_000,
+                        unit: Unit::Nanometres,
+                        space: DocumentSpace::Board,
+                    },
+                    800_000,
+                    400_000,
+                )
+                .unwrap(),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_requires_exactly_one_change_form() {
+        let server = Server::with_discovery(Arc::new(FakeDiscovery {
+            write_capability: true,
+        }));
+        let mut request = plan_request(project_snapshot(true), "req_mixed");
+        request.track = Some(BoardTrackRequest {
+            source_uuid: "track-1".into(),
+            start_x_nm: 0,
+            start_y_nm: 0,
+            end_x_nm: 1_000_000,
+            end_y_nm: 0,
+            width_nm: 250_000,
+        });
+
+        let error = server
+            .kicad_plan_change(Parameters(request))
+            .await
+            .unwrap_err();
+
+        assert!(
+            error
+                .message
+                .contains("exactly one of segments, outline, footprint, track, or via is required")
+        );
+        assert!(server.sessions.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
