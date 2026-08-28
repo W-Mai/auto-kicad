@@ -1154,7 +1154,7 @@ impl ObservedViaPadStack {
         stack
     }
 
-    fn validate(&self) -> Result<(), ModelError> {
+    fn validate(&self, allow_through_via_placeholder: bool) -> Result<(), ModelError> {
         if self.layers.iter().any(|layer| !valid_copper_layer(*layer)) {
             return Err(ModelError::InvalidRoutingObservation(
                 "via pad stack layers must be valid copper layers",
@@ -1166,8 +1166,15 @@ impl ObservedViaPadStack {
             ));
         }
         for shape in &self.copper_shapes {
-            validate_routing_copper_shape(shape)?;
-            if !self.layers.contains(&shape.layer) {
+            let is_placeholder = allow_through_via_placeholder
+                && shape.layer == BoardLayer::InnerCopper(1)
+                && shape.shape == PadShape::Circle
+                && shape.size.x_nm == 0
+                && shape.size.y_nm == 0;
+            if !is_placeholder {
+                validate_routing_copper_shape(shape)?;
+            }
+            if !(self.layers.contains(&shape.layer) || is_placeholder) {
                 return Err(ModelError::InvalidRoutingObservation(
                     "via copper shape layer must belong to its pad stack",
                 ));
@@ -1264,7 +1271,11 @@ impl ObservedVia {
             &self.position,
             "via position must use nanometres in board space",
         )?;
-        self.pad_stack.validate()?;
+        let allow_through_via_placeholder = self.via_type == ViaType::Through
+            && self.pad_stack.stack_type == PadStackType::FrontInnerBack
+            && self.pad_stack.layers == [BoardLayer::FrontCopper, BoardLayer::BackCopper]
+            && self.pad_stack.copper_shapes.len() == 3;
+        self.pad_stack.validate(allow_through_via_placeholder)?;
         validate_routing_net(board_id, self.net.as_ref())?;
         if &self.observed_revision != observed_revision {
             return Err(ModelError::InvalidRoutingObservation(
@@ -1475,7 +1486,10 @@ fn validate_routing_copper_shape(shape: &PadCopperShape) -> Result<(), ModelErro
             "via copper shape must use a valid copper layer",
         ));
     }
-    if shape.size.x_nm <= 0 || shape.size.y_nm <= 0 {
+    let is_inner_placeholder = matches!(shape.layer, BoardLayer::InnerCopper(_))
+        && shape.size.x_nm == 0
+        && shape.size.y_nm == 0;
+    if (shape.size.x_nm <= 0 || shape.size.y_nm <= 0) && !is_inner_placeholder {
         return Err(ModelError::InvalidRoutingObservation(
             "via copper shape dimensions must be positive",
         ));

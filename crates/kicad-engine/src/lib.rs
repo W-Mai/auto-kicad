@@ -724,7 +724,11 @@ fn apply_operations(
                     position: intent.position,
                     pad_stack: ObservedViaPadStack {
                         stack_type: PadStackType::FrontInnerBack,
-                        layers: vec![BoardLayer::FrontCopper, BoardLayer::BackCopper],
+                        layers: vec![
+                            BoardLayer::FrontCopper,
+                            BoardLayer::InnerCopper(1),
+                            BoardLayer::BackCopper,
+                        ],
                         primary_drill: Some(ObservedViaDrill {
                             start_layer: BoardLayer::FrontCopper,
                             end_layer: BoardLayer::BackCopper,
@@ -739,6 +743,20 @@ fn apply_operations(
                         unconnected_layer_removal: UnconnectedLayerRemoval::Unknown,
                         copper_shapes: vec![
                             pad(BoardLayer::FrontCopper),
+                            PadCopperShape {
+                                layer: BoardLayer::InnerCopper(1),
+                                shape: PadShape::Circle,
+                                size: SizeNm { x_nm: 0, y_nm: 0 },
+                                offset: LocalCoordinateNm { x_nm: 0, y_nm: 0 },
+                                corner_rounding_ratio: ratio,
+                                chamfer_ratio: ratio,
+                                chamfer_top_left: false,
+                                chamfer_top_right: false,
+                                chamfer_bottom_left: false,
+                                chamfer_bottom_right: false,
+                                trapezoid_delta: LocalCoordinateNm { x_nm: 0, y_nm: 0 },
+                                custom_anchor_shape: None,
+                            },
                             pad(BoardLayer::BackCopper),
                         ],
                         angle_degrees: ExactAngleDegrees::new(0.0)
@@ -1718,15 +1736,36 @@ mod tests {
         assert_eq!(routing.vias.len(), 1);
         assert_eq!(routing.vias[0].via_type, ViaType::Through);
         assert_eq!(
+            routing.vias[0].pad_stack.stack_type,
+            PadStackType::FrontInnerBack
+        );
+        assert_eq!(
+            routing.vias[0].pad_stack.layers,
+            vec![
+                BoardLayer::FrontCopper,
+                BoardLayer::InnerCopper(1),
+                BoardLayer::BackCopper,
+            ]
+        );
+        assert_eq!(
             routing.vias[0]
                 .pad_stack
-                .primary_drill
-                .as_ref()
-                .unwrap()
-                .size
-                .x_nm,
-            300
+                .copper_shapes
+                .iter()
+                .map(|shape| (shape.layer, shape.size.x_nm, shape.size.y_nm))
+                .collect::<Vec<_>>(),
+            vec![
+                (BoardLayer::FrontCopper, 600, 600),
+                (BoardLayer::InnerCopper(1), 0, 0),
+                (BoardLayer::BackCopper, 600, 600),
+            ]
         );
+        let drill = routing.vias[0].pad_stack.primary_drill.as_ref().unwrap();
+        assert_eq!(
+            (drill.start_layer, drill.end_layer),
+            (BoardLayer::FrontCopper, BoardLayer::BackCopper)
+        );
+        assert_eq!((drill.size.x_nm, drill.size.y_nm), (300, 300));
     }
 
     #[test]

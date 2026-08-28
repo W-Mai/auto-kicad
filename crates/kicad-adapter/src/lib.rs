@@ -1795,27 +1795,35 @@ fn normalized_track_geometry(
 fn observed_via_matches(observed: &IpcVia, receipt: &CreatedThroughViaReceipt) -> bool {
     let via = &receipt.via;
     let pad_shapes = &observed.pad_stack.copper_shapes;
-    let front_pads = pad_shapes.iter().filter(|shape| {
-        shape.layer == IpcBoardLayer::FrontCopper
-            && shape.shape == kicad_ipc::ObservedPadShape::Circle
-            && shape.size_x_nm == via.pad_diameter_nm
-            && shape.size_y_nm == via.pad_diameter_nm
-    });
-    let back_pads = pad_shapes.iter().filter(|shape| {
-        shape.layer == IpcBoardLayer::BackCopper
-            && shape.shape == kicad_ipc::ObservedPadShape::Circle
-            && shape.size_x_nm == via.pad_diameter_nm
-            && shape.size_y_nm == via.pad_diameter_nm
-    });
+    let expected_pad_shapes = [
+        (IpcBoardLayer::FrontCopper, via.pad_diameter_nm),
+        (IpcBoardLayer::InnerCopper(1), 0),
+        (IpcBoardLayer::BackCopper, via.pad_diameter_nm),
+    ];
+    let exact_pad_shapes = via.pad_diameter_nm > 0
+        && pad_shapes.len() == expected_pad_shapes.len()
+        && pad_shapes.iter().zip(expected_pad_shapes).all(
+            |(actual, (expected_layer, expected_size))| {
+                actual.layer == expected_layer
+                    && actual.shape == kicad_ipc::ObservedPadShape::Circle
+                    && actual.size_x_nm == expected_size
+                    && actual.size_y_nm == expected_size
+            },
+        );
     let Some(drill) = observed.pad_stack.primary_drill.as_ref() else {
         return false;
     };
     observed.position.x_nm == via.position_x_nm
         && observed.position.y_nm == via.position_y_nm
         && observed.via_type == kicad_ipc::ObservedViaType::Through
-        && pad_shapes.len() == 2
-        && front_pads.count() == 1
-        && back_pads.count() == 1
+        && observed.pad_stack.stack_type == IpcPadStackType::FrontInnerBack
+        && observed.pad_stack.layers
+            == vec![
+                IpcBoardLayer::FrontCopper,
+                IpcBoardLayer::InnerCopper(1),
+                IpcBoardLayer::BackCopper,
+            ]
+        && exact_pad_shapes
         && drill.start_layer == IpcBoardLayer::FrontCopper
         && drill.end_layer == IpcBoardLayer::BackCopper
         && drill.shape == IpcDrillShape::Circle
@@ -3412,6 +3420,77 @@ mod tests {
         }
     }
 
+    fn observed_via_for_test(source_uuid: &str) -> kicad_ipc::ObservedVia {
+        let copper_shape = |layer, size_nm| kicad_ipc::ObservedPadCopperShape {
+            layer,
+            shape: IpcPadShape::Circle,
+            size_x_nm: size_nm,
+            size_y_nm: size_nm,
+            offset_x_nm: 0,
+            offset_y_nm: 0,
+            corner_rounding_ratio: 0.0,
+            chamfer_ratio: 0.0,
+            chamfer_top_left: false,
+            chamfer_top_right: false,
+            chamfer_bottom_left: false,
+            chamfer_bottom_right: false,
+            trapezoid_delta_x_nm: 0,
+            trapezoid_delta_y_nm: 0,
+            custom_anchor_shape: None,
+        };
+        kicad_ipc::ObservedVia {
+            source_uuid: source_uuid.to_owned(),
+            position: kicad_ipc::ObservedRoutingPoint { x_nm: 5, y_nm: 6 },
+            pad_stack: kicad_ipc::ObservedViaPadStack {
+                stack_type: IpcPadStackType::FrontInnerBack,
+                layers: vec![
+                    IpcBoardLayer::FrontCopper,
+                    IpcBoardLayer::InnerCopper(1),
+                    IpcBoardLayer::BackCopper,
+                ],
+                primary_drill: Some(kicad_ipc::ObservedViaDrill {
+                    start_layer: IpcBoardLayer::FrontCopper,
+                    end_layer: IpcBoardLayer::BackCopper,
+                    size_x_nm: 100,
+                    size_y_nm: 100,
+                    shape: IpcDrillShape::Circle,
+                    capping: kicad_ipc::ObservedViaDrillCappingMode::Unknown,
+                    filling: kicad_ipc::ObservedViaDrillFillingMode::Unknown,
+                }),
+                unconnected_layer_removal: kicad_ipc::ObservedUnconnectedLayerRemoval::Unknown,
+                copper_shapes: vec![
+                    copper_shape(IpcBoardLayer::FrontCopper, 200),
+                    copper_shape(IpcBoardLayer::InnerCopper(1), 0),
+                    copper_shape(IpcBoardLayer::BackCopper, 200),
+                ],
+                angle_degrees: 0.0,
+                front_outer_layers: None,
+                back_outer_layers: None,
+                zone_settings: None,
+                secondary_drill: None,
+                tertiary_drill: None,
+                front_post_machining: None,
+                back_post_machining: None,
+            },
+            lock_state: kicad_ipc::ObservedLockState::Unlocked,
+            net: None,
+            via_type: kicad_ipc::ObservedViaType::Through,
+        }
+    }
+
+    fn via_operation_for_test() -> OperationKind {
+        OperationKind::AddThroughVia {
+            board: StableId::new("board").unwrap(),
+            intent: kicad_model::ThroughViaIntent::new(
+                StableId::new("via").unwrap(),
+                board_coordinate(5, 6),
+                200,
+                100,
+            )
+            .unwrap(),
+        }
+    }
+
     fn track_operation_for_test() -> OperationKind {
         OperationKind::AddStraightTrack {
             board: StableId::new("board").unwrap(),
@@ -3441,6 +3520,67 @@ mod tests {
             "route",
         );
         assert_eq!(outcome, BoardGraphicsCommitOutcome::CommittedAndSaved);
+    }
+
+    #[test]
+    fn routing_executor_accepts_exact_saved_through_via_observation() {
+        let mut ipc = FakeGraphicsIpc {
+            routing_observed: Some(Ok(IpcBoardRoutingItems {
+                tracks: Vec::new(),
+                vias: vec![observed_via_for_test("via-uuid")],
+            })),
+            ..Default::default()
+        };
+        let outcome = BoardGraphicsExecutor::default().execute(
+            &mut ipc,
+            &via_operation_for_test(),
+            "board.kicad_pcb",
+            "route",
+        );
+        assert_eq!(outcome, BoardGraphicsCommitOutcome::CommittedAndSaved);
+        assert_eq!(
+            ipc.calls,
+            vec![
+                "begin",
+                "via:board.kicad_pcb",
+                "commit:c1",
+                "save:board.kicad_pcb",
+                "routing-read:board.kicad_pcb",
+            ]
+        );
+    }
+
+    #[test]
+    fn observed_via_match_requires_canonical_two_layer_shapes() {
+        let receipt = CreatedThroughViaReceipt {
+            request_index: 0,
+            source_uuid: "via-uuid".into(),
+            via: CreateThroughVia {
+                position_x_nm: 5,
+                position_y_nm: 6,
+                pad_diameter_nm: 200,
+                drill_diameter_nm: 100,
+            },
+            lock_state: kicad_ipc::ObservedLockState::Unlocked,
+        };
+        let canonical = observed_via_for_test("via-uuid");
+        assert!(observed_via_matches(&canonical, &receipt));
+
+        let mut wrong_stack_layers = canonical.clone();
+        wrong_stack_layers
+            .pad_stack
+            .layers
+            .insert(1, IpcBoardLayer::InnerCopper(1));
+        assert!(!observed_via_matches(&wrong_stack_layers, &receipt));
+
+        let mut wrong_shape_order = canonical.clone();
+        wrong_shape_order.pad_stack.copper_shapes.swap(0, 2);
+        assert!(!observed_via_matches(&wrong_shape_order, &receipt));
+
+        let mut nonzero_inner_shape = canonical;
+        nonzero_inner_shape.pad_stack.copper_shapes[1].size_x_nm = 200;
+        nonzero_inner_shape.pad_stack.copper_shapes[1].size_y_nm = 200;
+        assert!(!observed_via_matches(&nonzero_inner_shape, &receipt));
     }
 
     #[test]

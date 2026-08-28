@@ -679,6 +679,7 @@ pub enum IpcError {
     InvalidObservedFootprint(&'static str),
     InvalidObservedPad(&'static str),
     InvalidObservedRouting(&'static str),
+    InvalidObservedRoutingDetail(String),
     InvalidObservedStackup(&'static str),
     UnknownPcbItemType(String),
     Status(ApiStatusCode, String),
@@ -711,7 +712,9 @@ impl IpcError {
             Self::InvalidObservedBoardGraphic(_) => "invalid_observed_board_graphic",
             Self::InvalidObservedFootprint(_) => "invalid_observed_footprint",
             Self::InvalidObservedPad(_) => "invalid_observed_pad",
-            Self::InvalidObservedRouting(_) => "invalid_observed_routing",
+            Self::InvalidObservedRouting(_) | Self::InvalidObservedRoutingDetail(_) => {
+                "invalid_observed_routing"
+            }
             Self::InvalidObservedStackup(_) => "invalid_observed_stackup",
             Self::UnknownPcbItemType(_) => "unknown_pcb_item_type",
             Self::Status(status, _) => match status {
@@ -768,6 +771,9 @@ impl Display for IpcError {
                 write!(formatter, "{}: {message}", self.code())
             }
             Self::InvalidObservedRouting(message) => {
+                write!(formatter, "{}: {message}", self.code())
+            }
+            Self::InvalidObservedRoutingDetail(message) => {
                 write!(formatter, "{}: {message}", self.code())
             }
             Self::InvalidObservedStackup(message) => {
@@ -1964,7 +1970,7 @@ fn footprint_pad_from_any(
     let mut copper_shapes = stack
         .copper_layers
         .iter()
-        .map(observed_pad_copper_shape)
+        .map(|layer| observed_pad_copper_shape(layer, false))
         .collect::<Result<Vec<_>, _>>()?;
     copper_shapes.sort_by_key(|shape| shape.layer);
     if copper_shapes
@@ -2044,6 +2050,7 @@ fn observed_board_layer(
 
 fn observed_pad_copper_shape(
     layer: &board_types::PadStackLayer,
+    allow_through_via_placeholder: bool,
 ) -> Result<ObservedPadCopperShape, IpcError> {
     if !layer.custom_shapes.is_empty() {
         return Err(IpcError::InvalidObservedPad(
@@ -2075,7 +2082,12 @@ fn observed_pad_copper_shape(
         .size
         .as_ref()
         .ok_or(IpcError::InvalidObservedPad("pad shape size is missing"))?;
-    if size.x_nm <= 0 || size.y_nm <= 0 {
+    let is_through_via_placeholder = allow_through_via_placeholder
+        && board_layer == ObservedBoardLayer::InnerCopper(1)
+        && layer.shape.enum_value() == Ok(board_types::PadStackShape::PSS_CIRCLE)
+        && size.x_nm == 0
+        && size.y_nm == 0;
+    if (size.x_nm <= 0 || size.y_nm <= 0) && !is_through_via_placeholder {
         return Err(IpcError::InvalidObservedPad(
             "pad shape size must be positive",
         ));
@@ -2278,10 +2290,27 @@ fn observed_via(item: &Any) -> Result<ObservedVia, IpcError> {
             "via layers must be unique",
         ));
     }
+    let allow_through_via_placeholder = stack_type == ObservedPadStackType::FrontInnerBack
+        && layers
+            == [
+                ObservedBoardLayer::FrontCopper,
+                ObservedBoardLayer::BackCopper,
+            ]
+        && value.type_.enum_value() == Ok(board_types::ViaType::VT_THROUGH)
+        && pad_stack.type_.enum_value() == Ok(board_types::PadStackType::PST_FRONT_INNER_BACK)
+        && pad_stack.copper_layers.len() == 3
+        && pad_stack.copper_layers.iter().all(|layer| {
+            matches!(
+                layer.layer.enum_value(),
+                Ok(board_types::BoardLayer::BL_F_Cu)
+                    | Ok(board_types::BoardLayer::BL_In1_Cu)
+                    | Ok(board_types::BoardLayer::BL_B_Cu)
+            )
+        });
     let mut copper_shapes = pad_stack
         .copper_layers
         .iter()
-        .map(observed_pad_copper_shape)
+        .map(|layer| observed_pad_copper_shape(layer, allow_through_via_placeholder))
         .collect::<Result<Vec<_>, _>>()?;
     copper_shapes.sort_by_key(|shape| shape.layer);
     if copper_shapes
@@ -2292,10 +2321,14 @@ fn observed_via(item: &Any) -> Result<ObservedVia, IpcError> {
             "via copper shape layers must be unique",
         ));
     }
-    if copper_shapes
-        .iter()
-        .any(|shape| !layers.contains(&shape.layer))
-    {
+    if copper_shapes.iter().any(|shape| {
+        !(layers.contains(&shape.layer)
+            || (allow_through_via_placeholder
+                && shape.layer == ObservedBoardLayer::InnerCopper(1)
+                && shape.shape == ObservedPadShape::Circle
+                && shape.size_x_nm == 0
+                && shape.size_y_nm == 0))
+    }) {
         return Err(IpcError::InvalidObservedRouting(
             "via copper shape layer must belong to the pad stack",
         ));
@@ -2459,32 +2492,26 @@ fn observed_zone_settings(
         .thermal_spokes
         .as_ref()
         .map(|spokes| {
-            let width = spokes
-                .width
-                .as_ref()
-                .ok_or(IpcError::InvalidObservedRouting("thermal width is missing"))?;
-            let angle = spokes
+            let width_nm = spokes.width.as_ref().map_or(0, |width| width.value_nm);
+            let angle_degrees = spokes
                 .angle
                 .as_ref()
-                .ok_or(IpcError::InvalidObservedRouting("thermal angle is missing"))?;
-            let gap = spokes
-                .gap
-                .as_ref()
-                .ok_or(IpcError::InvalidObservedRouting("thermal gap is missing"))?;
-            if width.value_nm < 0 {
+                .map_or(Ok(0.0), |angle| finite_angle(angle.value_degrees))?;
+            let gap_nm = spokes.gap.as_ref().map_or(0, |gap| gap.value_nm);
+            if width_nm < 0 {
                 return Err(IpcError::InvalidObservedRouting(
                     "thermal width must not be negative",
                 ));
             }
-            if gap.value_nm < 0 {
+            if gap_nm < 0 {
                 return Err(IpcError::InvalidObservedRouting(
                     "thermal gap must not be negative",
                 ));
             }
             Ok::<ObservedThermalSpokeSettings, IpcError>(ObservedThermalSpokeSettings {
-                width_nm: width.value_nm,
-                angle_degrees: finite_angle(angle.value_degrees)?,
-                gap_nm: gap.value_nm,
+                width_nm,
+                angle_degrees,
+                gap_nm,
             })
         })
         .transpose()?;
@@ -3096,7 +3123,7 @@ fn create_through_via_item(via: &CreateThroughVia) -> Result<Any, IpcError> {
             ..base_types::Vector2::default()
         }),
         pad_stack: MessageField::some(board_types::PadStack {
-            type_: protobuf::EnumOrUnknown::new(board_types::PadStackType::PST_NORMAL),
+            type_: protobuf::EnumOrUnknown::new(board_types::PadStackType::PST_FRONT_INNER_BACK),
             layers: vec![
                 protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Cu),
                 protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_B_Cu),
@@ -3282,18 +3309,128 @@ fn created_through_via_receipt(
         pad_diameter_nm: pad_size.x_nm,
         drill_diameter_nm: drill_size.x_nm,
     };
-    if &observed != requested
-        || via.type_.enum_value() != Ok(board_types::ViaType::VT_THROUGH)
-        || stack.type_.enum_value() != Ok(board_types::PadStackType::PST_NORMAL)
-        || drill.start_layer.enum_value() != Ok(board_types::BoardLayer::BL_F_Cu)
-        || drill.end_layer.enum_value() != Ok(board_types::BoardLayer::BL_B_Cu)
-        || drill.shape.enum_value() != Ok(board_types::DrillShape::DS_CIRCLE)
-        || pad_size.x_nm != pad_size.y_nm
-        || drill_size.x_nm != drill_size.y_nm
+    let expected_layers = [
+        board_types::BoardLayer::BL_F_Cu,
+        board_types::BoardLayer::BL_B_Cu,
+    ];
+    let exact_copper_layers = stack.layers.len() == expected_layers.len()
+        && stack
+            .layers
+            .iter()
+            .zip(expected_layers)
+            .all(|(actual, expected)| actual.enum_value() == Ok(expected));
+    let expected_copper_layers = [
+        (board_types::BoardLayer::BL_F_Cu, requested.pad_diameter_nm),
+        (board_types::BoardLayer::BL_In1_Cu, 0),
+        (board_types::BoardLayer::BL_B_Cu, requested.pad_diameter_nm),
+    ];
+    let exact_copper_shapes = requested.pad_diameter_nm > 0
+        && stack.copper_layers.len() == expected_copper_layers.len()
+        && stack.copper_layers.iter().zip(expected_copper_layers).all(
+            |(actual, (expected_layer, expected_size))| {
+                actual.layer.enum_value() == Ok(expected_layer)
+                    && actual.shape.enum_value() == Ok(board_types::PadStackShape::PSS_CIRCLE)
+                    && match actual.size.as_ref() {
+                        Some(size) => size.x_nm == expected_size && size.y_nm == expected_size,
+                        None => false,
+                    }
+            },
+        );
+    let mut mismatches = Vec::new();
+    if observed.position_x_nm != requested.position_x_nm
+        || observed.position_y_nm != requested.position_y_nm
     {
-        return Err(IpcError::InvalidObservedRouting(
-            "created via does not match the request",
+        mismatches.push(format!(
+            "position actual=({}, {}) expected=({}, {})",
+            observed.position_x_nm,
+            observed.position_y_nm,
+            requested.position_x_nm,
+            requested.position_y_nm
         ));
+    }
+    if observed.pad_diameter_nm != requested.pad_diameter_nm {
+        mismatches.push(format!(
+            "pad diameter actual={} expected={}",
+            observed.pad_diameter_nm, requested.pad_diameter_nm
+        ));
+    }
+    if observed.drill_diameter_nm != requested.drill_diameter_nm {
+        mismatches.push(format!(
+            "drill diameter actual={} expected={}",
+            observed.drill_diameter_nm, requested.drill_diameter_nm
+        ));
+    }
+    if via.type_.enum_value() != Ok(board_types::ViaType::VT_THROUGH) {
+        mismatches.push(format!(
+            "via type actual={:?} expected=VT_THROUGH",
+            via.type_.enum_value()
+        ));
+    }
+    if stack.type_.enum_value() != Ok(board_types::PadStackType::PST_FRONT_INNER_BACK) {
+        mismatches.push(format!(
+            "stack type actual={:?} expected=PST_FRONT_INNER_BACK",
+            stack.type_.enum_value()
+        ));
+    }
+    if !exact_copper_layers {
+        mismatches.push(format!(
+            "stack layers actual={:?} expected={:?}",
+            stack
+                .layers
+                .iter()
+                .map(|layer| layer.enum_value())
+                .collect::<Vec<_>>(),
+            expected_layers
+        ));
+    }
+    if !exact_copper_shapes {
+        mismatches.push(format!(
+            "copper shapes actual={:?} expected=ordered F.Cu/In1.Cu/B.Cu circles sized {}nm/0nm/{}nm",
+            stack
+                .copper_layers
+                .iter()
+                .map(|layer| (
+                    layer.layer.enum_value(),
+                    layer.shape.enum_value(),
+                    layer.size.as_ref().map(|size| (size.x_nm, size.y_nm))
+                ))
+                .collect::<Vec<_>>(),
+            requested.pad_diameter_nm,
+            requested.pad_diameter_nm
+        ));
+    }
+    if drill.start_layer.enum_value() != Ok(board_types::BoardLayer::BL_F_Cu)
+        || drill.end_layer.enum_value() != Ok(board_types::BoardLayer::BL_B_Cu)
+    {
+        mismatches.push(format!(
+            "drill layers actual=({:?}, {:?}) expected=(BL_F_Cu, BL_B_Cu)",
+            drill.start_layer.enum_value(),
+            drill.end_layer.enum_value()
+        ));
+    }
+    if drill.shape.enum_value() != Ok(board_types::DrillShape::DS_CIRCLE) {
+        mismatches.push(format!(
+            "drill shape actual={:?} expected=DS_CIRCLE",
+            drill.shape.enum_value()
+        ));
+    }
+    if pad_size.x_nm != pad_size.y_nm {
+        mismatches.push(format!(
+            "pad dimensions actual=({}, {}) expected square",
+            pad_size.x_nm, pad_size.y_nm
+        ));
+    }
+    if drill_size.x_nm != drill_size.y_nm {
+        mismatches.push(format!(
+            "drill dimensions actual=({}, {}) expected square",
+            drill_size.x_nm, drill_size.y_nm
+        ));
+    }
+    if !mismatches.is_empty() {
+        return Err(IpcError::InvalidObservedRoutingDetail(format!(
+            "created via does not match the request: {}",
+            mismatches.join("; ")
+        )));
     }
     Ok(CreatedThroughViaReceipt {
         request_index: 0,
@@ -5326,12 +5463,24 @@ mod tests {
                 ..Default::default()
             }),
             pad_stack: MessageField::some(board_types::PadStack {
-                type_: pad_stack_type(board_types::PadStackType::PST_NORMAL),
+                type_: pad_stack_type(board_types::PadStackType::PST_FRONT_INNER_BACK),
                 layers: vec![
                     board_layer(board_types::BoardLayer::BL_F_Cu),
                     board_layer(board_types::BoardLayer::BL_B_Cu),
                 ],
-                copper_layers: vec![shape],
+                copper_layers: vec![
+                    shape.clone(),
+                    board_types::PadStackLayer {
+                        layer: board_layer(board_types::BoardLayer::BL_In1_Cu),
+                        size: MessageField::some(base_types::Vector2::default()),
+                        ..shape.clone()
+                    },
+                    board_types::PadStackLayer {
+                        layer: board_layer(board_types::BoardLayer::BL_B_Cu),
+                        size: shape.size.clone(),
+                        ..shape
+                    },
+                ],
                 drill: MessageField::some(drill),
                 ..Default::default()
             }),
@@ -5339,6 +5488,7 @@ mod tests {
                 name: "".to_owned(),
                 ..Default::default()
             }),
+            type_: protobuf::EnumOrUnknown::new(board_types::ViaType::VT_THROUGH),
             ..Default::default()
         };
         pcb_item_any(
@@ -5705,6 +5855,206 @@ mod tests {
     }
 
     #[test]
+    fn routing_accepts_only_canonical_through_via_zero_size_inner_placeholder() {
+        let mut item = routing_via_item("via");
+        let mut via = board_types::Via::parse_from_bytes(&item.value).unwrap();
+        via.type_ = protobuf::EnumOrUnknown::new(board_types::ViaType::VT_THROUGH);
+        let stack = via.pad_stack.as_mut().unwrap();
+        stack.layers = vec![
+            protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Cu),
+            protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_B_Cu),
+        ];
+        item.value = via.write_to_bytes().unwrap();
+
+        let mut client = routing_client(get_items_response(
+            "new",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![item],
+        ));
+        let routing = client.get_board_routing("main.kicad_pcb").unwrap();
+        assert_eq!(routing.vias.len(), 1);
+        assert_eq!(routing.vias[0].pad_stack.copper_shapes[1].size_x_nm, 0);
+    }
+
+    fn canonical_created_through_via(mut item: Any, id: &str) -> Any {
+        let mut via = board_types::Via::parse_from_bytes(&item.value).unwrap();
+        via.id = MessageField::some(base_types::KIID {
+            value: id.to_owned(),
+            ..Default::default()
+        });
+        let stack = via.pad_stack.as_mut().unwrap();
+        let mut placeholder = stack.copper_layers[0].clone();
+        placeholder.layer = protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_In1_Cu);
+        placeholder.size = MessageField::some(base_types::Vector2::default());
+        stack.copper_layers.insert(1, placeholder);
+        item.value = via.write_to_bytes().unwrap();
+        item
+    }
+
+    #[test]
+    fn create_through_via_uses_kicad_compatible_pad_stack() {
+        let requested = CreateThroughVia {
+            position_x_nm: 10,
+            position_y_nm: 20,
+            pad_diameter_nm: 600,
+            drill_diameter_nm: 300,
+        };
+        let item = create_through_via_item(&requested).unwrap();
+        let via = board_types::Via::parse_from_bytes(&item.value).unwrap();
+        let stack = via.pad_stack.as_ref().unwrap();
+        let expected_layers = [
+            board_types::BoardLayer::BL_F_Cu,
+            board_types::BoardLayer::BL_B_Cu,
+        ];
+        assert_eq!(
+            stack.type_.enum_value(),
+            Ok(board_types::PadStackType::PST_FRONT_INNER_BACK)
+        );
+        assert_eq!(
+            stack
+                .layers
+                .iter()
+                .map(|layer| layer.enum_value().unwrap())
+                .collect::<Vec<_>>(),
+            expected_layers
+        );
+        assert_eq!(
+            stack
+                .copper_layers
+                .iter()
+                .map(|layer| {
+                    (
+                        layer.layer.enum_value().unwrap(),
+                        layer.size.as_ref().map_or(0, |size| size.x_nm),
+                        layer.size.as_ref().map_or(0, |size| size.y_nm),
+                    )
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                (expected_layers[0], 600, 600),
+                (expected_layers[1], 600, 600),
+            ]
+        );
+        let drill = stack.drill.as_ref().unwrap();
+        assert_eq!(
+            (
+                drill.start_layer.enum_value(),
+                drill.end_layer.enum_value(),
+                drill.diameter.as_ref().unwrap().x_nm,
+                drill.diameter.as_ref().unwrap().y_nm,
+            ),
+            (Ok(expected_layers[0]), Ok(expected_layers[1]), 300, 300)
+        );
+    }
+
+    #[test]
+    fn create_through_via_validates_receipt_and_updates_token() {
+        let requested = CreateThroughVia {
+            position_x_nm: 10,
+            position_y_nm: 20,
+            pad_diameter_nm: 600,
+            drill_diameter_nm: 300,
+        };
+        let created = canonical_created_through_via(
+            create_through_via_item(&requested).unwrap(),
+            "server-via",
+        );
+        let mut client = routing_client(create_items_response_with_results(
+            "new-token",
+            vec![create_item_result(created)],
+        ));
+
+        let receipt = client
+            .create_through_via("main.kicad_pcb", &requested)
+            .unwrap();
+        assert_eq!(receipt.request_index, 0);
+        assert_eq!(receipt.source_uuid, "server-via");
+        assert_eq!(receipt.via, requested);
+        assert_eq!(client.instance_token().unwrap().as_str(), "new-token");
+        assert_eq!(client.transport.requests.len(), 1);
+    }
+
+    #[test]
+    fn created_via_receipt_requires_canonical_two_layer_shapes() {
+        let requested = CreateThroughVia {
+            position_x_nm: 10,
+            position_y_nm: 20,
+            pad_diameter_nm: 600,
+            drill_diameter_nm: 300,
+        };
+        let canonical =
+            || canonical_created_through_via(create_through_via_item(&requested).unwrap(), "via");
+        let mutate = |mut item: Any, update: fn(&mut board_types::Via)| {
+            let mut via = board_types::Via::parse_from_bytes(&item.value).unwrap();
+            update(&mut via);
+            item.value = via.write_to_bytes().unwrap();
+            item
+        };
+        let cases = [
+            mutate(canonical(), |via| {
+                via.pad_stack.as_mut().unwrap().layers.insert(
+                    1,
+                    protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_In1_Cu),
+                );
+            }),
+            mutate(canonical(), |via| {
+                via.pad_stack.as_mut().unwrap().copper_layers.swap(0, 2);
+            }),
+            mutate(canonical(), |via| {
+                let size = via.pad_stack.as_mut().unwrap().copper_layers[1]
+                    .size
+                    .as_mut()
+                    .unwrap();
+                size.x_nm = 600;
+                size.y_nm = 600;
+            }),
+        ];
+
+        for item in cases {
+            let mut client = routing_client(create_items_response_with_results(
+                "new-token",
+                vec![create_item_result(item)],
+            ));
+            assert_eq!(
+                client
+                    .create_through_via("main.kicad_pcb", &requested)
+                    .unwrap_err()
+                    .code(),
+                "invalid_observed_routing"
+            );
+            assert!(client.instance_token().is_none());
+        }
+    }
+
+    #[test]
+    fn created_via_receipt_reports_the_exact_mismatched_field() {
+        let requested = CreateThroughVia {
+            position_x_nm: 10,
+            position_y_nm: 20,
+            pad_diameter_nm: 500,
+            drill_diameter_nm: 200,
+        };
+        let response = create_items_response_with_results(
+            "new-token",
+            vec![create_item_result(routing_via_item("via"))],
+        );
+        let mut client = routing_client(response);
+
+        let error = client
+            .create_through_via("main.kicad_pcb", &requested)
+            .unwrap_err();
+        assert_eq!(error.code(), "invalid_observed_routing");
+        assert!(
+            error
+                .to_string()
+                .contains("created via does not match the request:")
+        );
+        assert!(!error.to_string().contains("position actual="));
+        assert!(!error.to_string().contains("pad diameter actual="));
+        assert!(!error.to_string().contains("drill diameter actual="));
+    }
+
+    #[test]
     fn get_board_routing_rejects_bad_responses_without_changing_token() {
         let cases = vec![
             get_items_response(
@@ -5754,7 +6104,7 @@ mod tests {
         {
             let stack = via.pad_stack.as_mut().unwrap();
             stack.drill.as_mut().unwrap().end_layer =
-                protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_In1_Cu);
+                protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_In2_Cu);
         }
         item.value = via.write_to_bytes().unwrap();
         let mut client = routing_client(get_items_response(
