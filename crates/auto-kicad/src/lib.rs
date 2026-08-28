@@ -369,14 +369,19 @@ struct StoredChangeSession {
     session: ChangeSession,
     endpoint: String,
     board_filename: String,
+    board_path: std::path::PathBuf,
+    project_dir: std::path::PathBuf,
     execution_state: StoredExecutionState,
 }
 
 pub trait BoardGraphicsExecutionService: Send + Sync {
+    #[allow(clippy::too_many_arguments)]
     fn execute(
         &self,
         endpoint: &str,
         board_filename: &str,
+        board_path: &std::path::Path,
+        project_dir: &std::path::Path,
         expected_token: &str,
         expected_revision: &RevisionDigest,
         operations: &[Operation],
@@ -391,6 +396,8 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
         &self,
         endpoint: &str,
         board_filename: &str,
+        board_path: &std::path::Path,
+        project_dir: &std::path::Path,
         expected_token: &str,
         expected_revision: &RevisionDigest,
         operations: &[Operation],
@@ -409,6 +416,22 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
                     .into(),
             };
         }
+        let canonical_project_dir = match std::fs::canonicalize(project_dir) {
+            Ok(path) if path.is_dir() => path,
+            _ => {
+                return BoardGraphicsCommitOutcome::Rejected {
+                    reason: "canonical project directory is unavailable".into(),
+                };
+            }
+        };
+        let canonical_board_path = match std::fs::canonicalize(board_path) {
+            Ok(path) if path.is_file() && path.starts_with(&canonical_project_dir) => path,
+            _ => {
+                return BoardGraphicsCommitOutcome::Rejected {
+                    reason: "canonical board path is not an existing project file".into(),
+                };
+            }
+        };
         let config = match ClientConfig::new(endpoint, "auto-kicad-mcp") {
             Ok(config) => config,
             Err(reason) => {
@@ -497,6 +520,28 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
                 };
             }
         };
+        let observed_board_id = observation.snapshot.board.document_id.as_ref();
+        let operations_match_observed_board = operations.iter().all(|operation| {
+            operation.targets.len() == 1
+                && Some(&operation.targets[0]) == observed_board_id
+                && match &operation.kind {
+                    OperationKind::AddBoardGraphicSegments { board, .. }
+                    | OperationKind::AddBoardOutline { board, .. }
+                    | OperationKind::AddStraightTrack { board, .. }
+                    | OperationKind::AddThroughVia { board, .. } => {
+                        Some(board) == observed_board_id
+                    }
+                    _ => false,
+                }
+        });
+        if observation.board_path != canonical_board_path
+            || observation.project_dir != canonical_project_dir
+            || !operations_match_observed_board
+        {
+            return BoardGraphicsCommitOutcome::Rejected {
+                reason: "live PCB document identity changed".into(),
+            };
+        }
         let revision = match observation.snapshot.revision() {
             Ok(revision) => revision,
             Err(reason) => {
@@ -1059,6 +1104,8 @@ impl Server {
                 session,
                 endpoint: arguments.endpoint,
                 board_filename: observation.board_filename,
+                board_path: observation.board_path,
+                project_dir: observation.project_dir,
                 execution_state: StoredExecutionState::Ready,
             },
         );
@@ -1185,6 +1232,8 @@ impl Server {
         let outcome = self.execution.execute(
             &stored.endpoint,
             &stored.board_filename,
+            &stored.board_path,
+            &stored.project_dir,
             &stored.session.plan.instance_token,
             &stored.session.plan.base_revision,
             &stored.session.plan.operations,
@@ -2788,6 +2837,8 @@ mod tests {
             &self,
             _endpoint: &str,
             _board_filename: &str,
+            _board_path: &std::path::Path,
+            _project_dir: &std::path::Path,
             _expected_token: &str,
             expected_revision: &RevisionDigest,
             operations: &[Operation],
@@ -2818,6 +2869,8 @@ mod tests {
             &self,
             _endpoint: &str,
             _board_filename: &str,
+            _board_path: &std::path::Path,
+            _project_dir: &std::path::Path,
             _expected_token: &str,
             _expected_revision: &RevisionDigest,
             _operations: &[Operation],
@@ -2847,6 +2900,11 @@ mod tests {
         let plan = &sessions[plan_id].session.plan;
         assert_eq!(plan.base_revision, expected_revision);
         assert_eq!(plan.instance_token, "token");
+        assert_eq!(
+            sessions[plan_id].board_path,
+            std::path::Path::new("/tmp/board.kicad_pcb")
+        );
+        assert_eq!(sessions[plan_id].project_dir, std::path::Path::new("/tmp"));
         assert_eq!(
             plan.operations[0].targets,
             [StableId::new("board").unwrap()]
