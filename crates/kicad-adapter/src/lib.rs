@@ -1303,6 +1303,10 @@ pub trait BoardGraphicsIpc {
     fn commit_changes(&mut self, commit: &str, message: &str) -> Result<(), String>;
     fn drop_commit(&mut self, commit: &str) -> Result<(), String>;
     fn save_board(&mut self, board_filename: &str) -> Result<(), String>;
+    fn read_board_graphics(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<Vec<ObservedBoardGraphicSegment>, String>;
 }
 
 impl<T: KiCadTransport> BoardGraphicsIpc for KiCadClient<T> {
@@ -1333,6 +1337,13 @@ impl<T: KiCadTransport> BoardGraphicsIpc for KiCadClient<T> {
 
     fn save_board(&mut self, board_filename: &str) -> Result<(), String> {
         KiCadClient::save_board(self, board_filename).map_err(|error| error.to_string())
+    }
+
+    fn read_board_graphics(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<Vec<ObservedBoardGraphicSegment>, String> {
+        KiCadClient::get_board_graphics(self, board_filename).map_err(|error| error.to_string())
     }
 }
 
@@ -1477,10 +1488,41 @@ impl BoardGraphicsExecutor {
         if let Err(reason) = ipc.commit_changes(&commit, message) {
             return BoardGraphicsCommitOutcome::Unknown { reason };
         }
-        match ipc.save_board(board_filename) {
-            Ok(()) => BoardGraphicsCommitOutcome::CommittedAndSaved,
-            Err(reason) => BoardGraphicsCommitOutcome::CommittedButNotSaved { reason },
+        if let Err(reason) = ipc.save_board(board_filename) {
+            return BoardGraphicsCommitOutcome::Unknown { reason };
         }
+        let observed = match ipc.read_board_graphics(board_filename) {
+            Ok(observed) => observed,
+            Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
+        };
+        let mut matched = BTreeSet::new();
+        for receipt in &receipts {
+            let candidates = observed
+                .iter()
+                .filter(|item| item.graphic_id == receipt.graphic_id);
+            let mut candidates = candidates;
+            let Some(item) = candidates.next() else {
+                return BoardGraphicsCommitOutcome::Unknown {
+                    reason: format!("saved board graphic {} is missing", receipt.graphic_id),
+                };
+            };
+            if candidates.next().is_some() || !matched.insert(receipt.graphic_id.clone()) {
+                return BoardGraphicsCommitOutcome::Unknown {
+                    reason: format!("saved board graphic {} is not unique", receipt.graphic_id),
+                };
+            }
+            if item.segment != receipt.segment {
+                return BoardGraphicsCommitOutcome::Unknown {
+                    reason: format!("saved board graphic {} does not match", receipt.graphic_id),
+                };
+            }
+        }
+        if observed.len() != receipts.len() {
+            return BoardGraphicsCommitOutcome::Unknown {
+                reason: "saved board graphics contain unexpected items".into(),
+            };
+        }
+        BoardGraphicsCommitOutcome::CommittedAndSaved
     }
 }
 
@@ -2649,6 +2691,7 @@ mod tests {
         save: Result<(), String>,
         calls: Vec<String>,
         graphics: Vec<IpcBoardGraphicSegment>,
+        observed: Option<Result<Vec<ObservedBoardGraphicSegment>, String>>,
     }
 
     impl Default for FakeGraphicsIpc {
@@ -2661,6 +2704,7 @@ mod tests {
                 save: Ok(()),
                 calls: Vec::new(),
                 graphics: Vec::new(),
+                observed: None,
             }
         }
     }
@@ -2705,6 +2749,25 @@ mod tests {
         fn save_board(&mut self, filename: &str) -> Result<(), String> {
             self.calls.push(format!("save:{filename}"));
             self.save.clone()
+        }
+
+        fn read_board_graphics(
+            &mut self,
+            filename: &str,
+        ) -> Result<Vec<ObservedBoardGraphicSegment>, String> {
+            self.calls.push(format!("read:{filename}"));
+            if let Some(observed) = &self.observed {
+                return observed.clone();
+            }
+            Ok(self
+                .graphics
+                .iter()
+                .enumerate()
+                .map(|(index, segment)| ObservedBoardGraphicSegment {
+                    graphic_id: format!("g{}", index + 1),
+                    segment: segment.clone(),
+                })
+                .collect())
         }
     }
 
@@ -2843,10 +2906,66 @@ mod tests {
         );
         assert_eq!(
             outcome,
-            BoardGraphicsCommitOutcome::CommittedButNotSaved {
+            BoardGraphicsCommitOutcome::Unknown {
                 reason: "save failed".into()
             }
         );
         assert_eq!(ipc.graphics[0].layer, IpcBoardGraphicLayer::DwgsUser);
+    }
+
+    #[test]
+    fn graphics_executor_rejects_missing_saved_postcondition() {
+        let mut ipc = FakeGraphicsIpc {
+            observed: Some(Ok(Vec::new())),
+            ..Default::default()
+        };
+        let outcome = BoardGraphicsExecutor::default().execute(
+            &mut ipc,
+            &graphics_operation(),
+            "board.kicad_pcb",
+            "draw",
+        );
+        assert!(
+            matches!(outcome, BoardGraphicsCommitOutcome::Unknown { reason } if reason.contains("missing"))
+        );
+        assert_eq!(
+            ipc.calls,
+            vec![
+                "begin",
+                "create:board.kicad_pcb",
+                "commit:c1",
+                "save:board.kicad_pcb",
+                "read:board.kicad_pcb"
+            ]
+        );
+    }
+
+    #[test]
+    fn graphics_executor_rejects_mismatched_saved_postcondition() {
+        let mut mismatched = IpcBoardGraphicSegment {
+            start_x_nm: 1,
+            start_y_nm: 2,
+            end_x_nm: 30,
+            end_y_nm: 40,
+            width_nm: 100,
+            layer: IpcBoardGraphicLayer::DwgsUser,
+        };
+        mismatched.end_x_nm = 31;
+        let mut ipc = FakeGraphicsIpc {
+            observed: Some(Ok(vec![ObservedBoardGraphicSegment {
+                graphic_id: "g1".into(),
+                segment: mismatched,
+            }])),
+            ..Default::default()
+        };
+        let outcome = BoardGraphicsExecutor::default().execute(
+            &mut ipc,
+            &graphics_operation(),
+            "board.kicad_pcb",
+            "draw",
+        );
+        assert!(
+            matches!(outcome, BoardGraphicsCommitOutcome::Unknown { reason } if reason.contains("does not match"))
+        );
     }
 }
