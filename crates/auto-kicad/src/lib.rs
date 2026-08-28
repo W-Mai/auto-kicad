@@ -374,6 +374,18 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
         expected_revision: &RevisionDigest,
         operations: &[Operation],
     ) -> BoardGraphicsCommitOutcome {
+        if operations.iter().any(|operation| {
+            !matches!(
+                &operation.kind,
+                OperationKind::AddBoardGraphicSegments { .. }
+                    | OperationKind::AddBoardOutline { .. }
+            )
+        }) {
+            return BoardGraphicsCommitOutcome::Rejected {
+                reason: "footprint and other non-graphics authoring backends are not enabled"
+                    .into(),
+            };
+        }
         let config = match ClientConfig::new(endpoint, "auto-kicad-mcp") {
             Ok(config) => config,
             Err(reason) => {
