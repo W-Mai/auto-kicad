@@ -21,6 +21,16 @@ pub enum SchematicPatchOutcome {
     Unknown { reason: String },
 }
 
+pub const TWO_RESISTOR_OPERATION_IDENTITY: &str = "fixed-two-resistor-circuit-v1";
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SchematicPreviewReceipt {
+    pub source_artifact: SchematicArtifactFile,
+    pub candidate_artifact: SchematicArtifactFile,
+    pub operation_identity: String,
+    pub candidate_bytes: Vec<u8>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SchematicPatchRejection {
     InvalidProjectRoot,
@@ -32,6 +42,39 @@ pub enum SchematicPatchRejection {
     CandidateInvalid,
     ConnectivityNotProven,
     ErcFailed,
+    CandidateIdentityMismatch,
+}
+
+pub fn preview_two_resistor_circuit(
+    project_root: &Path,
+    root_schematic: &Path,
+    expected_artifact: &SchematicArtifactFile,
+) -> Result<SchematicPreviewReceipt, SchematicPatchOutcome> {
+    let runner = NetlistRunner::production().map_err(|error| SchematicPatchOutcome::Unknown {
+        reason: error.to_string(),
+    })?;
+    preview_two_resistor_circuit_with_runner(
+        project_root,
+        root_schematic,
+        expected_artifact,
+        &runner,
+    )
+}
+
+pub fn commit_two_resistor_circuit(
+    project_root: &Path,
+    root_schematic: &Path,
+    receipt: &SchematicPreviewReceipt,
+) -> SchematicPatchOutcome {
+    let runner = match NetlistRunner::production() {
+        Ok(runner) => runner,
+        Err(error) => {
+            return SchematicPatchOutcome::Unknown {
+                reason: error.to_string(),
+            };
+        }
+    };
+    commit_two_resistor_circuit_with_runner(project_root, root_schematic, receipt, &runner)
 }
 
 pub fn create_two_resistor_circuit(
@@ -47,58 +90,49 @@ pub fn create_two_resistor_circuit(
             };
         }
     };
-    create_two_resistor_circuit_with_runner(
+    let receipt = match preview_two_resistor_circuit_with_runner(
         project_root,
         root_schematic,
         expected_artifact,
         &runner,
-    )
+    ) {
+        Ok(receipt) => receipt,
+        Err(outcome) => return outcome,
+    };
+    commit_two_resistor_circuit_with_runner(project_root, root_schematic, &receipt, &runner)
 }
 
-fn create_two_resistor_circuit_with_runner(
+fn preview_two_resistor_circuit_with_runner(
     project_root: &Path,
     root_schematic: &Path,
     expected_artifact: &SchematicArtifactFile,
     runner: &NetlistRunner,
-) -> SchematicPatchOutcome {
-    match create_two_resistor_circuit_inner(project_root, root_schematic, expected_artifact, runner)
-    {
-        Ok(artifact) => SchematicPatchOutcome::Committed { artifact },
-        Err(PatchFailure::Rejected(reason)) => SchematicPatchOutcome::Rejected { reason },
-        Err(PatchFailure::Unknown(reason)) => SchematicPatchOutcome::Unknown { reason },
-    }
+) -> Result<SchematicPreviewReceipt, SchematicPatchOutcome> {
+    let result = preview_inner(project_root, root_schematic, expected_artifact, runner);
+    result.map_err(outcome_from_failure)
 }
 
-#[derive(Debug)]
-enum PatchFailure {
-    Rejected(SchematicPatchRejection),
-    Unknown(String),
-}
-
-fn create_two_resistor_circuit_inner(
+fn preview_inner(
     project_root: &Path,
     root_schematic: &Path,
     expected_artifact: &SchematicArtifactFile,
     runner: &NetlistRunner,
-) -> Result<SchematicArtifactFile, PatchFailure> {
+) -> Result<SchematicPreviewReceipt, PatchFailure> {
     let root = canonical_project_root(project_root)?;
     let schematic = canonical_root_schematic(&root, root_schematic)?;
     let relative_path = relative_schematic_path(&root, &schematic)?;
     if expected_artifact.relative_path != relative_path {
         return Err(rejected(SchematicPatchRejection::RevisionMismatch));
     }
-    let _lock = reserve_lock(&schematic)?;
-
+    if patch_lock_path(&schematic).is_file() {
+        return Err(rejected(SchematicPatchRejection::EditorLockPresent));
+    }
     let original = read_root(&schematic)?;
-    let observed_artifact = artifact(&relative_path, &original)?;
-    if &observed_artifact != expected_artifact {
+    let source_artifact = artifact(&relative_path, &original)?;
+    if &source_artifact != expected_artifact {
         return Err(rejected(SchematicPatchRejection::RevisionMismatch));
     }
     let candidate_bytes = build_candidate(&original)?;
-    if candidate_bytes.len() > MAX_CANDIDATE_BYTES {
-        return Err(rejected(SchematicPatchRejection::CandidateInvalid));
-    }
-
     let parent = schematic
         .parent()
         .ok_or_else(|| rejected(SchematicPatchRejection::InvalidRootSchematic))?;
@@ -114,7 +148,6 @@ fn create_two_resistor_circuit_inner(
         .as_file()
         .sync_all()
         .map_err(|error| unknown("sync candidate", error))?;
-
     validate_candidate(
         &relative_path,
         candidate.path(),
@@ -122,31 +155,101 @@ fn create_two_resistor_circuit_inner(
         runner,
         &root,
     )?;
+    let candidate_artifact = artifact(&relative_path, &candidate_bytes)?;
+    Ok(SchematicPreviewReceipt {
+        source_artifact,
+        candidate_artifact,
+        operation_identity: TWO_RESISTOR_OPERATION_IDENTITY.to_owned(),
+        candidate_bytes,
+    })
+}
 
+fn commit_two_resistor_circuit_with_runner(
+    project_root: &Path,
+    root_schematic: &Path,
+    receipt: &SchematicPreviewReceipt,
+    _runner: &NetlistRunner,
+) -> SchematicPatchOutcome {
+    let result = commit_inner(project_root, root_schematic, receipt);
+    match result {
+        Ok(artifact) => SchematicPatchOutcome::Committed { artifact },
+        Err(error) => outcome_from_failure(error),
+    }
+}
+
+fn commit_inner(
+    project_root: &Path,
+    root_schematic: &Path,
+    receipt: &SchematicPreviewReceipt,
+) -> Result<SchematicArtifactFile, PatchFailure> {
+    if receipt.operation_identity != TWO_RESISTOR_OPERATION_IDENTITY
+        || artifact(
+            &receipt.candidate_artifact.relative_path,
+            &receipt.candidate_bytes,
+        )? != receipt.candidate_artifact
+    {
+        return Err(rejected(SchematicPatchRejection::CandidateIdentityMismatch));
+    }
+    let root = canonical_project_root(project_root)?;
+    let schematic = canonical_root_schematic(&root, root_schematic)?;
+    let relative_path = relative_schematic_path(&root, &schematic)?;
+    if receipt.source_artifact.relative_path != relative_path
+        || receipt.candidate_artifact.relative_path != relative_path
+    {
+        return Err(rejected(SchematicPatchRejection::CandidateIdentityMismatch));
+    }
     let current = read_root(&schematic)?;
-    if artifact(&relative_path, &current)? != *expected_artifact {
+    if artifact(&relative_path, &current)? != receipt.source_artifact {
         return Err(rejected(SchematicPatchRejection::RevisionMismatch));
     }
-
+    if patch_lock_path(&schematic).is_file() {
+        return Err(rejected(SchematicPatchRejection::EditorLockPresent));
+    }
+    let _lock = reserve_lock(&schematic)?;
+    let current = read_root(&schematic)?;
+    if artifact(&relative_path, &current)? != receipt.source_artifact {
+        return Err(rejected(SchematicPatchRejection::RevisionMismatch));
+    }
+    let parent = schematic
+        .parent()
+        .ok_or_else(|| rejected(SchematicPatchRejection::InvalidRootSchematic))?;
+    let mut candidate = Builder::new()
+        .prefix(".auto-kicad-schematic-")
+        .suffix(".kicad_sch")
+        .tempfile_in(parent)
+        .map_err(|error| unknown("create candidate", error))?;
+    candidate
+        .write_all(&receipt.candidate_bytes)
+        .map_err(|error| unknown("write candidate", error))?;
+    candidate
+        .as_file()
+        .sync_all()
+        .map_err(|error| unknown("sync candidate", error))?;
     let candidate_path = candidate.into_temp_path();
     fs::rename(&candidate_path, &schematic)
         .map_err(|error| unknown("atomically replace schematic", error))?;
-    if let Err(error) = sync_directory(parent) {
-        return Err(unknown("sync schematic directory", error));
-    }
-
-    let committed = read_root(&schematic)
-        .map_err(|_| PatchFailure::Unknown("reopen committed schematic failed".into()))?;
-    let committed_artifact = artifact(&relative_path, &committed)
-        .map_err(|_| PatchFailure::Unknown("observe committed schematic failed".into()))?;
-    if committed != candidate_bytes {
-        return Err(PatchFailure::Unknown(
-            "committed schematic differs from validated candidate".into(),
+    sync_directory(parent).map_err(|error| unknown("sync schematic directory", error))?;
+    let committed = read_root(&schematic)?;
+    if committed != receipt.candidate_bytes {
+        return Err(unknown(
+            "committed schematic differs from approved candidate",
+            io::Error::other("byte mismatch"),
         ));
     }
-    parse_schematic(relative_path, &committed)
-        .map_err(|_| PatchFailure::Unknown("committed schematic no longer parses".into()))?;
-    Ok(committed_artifact)
+    artifact(&relative_path, &committed)
+}
+
+#[derive(Debug)]
+enum PatchFailure {
+    Rejected(SchematicPatchRejection),
+    Unknown(String),
+}
+
+fn outcome_from_failure(error: PatchFailure) -> SchematicPatchOutcome {
+    match error {
+        PatchFailure::Rejected(reason) => SchematicPatchOutcome::Rejected { reason },
+        PatchFailure::Unknown(reason) => SchematicPatchOutcome::Unknown { reason },
+    }
 }
 
 fn validate_candidate(
@@ -446,6 +549,14 @@ fn canonical_root_schematic(root: &Path, path: &Path) -> Result<PathBuf, PatchFa
     Ok(canonical)
 }
 
+fn patch_lock_path(schematic: &Path) -> PathBuf {
+    let name = schematic
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    schematic.with_file_name(format!("~{name}.lck"))
+}
+
 fn relative_schematic_path(root: &Path, path: &Path) -> Result<String, PatchFailure> {
     path.strip_prefix(root)
         .ok()
@@ -598,10 +709,19 @@ exit 1
         }
 
         fn run(&self, expected: &SchematicArtifactFile) -> SchematicPatchOutcome {
-            create_two_resistor_circuit_with_runner(
+            let receipt = match preview_two_resistor_circuit_with_runner(
                 &fs::canonicalize(self.dir.path()).unwrap(),
                 &fs::canonicalize(&self.root).unwrap(),
                 expected,
+                &self.runner,
+            ) {
+                Ok(receipt) => receipt,
+                Err(outcome) => return outcome,
+            };
+            commit_two_resistor_circuit_with_runner(
+                &fs::canonicalize(self.dir.path()).unwrap(),
+                &fs::canonicalize(&self.root).unwrap(),
+                &receipt,
                 &self.runner,
             )
         }
@@ -708,6 +828,71 @@ exit 1
                 SchematicPatchRejection::ConnectivityNotProven
             ))
         ));
+    }
+
+    #[test]
+    fn preview_does_not_modify_source_or_leave_lock() {
+        let fixture = Fixture::new();
+        let original = fs::read(&fixture.root).unwrap();
+        let receipt = preview_two_resistor_circuit_with_runner(
+            &fs::canonicalize(fixture.dir.path()).unwrap(),
+            &fs::canonicalize(&fixture.root).unwrap(),
+            &fixture.artifact(),
+            &fixture.runner,
+        )
+        .unwrap();
+        assert_eq!(fs::read(&fixture.root).unwrap(), original);
+        assert!(!fixture.dir.path().join("~root.kicad_sch.lck").exists());
+        assert_eq!(
+            receipt.candidate_artifact.size,
+            receipt.candidate_bytes.len() as u64
+        );
+        assert_eq!(
+            receipt.candidate_artifact,
+            artifact("root.kicad_sch", &receipt.candidate_bytes).unwrap()
+        );
+    }
+
+    #[test]
+    fn reusing_preview_receipt_preserves_candidate_identity() {
+        let fixture = Fixture::new();
+        let receipt = preview_two_resistor_circuit_with_runner(
+            &fs::canonicalize(fixture.dir.path()).unwrap(),
+            &fs::canonicalize(&fixture.root).unwrap(),
+            &fixture.artifact(),
+            &fixture.runner,
+        )
+        .unwrap();
+        let reused = receipt.clone();
+        assert_eq!(receipt.candidate_artifact, reused.candidate_artifact);
+        assert_eq!(receipt.candidate_bytes, reused.candidate_bytes);
+        assert_eq!(receipt.operation_identity, TWO_RESISTOR_OPERATION_IDENTITY);
+    }
+
+    #[test]
+    fn commit_rejects_mismatched_candidate_identity() {
+        let fixture = Fixture::new();
+        let mut receipt = preview_two_resistor_circuit_with_runner(
+            &fs::canonicalize(fixture.dir.path()).unwrap(),
+            &fs::canonicalize(&fixture.root).unwrap(),
+            &fixture.artifact(),
+            &fixture.runner,
+        )
+        .unwrap();
+        receipt.candidate_bytes.push(b' ');
+        let original = fs::read(&fixture.root).unwrap();
+        assert_eq!(
+            commit_two_resistor_circuit_with_runner(
+                &fs::canonicalize(fixture.dir.path()).unwrap(),
+                &fs::canonicalize(&fixture.root).unwrap(),
+                &receipt,
+                &fixture.runner,
+            ),
+            SchematicPatchOutcome::Rejected {
+                reason: SchematicPatchRejection::CandidateIdentityMismatch
+            }
+        );
+        assert_eq!(fs::read(&fixture.root).unwrap(), original);
     }
 
     #[test]

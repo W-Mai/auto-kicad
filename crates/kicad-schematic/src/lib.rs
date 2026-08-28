@@ -18,7 +18,11 @@ pub use netlist::{
     NetlistComponent, NetlistDocument, NetlistLimits, NetlistNet, NetlistNode, NetlistRun,
     NetlistRunner, NetlistRunnerError, NetlistSheet, parse_netlist_xml,
 };
-pub use patch::{SchematicPatchOutcome, SchematicPatchRejection, create_two_resistor_circuit};
+pub use patch::{
+    SchematicPatchOutcome, SchematicPatchRejection, SchematicPreviewReceipt,
+    TWO_RESISTOR_OPERATION_IDENTITY, commit_two_resistor_circuit, create_two_resistor_circuit,
+    preview_two_resistor_circuit,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Limits {
