@@ -3397,6 +3397,61 @@ mod tests {
     }
 
     #[test]
+    fn routing_executor_rejects_mixed_and_oversized_batches_before_begin_commit() {
+        let track = Operation {
+            operation_id: StableId::new("op-track").unwrap(),
+            kind: OperationKind::AddStraightTrack {
+                board: StableId::new("board").unwrap(),
+                intent: kicad_model::StraightTrackIntent::new(
+                    StableId::new("track").unwrap(),
+                    board_coordinate(1, 2),
+                    board_coordinate(3, 4),
+                    100,
+                )
+                .unwrap(),
+            },
+            targets: Vec::new(),
+            preconditions: Vec::new(),
+            expected_effects: Vec::new(),
+            risk_class: kicad_engine::RiskClass::Low,
+            idempotency_key: "track".into(),
+            source_run_id: "test".into(),
+        };
+        let graphic = Operation {
+            operation_id: StableId::new("op-graphic").unwrap(),
+            kind: graphics_operation(),
+            targets: Vec::new(),
+            preconditions: Vec::new(),
+            expected_effects: Vec::new(),
+            risk_class: kicad_engine::RiskClass::Low,
+            idempotency_key: "graphic".into(),
+            source_run_id: "test".into(),
+        };
+        let mut ipc = FakeGraphicsIpc::default();
+        let mixed = BoardGraphicsExecutor::default().execute_batch(
+            &mut ipc,
+            &[track.clone(), graphic],
+            "board.kicad_pcb",
+            "route",
+        );
+        assert!(
+            matches!(mixed, BoardGraphicsCommitOutcome::Rejected { reason } if reason.contains("cannot share"))
+        );
+        assert!(ipc.calls.is_empty());
+
+        let oversized = BoardGraphicsExecutor { max_segments: 1 }.execute_batch(
+            &mut ipc,
+            &[track.clone(), track],
+            "board.kicad_pcb",
+            "route",
+        );
+        assert!(
+            matches!(oversized, BoardGraphicsCommitOutcome::Rejected { reason } if reason.contains("exceeded bounds"))
+        );
+        assert!(ipc.calls.is_empty());
+    }
+
+    #[test]
     fn routing_executor_rejects_invalid_intent_before_begin_commit() {
         let operation = OperationKind::AddStraightTrack {
             board: StableId::new("board").unwrap(),
