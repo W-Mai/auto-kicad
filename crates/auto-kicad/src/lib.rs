@@ -335,7 +335,7 @@ pub trait BoardGraphicsExecutionService: Send + Sync {
         board_filename: &str,
         expected_token: &str,
         expected_revision: &RevisionDigest,
-        operation: &OperationKind,
+        operations: &[Operation],
     ) -> BoardGraphicsCommitOutcome;
 }
 
@@ -349,7 +349,7 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
         board_filename: &str,
         expected_token: &str,
         expected_revision: &RevisionDigest,
-        operation: &OperationKind,
+        operations: &[Operation],
     ) -> BoardGraphicsCommitOutcome {
         let config = match ClientConfig::new(endpoint, "auto-kicad-mcp") {
             Ok(config) => config,
@@ -452,9 +452,9 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
                 reason: "live identity or revision is stale".into(),
             };
         }
-        BoardGraphicsExecutor::default().execute(
+        BoardGraphicsExecutor::default().execute_batch(
             &mut client,
-            operation,
+            operations,
             board_filename,
             "auto-kicad MCP approved board graphics change",
         )
@@ -1031,7 +1031,7 @@ impl Server {
             &stored.board_filename,
             &stored.session.plan.instance_token,
             &stored.session.plan.base_revision,
-            &stored.session.plan.operations[0].kind,
+            &stored.session.plan.operations,
         );
         let (ok, state, outcome_data) = match &outcome {
             BoardGraphicsCommitOutcome::CommittedAndSaved => {
@@ -1051,22 +1051,10 @@ impl Server {
                 (true, "committed", json!({"kind": "committed_and_saved"}))
             }
             BoardGraphicsCommitOutcome::CommittedButNotSaved { reason } => {
-                let mut commit_engine = Engine::new(
-                    stored.session.snapshot.clone(),
-                    stored.session.plan.instance_token.clone(),
-                );
-                if let Err(error) = commit_engine.commit(&mut stored.session) {
-                    stored.execution_state = StoredExecutionState::Unknown;
-                    self.sessions
-                        .lock()
-                        .expect("session lock")
-                        .insert(arguments.plan_id.clone(), stored);
-                    return Err(ErrorData::internal_error(error.to_string(), None));
-                }
-                stored.execution_state = StoredExecutionState::Committed;
+                stored.execution_state = StoredExecutionState::Unknown;
                 (
-                    true,
-                    "committed",
+                    false,
+                    "unknown",
                     json!({"kind": "committed_but_not_saved", "reason": reason}),
                 )
             }
@@ -2157,9 +2145,12 @@ mod tests {
     async fn commit_requires_preview_and_exact_approval_and_executes_once() {
         let calls = Arc::new(Mutex::new(0));
         let revisions = Arc::new(Mutex::new(Vec::new()));
+        let operation_batches = Arc::new(Mutex::new(Vec::new()));
         let execution = Arc::new(CapturingExecution {
             calls: calls.clone(),
             revisions: revisions.clone(),
+            operation_batches: operation_batches.clone(),
+            outcome: BoardGraphicsCommitOutcome::CommittedAndSaved,
         });
         let server = Server::with_discovery_and_execution(
             Arc::new(FakeDiscovery {
@@ -2229,6 +2220,10 @@ mod tests {
         assert!(matches!(committed, CallToolResponse::Complete(_)));
         assert_eq!(*calls.lock().unwrap(), 1);
         assert_eq!(*revisions.lock().unwrap(), [expected_revision]);
+        assert_eq!(
+            *operation_batches.lock().unwrap(),
+            [vec![StableId::new("operation:req_commit").unwrap()]]
+        );
         let replay = server
             .kicad_commit_change(Parameters(CommitChangeRequest {
                 plan_id,
@@ -2239,6 +2234,120 @@ mod tests {
             .await;
         assert!(replay.is_err());
         assert_eq!(*calls.lock().unwrap(), 1);
+    }
+
+    async fn planned_multi_operation_server(
+        outcome: BoardGraphicsCommitOutcome,
+        request_id: &str,
+    ) -> (Server, String, String, Arc<Mutex<Vec<Vec<StableId>>>>) {
+        let operation_batches = Arc::new(Mutex::new(Vec::new()));
+        let server = Server::with_discovery_and_execution(
+            Arc::new(FakeDiscovery {
+                write_capability: true,
+            }),
+            Arc::new(CapturingExecution {
+                calls: Arc::new(Mutex::new(0)),
+                revisions: Arc::new(Mutex::new(Vec::new())),
+                operation_batches: operation_batches.clone(),
+                outcome,
+            }),
+        );
+        let planned = server
+            .kicad_plan_change(Parameters(plan_request(project_snapshot(true), request_id)))
+            .await
+            .unwrap();
+        let planned = match planned {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("plan call should complete"),
+        };
+        let plan_id = planned["data"]["plan_id"].as_str().unwrap().to_owned();
+        let plan_hash = {
+            let mut sessions = server.sessions.lock().unwrap();
+            let session = &mut sessions.get_mut(&plan_id).unwrap().session;
+            let mut second = session.plan.operations[0].clone();
+            second.operation_id = StableId::new(format!("operation:{request_id}:second")).unwrap();
+            second.idempotency_key = format!("{request_id}:second");
+            let OperationKind::AddBoardGraphicSegments { segments, .. } = &mut second.kind else {
+                unreachable!("plan tool creates board graphics operations");
+            };
+            segments[0].graphic_id = StableId::new("g2").unwrap();
+            session.plan.operations.push(second);
+            session.plan_hash = session.plan.hash().unwrap();
+            session.plan_hash.clone()
+        };
+        server
+            .kicad_preview_change(Parameters(PreviewChangeRequest {
+                plan_id: plan_id.clone(),
+                plan_hash: plan_hash.clone(),
+                request_id: Some(format!("{request_id}:preview")),
+            }))
+            .await
+            .unwrap();
+        (server, plan_id, plan_hash, operation_batches)
+    }
+
+    #[tokio::test]
+    async fn commit_executes_every_approved_operation_once_in_order() {
+        let (server, plan_id, plan_hash, operation_batches) = planned_multi_operation_server(
+            BoardGraphicsCommitOutcome::CommittedAndSaved,
+            "req_multi",
+        )
+        .await;
+
+        server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id: plan_id.clone(),
+                plan_hash: plan_hash.clone(),
+                approval_hash: plan_hash,
+                request_id: Some("req_multi_commit".into()),
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *operation_batches.lock().unwrap(),
+            [vec![
+                StableId::new("operation:req_multi").unwrap(),
+                StableId::new("operation:req_multi:second").unwrap(),
+            ]]
+        );
+        let sessions = server.sessions.lock().unwrap();
+        let stored = &sessions[&plan_id];
+        assert_eq!(stored.execution_state, StoredExecutionState::Committed);
+        assert_eq!(stored.session.committed_idempotency.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn batch_execution_failure_does_not_mark_session_committed() {
+        let (server, plan_id, plan_hash, operation_batches) = planned_multi_operation_server(
+            BoardGraphicsCommitOutcome::Rejected {
+                reason: "second operation failed".into(),
+            },
+            "req_multi_failure",
+        )
+        .await;
+
+        let response = server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id: plan_id.clone(),
+                plan_hash: plan_hash.clone(),
+                approval_hash: plan_hash,
+                request_id: Some("req_multi_failure_commit".into()),
+            }))
+            .await
+            .unwrap();
+        let response = match response {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("commit should complete"),
+        };
+
+        assert!(!response["ok"].as_bool().unwrap());
+        assert_eq!(response["data"]["state"], "rejected");
+        assert_eq!(operation_batches.lock().unwrap()[0].len(), 2);
+        let sessions = server.sessions.lock().unwrap();
+        let stored = &sessions[&plan_id];
+        assert_eq!(stored.execution_state, StoredExecutionState::Ready);
+        assert!(stored.session.committed_idempotency.is_empty());
     }
 
     #[tokio::test]
@@ -2387,11 +2496,12 @@ mod tests {
             CallToolResponse::Complete(result) => result.structured_content.unwrap(),
             _ => panic!("commit should complete"),
         };
-        assert!(saved["ok"].as_bool().unwrap());
+        assert!(!saved["ok"].as_bool().unwrap());
+        assert_eq!(saved["data"]["state"], "unknown");
         assert_eq!(saved["data"]["outcome"]["kind"], "committed_but_not_saved");
         assert_eq!(
             saved_server.sessions.lock().unwrap()[&saved_id].execution_state,
-            StoredExecutionState::Committed
+            StoredExecutionState::Unknown
         );
         assert_eq!(*saved_calls.lock().unwrap(), 1);
     }
@@ -2400,6 +2510,8 @@ mod tests {
     struct CapturingExecution {
         calls: Arc<Mutex<usize>>,
         revisions: Arc<Mutex<Vec<RevisionDigest>>>,
+        operation_batches: Arc<Mutex<Vec<Vec<StableId>>>>,
+        outcome: BoardGraphicsCommitOutcome,
     }
 
     impl BoardGraphicsExecutionService for CapturingExecution {
@@ -2409,14 +2521,20 @@ mod tests {
             _board_filename: &str,
             _expected_token: &str,
             expected_revision: &RevisionDigest,
-            _operation: &OperationKind,
+            operations: &[Operation],
         ) -> BoardGraphicsCommitOutcome {
             *self.calls.lock().unwrap() += 1;
             self.revisions
                 .lock()
                 .unwrap()
                 .push(expected_revision.clone());
-            BoardGraphicsCommitOutcome::CommittedAndSaved
+            self.operation_batches.lock().unwrap().push(
+                operations
+                    .iter()
+                    .map(|operation| operation.operation_id.clone())
+                    .collect(),
+            );
+            self.outcome.clone()
         }
     }
 
@@ -2433,7 +2551,7 @@ mod tests {
             _board_filename: &str,
             _expected_token: &str,
             _expected_revision: &RevisionDigest,
-            _operation: &OperationKind,
+            _operations: &[Operation],
         ) -> BoardGraphicsCommitOutcome {
             *self.calls.lock().unwrap() += 1;
             self.outcome.clone()

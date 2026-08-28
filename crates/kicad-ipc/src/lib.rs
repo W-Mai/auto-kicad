@@ -175,6 +175,14 @@ pub struct ObservedBoardGraphicSegment {
     pub segment: BoardGraphicSegment,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreatedBoardGraphicReceipt {
+    pub request_index: usize,
+    pub graphic_id: String,
+    pub segment: BoardGraphicSegment,
+    pub lock_state: ObservedLockState,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PcbItemKind {
     Footprint,
@@ -843,7 +851,7 @@ impl<T: KiCadTransport> KiCadClient<T> {
         &mut self,
         board_filename: &str,
         graphics: &[BoardGraphicSegment],
-    ) -> Result<(), IpcError> {
+    ) -> Result<Vec<CreatedBoardGraphicReceipt>, IpcError> {
         let items = graphics
             .iter()
             .map(board_graphic_segment_item)
@@ -866,8 +874,9 @@ impl<T: KiCadTransport> KiCadClient<T> {
             &response,
             CREATE_ITEMS_RESPONSE_TYPE_URL,
         )?;
+        let receipts = created_board_graphic_receipts(&response, graphics)?;
         self.token = Some(token);
-        validate_create_items_response(&response, graphics.len())
+        Ok(receipts)
     }
 
     pub fn commit_changes(&mut self, commit: &CommitId, message: &str) -> Result<(), IpcError> {
@@ -1493,10 +1502,10 @@ fn observed_board_stackup(stackup: &board::BoardStackup) -> Result<ObservedBoard
     })
 }
 
-fn validate_create_items_response(
+fn created_board_graphic_receipts(
     response: &editor_commands::CreateItemsResponse,
-    expected: usize,
-) -> Result<(), IpcError> {
+    requested: &[BoardGraphicSegment],
+) -> Result<Vec<CreatedBoardGraphicReceipt>, IpcError> {
     if response.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
         return Err(IpcError::Status(
             ApiStatusCode::AS_BAD_REQUEST,
@@ -1506,24 +1515,52 @@ fn validate_create_items_response(
             ),
         ));
     }
-    if response.created_items.len() != expected {
+    if response.created_items.len() != requested.len() {
         return Err(IpcError::CreateItemsCountMismatch {
-            expected,
+            expected: requested.len(),
             actual: response.created_items.len(),
         });
     }
-    for (index, result) in response.created_items.iter().enumerate() {
-        let status = result.status.as_ref();
-        let code = status.map_or(0, |status| status.code.value());
-        if code != editor_commands::ItemStatusCode::ISC_OK as i32 {
-            return Err(IpcError::CreateItemFailed {
-                index,
-                status: code,
-                message: status.map_or_else(String::new, |status| status.error_message.clone()),
-            });
-        }
-    }
-    Ok(())
+
+    let mut graphic_ids = std::collections::BTreeSet::new();
+    response
+        .created_items
+        .iter()
+        .zip(requested)
+        .enumerate()
+        .map(|(index, (result, requested))| {
+            let status = result.status.as_ref();
+            let code = status.map_or(0, |status| status.code.value());
+            if code != editor_commands::ItemStatusCode::ISC_OK as i32 {
+                return Err(IpcError::CreateItemFailed {
+                    index,
+                    status: code,
+                    message: status.map_or_else(String::new, |status| status.error_message.clone()),
+                });
+            }
+            let item = result
+                .item
+                .as_ref()
+                .ok_or(IpcError::MissingResponseMessage)?;
+            let observed = decoded_board_graphic(item)?;
+            if &observed.segment != requested {
+                return Err(IpcError::InvalidObservedBoardGraphic(
+                    "created board graphic does not match the request",
+                ));
+            }
+            if !graphic_ids.insert(observed.graphic_id.clone()) {
+                return Err(IpcError::InvalidObservedBoardGraphic(
+                    "created board graphic ids must be unique",
+                ));
+            }
+            Ok(CreatedBoardGraphicReceipt {
+                request_index: index,
+                graphic_id: observed.graphic_id,
+                segment: observed.segment,
+                lock_state: observed.lock_state,
+            })
+        })
+        .collect()
 }
 
 fn pcb_item_diagnostics(
@@ -2718,6 +2755,28 @@ fn board_graphics_from_response(
         .collect()
 }
 
+#[derive(Debug)]
+struct DecodedBoardGraphic {
+    graphic_id: String,
+    segment: BoardGraphicSegment,
+    lock_state: ObservedLockState,
+}
+
+fn reject_unknown_board_graphic_fields(message: &impl Message) -> Result<(), IpcError> {
+    if message
+        .special_fields()
+        .unknown_fields()
+        .iter()
+        .next()
+        .is_some()
+    {
+        return Err(IpcError::InvalidObservedBoardGraphic(
+            "board graphic contains unknown fields",
+        ));
+    }
+    Ok(())
+}
+
 fn observed_board_graphic(item: &Any) -> Option<Result<ObservedBoardGraphicSegment, IpcError>> {
     const BOARD_GRAPHIC_SHAPE_TYPE_URL: &str =
         "type.googleapis.com/kiapi.board.types.BoardGraphicShape";
@@ -2734,31 +2793,66 @@ fn observed_board_graphic(item: &Any) -> Option<Result<ObservedBoardGraphicSegme
     if graphic.layer.enum_value_or_default() != board_types::BoardLayer::BL_Dwgs_User {
         return None;
     }
-    Some(observed_dwgs_user_segment(&graphic))
+    Some(
+        decoded_board_graphic_value(&graphic).map(|graphic| ObservedBoardGraphicSegment {
+            graphic_id: graphic.graphic_id,
+            segment: graphic.segment,
+        }),
+    )
 }
 
-fn observed_dwgs_user_segment(
+fn decoded_board_graphic(item: &Any) -> Result<DecodedBoardGraphic, IpcError> {
+    const BOARD_GRAPHIC_SHAPE_TYPE_URL: &str =
+        "type.googleapis.com/kiapi.board.types.BoardGraphicShape";
+    if item.type_url != BOARD_GRAPHIC_SHAPE_TYPE_URL {
+        return Err(IpcError::UnexpectedMessageType {
+            expected: BOARD_GRAPHIC_SHAPE_TYPE_URL,
+            actual: item.type_url.clone(),
+        });
+    }
+    let graphic = board_types::BoardGraphicShape::parse_from_bytes(&item.value)
+        .map_err(|_| IpcError::MalformedEnvelope)?;
+    decoded_board_graphic_value(&graphic)
+}
+
+fn decoded_board_graphic_value(
     graphic: &board_types::BoardGraphicShape,
-) -> Result<ObservedBoardGraphicSegment, IpcError> {
-    let graphic_id = graphic
+) -> Result<DecodedBoardGraphic, IpcError> {
+    reject_unknown_board_graphic_fields(graphic)?;
+    let id = graphic
         .id
         .as_ref()
-        .map(|id| id.value.clone())
-        .filter(|id| !id.is_empty())
         .ok_or(IpcError::InvalidObservedBoardGraphic(
             "board graphic id must not be empty",
         ))?;
+    reject_unknown_board_graphic_fields(id)?;
+    if id.value.is_empty() {
+        return Err(IpcError::InvalidObservedBoardGraphic(
+            "board graphic id must not be empty",
+        ));
+    }
+    let graphic_id = id.value.clone();
+    let layer = match graphic.layer.enum_value() {
+        Ok(board_types::BoardLayer::BL_Dwgs_User) => BoardGraphicLayer::DwgsUser,
+        Ok(board_types::BoardLayer::BL_F_SilkS) => BoardGraphicLayer::FSilkS,
+        _ => {
+            return Err(IpcError::InvalidObservedBoardGraphic(
+                "board graphic layer is unsupported or unknown",
+            ));
+        }
+    };
     let shape = graphic
         .shape
         .as_ref()
         .ok_or(IpcError::InvalidObservedBoardGraphic(
             "board graphic shape is required",
         ))?;
+    reject_unknown_board_graphic_fields(shape)?;
     let segment = match shape.geometry.as_ref() {
         Some(base_types::graphic_shape::Geometry::Segment(segment)) => segment,
         Some(_) => {
             return Err(IpcError::InvalidObservedBoardGraphic(
-                "Dwgs.User graphic must be a segment",
+                "board graphic must be a segment",
             ));
         }
         None => {
@@ -2767,6 +2861,7 @@ fn observed_dwgs_user_segment(
             ));
         }
     };
+    reject_unknown_board_graphic_fields(segment)?;
     let start = segment
         .start
         .as_ref()
@@ -2779,26 +2874,44 @@ fn observed_dwgs_user_segment(
         .ok_or(IpcError::InvalidObservedBoardGraphic(
             "segment end is required",
         ))?;
+    reject_unknown_board_graphic_fields(start)?;
+    reject_unknown_board_graphic_fields(end)?;
     if start.x_nm == end.x_nm && start.y_nm == end.y_nm {
         return Err(IpcError::InvalidObservedBoardGraphic(
             "segment endpoints must differ",
         ));
     }
-    let width_nm = shape
+    let attributes = shape
         .attributes
         .as_ref()
-        .and_then(|attributes| attributes.stroke.as_ref())
-        .and_then(|stroke| stroke.width.as_ref())
-        .map(|width| width.value_nm)
         .ok_or(IpcError::InvalidObservedBoardGraphic(
             "segment width is required",
         ))?;
+    reject_unknown_board_graphic_fields(attributes)?;
+    let stroke = attributes
+        .stroke
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedBoardGraphic(
+            "segment width is required",
+        ))?;
+    reject_unknown_board_graphic_fields(stroke)?;
+    let width = stroke
+        .width
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedBoardGraphic(
+            "segment width is required",
+        ))?;
+    reject_unknown_board_graphic_fields(width)?;
+    let width_nm = width.value_nm;
     if width_nm <= 0 {
         return Err(IpcError::InvalidObservedBoardGraphic(
             "segment width must be positive",
         ));
     }
-    Ok(ObservedBoardGraphicSegment {
+    let lock_state = routing_lock_state(&graphic.locked).map_err(|_| {
+        IpcError::InvalidObservedBoardGraphic("board graphic lock state is unknown")
+    })?;
+    Ok(DecodedBoardGraphic {
         graphic_id,
         segment: BoardGraphicSegment {
             start_x_nm: start.x_nm,
@@ -2806,8 +2919,9 @@ fn observed_dwgs_user_segment(
             end_x_nm: end.x_nm,
             end_y_nm: end.y_nm,
             width_nm,
-            layer: BoardGraphicLayer::DwgsUser,
+            layer,
         },
+        lock_state,
     })
 }
 
@@ -3102,19 +3216,46 @@ mod tests {
         token: &str,
         statuses: &[(editor_commands::ItemStatusCode, &str)],
     ) -> ApiResponse {
-        let response = editor_commands::CreateItemsResponse {
-            status: protobuf::EnumOrUnknown::new(base_types::ItemRequestStatus::IRS_OK),
-            created_items: statuses
-                .iter()
-                .map(|(code, message)| editor_commands::ItemCreationResult {
+        let created_items = statuses
+            .iter()
+            .enumerate()
+            .map(
+                |(index, (code, message))| editor_commands::ItemCreationResult {
                     status: MessageField::some(editor_commands::ItemStatus {
                         code: protobuf::EnumOrUnknown::new(*code),
                         error_message: (*message).to_owned(),
                         ..editor_commands::ItemStatus::default()
                     }),
+                    item: MessageField::some(created_segment_item(
+                        &format!("graphic-{index}"),
+                        &segment(),
+                        base_types::LockedState::LS_UNLOCKED,
+                    )),
                     ..editor_commands::ItemCreationResult::default()
-                })
-                .collect(),
+                },
+            )
+            .collect();
+        create_items_response_with_results(token, created_items)
+    }
+
+    fn create_item_result(item: Any) -> editor_commands::ItemCreationResult {
+        editor_commands::ItemCreationResult {
+            status: MessageField::some(editor_commands::ItemStatus {
+                code: protobuf::EnumOrUnknown::new(editor_commands::ItemStatusCode::ISC_OK),
+                ..editor_commands::ItemStatus::default()
+            }),
+            item: MessageField::some(item),
+            ..editor_commands::ItemCreationResult::default()
+        }
+    }
+
+    fn create_items_response_with_results(
+        token: &str,
+        created_items: Vec<editor_commands::ItemCreationResult>,
+    ) -> ApiResponse {
+        let response = editor_commands::CreateItemsResponse {
+            status: protobuf::EnumOrUnknown::new(base_types::ItemRequestStatus::IRS_OK),
+            created_items,
             ..editor_commands::CreateItemsResponse::default()
         };
         ApiResponse {
@@ -3441,6 +3582,22 @@ mod tests {
         let mut pad = board_types::Pad::parse_from_bytes(&item.value).unwrap();
         update(&mut pad);
         item.value = pad.write_to_bytes().unwrap();
+    }
+
+    fn created_segment_item(
+        id: &str,
+        segment: &BoardGraphicSegment,
+        lock: base_types::LockedState,
+    ) -> Any {
+        let mut item = board_graphic_segment_item(segment).unwrap();
+        let mut graphic = board_types::BoardGraphicShape::parse_from_bytes(&item.value).unwrap();
+        graphic.id = MessageField::some(base_types::KIID {
+            value: id.to_owned(),
+            ..base_types::KIID::default()
+        });
+        graphic.locked = protobuf::EnumOrUnknown::new(lock);
+        item.value = graphic.write_to_bytes().unwrap();
+        item
     }
 
     fn observed_segment_item(layer: board_types::BoardLayer) -> Any {
@@ -3869,6 +4026,237 @@ mod tests {
                 .kicad_token,
             "token"
         );
+    }
+
+    #[test]
+    fn create_board_graphics_returns_server_receipts_in_request_order() {
+        let first = segment();
+        let mut second = segment();
+        second.start_x_nm = 10;
+        second.end_x_nm = 30;
+        second.layer = BoardGraphicLayer::FSilkS;
+        let response = create_items_response_with_results(
+            "new-token",
+            vec![
+                create_item_result(created_segment_item(
+                    "server-first",
+                    &first,
+                    base_types::LockedState::LS_UNLOCKED,
+                )),
+                create_item_result(created_segment_item(
+                    "server-second",
+                    &second,
+                    base_types::LockedState::LS_LOCKED,
+                )),
+            ],
+        );
+        let mut client = graphics_client(response);
+
+        let receipts = client
+            .create_board_graphics("main.kicad_pcb", &[first.clone(), second.clone()])
+            .unwrap();
+
+        assert_eq!(
+            receipts,
+            vec![
+                CreatedBoardGraphicReceipt {
+                    request_index: 0,
+                    graphic_id: "server-first".to_owned(),
+                    segment: first,
+                    lock_state: ObservedLockState::Unlocked,
+                },
+                CreatedBoardGraphicReceipt {
+                    request_index: 1,
+                    graphic_id: "server-second".to_owned(),
+                    segment: second,
+                    lock_state: ObservedLockState::Locked,
+                },
+            ]
+        );
+        assert_eq!(client.instance_token().unwrap().as_str(), "new-token");
+    }
+
+    #[test]
+    fn create_board_graphics_rejects_missing_created_item() {
+        let response = create_items_response_with_results(
+            "new-token",
+            vec![editor_commands::ItemCreationResult {
+                status: MessageField::some(editor_commands::ItemStatus {
+                    code: protobuf::EnumOrUnknown::new(editor_commands::ItemStatusCode::ISC_OK),
+                    ..editor_commands::ItemStatus::default()
+                }),
+                ..editor_commands::ItemCreationResult::default()
+            }],
+        );
+        let mut client = graphics_client(response);
+
+        assert_eq!(
+            client
+                .create_board_graphics("main.kicad_pcb", &[segment()])
+                .unwrap_err()
+                .code(),
+            "protocol_decode_failed"
+        );
+        assert!(client.instance_token().is_none());
+    }
+
+    #[test]
+    fn create_board_graphics_rejects_wrong_created_item_type() {
+        let mut item = created_segment_item(
+            "server-id",
+            &segment(),
+            base_types::LockedState::LS_UNLOCKED,
+        );
+        item.type_url = "type.googleapis.com/kiapi.board.types.Track".to_owned();
+        let mut client = graphics_client(create_items_response_with_results(
+            "new-token",
+            vec![create_item_result(item)],
+        ));
+
+        assert_eq!(
+            client
+                .create_board_graphics("main.kicad_pcb", &[segment()])
+                .unwrap_err()
+                .code(),
+            "protocol_decode_failed"
+        );
+        assert!(client.instance_token().is_none());
+    }
+
+    #[test]
+    fn create_board_graphics_rejects_wrong_created_layer() {
+        let mut returned = segment();
+        returned.layer = BoardGraphicLayer::FSilkS;
+        let mut client = graphics_client(create_items_response_with_results(
+            "new-token",
+            vec![create_item_result(created_segment_item(
+                "server-id",
+                &returned,
+                base_types::LockedState::LS_UNLOCKED,
+            ))],
+        ));
+
+        let error = client
+            .create_board_graphics("main.kicad_pcb", &[segment()])
+            .unwrap_err();
+        assert_eq!(error.code(), "invalid_observed_board_graphic");
+        assert!(client.instance_token().is_none());
+    }
+
+    #[test]
+    fn create_board_graphics_rejects_geometry_mismatch() {
+        let mut returned = segment();
+        returned.end_x_nm += 1;
+        let mut client = graphics_client(create_items_response_with_results(
+            "new-token",
+            vec![create_item_result(created_segment_item(
+                "server-id",
+                &returned,
+                base_types::LockedState::LS_UNLOCKED,
+            ))],
+        ));
+
+        let error = client
+            .create_board_graphics("main.kicad_pcb", &[segment()])
+            .unwrap_err();
+        assert_eq!(error.code(), "invalid_observed_board_graphic");
+        assert!(client.instance_token().is_none());
+    }
+
+    #[test]
+    fn create_board_graphics_rejects_duplicate_created_identity() {
+        let item = || {
+            create_item_result(created_segment_item(
+                "duplicate-id",
+                &segment(),
+                base_types::LockedState::LS_UNLOCKED,
+            ))
+        };
+        let mut client = graphics_client(create_items_response_with_results(
+            "new-token",
+            vec![item(), item()],
+        ));
+
+        let error = client
+            .create_board_graphics("main.kicad_pcb", &[segment(), segment()])
+            .unwrap_err();
+        assert_eq!(error.code(), "invalid_observed_board_graphic");
+        assert!(client.instance_token().is_none());
+    }
+
+    #[test]
+    fn create_board_graphics_rejects_future_lock_state_and_retains_prior_token() {
+        let first = create_item_result(created_segment_item(
+            "first-id",
+            &segment(),
+            base_types::LockedState::LS_UNLOCKED,
+        ));
+        let mut malformed = created_segment_item(
+            "second-id",
+            &segment(),
+            base_types::LockedState::LS_UNLOCKED,
+        );
+        let mut graphic =
+            board_types::BoardGraphicShape::parse_from_bytes(&malformed.value).unwrap();
+        graphic.locked = protobuf::EnumOrUnknown::from_i32(999);
+        malformed.value = graphic.write_to_bytes().unwrap();
+        let mut client = graphics_client(create_items_response_with_results(
+            "new-token",
+            vec![first, create_item_result(malformed)],
+        ));
+        client.token = Some(InstanceToken::new("prior-token").unwrap());
+
+        let error = client
+            .create_board_graphics("main.kicad_pcb", &[segment(), segment()])
+            .unwrap_err();
+        assert_eq!(error.code(), "invalid_observed_board_graphic");
+        assert_eq!(client.instance_token().unwrap().as_str(), "prior-token");
+    }
+
+    #[test]
+    fn create_board_graphics_rejects_future_fields_and_retains_prior_token() {
+        let mut item = created_segment_item(
+            "server-id",
+            &segment(),
+            base_types::LockedState::LS_UNLOCKED,
+        );
+        let mut graphic = board_types::BoardGraphicShape::parse_from_bytes(&item.value).unwrap();
+        graphic.mut_unknown_fields().add_varint(999, 1);
+        item.value = graphic.write_to_bytes().unwrap();
+        let mut client = graphics_client(create_items_response_with_results(
+            "new-token",
+            vec![create_item_result(item)],
+        ));
+        client.token = Some(InstanceToken::new("prior-token").unwrap());
+
+        let error = client
+            .create_board_graphics("main.kicad_pcb", &[segment()])
+            .unwrap_err();
+        assert_eq!(error.code(), "invalid_observed_board_graphic");
+        assert_eq!(client.instance_token().unwrap().as_str(), "prior-token");
+    }
+
+    #[test]
+    fn create_board_graphics_rejects_malformed_created_item_and_retains_prior_token() {
+        let malformed = Any {
+            type_url: "type.googleapis.com/kiapi.board.types.BoardGraphicShape".to_owned(),
+            value: vec![0xff],
+            ..Any::default()
+        };
+        let mut client = graphics_client(create_items_response_with_results(
+            "new-token",
+            vec![create_item_result(malformed)],
+        ));
+        client.token = Some(InstanceToken::new("prior-token").unwrap());
+
+        assert_eq!(
+            client
+                .create_board_graphics("main.kicad_pcb", &[segment()])
+                .unwrap_err()
+                .code(),
+            "protocol_decode_failed"
+        );
+        assert_eq!(client.instance_token().unwrap().as_str(), "prior-token");
     }
 
     #[test]

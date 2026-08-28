@@ -1,8 +1,8 @@
-use kicad_engine::{MAX_GRAPHIC_BOUNDING_AREA_NM2, MAX_GRAPHIC_SPAN_NM, OperationKind};
+use kicad_engine::{MAX_GRAPHIC_BOUNDING_AREA_NM2, MAX_GRAPHIC_SPAN_NM, Operation, OperationKind};
 use kicad_ipc::{
     BoardGraphicLayer as IpcBoardGraphicLayer, BoardGraphicSegment as IpcBoardGraphicSegment,
-    CommitId, FootprintSide as IpcFootprintSide, InstanceToken, KiCadClient, KiCadTransport,
-    ObservedBoardGraphicSegment, ObservedBoardLayer as IpcBoardLayer,
+    CommitId, CreatedBoardGraphicReceipt, FootprintSide as IpcFootprintSide, InstanceToken,
+    KiCadClient, KiCadTransport, ObservedBoardGraphicSegment, ObservedBoardLayer as IpcBoardLayer,
     ObservedBoardRoutingItems as IpcBoardRoutingItems, ObservedBoardStackup as IpcBoardStackup,
     ObservedDrillShape as IpcDrillShape, ObservedFootprintInstance as IpcFootprintInstance,
     ObservedLockState as IpcLockState, ObservedPad as IpcPad, ObservedPadKind as IpcPadKind,
@@ -1299,7 +1299,7 @@ pub trait BoardGraphicsIpc {
         &mut self,
         board_filename: &str,
         graphics: &[IpcBoardGraphicSegment],
-    ) -> Result<(), String>;
+    ) -> Result<Vec<CreatedBoardGraphicReceipt>, String>;
     fn commit_changes(&mut self, commit: &str, message: &str) -> Result<(), String>;
     fn drop_commit(&mut self, commit: &str) -> Result<(), String>;
     fn save_board(&mut self, board_filename: &str) -> Result<(), String>;
@@ -1316,7 +1316,7 @@ impl<T: KiCadTransport> BoardGraphicsIpc for KiCadClient<T> {
         &mut self,
         board_filename: &str,
         graphics: &[IpcBoardGraphicSegment],
-    ) -> Result<(), String> {
+    ) -> Result<Vec<CreatedBoardGraphicReceipt>, String> {
         KiCadClient::create_board_graphics(self, board_filename, graphics)
             .map_err(|error| error.to_string())
     }
@@ -1344,15 +1344,52 @@ impl BoardGraphicsExecutor {
         board_filename: &str,
         message: &str,
     ) -> BoardGraphicsCommitOutcome {
-        let OperationKind::AddBoardGraphicSegments { segments, .. } = operation else {
-            return BoardGraphicsCommitOutcome::Rejected {
-                reason: "operation is not board graphics".into(),
-            };
-        };
+        self.execute_kinds(ipc, &[operation], board_filename, message)
+    }
+
+    pub fn execute_batch<I: BoardGraphicsIpc>(
+        &self,
+        ipc: &mut I,
+        operations: &[Operation],
+        board_filename: &str,
+        message: &str,
+    ) -> BoardGraphicsCommitOutcome {
+        let kinds = operations
+            .iter()
+            .map(|operation| &operation.kind)
+            .collect::<Vec<_>>();
+        self.execute_kinds(ipc, &kinds, board_filename, message)
+    }
+
+    fn execute_kinds<I: BoardGraphicsIpc>(
+        &self,
+        ipc: &mut I,
+        operations: &[&OperationKind],
+        board_filename: &str,
+        message: &str,
+    ) -> BoardGraphicsCommitOutcome {
         if board_filename.is_empty() {
             return BoardGraphicsCommitOutcome::Rejected {
                 reason: "board filename is empty".into(),
             };
+        }
+        if operations.is_empty() {
+            return BoardGraphicsCommitOutcome::Rejected {
+                reason: "operation batch is empty".into(),
+            };
+        }
+        let mut segments = Vec::new();
+        for operation in operations {
+            let OperationKind::AddBoardGraphicSegments {
+                segments: operation_segments,
+                ..
+            } = operation
+            else {
+                return BoardGraphicsCommitOutcome::Rejected {
+                    reason: "operation is not board graphics".into(),
+                };
+            };
+            segments.extend(operation_segments.iter());
         }
         if segments.is_empty() || segments.len() > self.max_segments {
             return BoardGraphicsCommitOutcome::Rejected {
@@ -1412,11 +1449,28 @@ impl BoardGraphicsExecutor {
             Ok(commit) => commit,
             Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
         };
-        if let Err(reason) = ipc.create_board_graphics(board_filename, &graphics) {
+        let receipts = match ipc.create_board_graphics(board_filename, &graphics) {
+            Ok(receipts) => receipts,
+            Err(reason) => {
+                return match ipc.drop_commit(&commit) {
+                    Ok(()) => BoardGraphicsCommitOutcome::Rejected { reason },
+                    Err(drop_reason) => BoardGraphicsCommitOutcome::Unknown {
+                        reason: format!("create failed: {reason}; drop failed: {drop_reason}"),
+                    },
+                };
+            }
+        };
+        if receipts.len() != graphics.len()
+            || receipts.iter().enumerate().any(|(index, receipt)| {
+                receipt.request_index != index || receipt.segment != graphics[index]
+            })
+        {
             return match ipc.drop_commit(&commit) {
-                Ok(()) => BoardGraphicsCommitOutcome::Rejected { reason },
+                Ok(()) => BoardGraphicsCommitOutcome::Rejected {
+                    reason: "created board graphic receipt did not match the request".into(),
+                },
                 Err(drop_reason) => BoardGraphicsCommitOutcome::Unknown {
-                    reason: format!("create failed: {reason}; drop failed: {drop_reason}"),
+                    reason: format!("receipt mismatch; drop failed: {drop_reason}"),
                 },
             };
         }
@@ -2621,10 +2675,21 @@ mod tests {
             &mut self,
             filename: &str,
             graphics: &[IpcBoardGraphicSegment],
-        ) -> Result<(), String> {
+        ) -> Result<Vec<CreatedBoardGraphicReceipt>, String> {
             self.calls.push(format!("create:{filename}"));
             self.graphics = graphics.to_vec();
-            self.create.clone()
+            self.create.clone().map(|_| {
+                graphics
+                    .iter()
+                    .enumerate()
+                    .map(|(request_index, segment)| CreatedBoardGraphicReceipt {
+                        request_index,
+                        graphic_id: format!("g{}", request_index + 1),
+                        segment: segment.clone(),
+                        lock_state: kicad_ipc::ObservedLockState::Unlocked,
+                    })
+                    .collect()
+            })
         }
 
         fn commit_changes(&mut self, commit: &str, _: &str) -> Result<(), String> {

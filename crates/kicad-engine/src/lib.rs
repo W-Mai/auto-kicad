@@ -755,6 +755,54 @@ mod tests {
         assert_eq!(engine.preview(&stale), Err(EngineError::InstanceStale));
     }
     #[test]
+    fn commit_applies_every_operation_in_plan_order() {
+        let mut engine = Engine::new(snapshot(), "token");
+        let operations = vec![
+            op(
+                OperationKind::AddSymbol {
+                    symbol: symbol("first"),
+                },
+                "first",
+                "add-first",
+            ),
+            op(
+                OperationKind::AddSymbol {
+                    symbol: symbol("second"),
+                },
+                "second",
+                "add-second",
+            ),
+        ];
+        let mut session = engine.begin_session(plan(&engine, operations)).unwrap();
+        engine.preview_session(&mut session).unwrap();
+        engine.validate(&mut session).unwrap();
+        engine.request_approval(&mut session).unwrap();
+        let hash = session.plan_hash.clone();
+        engine.approve(&mut session, &hash).unwrap();
+
+        engine.commit(&mut session).unwrap();
+
+        assert_eq!(
+            engine
+                .snapshot()
+                .schematic
+                .symbols
+                .iter()
+                .map(|symbol| symbol.source_uuid.clone())
+                .collect::<Vec<_>>(),
+            [id("first"), id("second")]
+        );
+        assert_eq!(
+            session
+                .committed_idempotency
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>(),
+            ["add-first", "add-second"]
+        );
+    }
+
+    #[test]
     fn unsupported_commit_does_not_mutate_snapshot() {
         let mut engine = Engine::new(snapshot(), "token");
         let add_source = op(
