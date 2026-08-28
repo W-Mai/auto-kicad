@@ -2,8 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 
 use kicad_model::{
-    AllowlistedFootprintPlacement, BoardGraphicSegment, Coordinate, DocumentSpace, Footprint,
-    ProjectSnapshot, RevisionDigest, StableId, Symbol,
+    AllowlistedFootprintPlacement, BoardGraphicSegment, BoardLayer, Coordinate, DocumentSpace,
+    DrillShape, ExactAngleDegrees, FiniteRatio, Footprint, LocalCoordinateNm, LockState,
+    ObservedBoardRouting, ObservedTrack, ObservedTrackGeometry, ObservedVia, ObservedViaDrill,
+    ObservedViaPadStack, PadCopperShape, PadShape, PadStackType, ProjectSnapshot, RevisionDigest,
+    SizeNm, StableId, StraightTrackIntent, Symbol, ThroughViaIntent, UnconnectedLayerRemoval,
+    ViaDrillCappingMode, ViaDrillFillingMode, ViaType,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -50,6 +54,14 @@ pub enum OperationKind {
         bottom_right: Coordinate,
         width_nm: i64,
     },
+    AddStraightTrack {
+        board: StableId,
+        intent: StraightTrackIntent,
+    },
+    AddThroughVia {
+        board: StableId,
+        intent: ThroughViaIntent,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -90,7 +102,9 @@ impl Operation {
                 vec![board, &placement.target_id]
             }
             OperationKind::AddBoardGraphicSegments { board, .. }
-            | OperationKind::AddBoardOutline { board, .. } => vec![board],
+            | OperationKind::AddBoardOutline { board, .. }
+            | OperationKind::AddStraightTrack { board, .. }
+            | OperationKind::AddThroughVia { board, .. } => vec![board],
         }
     }
 }
@@ -146,6 +160,18 @@ impl ChangePlan {
             .graphics
             .iter()
             .map(|graphic| graphic.graphic_id.clone())
+            .collect();
+        let mut routing_ids: BTreeSet<StableId> = snapshot
+            .native_routing
+            .as_ref()
+            .into_iter()
+            .flat_map(|routing| {
+                routing
+                    .tracks
+                    .iter()
+                    .map(|track| track.source_uuid.clone())
+                    .chain(routing.vias.iter().map(|via| via.source_uuid.clone()))
+            })
             .collect();
         let mut footprint_targets: BTreeSet<StableId> = snapshot
             .board
@@ -214,6 +240,8 @@ impl ChangePlan {
                 OperationKind::PlaceAllowlistedFootprint { .. }
                     | OperationKind::AddBoardGraphicSegments { .. }
                     | OperationKind::AddBoardOutline { .. }
+                    | OperationKind::AddStraightTrack { .. }
+                    | OperationKind::AddThroughVia { .. }
             ) {
                 for target in op.refs() {
                     if !known.contains(target) {
@@ -299,6 +327,41 @@ impl ChangePlan {
                         .find(|segment| existing_graphics.contains(&segment.graphic_id))
                     {
                         return Err(EngineError::TargetAlreadyExists(segment.graphic_id.clone()));
+                    }
+                }
+                OperationKind::AddStraightTrack { board, intent } => {
+                    if snapshot.board.document_id.as_ref() != Some(board) {
+                        return Err(EngineError::ScopeMismatch);
+                    }
+                    if let Some(routing) = &snapshot.native_routing
+                        && routing.board_id != *board
+                    {
+                        return Err(EngineError::ScopeMismatch);
+                    }
+                    intent
+                        .validate()
+                        .map_err(|_| EngineError::InvalidPlan("invalid straight track intent"))?;
+                    validate_routing_position(intent.start)?;
+                    validate_routing_position(intent.end)?;
+                    if !routing_ids.insert(intent.source_uuid.clone()) {
+                        return Err(EngineError::TargetAlreadyExists(intent.source_uuid.clone()));
+                    }
+                }
+                OperationKind::AddThroughVia { board, intent } => {
+                    if snapshot.board.document_id.as_ref() != Some(board) {
+                        return Err(EngineError::ScopeMismatch);
+                    }
+                    if let Some(routing) = &snapshot.native_routing
+                        && routing.board_id != *board
+                    {
+                        return Err(EngineError::ScopeMismatch);
+                    }
+                    intent
+                        .validate()
+                        .map_err(|_| EngineError::InvalidPlan("invalid through via intent"))?;
+                    validate_routing_position(intent.position)?;
+                    if !routing_ids.insert(intent.source_uuid.clone()) {
+                        return Err(EngineError::TargetAlreadyExists(intent.source_uuid.clone()));
                     }
                 }
             }
@@ -608,10 +671,109 @@ fn apply_operations(
                     *width_nm,
                 ));
             }
+            OperationKind::AddStraightTrack { board, intent } => {
+                let mut routing = snapshot.native_routing.take().unwrap_or_else(|| {
+                    ObservedBoardRouting::new(board.clone(), vec![], vec![])
+                        .expect("empty routing observation is valid")
+                });
+                routing.tracks.push(ObservedTrack {
+                    track_id: kicad_model::board_track_id(board, &intent.source_uuid),
+                    source_uuid: intent.source_uuid.clone(),
+                    geometry: ObservedTrackGeometry::Segment {
+                        start: intent.start,
+                        end: intent.end,
+                    },
+                    width_nm: intent.width_nm,
+                    layer: BoardLayer::FrontCopper,
+                    lock_state: LockState::Unlocked,
+                    net: None,
+                    observed_revision: routing.observed_revision.clone(),
+                });
+                snapshot.native_routing = Some(
+                    ObservedBoardRouting::new(board.clone(), routing.tracks, routing.vias)
+                        .map_err(|error| EngineError::Serialization(error.to_string()))?,
+                );
+            }
+            OperationKind::AddThroughVia { board, intent } => {
+                let mut routing = snapshot.native_routing.take().unwrap_or_else(|| {
+                    ObservedBoardRouting::new(board.clone(), vec![], vec![])
+                        .expect("empty routing observation is valid")
+                });
+                let ratio = FiniteRatio::new(0.0)
+                    .map_err(|error| EngineError::Serialization(error.to_string()))?;
+                let pad = |layer| PadCopperShape {
+                    layer,
+                    shape: PadShape::Circle,
+                    size: SizeNm {
+                        x_nm: intent.size_nm,
+                        y_nm: intent.size_nm,
+                    },
+                    offset: LocalCoordinateNm { x_nm: 0, y_nm: 0 },
+                    corner_rounding_ratio: ratio,
+                    chamfer_ratio: ratio,
+                    chamfer_top_left: false,
+                    chamfer_top_right: false,
+                    chamfer_bottom_left: false,
+                    chamfer_bottom_right: false,
+                    trapezoid_delta: LocalCoordinateNm { x_nm: 0, y_nm: 0 },
+                    custom_anchor_shape: None,
+                };
+                routing.vias.push(ObservedVia {
+                    via_id: kicad_model::board_via_id(board, &intent.source_uuid),
+                    source_uuid: intent.source_uuid.clone(),
+                    position: intent.position,
+                    pad_stack: ObservedViaPadStack {
+                        stack_type: PadStackType::FrontInnerBack,
+                        layers: vec![BoardLayer::FrontCopper, BoardLayer::BackCopper],
+                        primary_drill: Some(ObservedViaDrill {
+                            start_layer: BoardLayer::FrontCopper,
+                            end_layer: BoardLayer::BackCopper,
+                            size: SizeNm {
+                                x_nm: intent.drill_nm,
+                                y_nm: intent.drill_nm,
+                            },
+                            shape: DrillShape::Circle,
+                            capping: ViaDrillCappingMode::Unknown,
+                            filling: ViaDrillFillingMode::Unknown,
+                        }),
+                        unconnected_layer_removal: UnconnectedLayerRemoval::Unknown,
+                        copper_shapes: vec![
+                            pad(BoardLayer::FrontCopper),
+                            pad(BoardLayer::BackCopper),
+                        ],
+                        angle_degrees: ExactAngleDegrees::new(0.0)
+                            .map_err(|error| EngineError::Serialization(error.to_string()))?,
+                        front_outer_layers: None,
+                        back_outer_layers: None,
+                        zone_settings: None,
+                        secondary_drill: None,
+                        tertiary_drill: None,
+                        front_post_machining: None,
+                        back_post_machining: None,
+                    },
+                    lock_state: LockState::Unlocked,
+                    net: None,
+                    via_type: ViaType::Through,
+                    observed_revision: routing.observed_revision.clone(),
+                });
+                snapshot.native_routing = Some(
+                    ObservedBoardRouting::new(board.clone(), routing.tracks, routing.vias)
+                        .map_err(|error| EngineError::Serialization(error.to_string()))?,
+                );
+            }
             _ => return Err(EngineError::UnsupportedOperation),
         }
     }
     Ok(snapshot.canonical())
+}
+
+fn validate_routing_position(position: Coordinate) -> Result<(), EngineError> {
+    if position.x.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
+        || position.y.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
+    {
+        return Err(EngineError::InvalidPlan("routing position bounds exceeded"));
+    }
+    Ok(())
 }
 
 fn validate_outline(
@@ -1514,6 +1676,126 @@ mod tests {
         assert_eq!(
             engine.preview(&plan(&engine, vec![oversized])),
             Err(EngineError::InvalidPlan("graphic bounding span exceeded"))
+        );
+    }
+
+    #[test]
+    fn routing_intents_preview_into_f_cu_and_through_via_native_routing() {
+        let engine = Engine::new(snapshot(), "token");
+        let coordinate = |x, y| Coordinate {
+            x,
+            y,
+            unit: Unit::Nanometres,
+            space: DocumentSpace::Board,
+        };
+        let track =
+            StraightTrackIntent::new(id("track"), coordinate(0, 0), coordinate(1_000, 2_000), 100)
+                .unwrap();
+        let via = ThroughViaIntent::new(id("via"), coordinate(3_000, 4_000), 600, 300).unwrap();
+        let operations = vec![
+            op(
+                OperationKind::AddStraightTrack {
+                    board: id("board"),
+                    intent: track,
+                },
+                "board",
+                "track",
+            ),
+            op(
+                OperationKind::AddThroughVia {
+                    board: id("board"),
+                    intent: via,
+                },
+                "board",
+                "via",
+            ),
+        ];
+        let preview = engine.preview(&plan(&engine, operations)).unwrap();
+        let routing = preview.after.native_routing.unwrap();
+        assert_eq!(routing.board_id, id("board"));
+        assert_eq!(routing.tracks.len(), 1);
+        assert_eq!(routing.tracks[0].layer, BoardLayer::FrontCopper);
+        assert_eq!(routing.vias.len(), 1);
+        assert_eq!(routing.vias[0].via_type, ViaType::Through);
+        assert_eq!(
+            routing.vias[0]
+                .pad_stack
+                .primary_drill
+                .as_ref()
+                .unwrap()
+                .size
+                .x_nm,
+            300
+        );
+    }
+
+    #[test]
+    fn routing_intents_reject_wrong_board_bounds_and_duplicate_source_ids() {
+        let engine = Engine::new(snapshot(), "token");
+        let coordinate = |x, y| Coordinate {
+            x,
+            y,
+            unit: Unit::Nanometres,
+            space: DocumentSpace::Board,
+        };
+        let make_track = |source, x| {
+            op(
+                OperationKind::AddStraightTrack {
+                    board: id("board"),
+                    intent: StraightTrackIntent::new(
+                        id(source),
+                        coordinate(x, 0),
+                        coordinate(x + 1, 1),
+                        100,
+                    )
+                    .unwrap(),
+                },
+                "board",
+                source,
+            )
+        };
+        let mut second = make_track("same", 2);
+        second.operation_id = id("same-second-operation");
+        second.idempotency_key = "same-second-key".into();
+        assert_eq!(
+            engine.preview(&plan(&engine, vec![make_track("same", 0), second])),
+            Err(EngineError::TargetAlreadyExists(id("same")))
+        );
+        let oversized = op(
+            OperationKind::AddThroughVia {
+                board: id("board"),
+                intent: ThroughViaIntent::new(
+                    id("oversized"),
+                    coordinate(MAX_BOARD_POSITION_NM + 1, 0),
+                    600,
+                    300,
+                )
+                .unwrap(),
+            },
+            "board",
+            "oversized",
+        );
+        assert_eq!(
+            engine.preview(&plan(&engine, vec![oversized])),
+            Err(EngineError::InvalidPlan("routing position bounds exceeded"))
+        );
+        let wrong_board = op(
+            OperationKind::AddStraightTrack {
+                board: id("other-board"),
+                intent: StraightTrackIntent::new(
+                    id("wrong-board"),
+                    coordinate(0, 0),
+                    coordinate(1, 1),
+                    100,
+                )
+                .unwrap(),
+            },
+            "other-board",
+            "wrong-board",
+        );
+        assert_eq!(
+            engine.preview(&plan(&engine, vec![wrong_board])),
+            Err(EngineError::ScopeMismatch)
         );
     }
 }

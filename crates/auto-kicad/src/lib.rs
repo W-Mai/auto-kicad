@@ -379,6 +379,8 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
                 &operation.kind,
                 OperationKind::AddBoardGraphicSegments { .. }
                     | OperationKind::AddBoardOutline { .. }
+                    | OperationKind::AddStraightTrack { .. }
+                    | OperationKind::AddThroughVia { .. }
             )
         }) {
             return BoardGraphicsCommitOutcome::Rejected {
