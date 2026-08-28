@@ -29,6 +29,8 @@ pub const BEGIN_COMMIT_RESPONSE_TYPE_URL: &str =
 pub const CREATE_ITEMS_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.CreateItems";
 pub const CREATE_ITEMS_RESPONSE_TYPE_URL: &str =
     "type.googleapis.com/kiapi.common.commands.CreateItemsResponse";
+pub const FOOTPRINT_INSTANCE_TYPE_URL: &str =
+    "type.googleapis.com/kiapi.board.types.FootprintInstance";
 pub const TRACK_TYPE_URL: &str = "type.googleapis.com/kiapi.board.types.Track";
 pub const VIA_TYPE_URL: &str = "type.googleapis.com/kiapi.board.types.Via";
 pub const END_COMMIT_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.EndCommit";
@@ -217,6 +219,23 @@ pub struct CreatedThroughViaReceipt {
     pub source_uuid: String,
     pub via: CreateThroughVia,
     pub lock_state: ObservedLockState,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FootprintInstanceTemplate {
+    bytes: Vec<u8>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreatedFootprintInstanceReceipt {
+    pub source_uuid: String,
+    pub position_x_nm: i64,
+    pub position_y_nm: i64,
+    pub orientation_mdeg: i64,
+    pub side: FootprintSide,
+    pub library_identifier: ObservedFootprintLibraryIdentifier,
+    pub reference: String,
+    pub value: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1125,6 +1144,77 @@ impl<T: KiCadTransport> KiCadClient<T> {
         Ok(diagnostics)
     }
 
+    pub fn capture_footprint_instance_templates(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<Vec<FootprintInstanceTemplate>, IpcError> {
+        let command = editor_commands::GetItems {
+            header: MessageField::some(board_item_header(board_filename)),
+            types: vec![protobuf::EnumOrUnknown::new(
+                enums::KiCadObjectType::KOT_PCB_FOOTPRINT,
+            )],
+            ..editor_commands::GetItems::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            GET_ITEMS_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let response = decode_any::<editor_commands::GetItemsResponse>(
+            &response,
+            GET_ITEMS_RESPONSE_TYPE_URL,
+        )?;
+        let templates = footprint_templates_from_response(&response)?;
+        self.token = Some(token);
+        Ok(templates)
+    }
+
+    pub fn create_footprint_instance(
+        &mut self,
+        board_filename: &str,
+        template: &FootprintInstanceTemplate,
+        position_x_nm: i64,
+        position_y_nm: i64,
+        reference: &str,
+        value: &str,
+    ) -> Result<CreatedFootprintInstanceReceipt, IpcError> {
+        if reference.is_empty() || value.is_empty() {
+            return Err(IpcError::InvalidObservedFootprint(
+                "created footprint reference and value must not be empty",
+            ));
+        }
+        let instance = footprint_instance_from_template(
+            template,
+            position_x_nm,
+            position_y_nm,
+            reference,
+            value,
+        )?;
+        let response = self.create_items(
+            board_filename,
+            vec![Any {
+                type_url: FOOTPRINT_INSTANCE_TYPE_URL.to_owned(),
+                value: instance
+                    .write_to_bytes()
+                    .map_err(|_| IpcError::MalformedEnvelope)?,
+                ..Any::default()
+            }],
+        )?;
+        let receipt = created_footprint_instance_receipt(
+            &response.0,
+            position_x_nm,
+            position_y_nm,
+            reference,
+            value,
+        )?;
+        self.token = Some(response.1);
+        Ok(receipt)
+    }
+
     pub fn get_footprint_instances(
         &mut self,
         board_filename: &str,
@@ -1734,6 +1824,246 @@ fn pcb_item_diagnostics(
 
 fn kiid_value(id: Option<&base_types::KIID>) -> Option<String> {
     id.map(|id| id.value.clone()).filter(|id| !id.is_empty())
+}
+
+fn footprint_templates_from_response(
+    response: &editor_commands::GetItemsResponse,
+) -> Result<Vec<FootprintInstanceTemplate>, IpcError> {
+    if response.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
+        return Err(IpcError::Status(
+            ApiStatusCode::AS_BAD_REQUEST,
+            format!(
+                "get items status: {:?}",
+                response.status.enum_value_or_default()
+            ),
+        ));
+    }
+    response
+        .items
+        .iter()
+        .map(|item| {
+            if item.type_url != FOOTPRINT_INSTANCE_TYPE_URL {
+                return Err(IpcError::UnexpectedMessageType {
+                    expected: FOOTPRINT_INSTANCE_TYPE_URL,
+                    actual: item.type_url.clone(),
+                });
+            }
+            let instance = board_types::FootprintInstance::parse_from_bytes(&item.value)
+                .map_err(|_| IpcError::MalformedEnvelope)?;
+            validate_footprint_instance(&instance)?;
+            Ok(FootprintInstanceTemplate {
+                bytes: item.value.clone(),
+            })
+        })
+        .collect()
+}
+
+fn footprint_instance_from_template(
+    template: &FootprintInstanceTemplate,
+    position_x_nm: i64,
+    position_y_nm: i64,
+    reference: &str,
+    value: &str,
+) -> Result<board_types::FootprintInstance, IpcError> {
+    let mut instance = board_types::FootprintInstance::parse_from_bytes(&template.bytes)
+        .map_err(|_| IpcError::MalformedEnvelope)?;
+    validate_footprint_instance(&instance)?;
+    instance.id = MessageField::none();
+    instance.position = MessageField::some(base_types::Vector2 {
+        x_nm: position_x_nm,
+        y_nm: position_y_nm,
+        ..base_types::Vector2::default()
+    });
+    instance.reference_field =
+        MessageField::some(rewrite_field(instance.reference_field.as_ref(), reference)?);
+    instance.value_field = MessageField::some(rewrite_field(instance.value_field.as_ref(), value)?);
+    instance.symbol_path = MessageField::none();
+    instance.symbol_sheet_name.clear();
+    instance.symbol_sheet_filename.clear();
+    instance.symbol_footprint_filters.clear();
+    Ok(instance)
+}
+
+fn rewrite_field(
+    field: Option<&board_types::Field>,
+    text: &str,
+) -> Result<board_types::Field, IpcError> {
+    let mut field = field.cloned().ok_or(IpcError::InvalidObservedFootprint(
+        "footprint field is missing",
+    ))?;
+    let field_text = field
+        .text
+        .as_mut()
+        .and_then(|board_text| board_text.text.as_mut())
+        .map(|text| &mut text.text)
+        .ok_or(IpcError::InvalidObservedFootprint(
+            "footprint field text is missing",
+        ))?;
+    *field_text = text.to_owned();
+    Ok(field)
+}
+
+fn validate_footprint_instance(instance: &board_types::FootprintInstance) -> Result<(), IpcError> {
+    if instance.id.as_ref().is_none_or(|id| id.value.is_empty()) {
+        return Err(IpcError::InvalidObservedFootprint(
+            "footprint identity is missing",
+        ));
+    }
+    let definition = instance
+        .definition
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedFootprint(
+            "footprint definition is missing",
+        ))?;
+    let library = definition
+        .id
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedFootprint(
+            "footprint library identity is missing",
+        ))?;
+    if library.library_nickname.is_empty() || library.entry_name.is_empty() {
+        return Err(IpcError::InvalidObservedFootprint(
+            "footprint library identity is incomplete",
+        ));
+    }
+    let _ = field_text(instance.reference_field.as_ref())?;
+    let _ = field_text(instance.value_field.as_ref())?;
+    let orientation = instance
+        .orientation
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedFootprint(
+            "footprint placement is incomplete",
+        ))?;
+    let orientation_mdeg = orientation.value_degrees * 1000.0;
+    if !orientation_mdeg.is_finite()
+        || !(-9_223_372_036_854_775_808.0..9_223_372_036_854_775_808.0).contains(&orientation_mdeg)
+    {
+        return Err(IpcError::InvalidObservedFootprint(
+            "footprint orientation is invalid",
+        ));
+    }
+    if instance.position.is_none()
+        || (instance.layer.enum_value() != Ok(board_types::BoardLayer::BL_F_Cu)
+            && instance.layer.enum_value() != Ok(board_types::BoardLayer::BL_B_Cu))
+    {
+        return Err(IpcError::InvalidObservedFootprint(
+            "footprint layer is not front or back copper",
+        ));
+    }
+    reject_unknown_footprint_message(instance)?;
+    reject_unknown_footprint_message(definition)?;
+    reject_unknown_footprint_message(library)?;
+    reject_unknown_footprint_field(instance.reference_field.as_ref())?;
+    reject_unknown_footprint_field(instance.value_field.as_ref())?;
+    Ok(())
+}
+
+fn reject_unknown_footprint_message(message: &impl Message) -> Result<(), IpcError> {
+    if message
+        .special_fields()
+        .unknown_fields()
+        .iter()
+        .next()
+        .is_some()
+    {
+        return Err(IpcError::InvalidObservedFootprint(
+            "footprint contains unknown fields",
+        ));
+    }
+    Ok(())
+}
+
+fn reject_unknown_footprint_field(field: Option<&board_types::Field>) -> Result<(), IpcError> {
+    let field = field.ok_or(IpcError::InvalidObservedFootprint(
+        "footprint field is missing",
+    ))?;
+    reject_unknown_footprint_message(field)?;
+    let board_text = field
+        .text
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedFootprint(
+            "footprint field text is missing",
+        ))?;
+    reject_unknown_footprint_message(board_text)?;
+    let text = board_text
+        .text
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedFootprint(
+            "footprint field text is missing",
+        ))?;
+    reject_unknown_footprint_message(text)?;
+    Ok(())
+}
+
+fn created_footprint_instance_receipt(
+    response: &editor_commands::CreateItemsResponse,
+    position_x_nm: i64,
+    position_y_nm: i64,
+    reference: &str,
+    value: &str,
+) -> Result<CreatedFootprintInstanceReceipt, IpcError> {
+    if response.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
+        return Err(IpcError::Status(
+            ApiStatusCode::AS_BAD_REQUEST,
+            format!(
+                "create items status: {:?}",
+                response.status.enum_value_or_default()
+            ),
+        ));
+    }
+    if response.created_items.len() != 1 {
+        return Err(IpcError::CreateItemsCountMismatch {
+            expected: 1,
+            actual: response.created_items.len(),
+        });
+    }
+    let item = created_item_status(&response.created_items[0], 0)?;
+    if item.type_url != FOOTPRINT_INSTANCE_TYPE_URL {
+        return Err(IpcError::UnexpectedMessageType {
+            expected: FOOTPRINT_INSTANCE_TYPE_URL,
+            actual: item.type_url.clone(),
+        });
+    }
+    let instance = board_types::FootprintInstance::parse_from_bytes(&item.value)
+        .map_err(|_| IpcError::MalformedEnvelope)?;
+    validate_footprint_instance(&instance)?;
+    let id = instance
+        .id
+        .as_ref()
+        .map(|id| id.value.clone())
+        .filter(|id| !id.is_empty())
+        .ok_or(IpcError::InvalidObservedFootprint(
+            "created footprint identity is missing",
+        ))?;
+    if instance.position.as_ref().unwrap().x_nm != position_x_nm
+        || instance.position.as_ref().unwrap().y_nm != position_y_nm
+        || field_text(instance.reference_field.as_ref())? != reference
+        || field_text(instance.value_field.as_ref())? != value
+    {
+        return Err(IpcError::InvalidObservedFootprint(
+            "created footprint does not match request",
+        ));
+    }
+    let definition = instance.definition.as_ref().unwrap();
+    let library = definition.id.as_ref().unwrap();
+    Ok(CreatedFootprintInstanceReceipt {
+        source_uuid: id,
+        position_x_nm,
+        position_y_nm,
+        orientation_mdeg: (instance.orientation.as_ref().unwrap().value_degrees * 1000.0).round()
+            as i64,
+        side: match instance.layer.enum_value() {
+            Ok(board_types::BoardLayer::BL_F_Cu) => FootprintSide::Front,
+            Ok(board_types::BoardLayer::BL_B_Cu) => FootprintSide::Back,
+            _ => unreachable!(),
+        },
+        library_identifier: ObservedFootprintLibraryIdentifier {
+            nickname: library.library_nickname.clone(),
+            entry_name: library.entry_name.clone(),
+        },
+        reference: reference.to_owned(),
+        value: value.to_owned(),
+    })
 }
 
 fn footprint_instances_from_response(
@@ -4207,6 +4537,122 @@ mod tests {
             }),
             ..ApiResponse::default()
         }
+    }
+
+    fn created_footprint_response(token: &str, id: &str) -> ApiResponse {
+        let mut item = footprint_item(id);
+        let mut footprint = board_types::FootprintInstance::parse_from_bytes(&item.value).unwrap();
+        footprint.position = MessageField::some(base_types::Vector2 {
+            x_nm: 900,
+            y_nm: -800,
+            ..base_types::Vector2::default()
+        });
+        footprint.reference_field = MessageField::some(field("R9"));
+        footprint.value_field = MessageField::some(field("22k"));
+        item.value = footprint.write_to_bytes().unwrap();
+        create_items_response_with_results(token, vec![create_item_result(item)])
+    }
+
+    #[test]
+    fn footprint_template_capture_and_create_preserve_definition_and_clear_identity() {
+        let mut source = footprint_item("source");
+        let mut source_value =
+            board_types::FootprintInstance::parse_from_bytes(&source.value).unwrap();
+        source_value.definition.as_mut().unwrap().items.push(Any {
+            type_url: "type.googleapis.com/test.opaque".to_owned(),
+            value: vec![1, 2, 3],
+            ..Any::default()
+        });
+        source.value = source_value.write_to_bytes().unwrap();
+        let mut client = KiCadClient::new(
+            FakeTransport {
+                responses: vec![
+                    get_items_response(
+                        "captured-token",
+                        base_types::ItemRequestStatus::IRS_OK,
+                        vec![source],
+                    ),
+                    created_footprint_response("created-token", "server-assigned"),
+                ],
+                requests: Vec::new(),
+            },
+            ClientConfig::new("ipc:///tmp/kicad/api.sock", "test-client").unwrap(),
+        );
+        let templates = client
+            .capture_footprint_instance_templates("main.kicad_pcb")
+            .unwrap();
+        let receipt = client
+            .create_footprint_instance("main.kicad_pcb", &templates[0], 900, -800, "R9", "22k")
+            .unwrap();
+        assert_eq!(receipt.source_uuid, "server-assigned");
+        assert_eq!(receipt.library_identifier.entry_name, "R_0603");
+        assert_eq!(client.instance_token().unwrap().as_str(), "created-token");
+        let command = editor_commands::CreateItems::parse_from_bytes(
+            &client.transport.requests[1].message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        let sent =
+            board_types::FootprintInstance::parse_from_bytes(&command.items[0].value).unwrap();
+        assert!(sent.id.is_none());
+        assert!(sent.symbol_path.is_none());
+        assert!(sent.symbol_sheet_name.is_empty());
+        assert_eq!(sent.position.as_ref().unwrap().x_nm, 900);
+        assert_eq!(field_text(sent.reference_field.as_ref()).unwrap(), "R9");
+        assert_eq!(field_text(sent.value_field.as_ref()).unwrap(), "22k");
+        assert_eq!(sent.definition.as_ref().unwrap().items.len(), 1);
+        assert_eq!(
+            sent.definition.as_ref().unwrap().items[0].value,
+            vec![1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn footprint_template_capture_rejects_unknown_instance_fields_without_adopting_token() {
+        let mut item = footprint_item("source");
+        let mut footprint = board_types::FootprintInstance::parse_from_bytes(&item.value).unwrap();
+        footprint
+            .mut_special_fields()
+            .mut_unknown_fields()
+            .add_varint(999, 1);
+        item.value = footprint.write_to_bytes().unwrap();
+        let mut client = footprint_client(get_items_response(
+            "captured-token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![item],
+        ));
+        assert_eq!(
+            client
+                .capture_footprint_instance_templates("main.kicad_pcb")
+                .unwrap_err()
+                .code(),
+            "invalid_observed_footprint"
+        );
+        assert!(client.instance_token().is_none());
+    }
+
+    #[test]
+    fn create_footprint_instance_rejects_mismatched_receipt_without_adopting_token() {
+        let mut client = KiCadClient::new(
+            FakeTransport {
+                responses: vec![created_footprint_response("bad-token", "server-assigned")],
+                requests: Vec::new(),
+            },
+            ClientConfig::new("ipc:///tmp/kicad/api.sock", "test-client").unwrap(),
+        );
+        let source =
+            board_types::FootprintInstance::parse_from_bytes(&footprint_item("source").value)
+                .unwrap();
+        let template = FootprintInstanceTemplate {
+            bytes: source.write_to_bytes().unwrap(),
+        };
+        assert_eq!(
+            client
+                .create_footprint_instance("main.kicad_pcb", &template, 1, 2, "R2", "1k")
+                .unwrap_err()
+                .code(),
+            "invalid_observed_footprint"
+        );
+        assert!(client.instance_token().is_none());
     }
 
     #[test]
