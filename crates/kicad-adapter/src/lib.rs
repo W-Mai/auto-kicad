@@ -44,8 +44,8 @@ pub mod footprint;
 pub use footprint::{
     AllowlistedFootprint, DisabledFootprintRunner, DisposableFootprintContext,
     DisposableFootprintRunner, FootprintBackendError, FootprintPlacementReceipt, FootprintRegistry,
-    FootprintSourceKind, LibraryProvenance, ResolutionEvidence, ResolvedFootprint,
-    validate_placement,
+    FootprintSourceKind, LibraryProvenance, PreparedFootprintPlacement, ResolutionEvidence,
+    ResolvedFootprint, validate_placement,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]

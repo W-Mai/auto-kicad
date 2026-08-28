@@ -2,7 +2,11 @@ use kicad_model::{AllowlistedFootprintPlacement, FootprintLibraryIdentifier, Rev
 use sha2::{Digest, Sha256};
 use std::fmt::{Display, Formatter};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+use std::sync::mpsc;
+use std::time::Duration;
 
 pub const MAX_PLACEMENT_COORDINATE_NM: i64 = 2_000_000_000;
 
@@ -71,6 +75,7 @@ pub struct ResolvedFootprint {
 pub struct FootprintPlacementReceipt {
     pub resolved: ResolvedFootprint,
     pub placement: AllowlistedFootprintPlacement,
+    pub postcondition: FootprintPostcondition,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -103,6 +108,9 @@ pub enum FootprintBackendError {
     SourceMissing(PathBuf),
     InvalidPlacement(&'static str),
     UnsupportedRunner,
+    RunnerProcess(String),
+    RunnerProtocol(&'static str),
+    RunnerTimeout,
 }
 
 impl Display for FootprintBackendError {
@@ -121,6 +129,14 @@ impl Display for FootprintBackendError {
             Self::UnsupportedRunner => {
                 formatter.write_str("disposable footprint runner is unavailable")
             }
+            Self::RunnerProcess(message) => {
+                write!(formatter, "disposable footprint helper failed: {message}")
+            }
+            Self::RunnerProtocol(message) => write!(
+                formatter,
+                "invalid disposable footprint helper response: {message}"
+            ),
+            Self::RunnerTimeout => formatter.write_str("disposable footprint helper timed out"),
         }
     }
 }
@@ -241,6 +257,310 @@ impl DisposableFootprintContext {
             context: self.clone(),
             resolved,
             placement,
+        })
+    }
+}
+
+const MAX_HELPER_OUTPUT_BYTES: usize = 1024 * 1024;
+const HELPER_TIMEOUT: Duration = Duration::from_secs(30);
+const FIXED_PCBNEW_PATHS: &[&str] = &[
+    "/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3.9",
+];
+const FIXED_HELPER_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/helpers/footprint_helper.py");
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FootprintPostcondition {
+    pub footprint_uuid: String,
+    pub library_identifier: FootprintLibraryIdentifier,
+    pub reference: String,
+    pub value: String,
+    pub position: kicad_model::Coordinate,
+    pub pad_count: usize,
+    pub pad_numbers: Vec<String>,
+    pub saved: bool,
+    pub reopened: bool,
+}
+
+fn is_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value.as_bytes().iter().enumerate().all(|(index, byte)| {
+            matches!(index, 8 | 13 | 18 | 23) == (*byte == b'-') || byte.is_ascii_hexdigit()
+        })
+}
+
+impl FootprintPostcondition {
+    pub fn matches(&self, request: &PreparedFootprintPlacement) -> bool {
+        let placement = request.placement();
+        is_uuid(&self.footprint_uuid)
+            && self.library_identifier == placement.library_identifier
+            && self.reference == placement.reference
+            && self.value == placement.value
+            && self.position == placement.position
+            && self.pad_count == self.pad_numbers.len()
+            && self.saved
+            && self.reopened
+            && self.pad_numbers.iter().all(|number| !number.is_empty())
+            && self
+                .pad_numbers
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                == self.pad_numbers.len()
+    }
+}
+
+struct FootprintHelperResponse {
+    postcondition: FootprintPostcondition,
+}
+
+impl FootprintHelperResponse {
+    fn from_json(value: serde_json::Value) -> Result<Self, FootprintBackendError> {
+        let postcondition =
+            value
+                .get("postcondition")
+                .cloned()
+                .ok_or(FootprintBackendError::RunnerProtocol(
+                    "missing postcondition",
+                ))?;
+        let object = postcondition
+            .as_object()
+            .ok_or(FootprintBackendError::RunnerProtocol(
+                "postcondition is not an object",
+            ))?;
+        const REQUIRED_FIELDS: &[&str] = &[
+            "footprint_uuid",
+            "library_identifier",
+            "reference",
+            "value",
+            "position",
+            "pad_count",
+            "pad_numbers",
+            "saved",
+            "reopened",
+        ];
+        if object.len() != REQUIRED_FIELDS.len()
+            || REQUIRED_FIELDS
+                .iter()
+                .any(|field| !object.contains_key(*field))
+        {
+            return Err(FootprintBackendError::RunnerProtocol(
+                "postcondition fields are not exact",
+            ));
+        }
+        let string = |name: &'static str| {
+            object
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .ok_or(FootprintBackendError::RunnerProtocol(name))
+        };
+        let position = object
+            .get("position")
+            .and_then(serde_json::Value::as_object)
+            .ok_or(FootprintBackendError::RunnerProtocol("position"))?;
+        let coordinate = |name: &'static str| {
+            position
+                .get(name)
+                .and_then(serde_json::Value::as_i64)
+                .ok_or(FootprintBackendError::RunnerProtocol(name))
+        };
+        if position.len() != 4
+            || ["x", "y", "unit", "space"]
+                .iter()
+                .any(|field| !position.contains_key(*field))
+        {
+            return Err(FootprintBackendError::RunnerProtocol(
+                "position fields are not exact",
+            ));
+        }
+        let unit = position
+            .get("unit")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(FootprintBackendError::RunnerProtocol("unit"))?;
+        let space = position
+            .get("space")
+            .and_then(serde_json::Value::as_str)
+            .ok_or(FootprintBackendError::RunnerProtocol("space"))?;
+        if unit != "Nanometres" || space != "Board" {
+            return Err(FootprintBackendError::RunnerProtocol("position units"));
+        }
+        let identifier = object
+            .get("library_identifier")
+            .and_then(serde_json::Value::as_object)
+            .ok_or(FootprintBackendError::RunnerProtocol("library_identifier"))?;
+        if identifier.len() != 2
+            || !identifier.contains_key("nickname")
+            || !identifier.contains_key("entry_name")
+        {
+            return Err(FootprintBackendError::RunnerProtocol(
+                "library identifier fields are not exact",
+            ));
+        }
+        let library_identifier = FootprintLibraryIdentifier {
+            nickname: identifier
+                .get("nickname")
+                .and_then(serde_json::Value::as_str)
+                .ok_or(FootprintBackendError::RunnerProtocol("nickname"))?
+                .to_owned(),
+            entry_name: identifier
+                .get("entry_name")
+                .and_then(serde_json::Value::as_str)
+                .ok_or(FootprintBackendError::RunnerProtocol("entry_name"))?
+                .to_owned(),
+        };
+        let pad_numbers = object
+            .get("pad_numbers")
+            .and_then(serde_json::Value::as_array)
+            .ok_or(FootprintBackendError::RunnerProtocol("pad_numbers"))?
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(str::to_owned)
+                    .ok_or(FootprintBackendError::RunnerProtocol("pad number"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let pad_count = object
+            .get("pad_count")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|value| usize::try_from(value).ok())
+            .ok_or(FootprintBackendError::RunnerProtocol("pad_count"))?;
+        let boolean = |name: &'static str| {
+            object
+                .get(name)
+                .and_then(serde_json::Value::as_bool)
+                .ok_or(FootprintBackendError::RunnerProtocol(name))
+        };
+        Ok(Self {
+            postcondition: FootprintPostcondition {
+                footprint_uuid: string("footprint_uuid")?.to_owned(),
+                library_identifier,
+                reference: string("reference")?.to_owned(),
+                value: string("value")?.to_owned(),
+                position: kicad_model::Coordinate {
+                    x: coordinate("x")?,
+                    y: coordinate("y")?,
+                    unit: kicad_model::Unit::Nanometres,
+                    space: kicad_model::DocumentSpace::Board,
+                },
+                pad_count,
+                pad_numbers,
+                saved: boolean("saved")?,
+                reopened: boolean("reopened")?,
+            },
+        })
+    }
+}
+
+pub struct BundledPcbnewRunner {
+    executable: PathBuf,
+    helper: PathBuf,
+    timeout: Duration,
+}
+
+impl BundledPcbnewRunner {
+    pub fn production() -> Result<Self, FootprintBackendError> {
+        let executable = FIXED_PCBNEW_PATHS
+            .iter()
+            .map(PathBuf::from)
+            .find(|path| path.is_file())
+            .ok_or(FootprintBackendError::UnsupportedRunner)?;
+        let helper = PathBuf::from(FIXED_HELPER_PATH);
+        if !helper.is_file() {
+            return Err(FootprintBackendError::UnsupportedRunner);
+        }
+        Ok(Self {
+            executable,
+            helper,
+            timeout: HELPER_TIMEOUT,
+        })
+    }
+
+    fn run_helper(
+        &self,
+        request: &PreparedFootprintPlacement,
+    ) -> Result<FootprintPostcondition, FootprintBackendError> {
+        let input = serde_json::json!({
+            "board_path": request.context().board_path(),
+            "project_root": request.context().project_root(),
+            "source_path": request.resolved().source_path,
+            "library_identifier": request.placement().library_identifier,
+            "target_id": request.placement().target_id,
+            "position": request.placement().position,
+            "reference": request.placement().reference,
+            "value": request.placement().value,
+        });
+        let mut child = Command::new(&self.executable)
+            .arg(&self.helper)
+            .arg("--fixed-footprint-placement-v1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| FootprintBackendError::RunnerProcess(error.to_string()))?;
+        let mut stdin = child.stdin.take().ok_or_else(|| {
+            FootprintBackendError::RunnerProcess("helper stdin unavailable".to_owned())
+        })?;
+        let encoded = serde_json::to_vec(&input)
+            .map_err(|_| FootprintBackendError::RunnerProtocol("request encoding"))?;
+        std::thread::spawn(move || {
+            use std::io::Write;
+            let _ = stdin.write_all(&encoded);
+        });
+        let stdout = child.stdout.take().ok_or_else(|| {
+            FootprintBackendError::RunnerProcess("helper stdout unavailable".to_owned())
+        })?;
+        let (sender, receiver) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut limited = stdout.take((MAX_HELPER_OUTPUT_BYTES + 1) as u64);
+            let mut bytes = Vec::new();
+            let result = limited.read_to_end(&mut bytes).map(|_| bytes);
+            let _ = sender.send(result);
+        });
+        let bytes = receiver
+            .recv_timeout(self.timeout)
+            .map_err(|_| {
+                let _ = child.kill();
+                let _ = child.wait();
+                FootprintBackendError::RunnerTimeout
+            })?
+            .map_err(|error| FootprintBackendError::RunnerProcess(error.to_string()))?;
+        let status = child
+            .wait()
+            .map_err(|error| FootprintBackendError::RunnerProcess(error.to_string()))?;
+        if !status.success() {
+            return Err(FootprintBackendError::RunnerProcess(status.to_string()));
+        }
+        if bytes.len() > MAX_HELPER_OUTPUT_BYTES {
+            return Err(FootprintBackendError::RunnerProtocol("response too large"));
+        }
+        let value: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|_| FootprintBackendError::RunnerProtocol("malformed JSON"))?;
+        let response = FootprintHelperResponse::from_json(value)?;
+        if !response.postcondition.matches(request) {
+            return Err(FootprintBackendError::RunnerProtocol(
+                "postcondition mismatch",
+            ));
+        }
+        Ok(response.postcondition)
+    }
+}
+
+impl DisposableFootprintRunner for BundledPcbnewRunner {
+    fn place(
+        &self,
+        request: &PreparedFootprintPlacement,
+    ) -> Result<FootprintPlacementReceipt, FootprintBackendError> {
+        request.context().validate_before_place()?;
+        let postcondition = self.run_helper(request)?;
+        if !postcondition.matches(request) {
+            return Err(FootprintBackendError::RunnerProtocol(
+                "postcondition mismatch",
+            ));
+        }
+        Ok(FootprintPlacementReceipt {
+            resolved: request.resolved().clone(),
+            placement: request.placement().clone(),
+            postcondition,
         })
     }
 }
@@ -386,6 +706,42 @@ mod tests {
             context.prepare(&registry, AllowlistedFootprint::OfficialLed1210, request),
             Err(FootprintBackendError::UnsupportedLibrary)
         ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn postcondition_matcher_is_strict_and_requires_reopen() {
+        let (root, official, project, board) = fixture();
+        let registry = FootprintRegistry::new(&official, &project).unwrap();
+        let context = DisposableFootprintContext::new(&root, &board).unwrap();
+        let prepared = context
+            .prepare(
+                &registry,
+                AllowlistedFootprint::OfficialLed1210,
+                placement(123),
+            )
+            .unwrap();
+        let good = FootprintPostcondition {
+            footprint_uuid: "01234567-89ab-cdef-0123-456789abcdef".to_owned(),
+            library_identifier: AllowlistedFootprint::OfficialLed1210.identifier(),
+            reference: "P1".to_owned(),
+            value: "LED".to_owned(),
+            position: placement(123).position,
+            pad_count: 2,
+            pad_numbers: vec!["1".to_owned(), "2".to_owned()],
+            saved: true,
+            reopened: true,
+        };
+        assert!(good.matches(&prepared));
+        let mut bad = good.clone();
+        bad.reopened = false;
+        assert!(!bad.matches(&prepared));
+        let mut bad = good.clone();
+        bad.reference = "P2".to_owned();
+        assert!(!bad.matches(&prepared));
+        let mut bad = good.clone();
+        bad.pad_numbers = vec!["1".to_owned(), "1".to_owned()];
+        assert!(!bad.matches(&prepared));
         fs::remove_dir_all(root).unwrap();
     }
 
