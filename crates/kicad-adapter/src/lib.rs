@@ -1,11 +1,12 @@
 use kicad_engine::{
-    MAX_GRAPHIC_BOUNDING_AREA_NM2, MAX_GRAPHIC_SPAN_NM, Operation, OperationKind,
-    expand_board_outline,
+    MAX_BOARD_POSITION_NM, MAX_GRAPHIC_BOUNDING_AREA_NM2, MAX_GRAPHIC_SPAN_NM, Operation,
+    OperationKind, expand_board_outline,
 };
 use kicad_ipc::{
     BoardGraphicLayer as IpcBoardGraphicLayer, BoardGraphicSegment as IpcBoardGraphicSegment,
-    CommitId, CreatedBoardGraphicReceipt, FootprintSide as IpcFootprintSide, InstanceToken,
-    KiCadClient, KiCadTransport, ObservedBoardGraphicSegment, ObservedBoardLayer as IpcBoardLayer,
+    CommitId, CreateThroughVia, CreateTrack, CreatedBoardGraphicReceipt, CreatedThroughViaReceipt,
+    CreatedTrackReceipt, FootprintSide as IpcFootprintSide, InstanceToken, KiCadClient,
+    KiCadTransport, ObservedBoardGraphicSegment, ObservedBoardLayer as IpcBoardLayer,
     ObservedBoardRoutingItems as IpcBoardRoutingItems, ObservedBoardStackup as IpcBoardStackup,
     ObservedDrillShape as IpcDrillShape, ObservedFootprintInstance as IpcFootprintInstance,
     ObservedLockState as IpcLockState, ObservedPad as IpcPad, ObservedPadKind as IpcPadKind,
@@ -1303,6 +1304,16 @@ pub trait BoardGraphicsIpc {
         board_filename: &str,
         graphics: &[IpcBoardGraphicSegment],
     ) -> Result<Vec<CreatedBoardGraphicReceipt>, String>;
+    fn create_track(
+        &mut self,
+        board_filename: &str,
+        track: &CreateTrack,
+    ) -> Result<CreatedTrackReceipt, String>;
+    fn create_through_via(
+        &mut self,
+        board_filename: &str,
+        via: &CreateThroughVia,
+    ) -> Result<CreatedThroughViaReceipt, String>;
     fn commit_changes(&mut self, commit: &str, message: &str) -> Result<(), String>;
     fn drop_commit(&mut self, commit: &str) -> Result<(), String>;
     fn save_board(&mut self, board_filename: &str) -> Result<(), String>;
@@ -1326,6 +1337,23 @@ impl<T: KiCadTransport> BoardGraphicsIpc for KiCadClient<T> {
         graphics: &[IpcBoardGraphicSegment],
     ) -> Result<Vec<CreatedBoardGraphicReceipt>, String> {
         KiCadClient::create_board_graphics(self, board_filename, graphics)
+            .map_err(|error| error.to_string())
+    }
+
+    fn create_track(
+        &mut self,
+        board_filename: &str,
+        track: &CreateTrack,
+    ) -> Result<CreatedTrackReceipt, String> {
+        KiCadClient::create_track(self, board_filename, track).map_err(|error| error.to_string())
+    }
+
+    fn create_through_via(
+        &mut self,
+        board_filename: &str,
+        via: &CreateThroughVia,
+    ) -> Result<CreatedThroughViaReceipt, String> {
+        KiCadClient::create_through_via(self, board_filename, via)
             .map_err(|error| error.to_string())
     }
 
@@ -1394,6 +1422,30 @@ impl BoardGraphicsExecutor {
             return BoardGraphicsCommitOutcome::Rejected {
                 reason: "operation batch is empty".into(),
             };
+        }
+        let has_routing = operations.iter().any(|operation| {
+            matches!(
+                operation,
+                OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. }
+            )
+        });
+        if has_routing {
+            if operations.len() > self.max_segments {
+                return BoardGraphicsCommitOutcome::Rejected {
+                    reason: "routing operation count exceeded bounds".into(),
+                };
+            }
+            if operations.iter().any(|operation| {
+                !matches!(
+                    operation,
+                    OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. }
+                )
+            }) {
+                return BoardGraphicsCommitOutcome::Rejected {
+                    reason: "routing and graphics operations cannot share a transaction".into(),
+                };
+            }
+            return self.execute_routing(ipc, operations, board_filename, message);
         }
         let mut segments = Vec::new();
         for operation in operations {
@@ -1547,6 +1599,109 @@ impl BoardGraphicsExecutor {
         }
         BoardGraphicsCommitOutcome::CommittedAndSaved
     }
+
+    fn execute_routing<I: BoardGraphicsIpc>(
+        &self,
+        ipc: &mut I,
+        operations: &[&OperationKind],
+        board_filename: &str,
+        message: &str,
+    ) -> BoardGraphicsCommitOutcome {
+        let mut requests = Vec::with_capacity(operations.len());
+        for operation in operations {
+            let request = match operation {
+                OperationKind::AddStraightTrack { intent, .. } => {
+                    if intent.validate().is_err()
+                        || intent.start.x.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
+                        || intent.start.y.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
+                        || intent.end.x.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
+                        || intent.end.y.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
+                    {
+                        return BoardGraphicsCommitOutcome::Rejected {
+                            reason: "straight track intent is invalid or out of bounds".into(),
+                        };
+                    }
+                    RoutingRequest::Track(CreateTrack {
+                        start_x_nm: intent.start.x,
+                        start_y_nm: intent.start.y,
+                        end_x_nm: intent.end.x,
+                        end_y_nm: intent.end.y,
+                        width_nm: intent.width_nm,
+                    })
+                }
+                OperationKind::AddThroughVia { intent, .. } => {
+                    if intent.validate().is_err()
+                        || intent.position.x.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
+                        || intent.position.y.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
+                    {
+                        return BoardGraphicsCommitOutcome::Rejected {
+                            reason: "through via intent is invalid or out of bounds".into(),
+                        };
+                    }
+                    RoutingRequest::Via(CreateThroughVia {
+                        position_x_nm: intent.position.x,
+                        position_y_nm: intent.position.y,
+                        pad_diameter_nm: intent.size_nm,
+                        drill_diameter_nm: intent.drill_nm,
+                    })
+                }
+                _ => unreachable!("routing batch was checked before execution"),
+            };
+            requests.push(request);
+        }
+        let commit = match ipc.begin_commit() {
+            Ok(commit) => commit,
+            Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
+        };
+        for request in &requests {
+            let result = match request {
+                RoutingRequest::Track(track) => ipc
+                    .create_track(board_filename, track)
+                    .map(|receipt| receipt.request_index == 0 && receipt.track == *track),
+                RoutingRequest::Via(via) => ipc
+                    .create_through_via(board_filename, via)
+                    .map(|receipt| receipt.request_index == 0 && receipt.via == *via),
+            };
+            match result {
+                Ok(true) => {}
+                Ok(false) => {
+                    return match ipc.drop_commit(&commit) {
+                        Ok(()) => BoardGraphicsCommitOutcome::Rejected {
+                            reason: "created routing receipt did not match the request".into(),
+                        },
+                        Err(drop_reason) => BoardGraphicsCommitOutcome::Unknown {
+                            reason: format!("routing receipt mismatch; drop failed: {drop_reason}"),
+                        },
+                    };
+                }
+                Err(reason) => {
+                    return match ipc.drop_commit(&commit) {
+                        Ok(()) => BoardGraphicsCommitOutcome::Rejected { reason },
+                        Err(drop_reason) => BoardGraphicsCommitOutcome::Unknown {
+                            reason: format!(
+                                "routing create failed: {reason}; drop failed: {drop_reason}"
+                            ),
+                        },
+                    };
+                }
+            }
+        }
+        if let Err(reason) = ipc.commit_changes(&commit, message) {
+            return BoardGraphicsCommitOutcome::Unknown { reason };
+        }
+        if let Err(reason) = ipc.save_board(board_filename) {
+            return BoardGraphicsCommitOutcome::Unknown { reason };
+        }
+        BoardGraphicsCommitOutcome::Unknown {
+            reason: "routing committed and saved, but no routing read-after-save observation is available".into(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum RoutingRequest {
+    Track(CreateTrack),
+    Via(CreateThroughVia),
 }
 
 #[cfg(test)]
@@ -2709,6 +2864,9 @@ mod tests {
     struct FakeGraphicsIpc {
         begin: Result<String, String>,
         create: Result<(), String>,
+        track: Result<(), String>,
+        via: Result<(), String>,
+        routing_receipt_matches: bool,
         commit: Result<(), String>,
         drop: Result<(), String>,
         save: Result<(), String>,
@@ -2722,6 +2880,9 @@ mod tests {
             Self {
                 begin: Ok("c1".into()),
                 create: Ok(()),
+                track: Ok(()),
+                via: Ok(()),
+                routing_receipt_matches: true,
                 commit: Ok(()),
                 drop: Ok(()),
                 save: Ok(()),
@@ -2756,6 +2917,34 @@ mod tests {
                         lock_state: kicad_ipc::ObservedLockState::Unlocked,
                     })
                     .collect()
+            })
+        }
+
+        fn create_track(
+            &mut self,
+            filename: &str,
+            track: &CreateTrack,
+        ) -> Result<CreatedTrackReceipt, String> {
+            self.calls.push(format!("track:{filename}"));
+            self.track.clone().map(|_| CreatedTrackReceipt {
+                request_index: usize::from(!self.routing_receipt_matches),
+                source_uuid: "track-uuid".into(),
+                track: *track,
+                lock_state: kicad_ipc::ObservedLockState::Unlocked,
+            })
+        }
+
+        fn create_through_via(
+            &mut self,
+            filename: &str,
+            via: &CreateThroughVia,
+        ) -> Result<CreatedThroughViaReceipt, String> {
+            self.calls.push(format!("via:{filename}"));
+            self.via.clone().map(|_| CreatedThroughViaReceipt {
+                request_index: usize::from(!self.routing_receipt_matches),
+                source_uuid: "via-uuid".into(),
+                via: *via,
+                lock_state: kicad_ipc::ObservedLockState::Unlocked,
             })
         }
 
@@ -3033,5 +3222,201 @@ mod tests {
         assert!(
             matches!(outcome, BoardGraphicsCommitOutcome::Unknown { reason } if reason.contains("does not match"))
         );
+    }
+
+    fn board_coordinate(x: i64, y: i64) -> Coordinate {
+        Coordinate {
+            x,
+            y,
+            unit: Unit::Nanometres,
+            space: DocumentSpace::Board,
+        }
+    }
+
+    #[test]
+    fn routing_executor_creates_track_and_via_but_reports_unknown_without_observation() {
+        let operations = vec![
+            Operation {
+                operation_id: StableId::new("op-track").unwrap(),
+                kind: OperationKind::AddStraightTrack {
+                    board: StableId::new("board").unwrap(),
+                    intent: kicad_model::StraightTrackIntent::new(
+                        StableId::new("track").unwrap(),
+                        board_coordinate(1, 2),
+                        board_coordinate(3, 4),
+                        100,
+                    )
+                    .unwrap(),
+                },
+                targets: Vec::new(),
+                preconditions: Vec::new(),
+                expected_effects: Vec::new(),
+                risk_class: kicad_engine::RiskClass::Low,
+                idempotency_key: "track".into(),
+                source_run_id: "test".into(),
+            },
+            Operation {
+                operation_id: StableId::new("op-via").unwrap(),
+                kind: OperationKind::AddThroughVia {
+                    board: StableId::new("board").unwrap(),
+                    intent: kicad_model::ThroughViaIntent::new(
+                        StableId::new("via").unwrap(),
+                        board_coordinate(5, 6),
+                        200,
+                        100,
+                    )
+                    .unwrap(),
+                },
+                targets: Vec::new(),
+                preconditions: Vec::new(),
+                expected_effects: Vec::new(),
+                risk_class: kicad_engine::RiskClass::Low,
+                idempotency_key: "via".into(),
+                source_run_id: "test".into(),
+            },
+        ];
+        let mut ipc = FakeGraphicsIpc::default();
+        let outcome = BoardGraphicsExecutor::default().execute_batch(
+            &mut ipc,
+            &operations,
+            "board.kicad_pcb",
+            "route",
+        );
+        assert!(
+            matches!(outcome, BoardGraphicsCommitOutcome::Unknown { reason } if reason.contains("no routing read-after-save"))
+        );
+        assert_eq!(
+            ipc.calls,
+            vec![
+                "begin",
+                "track:board.kicad_pcb",
+                "via:board.kicad_pcb",
+                "commit:c1",
+                "save:board.kicad_pcb",
+            ]
+        );
+    }
+
+    #[test]
+    fn routing_executor_drops_commit_after_create_failure() {
+        let operation = OperationKind::AddThroughVia {
+            board: StableId::new("board").unwrap(),
+            intent: kicad_model::ThroughViaIntent::new(
+                StableId::new("via").unwrap(),
+                board_coordinate(5, 6),
+                200,
+                100,
+            )
+            .unwrap(),
+        };
+        let mut ipc = FakeGraphicsIpc {
+            via: Err("create failed".into()),
+            ..Default::default()
+        };
+        let outcome = BoardGraphicsExecutor::default().execute(
+            &mut ipc,
+            &operation,
+            "board.kicad_pcb",
+            "route",
+        );
+        assert_eq!(
+            outcome,
+            BoardGraphicsCommitOutcome::Rejected {
+                reason: "create failed".into()
+            }
+        );
+        assert_eq!(ipc.calls, vec!["begin", "via:board.kicad_pcb", "drop:c1"]);
+    }
+
+    #[test]
+    fn routing_executor_reports_unknown_when_receipt_mismatch_cannot_be_dropped() {
+        let operation = OperationKind::AddStraightTrack {
+            board: StableId::new("board").unwrap(),
+            intent: kicad_model::StraightTrackIntent::new(
+                StableId::new("track").unwrap(),
+                board_coordinate(1, 2),
+                board_coordinate(3, 4),
+                100,
+            )
+            .unwrap(),
+        };
+        let mut ipc = FakeGraphicsIpc {
+            routing_receipt_matches: false,
+            drop: Err("drop failed".into()),
+            ..Default::default()
+        };
+        let outcome = BoardGraphicsExecutor::default().execute(
+            &mut ipc,
+            &operation,
+            "board.kicad_pcb",
+            "route",
+        );
+        assert!(
+            matches!(outcome, BoardGraphicsCommitOutcome::Unknown { reason } if reason.contains("receipt mismatch") && reason.contains("drop failed"))
+        );
+        assert_eq!(ipc.calls, vec!["begin", "track:board.kicad_pcb", "drop:c1"]);
+    }
+
+    #[test]
+    fn routing_executor_reports_unknown_when_save_fails_after_commit() {
+        let operation = OperationKind::AddThroughVia {
+            board: StableId::new("board").unwrap(),
+            intent: kicad_model::ThroughViaIntent::new(
+                StableId::new("via").unwrap(),
+                board_coordinate(5, 6),
+                200,
+                100,
+            )
+            .unwrap(),
+        };
+        let mut ipc = FakeGraphicsIpc {
+            save: Err("save failed".into()),
+            ..Default::default()
+        };
+        let outcome = BoardGraphicsExecutor::default().execute(
+            &mut ipc,
+            &operation,
+            "board.kicad_pcb",
+            "route",
+        );
+        assert_eq!(
+            outcome,
+            BoardGraphicsCommitOutcome::Unknown {
+                reason: "save failed".into()
+            }
+        );
+        assert_eq!(
+            ipc.calls,
+            vec![
+                "begin",
+                "via:board.kicad_pcb",
+                "commit:c1",
+                "save:board.kicad_pcb"
+            ]
+        );
+    }
+
+    #[test]
+    fn routing_executor_rejects_invalid_intent_before_begin_commit() {
+        let operation = OperationKind::AddStraightTrack {
+            board: StableId::new("board").unwrap(),
+            intent: kicad_model::StraightTrackIntent {
+                source_uuid: StableId::new("track").unwrap(),
+                start: board_coordinate(1, 2),
+                end: board_coordinate(1, 2),
+                width_nm: 100,
+            },
+        };
+        let mut ipc = FakeGraphicsIpc::default();
+        let outcome = BoardGraphicsExecutor::default().execute(
+            &mut ipc,
+            &operation,
+            "board.kicad_pcb",
+            "route",
+        );
+        assert!(
+            matches!(outcome, BoardGraphicsCommitOutcome::Rejected { reason } if reason.contains("invalid"))
+        );
+        assert!(ipc.calls.is_empty());
     }
 }
