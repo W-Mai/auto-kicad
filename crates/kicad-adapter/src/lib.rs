@@ -41,11 +41,16 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 pub mod footprint;
+pub mod lifecycle;
 pub use footprint::{
     AllowlistedFootprint, DisabledFootprintRunner, DisposableFootprintContext,
     DisposableFootprintRunner, FootprintBackendError, FootprintPlacementReceipt, FootprintRegistry,
     FootprintSourceKind, LibraryProvenance, PreparedFootprintPlacement, ResolutionEvidence,
     ResolvedFootprint, validate_placement,
+};
+pub use lifecycle::{
+    DisposablePcbLifecycle, FakeDisposablePcbLifecycle, FilesystemDisposablePcbLifecycle,
+    LifecycleError, OwnedEditorIdentity, ShadowProject,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
