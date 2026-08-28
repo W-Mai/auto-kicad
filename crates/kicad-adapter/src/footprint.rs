@@ -284,7 +284,11 @@ pub struct FootprintPostcondition {
 fn is_uuid(value: &str) -> bool {
     value.len() == 36
         && value.as_bytes().iter().enumerate().all(|(index, byte)| {
-            matches!(index, 8 | 13 | 18 | 23) == (*byte == b'-') || byte.is_ascii_hexdigit()
+            if matches!(index, 8 | 13 | 18 | 23) {
+                *byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
         })
 }
 
@@ -300,12 +304,6 @@ impl FootprintPostcondition {
             && self.saved
             && self.reopened
             && self.pad_numbers.iter().all(|number| !number.is_empty())
-            && self
-                .pad_numbers
-                .iter()
-                .collect::<std::collections::BTreeSet<_>>()
-                .len()
-                == self.pad_numbers.len()
     }
 }
 
@@ -739,8 +737,11 @@ mod tests {
         let mut bad = good.clone();
         bad.reference = "P2".to_owned();
         assert!(!bad.matches(&prepared));
+        let mut repeated = good.clone();
+        repeated.pad_numbers = vec!["S1".to_owned(), "S1".to_owned()];
+        assert!(repeated.matches(&prepared));
         let mut bad = good.clone();
-        bad.pad_numbers = vec!["1".to_owned(), "1".to_owned()];
+        bad.pad_numbers = vec!["1".to_owned(), String::new()];
         assert!(!bad.matches(&prepared));
         fs::remove_dir_all(root).unwrap();
     }
