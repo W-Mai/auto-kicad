@@ -2,8 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 
 use kicad_model::{
-    BoardGraphicSegment, Coordinate, DocumentSpace, ProjectSnapshot, RevisionDigest, StableId,
-    Symbol,
+    AllowlistedFootprintPlacement, BoardGraphicSegment, Coordinate, DocumentSpace, Footprint,
+    ProjectSnapshot, RevisionDigest, StableId, Symbol,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -11,6 +11,7 @@ use sha2::{Digest, Sha256};
 pub const MAX_OPERATIONS: usize = 100;
 pub const MAX_GRAPHIC_SPAN_NM: i128 = 10_000_000;
 pub const MAX_GRAPHIC_BOUNDING_AREA_NM2: i128 = 100_000_000_000_000;
+pub const MAX_BOARD_POSITION_NM: i64 = 2_000_000_000;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "arguments")]
@@ -34,6 +35,10 @@ pub enum OperationKind {
     PlaceFootprint {
         target: StableId,
         position: Coordinate,
+    },
+    PlaceAllowlistedFootprint {
+        board: StableId,
+        placement: AllowlistedFootprintPlacement,
     },
     AddBoardGraphicSegments {
         board: StableId,
@@ -81,6 +86,9 @@ impl Operation {
             OperationKind::ConnectPins { source, target } => vec![source, target],
             OperationKind::AssignFootprint { symbol, .. } => vec![symbol],
             OperationKind::PlaceFootprint { target, .. } => vec![target],
+            OperationKind::PlaceAllowlistedFootprint { board, placement } => {
+                vec![board, &placement.target_id]
+            }
             OperationKind::AddBoardGraphicSegments { board, .. }
             | OperationKind::AddBoardOutline { board, .. } => vec![board],
         }
@@ -139,6 +147,29 @@ impl ChangePlan {
             .iter()
             .map(|graphic| graphic.graphic_id.clone())
             .collect();
+        let mut footprint_targets: BTreeSet<StableId> = snapshot
+            .board
+            .footprints
+            .iter()
+            .map(|footprint| footprint.source_uuid.clone())
+            .collect();
+        if let Some(native_footprints) = &snapshot.native_footprints {
+            footprint_targets.extend(native_footprints.placements.iter().flat_map(|placement| {
+                [
+                    placement.source_uuid.clone(),
+                    placement.placement_id.clone(),
+                ]
+            }));
+        }
+        for operation in &self.operations {
+            if let OperationKind::PlaceAllowlistedFootprint { placement, .. } = &operation.kind
+                && !footprint_targets.insert(placement.target_id.clone())
+            {
+                return Err(EngineError::TargetAlreadyExists(
+                    placement.target_id.clone(),
+                ));
+            }
+        }
         let mut planned_adds = BTreeMap::new();
         for (index, operation) in self.operations.iter().enumerate() {
             if let OperationKind::AddSymbol { symbol } = &operation.kind
@@ -180,7 +211,8 @@ impl ChangePlan {
                 known.insert(symbol.source_uuid.clone());
             } else if !matches!(
                 op.kind,
-                OperationKind::AddBoardGraphicSegments { .. }
+                OperationKind::PlaceAllowlistedFootprint { .. }
+                    | OperationKind::AddBoardGraphicSegments { .. }
                     | OperationKind::AddBoardOutline { .. }
             ) {
                 for target in op.refs() {
@@ -219,6 +251,21 @@ impl ChangePlan {
                             && matches!(&candidate.kind, OperationKind::AssignFootprint { symbol, .. } if symbol == target)
                     }) {
                         return Err(EngineError::InvalidOrder);
+                    }
+                }
+                OperationKind::PlaceAllowlistedFootprint { board, placement } => {
+                    if snapshot.board.document_id.as_ref() != Some(board) {
+                        return Err(EngineError::ScopeMismatch);
+                    }
+                    placement.validate().map_err(|_| {
+                        EngineError::InvalidPlan("invalid allowlisted footprint placement")
+                    })?;
+                    if placement.position.x.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
+                        || placement.position.y.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
+                    {
+                        return Err(EngineError::InvalidPlan(
+                            "footprint position bounds exceeded",
+                        ));
                     }
                 }
                 OperationKind::AddBoardGraphicSegments { board, segments } => {
@@ -516,6 +563,9 @@ fn apply_operations(
     mut snapshot: ProjectSnapshot,
     operations: &[Operation],
 ) -> Result<ProjectSnapshot, EngineError> {
+    let base_revision = snapshot
+        .revision()
+        .map_err(|error| EngineError::Serialization(error.to_string()))?;
     for op in operations {
         match &op.kind {
             OperationKind::AddSymbol { symbol } => snapshot.schematic.symbols.push(symbol.clone()),
@@ -533,6 +583,16 @@ fn apply_operations(
                 symbol.value = Some(value.clone());
             }
             OperationKind::SetProperty { .. } => return Err(EngineError::UnsupportedOperation),
+            OperationKind::PlaceAllowlistedFootprint { placement, .. } => {
+                snapshot.board.footprints.push(Footprint {
+                    source_uuid: placement.target_id.clone(),
+                    observed_revision: base_revision.clone(),
+                    reference: Some(placement.reference.clone()),
+                    value: Some(placement.value.clone()),
+                    position: placement.position,
+                    library_identifier: Some(placement.library_identifier.clone()),
+                });
+            }
             OperationKind::AddBoardGraphicSegments { segments, .. } => {
                 snapshot.board.graphics.extend(segments.clone());
             }
@@ -741,6 +801,36 @@ mod tests {
             operation_id: id(key),
             kind,
             targets: vec![id(target)],
+            preconditions: vec![],
+            expected_effects: vec![],
+            risk_class: RiskClass::Low,
+            idempotency_key: key.into(),
+            source_run_id: "run".into(),
+        }
+    }
+    fn allowlisted_footprint_op(target: &str, x: i64, y: i64, key: &str) -> Operation {
+        Operation {
+            operation_id: id(key),
+            kind: OperationKind::PlaceAllowlistedFootprint {
+                board: id("board"),
+                placement: AllowlistedFootprintPlacement::new(
+                    id(target),
+                    kicad_model::FootprintLibraryIdentifier {
+                        nickname: "Connector_USB".into(),
+                        entry_name: "USB_C_Receptacle".into(),
+                    },
+                    Coordinate {
+                        x,
+                        y,
+                        unit: Unit::Nanometres,
+                        space: DocumentSpace::Board,
+                    },
+                    target,
+                    "USB-C",
+                )
+                .unwrap(),
+            },
+            targets: vec![id("board"), id(target)],
             preconditions: vec![],
             expected_effects: vec![],
             risk_class: RiskClass::Low,
@@ -1068,6 +1158,180 @@ mod tests {
         );
         stale.base_revision = digest('b');
         assert_eq!(engine.preview(&stale), Err(EngineError::RevisionStale));
+    }
+
+    #[test]
+    fn allowlisted_footprint_preview_is_deterministic_and_additive() {
+        let engine = Engine::new(snapshot(), "token");
+        let first = engine
+            .preview(&plan(
+                &engine,
+                vec![
+                    allowlisted_footprint_op("J2", 2_000_000, 0, "place-j2"),
+                    allowlisted_footprint_op("J1", 1_000_000, 0, "place-j1"),
+                ],
+            ))
+            .unwrap();
+        let second = engine
+            .preview(&plan(
+                &engine,
+                vec![
+                    allowlisted_footprint_op("J1", 1_000_000, 0, "place-j1"),
+                    allowlisted_footprint_op("J2", 2_000_000, 0, "place-j2"),
+                ],
+            ))
+            .unwrap();
+        assert_eq!(first.after, second.after);
+        assert_eq!(first.after.board.footprints[0].source_uuid, id("J1"));
+        assert_eq!(
+            first.after.board.footprints[0].reference.as_deref(),
+            Some("J1")
+        );
+
+        let legacy = serde_json::to_value(OperationKind::PlaceFootprint {
+            target: id("existing"),
+            position: Coordinate {
+                x: 1,
+                y: 2,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            },
+        })
+        .unwrap();
+        assert_eq!(legacy["kind"], "PlaceFootprint");
+        assert!(legacy["arguments"].get("placement").is_none());
+    }
+
+    #[test]
+    fn allowlisted_footprint_commit_replay_and_rollback_follow_session_contract() {
+        let mut engine = Engine::new(snapshot(), "token");
+        let operation = allowlisted_footprint_op("J1", 1_000_000, 2_000_000, "place-j1");
+        let mut session = engine
+            .begin_session(plan(&engine, vec![operation]))
+            .unwrap();
+        let preview = engine.preview_session(&mut session).unwrap();
+        assert_eq!(preview.after.board.footprints.len(), 1);
+        engine.validate(&mut session).unwrap();
+        engine.request_approval(&mut session).unwrap();
+        let hash = session.plan_hash.clone();
+        engine.approve(&mut session, &hash).unwrap();
+        let mut replay = session.clone();
+
+        engine.commit(&mut session).unwrap();
+        assert_eq!(engine.snapshot().board.footprints.len(), 1);
+        assert_eq!(
+            engine.snapshot().board.footprints[0].position,
+            Coordinate {
+                x: 1_000_000,
+                y: 2_000_000,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            }
+        );
+        engine.commit(&mut replay).unwrap();
+        assert_eq!(replay.audit.last().unwrap().event, "commit_replayed");
+        assert_eq!(engine.snapshot().board.footprints.len(), 1);
+        engine.rollback(&mut session).unwrap();
+        assert!(engine.snapshot().board.footprints.is_empty());
+    }
+
+    #[test]
+    fn allowlisted_footprint_serializes_as_a_new_tagged_operation() {
+        let value = serde_json::to_value(OperationKind::PlaceAllowlistedFootprint {
+            board: id("board"),
+            placement: AllowlistedFootprintPlacement::new(
+                id("J1"),
+                kicad_model::FootprintLibraryIdentifier {
+                    nickname: "Connector_USB".into(),
+                    entry_name: "USB_C_Receptacle".into(),
+                },
+                Coordinate {
+                    x: 1,
+                    y: 2,
+                    unit: Unit::Nanometres,
+                    space: DocumentSpace::Board,
+                },
+                "J1",
+                "USB-C",
+            )
+            .unwrap(),
+        })
+        .unwrap();
+        assert_eq!(value["kind"], "PlaceAllowlistedFootprint");
+        assert_eq!(
+            value["arguments"]["placement"]["library_identifier"]["entry_name"],
+            "USB_C_Receptacle"
+        );
+        assert_eq!(
+            serde_json::from_value::<OperationKind>(value.clone()).unwrap(),
+            serde_json::from_value(value).unwrap()
+        );
+    }
+
+    #[test]
+    fn allowlisted_footprint_rejects_invalid_context_bounds_and_identity() {
+        let engine = Engine::new(snapshot(), "token");
+        let mut invalid = allowlisted_footprint_op("J1", 0, 0, "invalid");
+        let OperationKind::PlaceAllowlistedFootprint { placement, .. } = &mut invalid.kind else {
+            unreachable!()
+        };
+        placement.library_identifier.nickname.clear();
+        assert_eq!(
+            engine.preview(&plan(&engine, vec![invalid])),
+            Err(EngineError::InvalidPlan(
+                "invalid allowlisted footprint placement"
+            ))
+        );
+
+        let mut invalid = allowlisted_footprint_op("J1", 0, 0, "invalid-space");
+        let OperationKind::PlaceAllowlistedFootprint { placement, .. } = &mut invalid.kind else {
+            unreachable!()
+        };
+        placement.position.space = DocumentSpace::Schematic;
+        assert!(matches!(
+            engine.preview(&plan(&engine, vec![invalid])),
+            Err(EngineError::InvalidPlan(_))
+        ));
+
+        let oversized = allowlisted_footprint_op("J1", MAX_BOARD_POSITION_NM + 1, 0, "oversized");
+        assert_eq!(
+            engine.preview(&plan(&engine, vec![oversized])),
+            Err(EngineError::InvalidPlan(
+                "footprint position bounds exceeded"
+            ))
+        );
+
+        let duplicate = vec![
+            allowlisted_footprint_op("J1", 0, 0, "place-1"),
+            allowlisted_footprint_op("J1", 1, 1, "place-2"),
+        ];
+        assert_eq!(
+            engine.preview(&plan(&engine, duplicate)),
+            Err(EngineError::TargetAlreadyExists(id("J1")))
+        );
+
+        let mut existing = snapshot();
+        existing.board.footprints.push(Footprint {
+            source_uuid: id("J1"),
+            observed_revision: digest('a'),
+            reference: Some("J1".into()),
+            value: Some("existing".into()),
+            position: Coordinate {
+                x: 0,
+                y: 0,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            },
+            library_identifier: None,
+        });
+        let engine = Engine::new(existing, "token");
+        assert_eq!(
+            engine.preview(&plan(
+                &engine,
+                vec![allowlisted_footprint_op("J1", 1, 1, "place")]
+            )),
+            Err(EngineError::TargetAlreadyExists(id("J1")))
+        );
     }
 
     #[test]

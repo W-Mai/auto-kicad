@@ -9,7 +9,10 @@ use kicad_engine::{
     ChangePlan, ChangeSession, Engine, Operation, OperationKind, Precondition, RiskClass,
 };
 use kicad_ipc::{ClientConfig, DocumentQuery, KiCadClient, NngTransport};
-use kicad_model::{DiscoverySnapshot, ProjectSnapshot, RevisionDigest, StableId};
+use kicad_model::{
+    AllowlistedFootprintPlacement, DiscoverySnapshot, FootprintLibraryIdentifier, ProjectSnapshot,
+    RevisionDigest, StableId,
+};
 use rmcp::{
     ErrorData, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -293,6 +296,7 @@ pub struct PlanBoardGraphicsRequest {
     pub source_run_id: String,
     pub segments: Option<Value>,
     pub outline: Option<BoardOutlineRequest>,
+    pub footprint: Option<BoardFootprintRequest>,
     pub request_id: String,
 }
 
@@ -303,6 +307,17 @@ pub struct BoardOutlineRequest {
     pub bottom_right_x_nm: i64,
     pub bottom_right_y_nm: i64,
     pub width_nm: i64,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+pub struct BoardFootprintRequest {
+    pub target_id: String,
+    pub library_nickname: String,
+    pub library_entry_name: String,
+    pub x_nm: i64,
+    pub y_nm: i64,
+    pub reference: String,
+    pub value: String,
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -869,13 +884,13 @@ impl Server {
             .document_id
             .clone()
             .ok_or_else(|| ErrorData::internal_error("board identity is unavailable", None))?;
-        let kind = match (arguments.segments, arguments.outline) {
-            (Some(segments), None) => OperationKind::AddBoardGraphicSegments {
+        let kind = match (arguments.segments, arguments.outline, arguments.footprint) {
+            (Some(segments), None, None) => OperationKind::AddBoardGraphicSegments {
                 board: board.clone(),
                 segments: serde_json::from_value(segments)
                     .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?,
             },
-            (None, Some(outline)) => OperationKind::AddBoardOutline {
+            (None, Some(outline), None) => OperationKind::AddBoardOutline {
                 board: board.clone(),
                 top_left: kicad_model::Coordinate {
                     x: outline.top_left_x_nm,
@@ -891,6 +906,31 @@ impl Server {
                 },
                 width_nm: outline.width_nm,
             },
+            (None, None, Some(footprint)) => {
+                let target_id = StableId::new(footprint.target_id)
+                    .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+                let library_identifier = FootprintLibraryIdentifier {
+                    nickname: footprint.library_nickname,
+                    entry_name: footprint.library_entry_name,
+                };
+                let placement = AllowlistedFootprintPlacement::new(
+                    target_id,
+                    library_identifier,
+                    kicad_model::Coordinate {
+                        x: footprint.x_nm,
+                        y: footprint.y_nm,
+                        unit: kicad_model::Unit::Nanometres,
+                        space: kicad_model::DocumentSpace::Board,
+                    },
+                    footprint.reference,
+                    footprint.value,
+                )
+                .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+                OperationKind::PlaceAllowlistedFootprint {
+                    board: board.clone(),
+                    placement,
+                }
+            }
             _ => {
                 return Err(ErrorData::invalid_params(
                     "exactly one of segments or outline is required",
@@ -1848,6 +1888,7 @@ mod tests {
             source_run_id: "run".into(),
             segments: Some(serde_json::to_value(vec![graphic("g1")]).unwrap()),
             outline: None,
+            footprint: None,
             request_id: request_id.into(),
         }
     }

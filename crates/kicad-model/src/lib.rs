@@ -103,6 +103,8 @@ pub struct Footprint {
     pub reference: Option<String>,
     pub value: Option<String>,
     pub position: Coordinate,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library_identifier: Option<FootprintLibraryIdentifier>,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -343,6 +345,77 @@ impl FootprintLibraryIdentifier {
             ));
         }
         Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct AllowlistedFootprintPlacement {
+    pub target_id: StableId,
+    pub library_identifier: FootprintLibraryIdentifier,
+    pub position: Coordinate,
+    pub reference: String,
+    pub value: String,
+}
+
+impl AllowlistedFootprintPlacement {
+    pub fn new(
+        target_id: StableId,
+        library_identifier: FootprintLibraryIdentifier,
+        position: Coordinate,
+        reference: impl Into<String>,
+        value: impl Into<String>,
+    ) -> Result<Self, ModelError> {
+        let placement = Self {
+            target_id,
+            library_identifier,
+            position,
+            reference: reference.into(),
+            value: value.into(),
+        };
+        placement.validate()?;
+        Ok(placement)
+    }
+
+    pub fn validate(&self) -> Result<(), ModelError> {
+        if self.library_identifier.nickname.is_empty()
+            || self.library_identifier.entry_name.is_empty()
+        {
+            return Err(ModelError::InvalidAllowlistedFootprintPlacement(
+                "allowlisted library identifier must not be empty",
+            ));
+        }
+        if self.position.unit != Unit::Nanometres || self.position.space != DocumentSpace::Board {
+            return Err(ModelError::InvalidAllowlistedFootprintPlacement(
+                "footprint position must use board-space nanometres",
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl<'de> Deserialize<'de> for AllowlistedFootprintPlacement {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct RawPlacement {
+            target_id: StableId,
+            library_identifier: FootprintLibraryIdentifier,
+            position: Coordinate,
+            reference: String,
+            value: String,
+        }
+
+        let raw = RawPlacement::deserialize(deserializer)?;
+        Self::new(
+            raw.target_id,
+            raw.library_identifier,
+            raw.position,
+            raw.reference,
+            raw.value,
+        )
+        .map_err(serde::de::Error::custom)
     }
 }
 
@@ -1913,6 +1986,7 @@ pub enum ModelError {
     NonCanonicalSchematicArtifacts,
     SchematicArtifactDigestMismatch,
     InvalidBoardGraphic(&'static str),
+    InvalidAllowlistedFootprintPlacement(&'static str),
     InvalidFootprintObservation(&'static str),
     InvalidRoutingObservation(&'static str),
     InvalidStackupObservation(&'static str),
@@ -1941,6 +2015,7 @@ impl Display for ModelError {
                 formatter.write_str("schematic artifact revision digest does not match its inputs")
             }
             Self::InvalidBoardGraphic(message)
+            | Self::InvalidAllowlistedFootprintPlacement(message)
             | Self::InvalidFootprintObservation(message)
             | Self::InvalidRoutingObservation(message)
             | Self::InvalidStackupObservation(message) => formatter.write_str(message),
@@ -2030,6 +2105,41 @@ mod tests {
         let coordinate = symbol("a", "R1").position;
         assert_eq!(coordinate.unit, Unit::Nanometres);
         assert_eq!(coordinate.space, DocumentSpace::Schematic);
+    }
+
+    #[test]
+    fn allowlisted_footprint_placement_enforces_typed_context() {
+        let placement = AllowlistedFootprintPlacement::new(
+            id("request-1"),
+            FootprintLibraryIdentifier {
+                nickname: "Connector_USB".to_owned(),
+                entry_name: "USB_C_Receptacle".to_owned(),
+            },
+            Coordinate {
+                x: 10_000_000,
+                y: -5_000_000,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            },
+            "J1",
+            "USB-C",
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_value::<AllowlistedFootprintPlacement>(
+                serde_json::to_value(&placement).unwrap()
+            )
+            .unwrap(),
+            placement
+        );
+
+        let mut invalid = serde_json::to_value(&placement).unwrap();
+        invalid["library_identifier"]["nickname"] = serde_json::json!("");
+        assert!(serde_json::from_value::<AllowlistedFootprintPlacement>(invalid).is_err());
+
+        let mut invalid = serde_json::to_value(&placement).unwrap();
+        invalid["position"]["space"] = serde_json::json!("Schematic");
+        assert!(serde_json::from_value::<AllowlistedFootprintPlacement>(invalid).is_err());
     }
 
     #[test]
