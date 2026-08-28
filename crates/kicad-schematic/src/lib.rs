@@ -24,6 +24,10 @@ pub use patch::{
     preview_two_resistor_circuit,
 };
 
+pub fn schematic_change_available() -> bool {
+    NetlistRunner::production().is_ok()
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Limits {
     pub max_files: usize,

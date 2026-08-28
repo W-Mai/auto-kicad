@@ -74,7 +74,10 @@ pub fn commit_two_resistor_circuit(
             };
         }
     };
-    commit_two_resistor_circuit_with_runner(project_root, root_schematic, receipt, &runner)
+    match commit_inner(project_root, root_schematic, receipt, &runner) {
+        Ok(artifact) => SchematicPatchOutcome::Committed { artifact },
+        Err(error) => outcome_from_failure(error),
+    }
 }
 
 pub fn create_two_resistor_circuit(
@@ -133,6 +136,9 @@ fn preview_inner(
         return Err(rejected(SchematicPatchRejection::RevisionMismatch));
     }
     let candidate_bytes = build_candidate(&original)?;
+    if candidate_bytes.len() > MAX_CANDIDATE_BYTES {
+        return Err(rejected(SchematicPatchRejection::CandidateInvalid));
+    }
     let parent = schematic
         .parent()
         .ok_or_else(|| rejected(SchematicPatchRejection::InvalidRootSchematic))?;
@@ -168,9 +174,9 @@ fn commit_two_resistor_circuit_with_runner(
     project_root: &Path,
     root_schematic: &Path,
     receipt: &SchematicPreviewReceipt,
-    _runner: &NetlistRunner,
+    runner: &NetlistRunner,
 ) -> SchematicPatchOutcome {
-    let result = commit_inner(project_root, root_schematic, receipt);
+    let result = commit_inner(project_root, root_schematic, receipt, runner);
     match result {
         Ok(artifact) => SchematicPatchOutcome::Committed { artifact },
         Err(error) => outcome_from_failure(error),
@@ -181,6 +187,7 @@ fn commit_inner(
     project_root: &Path,
     root_schematic: &Path,
     receipt: &SchematicPreviewReceipt,
+    runner: &NetlistRunner,
 ) -> Result<SchematicArtifactFile, PatchFailure> {
     if receipt.operation_identity != TWO_RESISTOR_OPERATION_IDENTITY
         || artifact(
@@ -225,6 +232,10 @@ fn commit_inner(
         .as_file()
         .sync_all()
         .map_err(|error| unknown("sync candidate", error))?;
+    let current = read_root(&schematic)?;
+    if artifact(&relative_path, &current)? != receipt.source_artifact {
+        return Err(rejected(SchematicPatchRejection::RevisionMismatch));
+    }
     let candidate_path = candidate.into_temp_path();
     fs::rename(&candidate_path, &schematic)
         .map_err(|error| unknown("atomically replace schematic", error))?;
@@ -235,6 +246,14 @@ fn commit_inner(
             "committed schematic differs from approved candidate",
             io::Error::other("byte mismatch"),
         ));
+    }
+    if let Err(error) = validate_candidate(&relative_path, &schematic, &committed, runner, &root) {
+        return Err(match error {
+            PatchFailure::Rejected(reason) => {
+                unknown("post-commit validation", format!("{reason:?}"))
+            }
+            PatchFailure::Unknown(reason) => unknown("post-commit validation", reason),
+        });
     }
     artifact(&relative_path, &committed)
 }
@@ -686,6 +705,7 @@ XML
 exit 0
 fi
 if [ "$1" = "sch" ] && [ "$2" = "erc" ]; then
+if [ -f "$(dirname "$0")/erc-fail" ]; then exit 7; fi
 while [ "$1" != "" ]; do
   if [ "$1" = "-o" ]; then shift; printf 'ERC passed\n' > "$1"; fi
   shift
@@ -893,6 +913,28 @@ exit 1
             }
         );
         assert_eq!(fs::read(&fixture.root).unwrap(), original);
+    }
+
+    #[test]
+    fn post_commit_validation_failure_is_unknown_after_replacement() {
+        let fixture = Fixture::new();
+        let receipt = preview_two_resistor_circuit_with_runner(
+            &fs::canonicalize(fixture.dir.path()).unwrap(),
+            &fs::canonicalize(&fixture.root).unwrap(),
+            &fixture.artifact(),
+            &fixture.runner,
+        )
+        .unwrap();
+        fs::write(fixture.dir.path().join("erc-fail"), "fail").unwrap();
+        let outcome = commit_two_resistor_circuit_with_runner(
+            &fs::canonicalize(fixture.dir.path()).unwrap(),
+            &fs::canonicalize(&fixture.root).unwrap(),
+            &receipt,
+            &fixture.runner,
+        );
+        assert!(matches!(outcome, SchematicPatchOutcome::Unknown { .. }));
+        assert_eq!(fs::read(&fixture.root).unwrap(), receipt.candidate_bytes);
+        assert!(!fixture.dir.path().join("~root.kicad_sch.lck").exists());
     }
 
     #[test]

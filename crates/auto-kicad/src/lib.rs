@@ -11,7 +11,12 @@ use kicad_engine::{
 use kicad_ipc::{ClientConfig, DocumentQuery, KiCadClient, NngTransport};
 use kicad_model::{
     AllowlistedFootprintPlacement, DiscoverySnapshot, FootprintLibraryIdentifier, ProjectSnapshot,
-    RevisionDigest, StableId, StraightTrackIntent, ThroughViaIntent,
+    RevisionDigest, SchematicArtifactFile, StableId, StraightTrackIntent, ThroughViaIntent,
+};
+use kicad_schematic::{
+    Limits as SchematicLimits, SchematicPatchOutcome, SchematicPreviewReceipt,
+    TWO_RESISTOR_OPERATION_IDENTITY, commit_two_resistor_circuit, load_schematic_project,
+    preview_two_resistor_circuit, schematic_change_available,
 };
 use rmcp::{
     ErrorData, ServerHandler,
@@ -21,12 +26,53 @@ use rmcp::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub const CONTRACT_SCHEMA_VERSION: &str = "1";
+
+fn digest_bytes(bytes: &[u8]) -> RevisionDigest {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    RevisionDigest::new(hex::encode(hasher.finalize())).expect("sha256 is a valid revision digest")
+}
+
+fn digest_text(parts: &[&str]) -> String {
+    let mut hasher = Sha256::new();
+    for part in parts {
+        hasher.update(part.as_bytes());
+        hasher.update([0]);
+    }
+    format!("sha256:{}", hex::encode(hasher.finalize()))
+}
+
+fn schematic_state(outcome: &SchematicPatchOutcome) -> &'static str {
+    match outcome {
+        SchematicPatchOutcome::Committed { .. } => "committed",
+        SchematicPatchOutcome::Rejected { .. } => "rejected",
+        SchematicPatchOutcome::Unknown { .. } => "unknown",
+    }
+}
+
+fn schematic_outcome_data(outcome: &SchematicPatchOutcome) -> Value {
+    match outcome {
+        SchematicPatchOutcome::Committed { artifact } => json!({
+            "kind": "committed",
+            "artifact": artifact,
+        }),
+        SchematicPatchOutcome::Rejected { reason } => json!({
+            "kind": "rejected",
+            "reason": format!("{reason:?}"),
+        }),
+        SchematicPatchOutcome::Unknown { reason } => json!({
+            "kind": "unknown",
+            "reason": reason,
+        }),
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Capability {
@@ -356,12 +402,101 @@ pub struct CommitChangeRequest {
     pub request_id: Option<String>,
 }
 
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+pub struct PlanSchematicChangeRequest {
+    pub project_root: String,
+    pub root_schematic: String,
+    pub request_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+pub struct PreviewSchematicChangeRequest {
+    pub plan_id: String,
+    pub plan_hash: String,
+    pub request_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+pub struct CommitSchematicChangeRequest {
+    pub plan_id: String,
+    pub plan_hash: String,
+    pub approval_hash: String,
+    pub request_id: Option<String>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum StoredExecutionState {
     Ready,
     InFlight,
     Committed,
     Unknown,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum SchematicExecutionState {
+    Planned,
+    AwaitingApproval,
+    InFlight,
+    Committed,
+    Unknown,
+}
+
+#[derive(Clone, Debug)]
+struct StoredSchematicChange {
+    project_root: std::path::PathBuf,
+    root_schematic: std::path::PathBuf,
+    source_artifact: SchematicArtifactFile,
+    plan_hash: String,
+    approval_hash: Option<String>,
+    receipt: Option<SchematicPreviewReceipt>,
+    state: SchematicExecutionState,
+    outcome: Option<SchematicPatchOutcome>,
+}
+
+pub trait SchematicChangeService: Send + Sync {
+    fn verified(&self) -> bool {
+        false
+    }
+
+    fn preview(
+        &self,
+        project_root: &std::path::Path,
+        root_schematic: &std::path::Path,
+        source_artifact: &SchematicArtifactFile,
+    ) -> Result<SchematicPreviewReceipt, SchematicPatchOutcome>;
+    fn commit(
+        &self,
+        project_root: &std::path::Path,
+        root_schematic: &std::path::Path,
+        receipt: &SchematicPreviewReceipt,
+    ) -> SchematicPatchOutcome;
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ProductionSchematicChangeService;
+
+impl SchematicChangeService for ProductionSchematicChangeService {
+    fn verified(&self) -> bool {
+        schematic_change_available()
+    }
+
+    fn preview(
+        &self,
+        project_root: &std::path::Path,
+        root_schematic: &std::path::Path,
+        source_artifact: &SchematicArtifactFile,
+    ) -> Result<SchematicPreviewReceipt, SchematicPatchOutcome> {
+        preview_two_resistor_circuit(project_root, root_schematic, source_artifact)
+    }
+
+    fn commit(
+        &self,
+        project_root: &std::path::Path,
+        root_schematic: &std::path::Path,
+        receipt: &SchematicPreviewReceipt,
+    ) -> SchematicPatchOutcome {
+        commit_two_resistor_circuit(project_root, root_schematic, receipt)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -597,7 +732,9 @@ struct StoredDrcBaseline {
 #[derive(Clone)]
 pub struct Server {
     sessions: Arc<Mutex<BTreeMap<String, StoredChangeSession>>>,
+    schematic_sessions: Arc<Mutex<BTreeMap<String, StoredSchematicChange>>>,
     drc_baselines: Arc<Mutex<BTreeMap<String, StoredDrcBaseline>>>,
+    schematic: Arc<dyn SchematicChangeService>,
     capabilities: Vec<Capability>,
     discovery: Arc<dyn DiscoveryService>,
     execution: Arc<dyn BoardGraphicsExecutionService>,
@@ -664,9 +801,36 @@ impl Server {
         execution: Arc<dyn BoardGraphicsExecutionService>,
         validation: Arc<dyn BoardValidationService>,
     ) -> Self {
+        Self::with_all_services(
+            discovery,
+            execution,
+            validation,
+            Arc::new(ProductionSchematicChangeService),
+        )
+    }
+
+    pub fn with_all_services(
+        discovery: Arc<dyn DiscoveryService>,
+        execution: Arc<dyn BoardGraphicsExecutionService>,
+        validation: Arc<dyn BoardValidationService>,
+        schematic: Arc<dyn SchematicChangeService>,
+    ) -> Self {
+        let schematic_verified = schematic.verified();
+        let mut tool_router = Self::tool_router();
+        if !schematic_verified {
+            for name in [
+                "kicad_plan_schematic_change",
+                "kicad_preview_schematic_change",
+                "kicad_commit_schematic_change",
+            ] {
+                tool_router.disable_route(name);
+            }
+        }
         Self {
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            schematic_sessions: Arc::new(Mutex::new(BTreeMap::new())),
             drc_baselines: Arc::new(Mutex::new(BTreeMap::new())),
+            schematic,
             capabilities: vec![
                 Capability {
                     id: "pcb.drc.validate",
@@ -686,12 +850,22 @@ impl Server {
                     mode: "read",
                     status: "verified",
                 },
+                Capability {
+                    id: "schematic.fixed_two_resistor_change",
+                    domain: "schematic",
+                    mode: "write",
+                    status: if schematic_verified {
+                        "verified"
+                    } else {
+                        "unavailable"
+                    },
+                },
             ],
             discovery,
             execution,
             validation,
             baseline_sequence: Arc::new(AtomicU64::new(0)),
-            tool_router: Self::tool_router(),
+            tool_router,
         }
     }
 
@@ -713,6 +887,24 @@ impl Server {
         let request_id = arguments
             .request_id
             .unwrap_or_else(|| "req_capabilities".to_owned());
+        let mut advertised_tools = vec![
+            "kicad_capabilities",
+            "kicad_inspect_project",
+            "kicad_validate_project",
+            "kicad_plan_change",
+            "kicad_preview_change",
+            "kicad_commit_change",
+        ];
+        if self.capabilities.iter().any(|capability| {
+            capability.id == "schematic.fixed_two_resistor_change"
+                && capability.status == "verified"
+        }) {
+            advertised_tools.extend([
+                "kicad_plan_schematic_change",
+                "kicad_preview_schematic_change",
+                "kicad_commit_schematic_change",
+            ]);
+        }
         let envelope = Envelope {
             ok: true,
             request_id,
@@ -726,7 +918,7 @@ impl Server {
                     "mode": capability.mode,
                     "status": capability.status
                 })).collect::<Vec<_>>(),
-                "advertised_tools": ["kicad_capabilities", "kicad_inspect_project", "kicad_validate_project", "kicad_plan_change", "kicad_preview_change", "kicad_commit_change"]
+                "advertised_tools": advertised_tools
             }),
             diagnostics: Vec::new(),
             next_actions: Vec::new(),
@@ -1295,6 +1487,280 @@ impl Server {
         }
     }
 
+    #[tool(
+        name = "kicad_plan_schematic_change",
+        description = "Plan the fixed two-resistor schematic change against a saved filesystem schematic without writing it."
+    )]
+    pub async fn kicad_plan_schematic_change(
+        &self,
+        Parameters(arguments): Parameters<PlanSchematicChangeRequest>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        if !self.schematic.verified() {
+            return Ok(self.rejected(arguments.request_id, "capability_not_verified"));
+        }
+        let root = std::fs::canonicalize(&arguments.project_root)
+            .map_err(|_| ErrorData::invalid_params("project_root is unavailable", None))?;
+        if !root.is_dir() {
+            return Err(ErrorData::invalid_params(
+                "project_root is not a directory",
+                None,
+            ));
+        }
+        let schematic = std::fs::canonicalize(&arguments.root_schematic)
+            .map_err(|_| ErrorData::invalid_params("root_schematic is unavailable", None))?;
+        if !schematic.is_file()
+            || !schematic.starts_with(&root)
+            || schematic.extension().and_then(|e| e.to_str()) != Some("kicad_sch")
+        {
+            return Err(ErrorData::invalid_params(
+                "root_schematic is not a confined .kicad_sch file",
+                None,
+            ));
+        }
+        let relative = schematic
+            .strip_prefix(&root)
+            .map_err(|_| ErrorData::invalid_params("root_schematic escapes project_root", None))?
+            .to_str()
+            .ok_or_else(|| ErrorData::invalid_params("root_schematic is not UTF-8", None))?
+            .replace(std::path::MAIN_SEPARATOR, "/");
+        let project = load_schematic_project(
+            &root,
+            &schematic,
+            "filesystem-plan",
+            1,
+            SchematicLimits::default(),
+        )
+        .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+        if project.editor_lock_present {
+            return Err(ErrorData::invalid_params(
+                "schematic editor lock is present",
+                None,
+            ));
+        }
+        let bytes = std::fs::read(&schematic)
+            .map_err(|_| ErrorData::invalid_params("root_schematic is unreadable", None))?;
+        let source_artifact =
+            SchematicArtifactFile::new(relative, bytes.len() as u64, digest_bytes(&bytes))
+                .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+        let plan_id = format!("schematic-plan:{}", arguments.request_id);
+        let plan_hash = digest_text(&[
+            TWO_RESISTOR_OPERATION_IDENTITY,
+            root.to_string_lossy().as_ref(),
+            schematic.to_string_lossy().as_ref(),
+            &serde_json::to_string(&source_artifact).expect("artifact serialization"),
+        ]);
+        let stored = StoredSchematicChange {
+            project_root: root,
+            root_schematic: schematic,
+            source_artifact: source_artifact.clone(),
+            plan_hash: plan_hash.clone(),
+            approval_hash: None,
+            receipt: None,
+            state: SchematicExecutionState::Planned,
+            outcome: None,
+        };
+        let mut sessions = self
+            .schematic_sessions
+            .lock()
+            .expect("schematic session lock");
+        if let Some(existing) = sessions.get(&plan_id) {
+            if existing.plan_hash != plan_hash {
+                return Err(ErrorData::invalid_params("plan_id conflict", None));
+            }
+            return self.envelope(
+                arguments.request_id,
+                Some(plan_hash),
+                json!({"plan_id": plan_id, "plan_hash": existing.plan_hash, "source_artifact": existing.source_artifact, "state": "planned"}),
+            );
+        }
+        sessions.insert(plan_id.clone(), stored);
+        self.envelope(
+            arguments.request_id,
+            Some(plan_hash.clone()),
+            json!({"plan_id": plan_id, "plan_hash": plan_hash, "operation_identity": TWO_RESISTOR_OPERATION_IDENTITY, "source_artifact": source_artifact, "state": "planned"}),
+        )
+    }
+
+    #[tool(
+        name = "kicad_preview_schematic_change",
+        description = "Preview the fixed two-resistor filesystem schematic change using production validation, then await approval."
+    )]
+    pub async fn kicad_preview_schematic_change(
+        &self,
+        Parameters(arguments): Parameters<PreviewSchematicChangeRequest>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        if !self.schematic.verified() {
+            return Ok(self.rejected(
+                arguments
+                    .request_id
+                    .unwrap_or_else(|| "req_preview_schematic_change".into()),
+                "capability_not_verified",
+            ));
+        }
+        let mut stored = self
+            .schematic_sessions
+            .lock()
+            .expect("schematic session lock")
+            .get(&arguments.plan_id)
+            .cloned()
+            .ok_or_else(|| ErrorData::invalid_params("unknown schematic plan_id", None))?;
+        if stored.plan_hash != arguments.plan_hash {
+            return Err(ErrorData::invalid_params("plan hash mismatch", None));
+        }
+        if stored.state == SchematicExecutionState::Committed {
+            return Err(ErrorData::invalid_params(
+                "schematic change already committed",
+                None,
+            ));
+        }
+        if stored.state == SchematicExecutionState::Unknown {
+            return Err(ErrorData::invalid_params(
+                "schematic outcome is unknown; manual verification required",
+                None,
+            ));
+        }
+        let receipt = match self.schematic.preview(
+            &stored.project_root,
+            &stored.root_schematic,
+            &stored.source_artifact,
+        ) {
+            Ok(receipt) => receipt,
+            Err(outcome) => {
+                if matches!(outcome, SchematicPatchOutcome::Unknown { .. }) {
+                    stored.state = SchematicExecutionState::Unknown;
+                }
+                self.schematic_sessions
+                    .lock()
+                    .expect("schematic session lock")
+                    .insert(arguments.plan_id, stored);
+                return Ok(self.envelope_sync(
+                    arguments
+                        .request_id
+                        .unwrap_or_else(|| "req_preview_schematic_change".into()),
+                    Some(arguments.plan_hash),
+                    schematic_outcome_data(&outcome),
+                ));
+            }
+        };
+        if receipt.operation_identity != TWO_RESISTOR_OPERATION_IDENTITY
+            || receipt.source_artifact != stored.source_artifact
+        {
+            stored.state = SchematicExecutionState::Unknown;
+            return Err(ErrorData::internal_error(
+                "schematic preview receipt identity mismatch",
+                None,
+            ));
+        }
+        let approval_hash = digest_text(&[
+            &stored.plan_hash,
+            &receipt.operation_identity,
+            receipt.source_artifact.content_digest.as_str(),
+            receipt.candidate_artifact.content_digest.as_str(),
+        ]);
+        stored.approval_hash = Some(approval_hash.clone());
+        stored.receipt = Some(receipt.clone());
+        stored.state = SchematicExecutionState::AwaitingApproval;
+        self.schematic_sessions
+            .lock()
+            .expect("schematic session lock")
+            .insert(arguments.plan_id.clone(), stored);
+        self.envelope(
+            arguments.request_id.unwrap_or_else(|| "req_preview_schematic_change".into()),
+            Some(arguments.plan_hash),
+            json!({"plan_id": arguments.plan_id, "state": "awaiting_approval", "approval_hash": approval_hash, "operation_identity": receipt.operation_identity, "source_artifact": receipt.source_artifact, "candidate_artifact": receipt.candidate_artifact}),
+        )
+    }
+
+    #[tool(
+        name = "kicad_commit_schematic_change",
+        description = "Commit an exactly approved fixed two-resistor filesystem schematic preview."
+    )]
+    pub async fn kicad_commit_schematic_change(
+        &self,
+        Parameters(arguments): Parameters<CommitSchematicChangeRequest>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        if !self.schematic.verified() {
+            return Ok(self.rejected(
+                arguments
+                    .request_id
+                    .unwrap_or_else(|| "req_commit_schematic_change".into()),
+                "capability_not_verified",
+            ));
+        }
+        let mut stored = self
+            .schematic_sessions
+            .lock()
+            .expect("schematic session lock")
+            .get(&arguments.plan_id)
+            .cloned()
+            .ok_or_else(|| ErrorData::invalid_params("unknown schematic plan_id", None))?;
+        if stored.plan_hash != arguments.plan_hash {
+            return Err(ErrorData::invalid_params(
+                "schematic plan hash mismatch",
+                None,
+            ));
+        }
+        if stored.state == SchematicExecutionState::Committed {
+            if stored.approval_hash.as_deref() != Some(&arguments.approval_hash) {
+                return Err(ErrorData::invalid_params(
+                    "schematic approval mismatch",
+                    None,
+                ));
+            }
+            let outcome = stored
+                .outcome
+                .as_ref()
+                .expect("committed schematic has outcome");
+            return self.envelope(arguments.request_id.unwrap_or_else(|| "req_commit_schematic_change".into()), Some(arguments.plan_hash), json!({"plan_id": arguments.plan_id, "state": schematic_state(outcome), "outcome": schematic_outcome_data(outcome)}));
+        }
+        if stored.state != SchematicExecutionState::AwaitingApproval
+            || stored.approval_hash.as_deref() != Some(&arguments.approval_hash)
+        {
+            return Err(ErrorData::invalid_params(
+                "schematic approval mismatch or state is not awaiting approval",
+                None,
+            ));
+        }
+        let mut sessions = self
+            .schematic_sessions
+            .lock()
+            .expect("schematic session lock");
+        let current = sessions
+            .get_mut(&arguments.plan_id)
+            .ok_or_else(|| ErrorData::invalid_params("unknown schematic plan_id", None))?;
+        if current.state != SchematicExecutionState::AwaitingApproval {
+            return Err(ErrorData::invalid_params(
+                "schematic change execution was claimed",
+                None,
+            ));
+        }
+        current.state = SchematicExecutionState::InFlight;
+        stored.state = SchematicExecutionState::InFlight;
+        drop(sessions);
+        let receipt = stored
+            .receipt
+            .as_ref()
+            .expect("awaiting approval has receipt");
+        let outcome = self
+            .schematic
+            .commit(&stored.project_root, &stored.root_schematic, receipt);
+        let state = match &outcome {
+            SchematicPatchOutcome::Committed { .. } => SchematicExecutionState::Committed,
+            SchematicPatchOutcome::Rejected { .. } => SchematicExecutionState::Planned,
+            SchematicPatchOutcome::Unknown { .. } => SchematicExecutionState::Unknown,
+        };
+        stored.state = state;
+        if !matches!(outcome, SchematicPatchOutcome::Committed { .. }) {
+            stored.approval_hash = None;
+        }
+        stored.outcome = Some(outcome.clone());
+        self.schematic_sessions
+            .lock()
+            .expect("schematic session lock")
+            .insert(arguments.plan_id.clone(), stored);
+        self.envelope(arguments.request_id.unwrap_or_else(|| "req_commit_schematic_change".into()), Some(arguments.plan_hash), json!({"plan_id": arguments.plan_id, "state": schematic_state(&outcome), "outcome": schematic_outcome_data(&outcome)}))
+    }
+
     fn rejected(&self, request_id: String, reason: &str) -> CallToolResponse {
         self.envelope_sync(request_id, None, json!({ "reason": reason }))
     }
@@ -1842,6 +2308,73 @@ mod tests {
     }
 
     #[derive(Clone)]
+    struct FakeSchematic {
+        preview_calls: Arc<AtomicUsize>,
+        commit_calls: Arc<AtomicUsize>,
+    }
+
+    impl SchematicChangeService for FakeSchematic {
+        fn verified(&self) -> bool {
+            true
+        }
+
+        fn preview(
+            &self,
+            _: &Path,
+            _: &Path,
+            source_artifact: &SchematicArtifactFile,
+        ) -> Result<SchematicPreviewReceipt, SchematicPatchOutcome> {
+            self.preview_calls.fetch_add(1, AtomicOrdering::SeqCst);
+            let candidate_bytes = b"approved schematic candidate".to_vec();
+            Ok(SchematicPreviewReceipt {
+                source_artifact: source_artifact.clone(),
+                candidate_artifact: SchematicArtifactFile::new(
+                    source_artifact.relative_path.clone(),
+                    candidate_bytes.len() as u64,
+                    digest_bytes(&candidate_bytes),
+                )
+                .unwrap(),
+                operation_identity: TWO_RESISTOR_OPERATION_IDENTITY.to_owned(),
+                candidate_bytes,
+            })
+        }
+
+        fn commit(
+            &self,
+            _: &Path,
+            _: &Path,
+            receipt: &SchematicPreviewReceipt,
+        ) -> SchematicPatchOutcome {
+            self.commit_calls.fetch_add(1, AtomicOrdering::SeqCst);
+            SchematicPatchOutcome::Committed {
+                artifact: receipt.candidate_artifact.clone(),
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, Default)]
+    struct UnavailableSchematic;
+
+    impl SchematicChangeService for UnavailableSchematic {
+        fn preview(
+            &self,
+            _: &Path,
+            _: &Path,
+            _: &SchematicArtifactFile,
+        ) -> Result<SchematicPreviewReceipt, SchematicPatchOutcome> {
+            Err(SchematicPatchOutcome::Unknown {
+                reason: "schematic service unavailable".into(),
+            })
+        }
+
+        fn commit(&self, _: &Path, _: &Path, _: &SchematicPreviewReceipt) -> SchematicPatchOutcome {
+            SchematicPatchOutcome::Unknown {
+                reason: "schematic service unavailable".into(),
+            }
+        }
+    }
+
+    #[derive(Clone)]
     struct ValidationDiscovery {
         root: PathBuf,
         board_path: PathBuf,
@@ -2191,24 +2724,230 @@ mod tests {
         assert_eq!(calls.load(AtomicOrdering::SeqCst), 2);
     }
 
+    #[test]
+    fn schematic_hashes_are_deterministic_and_candidate_bytes_are_not_serialized() {
+        let first = digest_text(&["fixed-two-resistor-circuit-v1", "source"]);
+        let second = digest_text(&["fixed-two-resistor-circuit-v1", "source"]);
+        assert_eq!(first, second);
+        assert!(first.starts_with("sha256:"));
+        let outcome = SchematicPatchOutcome::Committed {
+            artifact: SchematicArtifactFile::new("root.kicad_sch", 4, digest_bytes(b"test"))
+                .unwrap(),
+        };
+        let serialized = schematic_outcome_data(&outcome).to_string();
+        assert!(!serialized.contains("candidate_bytes"));
+    }
+
     #[tokio::test]
-    async fn sdk_initialize_and_tool_list_expose_verified_read_tools() {
+    async fn schematic_change_requires_exact_approval_and_commits_once() {
+        let sequence = TEMP_SEQUENCE.fetch_add(1, AtomicOrdering::Relaxed);
+        let root = std::env::temp_dir().join(format!(
+            "auto-kicad-schematic-mcp-{}-{sequence}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let schematic = root.join("root.kicad_sch");
+        std::fs::write(
+            &schematic,
+            r#"(kicad_sch
+  (version 20231120)
+  (generator "eeschema")
+  (generator_version "10.0")
+  (uuid "11111111-1111-4111-8111-111111111111")
+  (paper "A4")
+  (lib_symbols)
+)
+"#,
+        )
+        .unwrap();
+        let preview_calls = Arc::new(AtomicUsize::new(0));
+        let commit_calls = Arc::new(AtomicUsize::new(0));
+        let server = Server::with_all_services(
+            Arc::new(FakeDiscovery {
+                write_capability: true,
+            }),
+            Arc::new(IpcBoardGraphicsExecutionService),
+            Arc::new(IpcBoardValidationService),
+            Arc::new(FakeSchematic {
+                preview_calls: preview_calls.clone(),
+                commit_calls: commit_calls.clone(),
+            }),
+        );
+        let planned = server
+            .kicad_plan_schematic_change(Parameters(PlanSchematicChangeRequest {
+                project_root: root.to_string_lossy().into_owned(),
+                root_schematic: schematic.to_string_lossy().into_owned(),
+                request_id: "schematic-lifecycle".into(),
+            }))
+            .await
+            .unwrap();
+        let planned = match planned {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("plan call should complete"),
+        };
+        let plan_id = planned["data"]["plan_id"].as_str().unwrap().to_owned();
+        let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
+        assert!(
+            server
+                .kicad_commit_schematic_change(Parameters(CommitSchematicChangeRequest {
+                    plan_id: plan_id.clone(),
+                    plan_hash: plan_hash.clone(),
+                    approval_hash: plan_hash.clone(),
+                    request_id: None,
+                }))
+                .await
+                .is_err()
+        );
+        let preview = server
+            .kicad_preview_schematic_change(Parameters(PreviewSchematicChangeRequest {
+                plan_id: plan_id.clone(),
+                plan_hash: plan_hash.clone(),
+                request_id: None,
+            }))
+            .await
+            .unwrap();
+        let preview = match preview {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("preview call should complete"),
+        };
+        let approval_hash = preview["data"]["approval_hash"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_eq!(preview_calls.load(AtomicOrdering::SeqCst), 1);
+        assert!(
+            server
+                .kicad_commit_schematic_change(Parameters(CommitSchematicChangeRequest {
+                    plan_id: plan_id.clone(),
+                    plan_hash: plan_hash.clone(),
+                    approval_hash: "wrong".into(),
+                    request_id: None,
+                }))
+                .await
+                .is_err()
+        );
+        let committed = server
+            .kicad_commit_schematic_change(Parameters(CommitSchematicChangeRequest {
+                plan_id: plan_id.clone(),
+                plan_hash: plan_hash.clone(),
+                approval_hash: approval_hash.clone(),
+                request_id: None,
+            }))
+            .await
+            .unwrap();
+        let committed = match committed {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("commit call should complete"),
+        };
+        assert_eq!(committed["data"]["state"], "committed");
+        assert_eq!(commit_calls.load(AtomicOrdering::SeqCst), 1);
+        server
+            .kicad_commit_schematic_change(Parameters(CommitSchematicChangeRequest {
+                plan_id,
+                plan_hash,
+                approval_hash,
+                request_id: None,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(commit_calls.load(AtomicOrdering::SeqCst), 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn sdk_initialize_and_tool_list_hide_unverified_schematic_tools() {
+        let client = connected(Server::with_all_services(
+            Arc::new(FakeDiscovery {
+                write_capability: true,
+            }),
+            Arc::new(IpcBoardGraphicsExecutionService),
+            Arc::new(IpcBoardValidationService),
+            Arc::new(UnavailableSchematic),
+        ))
+        .await;
+        let tools = client.list_tools(None).await.expect("tool list");
+        let names: Vec<_> = tools.tools.iter().map(|tool| tool.name.clone()).collect();
+        assert!(
+            !names
+                .iter()
+                .any(|name| name == "kicad_plan_schematic_change")
+        );
+        assert!(
+            !names
+                .iter()
+                .any(|name| name == "kicad_preview_schematic_change")
+        );
+        assert!(
+            !names
+                .iter()
+                .any(|name| name == "kicad_commit_schematic_change")
+        );
+        let result = client
+            .call_tool(
+                CallToolRequestParams::new("kicad_capabilities").with_arguments(
+                    json!({ "request_id": "req_capabilities" })
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                ),
+            )
+            .await
+            .expect("capability call");
+        let structured = result.structured_content.unwrap();
+        assert_eq!(
+            structured["data"]["capabilities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|capability| capability["id"] == "schematic.fixed_two_resistor_change")
+                .unwrap()["status"],
+            "unavailable"
+        );
+    }
+
+    #[tokio::test]
+    async fn sdk_initialize_and_tool_list_advertises_verified_schematic_tools() {
         let client = connected(Server::with_discovery(Arc::new(FakeDiscovery {
             write_capability: true,
         })))
         .await;
         let tools = client.list_tools(None).await.expect("tool list");
         let names: Vec<_> = tools.tools.iter().map(|tool| tool.name.clone()).collect();
+        assert!(
+            names
+                .iter()
+                .any(|name| name == "kicad_plan_schematic_change")
+        );
+        assert!(
+            names
+                .iter()
+                .any(|name| name == "kicad_preview_schematic_change")
+        );
+        assert!(
+            names
+                .iter()
+                .any(|name| name == "kicad_commit_schematic_change")
+        );
+        let result = client
+            .call_tool(
+                CallToolRequestParams::new("kicad_capabilities").with_arguments(
+                    json!({ "request_id": "req_capabilities_verified" })
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                ),
+            )
+            .await
+            .expect("capability call");
+        let structured = result.structured_content.unwrap();
         assert_eq!(
-            names,
-            vec![
-                "kicad_capabilities",
-                "kicad_commit_change",
-                "kicad_inspect_project",
-                "kicad_plan_change",
-                "kicad_preview_change",
-                "kicad_validate_project",
-            ]
+            structured["data"]["capabilities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|capability| capability["id"] == "schematic.fixed_two_resistor_change")
+                .unwrap()["status"],
+            "verified"
         );
     }
 

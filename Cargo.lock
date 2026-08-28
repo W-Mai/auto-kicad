@@ -30,16 +30,19 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 name = "auto-kicad"
 version = "0.1.0"
 dependencies = [
+ "hex",
  "kicad-adapter",
  "kicad-checks",
  "kicad-engine",
  "kicad-ipc",
  "kicad-model",
+ "kicad-schematic",
  "rmcp",
  "runtime",
  "schemars",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
 ]
 

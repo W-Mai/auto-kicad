@@ -104,7 +104,7 @@ impl NetlistRunner {
             PathBuf::from("/usr/bin/kicad-cli"),
         ]
         .into_iter()
-        .find(|path| path.is_file())
+        .find(|path| canonical_executable(path).is_ok())
         .ok_or(NetlistRunnerError::ExecutableNotFound)?;
         Ok(Self::from_executable(executable))
     }
