@@ -40,6 +40,14 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+pub mod footprint;
+pub use footprint::{
+    AllowlistedFootprint, DisabledFootprintRunner, DisposableFootprintContext,
+    DisposableFootprintRunner, FootprintBackendError, FootprintPlacementReceipt, FootprintRegistry,
+    FootprintSourceKind, LibraryProvenance, ResolutionEvidence, ResolvedFootprint,
+    validate_placement,
+};
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DocumentObservation {
     Documents(Vec<OpenDocument>),
