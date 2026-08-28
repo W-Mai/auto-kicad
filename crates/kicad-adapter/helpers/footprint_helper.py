@@ -86,7 +86,7 @@ def main():
     if not server_id:
         fail("server footprint UUID is empty")
     pad_numbers = sorted(str(pad.GetNumber()) for pad in candidate.Pads())
-    if not pad_numbers or len(pad_numbers) != len(set(pad_numbers)):
+    if not pad_numbers or any(not number for number in pad_numbers):
         fail("pad identity is invalid")
     print(json.dumps({"postcondition": {"footprint_uuid": server_id, "library_identifier": identifier, "reference": candidate.GetReference(), "value": candidate.GetValue(), "position": position, "pad_count": len(pad_numbers), "pad_numbers": pad_numbers, "saved": True, "reopened": True}}, separators=(",", ":")))
 
