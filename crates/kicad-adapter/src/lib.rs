@@ -2965,6 +2965,48 @@ mod tests {
     }
 
     #[test]
+    fn graphics_executor_writes_and_reads_edge_cuts_outline_layer() {
+        let outline = expand_board_outline(
+            Coordinate {
+                x: 0,
+                y: 0,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            },
+            Coordinate {
+                x: 1_000,
+                y: 500,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            },
+            10,
+        );
+        let operation = OperationKind::AddBoardOutline {
+            board: StableId::new("board").unwrap(),
+            top_left: outline[0].start,
+            bottom_right: outline[2].start,
+            width_nm: 10,
+        };
+        let mut ipc = FakeGraphicsIpc::default();
+        let outcome = BoardGraphicsExecutor::default().execute(
+            &mut ipc,
+            &operation,
+            "board.kicad_pcb",
+            "outline",
+        );
+        assert_eq!(outcome, BoardGraphicsCommitOutcome::CommittedAndSaved);
+        assert!(
+            ipc.graphics
+                .iter()
+                .all(|segment| { segment.layer == IpcBoardGraphicLayer::EdgeCuts })
+        );
+        assert_eq!(
+            ipc.calls.last().map(String::as_str),
+            Some("read:board.kicad_pcb")
+        );
+    }
+
+    #[test]
     fn graphics_executor_rejects_mismatched_saved_postcondition() {
         let mut mismatched = IpcBoardGraphicSegment {
             start_x_nm: 1,
