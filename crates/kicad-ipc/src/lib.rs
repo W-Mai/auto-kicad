@@ -157,6 +157,7 @@ pub struct ObservedBoardStackup {
 pub enum BoardGraphicLayer {
     DwgsUser,
     FSilkS,
+    EdgeCuts,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1135,6 +1136,14 @@ impl<T: KiCadTransport> KiCadClient<T> {
         &mut self,
         board_filename: &str,
     ) -> Result<Vec<ObservedBoardGraphicSegment>, IpcError> {
+        self.get_board_graphics_on_layer(board_filename, BoardGraphicLayer::DwgsUser)
+    }
+
+    pub fn get_board_graphics_on_layer(
+        &mut self,
+        board_filename: &str,
+        layer: BoardGraphicLayer,
+    ) -> Result<Vec<ObservedBoardGraphicSegment>, IpcError> {
         let command = editor_commands::GetItems {
             header: MessageField::some(board_item_header(board_filename)),
             types: vec![protobuf::EnumOrUnknown::new(
@@ -1155,7 +1164,7 @@ impl<T: KiCadTransport> KiCadClient<T> {
             &response,
             GET_ITEMS_RESPONSE_TYPE_URL,
         )?;
-        let graphics = board_graphics_from_response(&response)?;
+        let graphics = board_graphics_from_response(&response, layer)?;
         self.token = Some(token);
         Ok(graphics)
     }
@@ -2738,6 +2747,7 @@ fn routing_point(
 
 fn board_graphics_from_response(
     response: &editor_commands::GetItemsResponse,
+    layer: BoardGraphicLayer,
 ) -> Result<Vec<ObservedBoardGraphicSegment>, IpcError> {
     if response.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
         return Err(IpcError::Status(
@@ -2751,7 +2761,7 @@ fn board_graphics_from_response(
     response
         .items
         .iter()
-        .filter_map(observed_board_graphic)
+        .filter_map(|item| observed_board_graphic(item, layer))
         .collect()
 }
 
@@ -2777,7 +2787,10 @@ fn reject_unknown_board_graphic_fields(message: &impl Message) -> Result<(), Ipc
     Ok(())
 }
 
-fn observed_board_graphic(item: &Any) -> Option<Result<ObservedBoardGraphicSegment, IpcError>> {
+fn observed_board_graphic(
+    item: &Any,
+    requested_layer: BoardGraphicLayer,
+) -> Option<Result<ObservedBoardGraphicSegment, IpcError>> {
     const BOARD_GRAPHIC_SHAPE_TYPE_URL: &str =
         "type.googleapis.com/kiapi.board.types.BoardGraphicShape";
     if item.type_url != BOARD_GRAPHIC_SHAPE_TYPE_URL {
@@ -2790,15 +2803,21 @@ fn observed_board_graphic(item: &Any) -> Option<Result<ObservedBoardGraphicSegme
         Ok(graphic) => graphic,
         Err(_) => return Some(Err(IpcError::MalformedEnvelope)),
     };
-    if graphic.layer.enum_value_or_default() != board_types::BoardLayer::BL_Dwgs_User {
+    let expected_layer = match requested_layer {
+        BoardGraphicLayer::DwgsUser => board_types::BoardLayer::BL_Dwgs_User,
+        BoardGraphicLayer::FSilkS => board_types::BoardLayer::BL_F_SilkS,
+        BoardGraphicLayer::EdgeCuts => board_types::BoardLayer::BL_Edge_Cuts,
+    };
+    if graphic.layer.enum_value_or_default() != expected_layer {
         return None;
     }
-    Some(
-        decoded_board_graphic_value(&graphic).map(|graphic| ObservedBoardGraphicSegment {
+    Some(decoded_board_graphic_value(&graphic).map(|mut graphic| {
+        graphic.segment.layer = requested_layer;
+        ObservedBoardGraphicSegment {
             graphic_id: graphic.graphic_id,
             segment: graphic.segment,
-        }),
-    )
+        }
+    }))
 }
 
 fn decoded_board_graphic(item: &Any) -> Result<DecodedBoardGraphic, IpcError> {
@@ -2835,6 +2854,7 @@ fn decoded_board_graphic_value(
     let layer = match graphic.layer.enum_value() {
         Ok(board_types::BoardLayer::BL_Dwgs_User) => BoardGraphicLayer::DwgsUser,
         Ok(board_types::BoardLayer::BL_F_SilkS) => BoardGraphicLayer::FSilkS,
+        Ok(board_types::BoardLayer::BL_Edge_Cuts) => BoardGraphicLayer::EdgeCuts,
         _ => {
             return Err(IpcError::InvalidObservedBoardGraphic(
                 "board graphic layer is unsupported or unknown",
@@ -2939,6 +2959,7 @@ fn board_graphic_segment_item(segment: &BoardGraphicSegment) -> Result<Any, IpcE
     let layer = match segment.layer {
         BoardGraphicLayer::DwgsUser => board_types::BoardLayer::BL_Dwgs_User,
         BoardGraphicLayer::FSilkS => board_types::BoardLayer::BL_F_SilkS,
+        BoardGraphicLayer::EdgeCuts => board_types::BoardLayer::BL_Edge_Cuts,
     };
     let graphic = board_types::BoardGraphicShape {
         shape: MessageField::some(base_types::GraphicShape {

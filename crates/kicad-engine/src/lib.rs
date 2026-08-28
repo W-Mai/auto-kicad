@@ -39,6 +39,12 @@ pub enum OperationKind {
         board: StableId,
         segments: Vec<BoardGraphicSegment>,
     },
+    AddBoardOutline {
+        board: StableId,
+        top_left: Coordinate,
+        bottom_right: Coordinate,
+        width_nm: i64,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -75,7 +81,8 @@ impl Operation {
             OperationKind::ConnectPins { source, target } => vec![source, target],
             OperationKind::AssignFootprint { symbol, .. } => vec![symbol],
             OperationKind::PlaceFootprint { target, .. } => vec![target],
-            OperationKind::AddBoardGraphicSegments { board, .. } => vec![board],
+            OperationKind::AddBoardGraphicSegments { board, .. }
+            | OperationKind::AddBoardOutline { board, .. } => vec![board],
         }
     }
 }
@@ -171,7 +178,11 @@ impl ChangePlan {
             }
             if let OperationKind::AddSymbol { symbol } = &op.kind {
                 known.insert(symbol.source_uuid.clone());
-            } else if !matches!(op.kind, OperationKind::AddBoardGraphicSegments { .. }) {
+            } else if !matches!(
+                op.kind,
+                OperationKind::AddBoardGraphicSegments { .. }
+                    | OperationKind::AddBoardOutline { .. }
+            ) {
                 for target in op.refs() {
                     if !known.contains(target) {
                         if planned_adds
@@ -225,6 +236,23 @@ impl ChangePlan {
                         }
                     }
                     validate_graphics(segments)?;
+                }
+                OperationKind::AddBoardOutline {
+                    board,
+                    top_left,
+                    bottom_right,
+                    width_nm,
+                } => {
+                    if snapshot.board.document_id.as_ref() != Some(board) {
+                        return Err(EngineError::ScopeMismatch);
+                    }
+                    validate_outline(*top_left, *bottom_right, *width_nm)?;
+                    if let Some(segment) = expand_board_outline(*top_left, *bottom_right, *width_nm)
+                        .iter()
+                        .find(|segment| existing_graphics.contains(&segment.graphic_id))
+                    {
+                        return Err(EngineError::TargetAlreadyExists(segment.graphic_id.clone()));
+                    }
                 }
             }
         }
@@ -508,10 +536,90 @@ fn apply_operations(
             OperationKind::AddBoardGraphicSegments { segments, .. } => {
                 snapshot.board.graphics.extend(segments.clone());
             }
+            OperationKind::AddBoardOutline {
+                top_left,
+                bottom_right,
+                width_nm,
+                ..
+            } => {
+                snapshot.board.graphics.extend(expand_board_outline(
+                    *top_left,
+                    *bottom_right,
+                    *width_nm,
+                ));
+            }
             _ => return Err(EngineError::UnsupportedOperation),
         }
     }
     Ok(snapshot.canonical())
+}
+
+fn validate_outline(
+    top_left: Coordinate,
+    bottom_right: Coordinate,
+    width_nm: i64,
+) -> Result<(), EngineError> {
+    if top_left.unit != kicad_model::Unit::Nanometres
+        || bottom_right.unit != kicad_model::Unit::Nanometres
+        || top_left.space != DocumentSpace::Board
+        || bottom_right.space != DocumentSpace::Board
+    {
+        return Err(EngineError::InvalidPlan(
+            "outline coordinates must use board nanometres",
+        ));
+    }
+    if width_nm <= 0 || bottom_right.x <= top_left.x || bottom_right.y <= top_left.y {
+        return Err(EngineError::InvalidPlan(
+            "outline dimensions must be positive",
+        ));
+    }
+    let span_x = i128::from(bottom_right.x) - i128::from(top_left.x);
+    let span_y = i128::from(bottom_right.y) - i128::from(top_left.y);
+    if span_x > MAX_GRAPHIC_SPAN_NM
+        || span_y > MAX_GRAPHIC_SPAN_NM
+        || span_x
+            .checked_mul(span_y)
+            .is_none_or(|area| area > MAX_GRAPHIC_BOUNDING_AREA_NM2)
+    {
+        return Err(EngineError::InvalidPlan("outline bounds exceeded"));
+    }
+    Ok(())
+}
+
+pub fn expand_board_outline(
+    top_left: Coordinate,
+    bottom_right: Coordinate,
+    width_nm: i64,
+) -> Vec<BoardGraphicSegment> {
+    let points = [
+        top_left,
+        Coordinate {
+            x: bottom_right.x,
+            y: top_left.y,
+            ..top_left
+        },
+        bottom_right,
+        Coordinate {
+            x: top_left.x,
+            y: bottom_right.y,
+            ..top_left
+        },
+    ];
+    points
+        .iter()
+        .enumerate()
+        .map(|(index, start)| BoardGraphicSegment {
+            graphic_id: StableId::new(format!(
+                "outline:{}:{}:{}:{}:edge:{index}",
+                top_left.x, top_left.y, bottom_right.x, bottom_right.y
+            ))
+            .expect("outline identity is valid"),
+            start: *start,
+            end: points[(index + 1) % points.len()],
+            width_nm,
+            layer: kicad_model::BoardGraphicLayer::EdgeCuts,
+        })
+        .collect()
 }
 
 fn validate_graphics(segments: &[BoardGraphicSegment]) -> Result<(), EngineError> {
@@ -991,6 +1099,75 @@ mod tests {
             engine.preview(&plan(&engine, vec![duplicate])),
             Err(EngineError::TargetAlreadyExists(id("g1")))
         );
+    }
+
+    #[test]
+    fn board_outline_preview_expands_to_four_closed_edge_cuts_segments() {
+        let engine = Engine::new(snapshot(), "token");
+        let top_left = Coordinate {
+            x: 0,
+            y: 0,
+            unit: kicad_model::Unit::Nanometres,
+            space: DocumentSpace::Board,
+        };
+        let bottom_right = Coordinate {
+            x: 1_000_000,
+            y: 500_000,
+            unit: kicad_model::Unit::Nanometres,
+            space: DocumentSpace::Board,
+        };
+        let operation = op(
+            OperationKind::AddBoardOutline {
+                board: id("board"),
+                top_left,
+                bottom_right,
+                width_nm: 100_000,
+            },
+            "board",
+            "outline",
+        );
+        let preview = engine.preview(&plan(&engine, vec![operation])).unwrap();
+        assert_eq!(preview.after.board.graphics.len(), 4);
+        assert!(
+            preview
+                .after
+                .board
+                .graphics
+                .iter()
+                .all(|segment| segment.layer == kicad_model::BoardGraphicLayer::EdgeCuts)
+        );
+        let starts = preview
+            .after
+            .board
+            .graphics
+            .iter()
+            .map(|segment| (segment.start.x, segment.start.y))
+            .collect::<BTreeSet<_>>();
+        let ends = preview
+            .after
+            .board
+            .graphics
+            .iter()
+            .map(|segment| (segment.end.x, segment.end.y))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(starts, ends);
+        let invalid = op(
+            OperationKind::AddBoardOutline {
+                board: id("board"),
+                top_left,
+                bottom_right: Coordinate {
+                    x: 0,
+                    ..bottom_right
+                },
+                width_nm: 100_000,
+            },
+            "board",
+            "invalid-outline",
+        );
+        assert!(matches!(
+            engine.preview(&plan(&engine, vec![invalid])),
+            Err(EngineError::InvalidPlan(_))
+        ));
     }
 
     #[test]

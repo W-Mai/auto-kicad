@@ -9,9 +9,7 @@ use kicad_engine::{
     ChangePlan, ChangeSession, Engine, Operation, OperationKind, Precondition, RiskClass,
 };
 use kicad_ipc::{ClientConfig, DocumentQuery, KiCadClient, NngTransport};
-use kicad_model::{
-    BoardGraphicSegment, DiscoverySnapshot, ProjectSnapshot, RevisionDigest, StableId,
-};
+use kicad_model::{DiscoverySnapshot, ProjectSnapshot, RevisionDigest, StableId};
 use rmcp::{
     ErrorData, ServerHandler,
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
@@ -293,8 +291,18 @@ fn observe_documents<T: kicad_ipc::KiCadTransport>(
 pub struct PlanBoardGraphicsRequest {
     pub endpoint: String,
     pub source_run_id: String,
-    pub segments: Value,
+    pub segments: Option<Value>,
+    pub outline: Option<BoardOutlineRequest>,
     pub request_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+pub struct BoardOutlineRequest {
+    pub top_left_x_nm: i64,
+    pub top_left_y_nm: i64,
+    pub bottom_right_x_nm: i64,
+    pub bottom_right_y_nm: i64,
+    pub width_nm: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -834,7 +842,7 @@ impl Server {
 
     #[tool(
         name = "kicad_plan_change",
-        description = "Plan bounded Dwgs.User board graphics without mutating KiCad."
+        description = "Plan bounded board graphics or a rectangular Edge.Cuts outline without mutating KiCad."
     )]
     pub async fn kicad_plan_change(
         &self,
@@ -861,8 +869,35 @@ impl Server {
             .document_id
             .clone()
             .ok_or_else(|| ErrorData::internal_error("board identity is unavailable", None))?;
-        let segments: Vec<BoardGraphicSegment> = serde_json::from_value(arguments.segments)
-            .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+        let kind = match (arguments.segments, arguments.outline) {
+            (Some(segments), None) => OperationKind::AddBoardGraphicSegments {
+                board: board.clone(),
+                segments: serde_json::from_value(segments)
+                    .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?,
+            },
+            (None, Some(outline)) => OperationKind::AddBoardOutline {
+                board: board.clone(),
+                top_left: kicad_model::Coordinate {
+                    x: outline.top_left_x_nm,
+                    y: outline.top_left_y_nm,
+                    unit: kicad_model::Unit::Nanometres,
+                    space: kicad_model::DocumentSpace::Board,
+                },
+                bottom_right: kicad_model::Coordinate {
+                    x: outline.bottom_right_x_nm,
+                    y: outline.bottom_right_y_nm,
+                    unit: kicad_model::Unit::Nanometres,
+                    space: kicad_model::DocumentSpace::Board,
+                },
+                width_nm: outline.width_nm,
+            },
+            _ => {
+                return Err(ErrorData::invalid_params(
+                    "exactly one of segments or outline is required",
+                    None,
+                ));
+            }
+        };
         let base_revision = snapshot
             .revision()
             .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
@@ -872,10 +907,7 @@ impl Server {
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
         let operation = Operation {
             operation_id,
-            kind: OperationKind::AddBoardGraphicSegments {
-                board: board.clone(),
-                segments,
-            },
+            kind,
             targets: vec![board],
             preconditions: vec![Precondition::Revision(base_revision.clone())],
             expected_effects: vec!["add board graphic segments".into()],
@@ -1150,8 +1182,9 @@ mod tests {
     use super::*;
     use kicad_checks::{CheckFailure, DrcItem, DrcViolation, Position, ViolationIdentity};
     use kicad_model::{
-        Board, BoardGraphicLayer, CapabilityObservation, CapabilityStatus, Coordinate, Diagnostic,
-        DocumentSpace, ObservedBoardFootprints, ProjectSnapshot, Schematic, Unit,
+        Board, BoardGraphicLayer, BoardGraphicSegment, CapabilityObservation, CapabilityStatus,
+        Coordinate, Diagnostic, DocumentSpace, ObservedBoardFootprints, ProjectSnapshot, Schematic,
+        Unit,
     };
     use rmcp::{ClientHandler, ServiceExt, model::CallToolRequestParams};
     use std::collections::VecDeque;
@@ -1813,7 +1846,8 @@ mod tests {
         PlanBoardGraphicsRequest {
             endpoint: "ipc:///tmp/kicad/api.sock".into(),
             source_run_id: "run".into(),
-            segments: serde_json::to_value(vec![graphic("g1")]).unwrap(),
+            segments: Some(serde_json::to_value(vec![graphic("g1")]).unwrap()),
+            outline: None,
             request_id: request_id.into(),
         }
     }

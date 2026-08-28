@@ -1642,6 +1642,7 @@ impl ObservedBoardStackup {
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum BoardGraphicLayer {
     DwgsUser,
+    EdgeCuts,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

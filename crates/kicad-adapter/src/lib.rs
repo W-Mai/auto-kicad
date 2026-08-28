@@ -1,4 +1,7 @@
-use kicad_engine::{MAX_GRAPHIC_BOUNDING_AREA_NM2, MAX_GRAPHIC_SPAN_NM, Operation, OperationKind};
+use kicad_engine::{
+    MAX_GRAPHIC_BOUNDING_AREA_NM2, MAX_GRAPHIC_SPAN_NM, Operation, OperationKind,
+    expand_board_outline,
+};
 use kicad_ipc::{
     BoardGraphicLayer as IpcBoardGraphicLayer, BoardGraphicSegment as IpcBoardGraphicSegment,
     CommitId, CreatedBoardGraphicReceipt, FootprintSide as IpcFootprintSide, InstanceToken,
@@ -1306,6 +1309,7 @@ pub trait BoardGraphicsIpc {
     fn read_board_graphics(
         &mut self,
         board_filename: &str,
+        layer: IpcBoardGraphicLayer,
     ) -> Result<Vec<ObservedBoardGraphicSegment>, String>;
 }
 
@@ -1342,8 +1346,10 @@ impl<T: KiCadTransport> BoardGraphicsIpc for KiCadClient<T> {
     fn read_board_graphics(
         &mut self,
         board_filename: &str,
+        layer: IpcBoardGraphicLayer,
     ) -> Result<Vec<ObservedBoardGraphicSegment>, String> {
-        KiCadClient::get_board_graphics(self, board_filename).map_err(|error| error.to_string())
+        KiCadClient::get_board_graphics_on_layer(self, board_filename, layer)
+            .map_err(|error| error.to_string())
     }
 }
 
@@ -1391,16 +1397,23 @@ impl BoardGraphicsExecutor {
         }
         let mut segments = Vec::new();
         for operation in operations {
-            let OperationKind::AddBoardGraphicSegments {
-                segments: operation_segments,
-                ..
-            } = operation
-            else {
-                return BoardGraphicsCommitOutcome::Rejected {
-                    reason: "operation is not board graphics".into(),
-                };
-            };
-            segments.extend(operation_segments.iter());
+            match operation {
+                OperationKind::AddBoardGraphicSegments {
+                    segments: operation_segments,
+                    ..
+                } => segments.extend(operation_segments.iter().cloned()),
+                OperationKind::AddBoardOutline {
+                    top_left,
+                    bottom_right,
+                    width_nm,
+                    ..
+                } => segments.extend(expand_board_outline(*top_left, *bottom_right, *width_nm)),
+                _ => {
+                    return BoardGraphicsCommitOutcome::Rejected {
+                        reason: "operation is not board graphics".into(),
+                    };
+                }
+            }
         }
         if segments.is_empty() || segments.len() > self.max_segments {
             return BoardGraphicsCommitOutcome::Rejected {
@@ -1408,7 +1421,11 @@ impl BoardGraphicsExecutor {
             };
         }
         if segments.iter().any(|segment| {
-            segment.validate().is_err() || !matches!(segment.layer, BoardGraphicLayer::DwgsUser)
+            segment.validate().is_err()
+                || !matches!(
+                    segment.layer,
+                    BoardGraphicLayer::DwgsUser | BoardGraphicLayer::EdgeCuts
+                )
         }) {
             return BoardGraphicsCommitOutcome::Rejected {
                 reason: "graphic segment is invalid or uses an unsupported layer".into(),
@@ -1453,7 +1470,10 @@ impl BoardGraphicsExecutor {
                 end_x_nm: segment.end.x,
                 end_y_nm: segment.end.y,
                 width_nm: segment.width_nm,
-                layer: IpcBoardGraphicLayer::DwgsUser,
+                layer: match segment.layer {
+                    BoardGraphicLayer::DwgsUser => IpcBoardGraphicLayer::DwgsUser,
+                    BoardGraphicLayer::EdgeCuts => IpcBoardGraphicLayer::EdgeCuts,
+                },
             })
             .collect::<Vec<_>>();
         let commit = match ipc.begin_commit() {
@@ -1491,7 +1511,15 @@ impl BoardGraphicsExecutor {
         if let Err(reason) = ipc.save_board(board_filename) {
             return BoardGraphicsCommitOutcome::Unknown { reason };
         }
-        let observed = match ipc.read_board_graphics(board_filename) {
+        let read_layer = if segments
+            .iter()
+            .all(|segment| segment.layer == BoardGraphicLayer::EdgeCuts)
+        {
+            IpcBoardGraphicLayer::EdgeCuts
+        } else {
+            IpcBoardGraphicLayer::DwgsUser
+        };
+        let observed = match ipc.read_board_graphics(board_filename, read_layer) {
             Ok(observed) => observed,
             Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
         };
@@ -1516,11 +1544,6 @@ impl BoardGraphicsExecutor {
                     reason: format!("saved board graphic {} does not match", receipt.graphic_id),
                 };
             }
-        }
-        if observed.len() != receipts.len() {
-            return BoardGraphicsCommitOutcome::Unknown {
-                reason: "saved board graphics contain unexpected items".into(),
-            };
         }
         BoardGraphicsCommitOutcome::CommittedAndSaved
     }
@@ -2754,6 +2777,7 @@ mod tests {
         fn read_board_graphics(
             &mut self,
             filename: &str,
+            _layer: IpcBoardGraphicLayer,
         ) -> Result<Vec<ObservedBoardGraphicSegment>, String> {
             self.calls.push(format!("read:{filename}"));
             if let Some(observed) = &self.observed {
