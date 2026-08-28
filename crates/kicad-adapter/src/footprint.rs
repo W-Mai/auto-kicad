@@ -75,9 +75,23 @@ pub struct FootprintPlacementReceipt {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreparedFootprintPlacement {
-    pub context: DisposableFootprintContext,
-    pub resolved: ResolvedFootprint,
-    pub placement: AllowlistedFootprintPlacement,
+    context: DisposableFootprintContext,
+    resolved: ResolvedFootprint,
+    placement: AllowlistedFootprintPlacement,
+}
+
+impl PreparedFootprintPlacement {
+    pub fn context(&self) -> &DisposableFootprintContext {
+        &self.context
+    }
+
+    pub fn resolved(&self) -> &ResolvedFootprint {
+        &self.resolved
+    }
+
+    pub fn placement(&self) -> &AllowlistedFootprintPlacement {
+        &self.placement
+    }
 }
 
 #[derive(Debug)]
