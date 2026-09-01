@@ -50,7 +50,8 @@ pub use footprint::{
 };
 pub use lifecycle::{
     DisposablePcbLifecycle, FakeDisposablePcbLifecycle, FilesystemDisposablePcbLifecycle,
-    LifecycleError, OwnedEditorIdentity, ShadowProject,
+    KICAD_PCBNEW_CANDIDATES, LifecycleError, OwnedEditorIdentity, OwnedPcbnewLauncher,
+    ShadowProject,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1145,9 +1146,13 @@ pub fn live_board_observation(
                     observed.graphic_id,
                 ));
             }
-            if observed.segment.layer != IpcBoardGraphicLayer::DwgsUser {
-                return Err(LiveBoardObservationError::UnsupportedGraphicLayer);
-            }
+            let layer = match observed.segment.layer {
+                IpcBoardGraphicLayer::DwgsUser => BoardGraphicLayer::DwgsUser,
+                IpcBoardGraphicLayer::EdgeCuts => BoardGraphicLayer::EdgeCuts,
+                IpcBoardGraphicLayer::FSilkS => {
+                    return Err(LiveBoardObservationError::UnsupportedGraphicLayer);
+                }
+            };
             let graphic = BoardGraphicSegment {
                 graphic_id: StableId::new(observed.graphic_id)?,
                 start: Coordinate {
@@ -1163,7 +1168,7 @@ pub fn live_board_observation(
                     space: DocumentSpace::Board,
                 },
                 width_nm: observed.segment.width_nm,
-                layer: BoardGraphicLayer::DwgsUser,
+                layer,
             };
             graphic.validate()?;
             Ok(graphic)
@@ -1335,7 +1340,25 @@ pub trait BoardGraphicsIpc {
         board_filename: &str,
         layer: IpcBoardGraphicLayer,
     ) -> Result<Vec<ObservedBoardGraphicSegment>, String>;
+    fn read_board_graphics_by_id(
+        &mut self,
+        board_filename: &str,
+        graphic_ids: &[String],
+        layer: IpcBoardGraphicLayer,
+    ) -> Result<Vec<ObservedBoardGraphicSegment>, String>;
     fn read_board_routing(&mut self, board_filename: &str) -> Result<IpcBoardRoutingItems, String>;
+    fn read_board_routing_by_id(
+        &mut self,
+        board_filename: &str,
+        routing_ids: &[String],
+    ) -> Result<IpcBoardRoutingItems, String>;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativePcbBatchReceipt {
+    pub graphics: Vec<CreatedBoardGraphicReceipt>,
+    pub tracks: Vec<CreatedTrackReceipt>,
+    pub vias: Vec<CreatedThroughViaReceipt>,
 }
 
 impl<T: KiCadTransport> BoardGraphicsIpc for KiCadClient<T> {
@@ -1394,12 +1417,157 @@ impl<T: KiCadTransport> BoardGraphicsIpc for KiCadClient<T> {
             .map_err(|error| error.to_string())
     }
 
+    fn read_board_graphics_by_id(
+        &mut self,
+        board_filename: &str,
+        graphic_ids: &[String],
+        layer: IpcBoardGraphicLayer,
+    ) -> Result<Vec<ObservedBoardGraphicSegment>, String> {
+        KiCadClient::get_board_graphics_by_id(self, board_filename, graphic_ids, layer)
+            .map_err(|error| error.to_string())
+    }
+
     fn read_board_routing(&mut self, board_filename: &str) -> Result<IpcBoardRoutingItems, String> {
         KiCadClient::get_board_routing(self, board_filename).map_err(|error| error.to_string())
+    }
+
+    fn read_board_routing_by_id(
+        &mut self,
+        board_filename: &str,
+        routing_ids: &[String],
+    ) -> Result<IpcBoardRoutingItems, String> {
+        KiCadClient::get_board_routing_by_id(self, board_filename, routing_ids)
+            .map_err(|error| error.to_string())
     }
 }
 
 impl BoardGraphicsExecutor {
+    pub fn execute_native_batch<I: BoardGraphicsIpc>(
+        &self,
+        ipc: &mut I,
+        board_filename: &str,
+        graphics: &[IpcBoardGraphicSegment],
+        tracks: &[CreateTrack],
+        vias: &[CreateThroughVia],
+        message: &str,
+    ) -> Result<NativePcbBatchReceipt, BoardGraphicsCommitOutcome> {
+        let item_count = graphics.len() + tracks.len() + vias.len();
+        if board_filename.is_empty() || item_count == 0 || item_count > self.max_segments {
+            return Err(BoardGraphicsCommitOutcome::Rejected {
+                reason: "native PCB batch is empty, oversized, or has no board filename".into(),
+            });
+        }
+        if graphics.iter().any(|graphic| {
+            graphic.width_nm <= 0
+                || (graphic.start_x_nm, graphic.start_y_nm) == (graphic.end_x_nm, graphic.end_y_nm)
+                || !matches!(
+                    graphic.layer,
+                    IpcBoardGraphicLayer::DwgsUser | IpcBoardGraphicLayer::EdgeCuts
+                )
+                || [
+                    graphic.start_x_nm,
+                    graphic.start_y_nm,
+                    graphic.end_x_nm,
+                    graphic.end_y_nm,
+                ]
+                .iter()
+                .any(|value| value.unsigned_abs() > MAX_BOARD_POSITION_NM as u64)
+        }) || tracks.iter().any(|track| {
+            track.width_nm <= 0
+                || (track.start_x_nm, track.start_y_nm) == (track.end_x_nm, track.end_y_nm)
+                || [
+                    track.start_x_nm,
+                    track.start_y_nm,
+                    track.end_x_nm,
+                    track.end_y_nm,
+                ]
+                .iter()
+                .any(|value| value.unsigned_abs() > MAX_BOARD_POSITION_NM as u64)
+        }) || vias.iter().any(|via| {
+            via.pad_diameter_nm <= 0
+                || via.drill_diameter_nm <= 0
+                || via.drill_diameter_nm > via.pad_diameter_nm
+                || via.position_x_nm.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
+                || via.position_y_nm.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
+        }) {
+            return Err(BoardGraphicsCommitOutcome::Rejected {
+                reason: "native PCB batch contains invalid or out-of-bounds items".into(),
+            });
+        }
+
+        let commit = ipc
+            .begin_commit()
+            .map_err(|reason| BoardGraphicsCommitOutcome::Unknown { reason })?;
+        let graphic_receipts = if graphics.is_empty() {
+            Vec::new()
+        } else {
+            match ipc.create_board_graphics(board_filename, graphics) {
+                Ok(receipts)
+                    if receipts.len() == graphics.len()
+                        && receipts.iter().enumerate().all(|(index, receipt)| {
+                            receipt.request_index == index && receipt.segment == graphics[index]
+                        }) =>
+                {
+                    receipts
+                }
+                Ok(_) => {
+                    return Err(drop_native_pcb_commit(
+                        ipc,
+                        &commit,
+                        "created board graphic receipt did not match the request".into(),
+                    ));
+                }
+                Err(reason) => return Err(drop_native_pcb_commit(ipc, &commit, reason)),
+            }
+        };
+        let mut track_receipts = Vec::with_capacity(tracks.len());
+        for track in tracks {
+            match ipc.create_track(board_filename, track) {
+                Ok(receipt) if receipt.request_index == 0 && receipt.track == *track => {
+                    track_receipts.push(receipt);
+                }
+                Ok(_) => {
+                    return Err(drop_native_pcb_commit(
+                        ipc,
+                        &commit,
+                        "created track receipt did not match the request".into(),
+                    ));
+                }
+                Err(reason) => return Err(drop_native_pcb_commit(ipc, &commit, reason)),
+            }
+        }
+        let mut via_receipts = Vec::with_capacity(vias.len());
+        for via in vias {
+            match ipc.create_through_via(board_filename, via) {
+                Ok(receipt) if receipt.request_index == 0 && receipt.via == *via => {
+                    via_receipts.push(receipt);
+                }
+                Ok(_) => {
+                    return Err(drop_native_pcb_commit(
+                        ipc,
+                        &commit,
+                        "created via receipt did not match the request".into(),
+                    ));
+                }
+                Err(reason) => return Err(drop_native_pcb_commit(ipc, &commit, reason)),
+            }
+        }
+        let receipt = NativePcbBatchReceipt {
+            graphics: graphic_receipts,
+            tracks: track_receipts,
+            vias: via_receipts,
+        };
+        if let Err(reason) = ipc.commit_changes(&commit, message) {
+            return Err(BoardGraphicsCommitOutcome::Unknown { reason });
+        }
+        if let Err(reason) = ipc.save_board(board_filename) {
+            return Err(BoardGraphicsCommitOutcome::Unknown { reason });
+        }
+        verify_native_pcb_batch(ipc, board_filename, &receipt)
+            .map_err(|reason| BoardGraphicsCommitOutcome::Unknown { reason })?;
+        Ok(receipt)
+    }
+
     pub fn execute<I: BoardGraphicsIpc>(
         &self,
         ipc: &mut I,
@@ -1673,19 +1841,18 @@ impl BoardGraphicsExecutor {
         };
         let mut track_receipts = Vec::new();
         let mut via_receipts = Vec::new();
-        for (request_index, request) in requests.iter().enumerate() {
+        for request in &requests {
             let result = match request {
                 RoutingRequest::Track(track) => {
                     ipc.create_track(board_filename, track).map(|receipt| {
-                        let matches =
-                            receipt.request_index == request_index && receipt.track == *track;
+                        let matches = receipt.request_index == 0 && receipt.track == *track;
                         track_receipts.push(receipt);
                         matches
                     })
                 }
                 RoutingRequest::Via(via) => {
                     ipc.create_through_via(board_filename, via).map(|receipt| {
-                        let matches = receipt.request_index == request_index && receipt.via == *via;
+                        let matches = receipt.request_index == 0 && receipt.via == *via;
                         via_receipts.push(receipt);
                         matches
                     })
@@ -1775,6 +1942,110 @@ impl BoardGraphicsExecutor {
     }
 }
 
+fn drop_native_pcb_commit<I: BoardGraphicsIpc>(
+    ipc: &mut I,
+    commit: &str,
+    reason: String,
+) -> BoardGraphicsCommitOutcome {
+    match ipc.drop_commit(commit) {
+        Ok(()) => BoardGraphicsCommitOutcome::Rejected { reason },
+        Err(drop_reason) => BoardGraphicsCommitOutcome::Unknown {
+            reason: format!("native PCB create failed: {reason}; drop failed: {drop_reason}"),
+        },
+    }
+}
+
+pub fn verify_native_pcb_batch<I: BoardGraphicsIpc>(
+    ipc: &mut I,
+    board_filename: &str,
+    receipt: &NativePcbBatchReceipt,
+) -> Result<(), String> {
+    let graphic_ids = receipt
+        .graphics
+        .iter()
+        .map(|graphic| graphic.graphic_id.clone())
+        .collect::<Vec<_>>();
+    let observed_graphics = if graphic_ids.is_empty() {
+        Vec::new()
+    } else {
+        ipc.read_board_graphics_by_id(board_filename, &graphic_ids, IpcBoardGraphicLayer::EdgeCuts)?
+    };
+    let routing_ids = receipt
+        .tracks
+        .iter()
+        .map(|track| track.source_uuid.clone())
+        .chain(receipt.vias.iter().map(|via| via.source_uuid.clone()))
+        .collect::<Vec<_>>();
+    let observed_routing = if routing_ids.is_empty() {
+        IpcBoardRoutingItems::default()
+    } else {
+        ipc.read_board_routing_by_id(board_filename, &routing_ids)?
+    };
+    let mut matched = BTreeSet::new();
+    for expected in &receipt.graphics {
+        let mut candidates = observed_graphics
+            .iter()
+            .filter(|actual| actual.graphic_id == expected.graphic_id);
+        let Some(actual) = candidates.next() else {
+            return Err(format!(
+                "saved board graphic {} is missing",
+                expected.graphic_id
+            ));
+        };
+        if candidates.next().is_some() || !matched.insert(expected.graphic_id.clone()) {
+            return Err(format!(
+                "saved board graphic {} is not unique",
+                expected.graphic_id
+            ));
+        }
+        if actual.segment != expected.segment {
+            return Err(format!(
+                "saved board graphic {} does not match",
+                expected.graphic_id
+            ));
+        }
+    }
+    let mut matched = BTreeSet::new();
+    for expected in &receipt.tracks {
+        let mut candidates = observed_routing
+            .tracks
+            .iter()
+            .filter(|actual| actual.source_uuid == expected.source_uuid);
+        let Some(actual) = candidates.next() else {
+            return Err(format!("saved track {} is missing", expected.source_uuid));
+        };
+        if candidates.next().is_some() || !matched.insert(expected.source_uuid.clone()) {
+            return Err(format!(
+                "saved track {} is not unique",
+                expected.source_uuid
+            ));
+        }
+        if !observed_track_matches(actual, expected) {
+            return Err(format!(
+                "saved track {} does not match",
+                expected.source_uuid
+            ));
+        }
+    }
+    let mut matched = BTreeSet::new();
+    for expected in &receipt.vias {
+        let mut candidates = observed_routing
+            .vias
+            .iter()
+            .filter(|actual| actual.source_uuid == expected.source_uuid);
+        let Some(actual) = candidates.next() else {
+            return Err(format!("saved via {} is missing", expected.source_uuid));
+        };
+        if candidates.next().is_some() || !matched.insert(expected.source_uuid.clone()) {
+            return Err(format!("saved via {} is not unique", expected.source_uuid));
+        }
+        if !observed_via_matches(actual, expected) {
+            return Err(format!("saved via {} does not match", expected.source_uuid));
+        }
+    }
+    Ok(())
+}
+
 fn observed_track_matches(observed: &IpcTrack, receipt: &CreatedTrackReceipt) -> bool {
     let IpcTrackGeometry::Segment { start, end } = &observed.geometry else {
         return false;
@@ -1808,21 +2079,27 @@ fn normalized_track_geometry(
 fn observed_via_matches(observed: &IpcVia, receipt: &CreatedThroughViaReceipt) -> bool {
     let via = &receipt.via;
     let pad_shapes = &observed.pad_stack.copper_shapes;
-    let expected_pad_shapes = [
-        (IpcBoardLayer::FrontCopper, via.pad_diameter_nm),
-        (IpcBoardLayer::InnerCopper(1), 0),
-        (IpcBoardLayer::BackCopper, via.pad_diameter_nm),
+    let expected_pad_layers = [
+        IpcBoardLayer::FrontCopper,
+        IpcBoardLayer::InnerCopper(1),
+        IpcBoardLayer::BackCopper,
     ];
     let exact_pad_shapes = via.pad_diameter_nm > 0
-        && pad_shapes.len() == expected_pad_shapes.len()
-        && pad_shapes.iter().zip(expected_pad_shapes).all(
-            |(actual, (expected_layer, expected_size))| {
+        && pad_shapes.len() == expected_pad_layers.len()
+        && pad_shapes
+            .iter()
+            .zip(expected_pad_layers)
+            .all(|(actual, expected_layer)| {
+                let expected_size = if expected_layer == IpcBoardLayer::InnerCopper(1) {
+                    actual.size_x_nm == 0 || actual.size_x_nm == via.pad_diameter_nm
+                } else {
+                    actual.size_x_nm == via.pad_diameter_nm
+                };
                 actual.layer == expected_layer
                     && actual.shape == kicad_ipc::ObservedPadShape::Circle
-                    && actual.size_x_nm == expected_size
-                    && actual.size_y_nm == expected_size
-            },
-        );
+                    && expected_size
+                    && actual.size_x_nm == actual.size_y_nm
+            });
     let Some(drill) = observed.pad_stack.primary_drill.as_ref() else {
         return false;
     };
@@ -1830,12 +2107,7 @@ fn observed_via_matches(observed: &IpcVia, receipt: &CreatedThroughViaReceipt) -
         && observed.position.y_nm == via.position_y_nm
         && observed.via_type == kicad_ipc::ObservedViaType::Through
         && observed.pad_stack.stack_type == IpcPadStackType::FrontInnerBack
-        && observed.pad_stack.layers
-            == vec![
-                IpcBoardLayer::FrontCopper,
-                IpcBoardLayer::InnerCopper(1),
-                IpcBoardLayer::BackCopper,
-            ]
+        && observed.pad_stack.layers == vec![IpcBoardLayer::FrontCopper, IpcBoardLayer::BackCopper]
         && exact_pad_shapes
         && drill.start_layer == IpcBoardLayer::FrontCopper
         && drill.end_layer == IpcBoardLayer::BackCopper
@@ -3074,18 +3346,8 @@ mod tests {
             track: &CreateTrack,
         ) -> Result<CreatedTrackReceipt, String> {
             self.calls.push(format!("track:{filename}"));
-            let request_index = self
-                .calls
-                .iter()
-                .filter(|call| call.starts_with("track:") || call.starts_with("via:"))
-                .count()
-                - 1;
             self.track.clone().map(|_| CreatedTrackReceipt {
-                request_index: if self.routing_receipt_matches {
-                    request_index
-                } else {
-                    request_index + 1
-                },
+                request_index: usize::from(!self.routing_receipt_matches),
                 source_uuid: "track-uuid".into(),
                 track: *track,
                 lock_state: kicad_ipc::ObservedLockState::Unlocked,
@@ -3098,18 +3360,8 @@ mod tests {
             via: &CreateThroughVia,
         ) -> Result<CreatedThroughViaReceipt, String> {
             self.calls.push(format!("via:{filename}"));
-            let request_index = self
-                .calls
-                .iter()
-                .filter(|call| call.starts_with("track:") || call.starts_with("via:"))
-                .count()
-                - 1;
             self.via.clone().map(|_| CreatedThroughViaReceipt {
-                request_index: if self.routing_receipt_matches {
-                    request_index
-                } else {
-                    request_index + 1
-                },
+                request_index: usize::from(!self.routing_receipt_matches),
                 source_uuid: "via-uuid".into(),
                 via: *via,
                 lock_state: kicad_ipc::ObservedLockState::Unlocked,
@@ -3151,11 +3403,55 @@ mod tests {
                 .collect())
         }
 
+        fn read_board_graphics_by_id(
+            &mut self,
+            filename: &str,
+            graphic_ids: &[String],
+            _layer: IpcBoardGraphicLayer,
+        ) -> Result<Vec<ObservedBoardGraphicSegment>, String> {
+            self.calls.push(format!("read-by-id:{filename}"));
+            let observed = if let Some(observed) = &self.observed {
+                observed.clone()?
+            } else {
+                self.graphics
+                    .iter()
+                    .enumerate()
+                    .map(|(index, segment)| ObservedBoardGraphicSegment {
+                        graphic_id: format!("g{}", index + 1),
+                        segment: segment.clone(),
+                    })
+                    .collect()
+            };
+            Ok(observed
+                .into_iter()
+                .filter(|graphic| graphic_ids.contains(&graphic.graphic_id))
+                .collect())
+        }
+
         fn read_board_routing(&mut self, filename: &str) -> Result<IpcBoardRoutingItems, String> {
             self.calls.push(format!("routing-read:{filename}"));
             self.routing_observed
                 .clone()
                 .ok_or_else(|| "routing observation not configured".to_owned())?
+        }
+
+        fn read_board_routing_by_id(
+            &mut self,
+            filename: &str,
+            routing_ids: &[String],
+        ) -> Result<IpcBoardRoutingItems, String> {
+            self.calls.push(format!("routing-read-by-id:{filename}"));
+            let mut observed = self
+                .routing_observed
+                .clone()
+                .ok_or_else(|| "routing observation not configured".to_owned())??;
+            observed
+                .tracks
+                .retain(|track| routing_ids.contains(&track.source_uuid));
+            observed
+                .vias
+                .retain(|via| routing_ids.contains(&via.source_uuid));
+            Ok(observed)
         }
     }
 
@@ -3456,11 +3752,7 @@ mod tests {
             position: kicad_ipc::ObservedRoutingPoint { x_nm: 5, y_nm: 6 },
             pad_stack: kicad_ipc::ObservedViaPadStack {
                 stack_type: IpcPadStackType::FrontInnerBack,
-                layers: vec![
-                    IpcBoardLayer::FrontCopper,
-                    IpcBoardLayer::InnerCopper(1),
-                    IpcBoardLayer::BackCopper,
-                ],
+                layers: vec![IpcBoardLayer::FrontCopper, IpcBoardLayer::BackCopper],
                 primary_drill: Some(kicad_ipc::ObservedViaDrill {
                     start_layer: IpcBoardLayer::FrontCopper,
                     end_layer: IpcBoardLayer::BackCopper,
@@ -3515,6 +3807,92 @@ mod tests {
             )
             .unwrap(),
         }
+    }
+
+    #[test]
+    fn native_pcb_batch_uses_one_commit_save_and_exact_postcondition_reads() {
+        let graphics = vec![IpcBoardGraphicSegment {
+            start_x_nm: 0,
+            start_y_nm: 0,
+            end_x_nm: 10,
+            end_y_nm: 0,
+            width_nm: 100,
+            layer: IpcBoardGraphicLayer::EdgeCuts,
+        }];
+        let tracks = vec![CreateTrack {
+            start_x_nm: 1,
+            start_y_nm: 2,
+            end_x_nm: 3,
+            end_y_nm: 4,
+            width_nm: 100,
+        }];
+        let vias = vec![CreateThroughVia {
+            position_x_nm: 5,
+            position_y_nm: 6,
+            pad_diameter_nm: 200,
+            drill_diameter_nm: 100,
+        }];
+        let mut ipc = FakeGraphicsIpc {
+            routing_observed: Some(Ok(IpcBoardRoutingItems {
+                tracks: vec![observed_track_for_test("track-uuid", (3, 4), (1, 2), 100)],
+                vias: vec![observed_via_for_test("via-uuid")],
+            })),
+            ..Default::default()
+        };
+        let receipt = BoardGraphicsExecutor::default()
+            .execute_native_batch(
+                &mut ipc,
+                "board.kicad_pcb",
+                &graphics,
+                &tracks,
+                &vias,
+                "native batch",
+            )
+            .unwrap();
+        assert_eq!(receipt.graphics.len(), 1);
+        assert_eq!(receipt.tracks.len(), 1);
+        assert_eq!(receipt.vias.len(), 1);
+        assert_eq!(
+            ipc.calls,
+            vec![
+                "begin",
+                "create:board.kicad_pcb",
+                "track:board.kicad_pcb",
+                "via:board.kicad_pcb",
+                "commit:c1",
+                "save:board.kicad_pcb",
+                "read-by-id:board.kicad_pcb",
+                "routing-read-by-id:board.kicad_pcb",
+            ]
+        );
+    }
+
+    #[test]
+    fn native_pcb_batch_drops_nonzero_single_item_receipt_before_commit() {
+        let mut ipc = FakeGraphicsIpc {
+            routing_receipt_matches: false,
+            ..Default::default()
+        };
+        let outcome = BoardGraphicsExecutor::default()
+            .execute_native_batch(
+                &mut ipc,
+                "board.kicad_pcb",
+                &[],
+                &[CreateTrack {
+                    start_x_nm: 1,
+                    start_y_nm: 2,
+                    end_x_nm: 3,
+                    end_y_nm: 4,
+                    width_nm: 100,
+                }],
+                &[],
+                "native batch",
+            )
+            .unwrap_err();
+        assert!(
+            matches!(outcome, BoardGraphicsCommitOutcome::Rejected { reason } if reason.contains("track receipt"))
+        );
+        assert_eq!(ipc.calls, vec!["begin", "track:board.kicad_pcb", "drop:c1"]);
     }
 
     #[test]
@@ -3590,10 +3968,14 @@ mod tests {
         wrong_shape_order.pad_stack.copper_shapes.swap(0, 2);
         assert!(!observed_via_matches(&wrong_shape_order, &receipt));
 
-        let mut nonzero_inner_shape = canonical;
-        nonzero_inner_shape.pad_stack.copper_shapes[1].size_x_nm = 200;
-        nonzero_inner_shape.pad_stack.copper_shapes[1].size_y_nm = 200;
-        assert!(!observed_via_matches(&nonzero_inner_shape, &receipt));
+        let mut reopened_inner_shape = canonical;
+        reopened_inner_shape.pad_stack.copper_shapes[1].size_x_nm = 200;
+        reopened_inner_shape.pad_stack.copper_shapes[1].size_y_nm = 200;
+        assert!(observed_via_matches(&reopened_inner_shape, &receipt));
+
+        reopened_inner_shape.pad_stack.copper_shapes[1].size_x_nm = 199;
+        reopened_inner_shape.pad_stack.copper_shapes[1].size_y_nm = 199;
+        assert!(!observed_via_matches(&reopened_inner_shape, &receipt));
     }
 
     #[test]

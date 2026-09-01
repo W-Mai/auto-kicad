@@ -98,14 +98,26 @@ pub struct NetlistRunner {
 
 impl NetlistRunner {
     pub(crate) fn production() -> Result<Self, NetlistRunnerError> {
-        let executable = [
+        if !cfg!(unix) {
+            return Err(NetlistRunnerError::UnsupportedPlatform);
+        }
+        let mut candidates = std::env::var_os("PATH")
+            .into_iter()
+            .flat_map(|path| {
+                std::env::split_paths(&path)
+                    .map(|directory| directory.join("kicad-cli"))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        candidates.extend([
             PathBuf::from("/opt/homebrew/bin/kicad-cli"),
             PathBuf::from("/usr/local/bin/kicad-cli"),
             PathBuf::from("/usr/bin/kicad-cli"),
-        ]
-        .into_iter()
-        .find(|path| canonical_executable(path).is_ok())
-        .ok_or(NetlistRunnerError::ExecutableNotFound)?;
+        ]);
+        let executable = candidates
+            .into_iter()
+            .find(|path| canonical_executable(path).is_ok())
+            .ok_or(NetlistRunnerError::ExecutableNotFound)?;
         Ok(Self::from_executable(executable))
     }
 

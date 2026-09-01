@@ -1,8 +1,14 @@
+use crate::lifecycle::{DisposablePcbLifecycle, LifecycleError, OwnedPcbnewLauncher};
+use kicad_ipc::{
+    CreatedFootprintInstanceReceipt, FootprintInstanceTemplate, KiCadClient, KiCadTransport,
+    ObservedFootprintInstance, ObservedPad,
+};
 use kicad_model::{AllowlistedFootprintPlacement, FootprintLibraryIdentifier, RevisionDigest};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
@@ -17,6 +23,12 @@ pub enum AllowlistedFootprint {
 }
 
 impl AllowlistedFootprint {
+    pub fn from_identifier(identifier: &FootprintLibraryIdentifier) -> Option<Self> {
+        [Self::OfficialLed1210, Self::ProjectTypeC]
+            .into_iter()
+            .find(|library| library.identifier() == *identifier)
+    }
+
     pub fn identifier(self) -> FootprintLibraryIdentifier {
         match self {
             Self::OfficialLed1210 => FootprintLibraryIdentifier {
@@ -111,6 +123,12 @@ pub enum FootprintBackendError {
     RunnerProcess(String),
     RunnerProtocol(&'static str),
     RunnerTimeout,
+    Lifecycle(String),
+    Ipc(String),
+    TemplateNotFound,
+    TemplateProvenanceUnavailable,
+    PostconditionMismatch,
+    UuidSetMismatch,
 }
 
 impl Display for FootprintBackendError {
@@ -137,6 +155,22 @@ impl Display for FootprintBackendError {
                 "invalid disposable footprint helper response: {message}"
             ),
             Self::RunnerTimeout => formatter.write_str("disposable footprint helper timed out"),
+            Self::Lifecycle(message) => {
+                write!(formatter, "disposable PCB lifecycle failed: {message}")
+            }
+            Self::Ipc(message) => write!(formatter, "footprint IPC failed: {message}"),
+            Self::TemplateNotFound => {
+                formatter.write_str("matching allowlisted footprint template was not observed")
+            }
+            Self::TemplateProvenanceUnavailable => formatter.write_str(
+                "captured footprint template is not bound to the allowlisted source provenance",
+            ),
+            Self::PostconditionMismatch => {
+                formatter.write_str("footprint postcondition did not match the prepared placement")
+            }
+            Self::UuidSetMismatch => {
+                formatter.write_str("footprint UUID set difference was not exactly one")
+            }
         }
     }
 }
@@ -261,12 +295,16 @@ impl DisposableFootprintContext {
     }
 }
 
-const MAX_HELPER_OUTPUT_BYTES: usize = 1024 * 1024;
-const HELPER_TIMEOUT: Duration = Duration::from_secs(30);
-const FIXED_PCBNEW_PATHS: &[&str] = &[
-    "/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3.9",
-];
-const FIXED_HELPER_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/helpers/footprint_helper.py");
+fn is_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value.as_bytes().iter().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                *byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FootprintPostcondition {
@@ -279,22 +317,14 @@ pub struct FootprintPostcondition {
     pub pad_numbers: Vec<String>,
     pub saved: bool,
     pub reopened: bool,
-}
-
-fn is_uuid(value: &str) -> bool {
-    value.len() == 36
-        && value.as_bytes().iter().enumerate().all(|(index, byte)| {
-            if matches!(index, 8 | 13 | 18 | 23) {
-                *byte == b'-'
-            } else {
-                byte.is_ascii_hexdigit()
-            }
-        })
+    pub source_digest: RevisionDigest,
+    pub source_size: u64,
 }
 
 impl FootprintPostcondition {
     pub fn matches(&self, request: &PreparedFootprintPlacement) -> bool {
         let placement = request.placement();
+        let provenance = &request.resolved().provenance;
         is_uuid(&self.footprint_uuid)
             && self.library_identifier == placement.library_identifier
             && self.reference == placement.reference
@@ -304,17 +334,38 @@ impl FootprintPostcondition {
             && self.saved
             && self.reopened
             && self.pad_numbers.iter().all(|number| !number.is_empty())
+            && self.source_digest == provenance.source_digest
+            && self.source_size == provenance.source_size
     }
 }
 
-struct FootprintHelperResponse {
-    postcondition: FootprintPostcondition,
+struct FootprintHelperPostcondition {
+    library_identifier: FootprintLibraryIdentifier,
+    reference: String,
+    value: String,
+    position: kicad_model::Coordinate,
+    pad_count: usize,
+    pad_numbers: Vec<String>,
+    saved: bool,
+    reopened: bool,
+    source_digest: RevisionDigest,
+    source_size: u64,
 }
 
-impl FootprintHelperResponse {
+impl FootprintHelperPostcondition {
     fn from_json(value: serde_json::Value) -> Result<Self, FootprintBackendError> {
+        let response = value
+            .as_object()
+            .ok_or(FootprintBackendError::RunnerProtocol(
+                "response is not an object",
+            ))?;
+        if response.len() != 1 || !response.contains_key("postcondition") {
+            return Err(FootprintBackendError::RunnerProtocol(
+                "response fields are not exact",
+            ));
+        }
         let postcondition =
-            value
+            response
                 .get("postcondition")
                 .cloned()
                 .ok_or(FootprintBackendError::RunnerProtocol(
@@ -326,7 +377,6 @@ impl FootprintHelperResponse {
                 "postcondition is not an object",
             ))?;
         const REQUIRED_FIELDS: &[&str] = &[
-            "footprint_uuid",
             "library_identifier",
             "reference",
             "value",
@@ -335,6 +385,8 @@ impl FootprintHelperResponse {
             "pad_numbers",
             "saved",
             "reopened",
+            "source_digest",
+            "source_size",
         ];
         if object.len() != REQUIRED_FIELDS.len()
             || REQUIRED_FIELDS
@@ -428,139 +480,796 @@ impl FootprintHelperResponse {
                 .and_then(serde_json::Value::as_bool)
                 .ok_or(FootprintBackendError::RunnerProtocol(name))
         };
+        let source_digest = RevisionDigest::new(string("source_digest")?.to_owned())
+            .map_err(|_| FootprintBackendError::RunnerProtocol("source_digest"))?;
+        let source_size = object
+            .get("source_size")
+            .and_then(serde_json::Value::as_u64)
+            .ok_or(FootprintBackendError::RunnerProtocol("source_size"))?;
         Ok(Self {
-            postcondition: FootprintPostcondition {
-                footprint_uuid: string("footprint_uuid")?.to_owned(),
-                library_identifier,
-                reference: string("reference")?.to_owned(),
-                value: string("value")?.to_owned(),
-                position: kicad_model::Coordinate {
-                    x: coordinate("x")?,
-                    y: coordinate("y")?,
-                    unit: kicad_model::Unit::Nanometres,
-                    space: kicad_model::DocumentSpace::Board,
-                },
-                pad_count,
-                pad_numbers,
-                saved: boolean("saved")?,
-                reopened: boolean("reopened")?,
+            library_identifier,
+            reference: string("reference")?.to_owned(),
+            value: string("value")?.to_owned(),
+            position: kicad_model::Coordinate {
+                x: coordinate("x")?,
+                y: coordinate("y")?,
+                unit: kicad_model::Unit::Nanometres,
+                space: kicad_model::DocumentSpace::Board,
             },
+            pad_count,
+            pad_numbers,
+            saved: boolean("saved")?,
+            reopened: boolean("reopened")?,
+            source_digest,
+            source_size,
         })
     }
 }
 
-pub struct BundledPcbnewRunner {
-    executable: PathBuf,
-    helper: PathBuf,
-    timeout: Duration,
+#[allow(dead_code)]
+pub(crate) trait FootprintIpc {
+    fn capture_templates(&mut self, board: &str) -> Result<Vec<FootprintInstanceTemplate>, String>;
+    fn create_footprint(
+        &mut self,
+        board: &str,
+        template: &FootprintInstanceTemplate,
+        placement: &AllowlistedFootprintPlacement,
+    ) -> Result<CreatedFootprintInstanceReceipt, String>;
+    fn begin_commit(&mut self) -> Result<String, String>;
+    fn commit(&mut self, commit: &str, message: &str) -> Result<(), String>;
+    fn drop_commit(&mut self, commit: &str) -> Result<(), String>;
+    fn save(&mut self, board: &str) -> Result<(), String>;
+    fn footprints(&mut self, board: &str) -> Result<Vec<ObservedFootprintInstance>, String>;
+    fn pads(&mut self, board: &str, footprint: &str) -> Result<Vec<ObservedPad>, String>;
 }
 
-impl BundledPcbnewRunner {
-    pub fn production() -> Result<Self, FootprintBackendError> {
-        let executable = FIXED_PCBNEW_PATHS
-            .iter()
-            .map(PathBuf::from)
-            .find(|path| path.is_file())
-            .ok_or(FootprintBackendError::UnsupportedRunner)?;
-        let helper = PathBuf::from(FIXED_HELPER_PATH);
-        if !helper.is_file() {
-            return Err(FootprintBackendError::UnsupportedRunner);
-        }
-        Ok(Self {
-            executable,
-            helper,
-            timeout: HELPER_TIMEOUT,
-        })
+impl<T: KiCadTransport> FootprintIpc for KiCadClient<T> {
+    fn capture_templates(&mut self, board: &str) -> Result<Vec<FootprintInstanceTemplate>, String> {
+        self.capture_footprint_instance_templates(board)
+            .map_err(|error| error.to_string())
     }
 
-    fn run_helper(
-        &self,
-        request: &PreparedFootprintPlacement,
-    ) -> Result<FootprintPostcondition, FootprintBackendError> {
-        let input = serde_json::json!({
-            "board_path": request.context().board_path(),
-            "project_root": request.context().project_root(),
-            "source_path": request.resolved().source_path,
-            "library_identifier": request.placement().library_identifier,
-            "target_id": request.placement().target_id,
-            "position": request.placement().position,
-            "reference": request.placement().reference,
-            "value": request.placement().value,
-        });
-        let mut child = Command::new(&self.executable)
-            .arg(&self.helper)
-            .arg("--fixed-footprint-placement-v1")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|error| FootprintBackendError::RunnerProcess(error.to_string()))?;
-        let mut stdin = child.stdin.take().ok_or_else(|| {
-            FootprintBackendError::RunnerProcess("helper stdin unavailable".to_owned())
-        })?;
-        let encoded = serde_json::to_vec(&input)
-            .map_err(|_| FootprintBackendError::RunnerProtocol("request encoding"))?;
-        std::thread::spawn(move || {
-            use std::io::Write;
-            let _ = stdin.write_all(&encoded);
-        });
-        let stdout = child.stdout.take().ok_or_else(|| {
-            FootprintBackendError::RunnerProcess("helper stdout unavailable".to_owned())
-        })?;
-        let (sender, receiver) = mpsc::channel();
-        std::thread::spawn(move || {
-            let mut limited = stdout.take((MAX_HELPER_OUTPUT_BYTES + 1) as u64);
-            let mut bytes = Vec::new();
-            let result = limited.read_to_end(&mut bytes).map(|_| bytes);
-            let _ = sender.send(result);
-        });
-        let bytes = receiver
-            .recv_timeout(self.timeout)
-            .map_err(|_| {
-                let _ = child.kill();
-                let _ = child.wait();
-                FootprintBackendError::RunnerTimeout
-            })?
-            .map_err(|error| FootprintBackendError::RunnerProcess(error.to_string()))?;
-        let status = child
-            .wait()
-            .map_err(|error| FootprintBackendError::RunnerProcess(error.to_string()))?;
-        if !status.success() {
-            return Err(FootprintBackendError::RunnerProcess(status.to_string()));
-        }
-        if bytes.len() > MAX_HELPER_OUTPUT_BYTES {
-            return Err(FootprintBackendError::RunnerProtocol("response too large"));
-        }
-        let value: serde_json::Value = serde_json::from_slice(&bytes)
-            .map_err(|_| FootprintBackendError::RunnerProtocol("malformed JSON"))?;
-        let response = FootprintHelperResponse::from_json(value)?;
-        if !response.postcondition.matches(request) {
-            return Err(FootprintBackendError::RunnerProtocol(
-                "postcondition mismatch",
-            ));
-        }
-        Ok(response.postcondition)
+    fn create_footprint(
+        &mut self,
+        board: &str,
+        template: &FootprintInstanceTemplate,
+        placement: &AllowlistedFootprintPlacement,
+    ) -> Result<CreatedFootprintInstanceReceipt, String> {
+        self.create_footprint_instance(
+            board,
+            template,
+            placement.position.x,
+            placement.position.y,
+            &placement.reference,
+            &placement.value,
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    fn begin_commit(&mut self) -> Result<String, String> {
+        KiCadClient::begin_commit(self)
+            .map(|commit| commit.as_str().to_owned())
+            .map_err(|error| error.to_string())
+    }
+
+    fn commit(&mut self, commit: &str, message: &str) -> Result<(), String> {
+        let commit = kicad_ipc::CommitId::new(commit).map_err(|error| error.to_string())?;
+        self.commit_changes(&commit, message)
+            .map_err(|error| error.to_string())
+    }
+
+    fn drop_commit(&mut self, commit: &str) -> Result<(), String> {
+        let commit = kicad_ipc::CommitId::new(commit).map_err(|error| error.to_string())?;
+        self.drop_commit(&commit).map_err(|error| error.to_string())
+    }
+
+    fn save(&mut self, board: &str) -> Result<(), String> {
+        self.save_board(board).map_err(|error| error.to_string())
+    }
+
+    fn footprints(&mut self, board: &str) -> Result<Vec<ObservedFootprintInstance>, String> {
+        self.get_footprint_instances(board)
+            .map_err(|error| error.to_string())
+    }
+
+    fn pads(&mut self, board: &str, footprint: &str) -> Result<Vec<ObservedPad>, String> {
+        self.get_footprint_pads(board, footprint)
+            .map_err(|error| error.to_string())
     }
 }
 
-impl DisposableFootprintRunner for BundledPcbnewRunner {
-    fn place(
-        &self,
+#[allow(dead_code)]
+pub(crate) struct DisposableIpcFootprintExecutor;
+
+#[allow(dead_code)]
+impl DisposableIpcFootprintExecutor {
+    pub fn place(
+        launcher: &mut OwnedPcbnewLauncher,
         request: &PreparedFootprintPlacement,
+        message: &str,
     ) -> Result<FootprintPlacementReceipt, FootprintBackendError> {
         request.context().validate_before_place()?;
-        let postcondition = self.run_helper(request)?;
-        if !postcondition.matches(request) {
-            return Err(FootprintBackendError::RunnerProtocol(
-                "postcondition mismatch",
+        verify_source_provenance(request)?;
+        let shadow = launcher.current_shadow().map_err(lifecycle_error)?;
+        if shadow.board_path() != request.context().board_path()
+            || shadow.root() != request.context().project_root()
+        {
+            return Err(FootprintBackendError::Lifecycle(
+                "prepared request is not bound to the owned shadow".into(),
             ));
         }
-        Ok(FootprintPlacementReceipt {
+        let identity = launcher
+            .current_identity()
+            .map_err(lifecycle_error)?
+            .clone();
+        let mut ipc = launcher.connect_owned().map_err(lifecycle_error)?;
+        let templates = match FootprintIpc::capture_templates(&mut ipc, &identity.board_filename) {
+            Ok(templates) => templates,
+            Err(error) => {
+                return abort_footprint_transaction(
+                    ipc,
+                    None,
+                    launcher,
+                    identity.pid,
+                    FootprintBackendError::Ipc(error),
+                );
+            }
+        };
+        let template = match templates.into_iter().find(|template| {
+            let metadata = template.metadata();
+            metadata.library_identifier.nickname == request.placement().library_identifier.nickname
+                && metadata.library_identifier.entry_name
+                    == request.placement().library_identifier.entry_name
+        }) {
+            Some(template) => template,
+            None => {
+                return abort_footprint_transaction(
+                    ipc,
+                    None,
+                    launcher,
+                    identity.pid,
+                    FootprintBackendError::TemplateNotFound,
+                );
+            }
+        };
+        let commit = match FootprintIpc::begin_commit(&mut ipc) {
+            Ok(commit) => commit,
+            Err(error) => {
+                return abort_footprint_transaction(
+                    ipc,
+                    None,
+                    launcher,
+                    identity.pid,
+                    FootprintBackendError::Ipc(error.to_string()),
+                );
+            }
+        };
+        let receipt = match FootprintIpc::create_footprint(
+            &mut ipc,
+            &identity.board_filename,
+            &template,
+            request.placement(),
+        ) {
+            Ok(receipt) => receipt,
+            Err(error) => {
+                return abort_footprint_transaction(
+                    ipc,
+                    Some(commit),
+                    launcher,
+                    identity.pid,
+                    FootprintBackendError::Ipc(error.to_string()),
+                );
+            }
+        };
+        if let Err(error) = FootprintIpc::commit(&mut ipc, &commit, message) {
+            return abort_footprint_transaction(
+                ipc,
+                Some(commit),
+                launcher,
+                identity.pid,
+                FootprintBackendError::Ipc(error),
+            );
+        }
+        if let Err(error) = FootprintIpc::save(&mut ipc, &identity.board_filename) {
+            return abort_footprint_transaction(
+                ipc,
+                None,
+                launcher,
+                identity.pid,
+                FootprintBackendError::Ipc(error),
+            );
+        }
+        let pid = identity.pid;
+        drop(ipc);
+        launcher.close_owned(pid).map_err(lifecycle_error)?;
+        let reopened = launcher.reopen().map_err(lifecycle_error)?.clone();
+        let mut reopened_ipc = launcher.connect_owned().map_err(lifecycle_error)?;
+        let observed = match FootprintIpc::footprints(&mut reopened_ipc, &reopened.board_filename) {
+            Ok(observed) => observed,
+            Err(error) => {
+                return abort_reopened_footprint(
+                    reopened_ipc,
+                    launcher,
+                    reopened.pid,
+                    FootprintBackendError::Ipc(error),
+                );
+            }
+        };
+        let matching: Vec<_> = observed
+            .into_iter()
+            .filter(|footprint| {
+                footprint.source_uuid == receipt.source_uuid
+                    && footprint.library_identifier.nickname
+                        == request.placement().library_identifier.nickname
+                    && footprint.library_identifier.entry_name
+                        == request.placement().library_identifier.entry_name
+                    && footprint.reference == request.placement().reference
+                    && footprint.value == request.placement().value
+                    && footprint.position_x_nm == request.placement().position.x
+                    && footprint.position_y_nm == request.placement().position.y
+            })
+            .collect();
+        let footprint = match matching.len() {
+            1 => matching.into_iter().next().expect("length checked"),
+            _ => {
+                return abort_reopened_footprint(
+                    reopened_ipc,
+                    launcher,
+                    reopened.pid,
+                    FootprintBackendError::PostconditionMismatch,
+                );
+            }
+        };
+        let pads = match FootprintIpc::pads(
+            &mut reopened_ipc,
+            &reopened.board_filename,
+            &footprint.source_uuid,
+        ) {
+            Ok(pads) if !pads.is_empty() => pads,
+            Ok(_) => {
+                return abort_reopened_footprint(
+                    reopened_ipc,
+                    launcher,
+                    reopened.pid,
+                    FootprintBackendError::PostconditionMismatch,
+                );
+            }
+            Err(error) => {
+                return abort_reopened_footprint(
+                    reopened_ipc,
+                    launcher,
+                    reopened.pid,
+                    FootprintBackendError::Ipc(error),
+                );
+            }
+        };
+        let postcondition = FootprintPostcondition {
+            footprint_uuid: footprint.source_uuid,
+            library_identifier: request.placement().library_identifier.clone(),
+            reference: footprint.reference,
+            value: footprint.value,
+            position: request.placement().position,
+            pad_count: pads.len(),
+            pad_numbers: pads.into_iter().map(|pad| pad.number).collect(),
+            saved: true,
+            reopened: launcher.is_reopened(),
+            source_digest: request.resolved().provenance.source_digest.clone(),
+            source_size: request.resolved().provenance.source_size,
+        };
+        if !postcondition.matches(request) {
+            return abort_reopened_footprint(
+                reopened_ipc,
+                launcher,
+                reopened.pid,
+                FootprintBackendError::PostconditionMismatch,
+            );
+        }
+        let receipt = FootprintPlacementReceipt {
             resolved: request.resolved().clone(),
             placement: request.placement().clone(),
             postcondition,
-        })
+        };
+        launcher
+            .close_owned(reopened.pid)
+            .map_err(lifecycle_error)?;
+        launcher.cleanup().map_err(lifecycle_error)?;
+        Ok(receipt)
     }
+}
+
+const MAX_HELPER_OUTPUT_BYTES: usize = 1024 * 1024;
+const HELPER_TIMEOUT: Duration = Duration::from_secs(30);
+const FIXED_PYTHON_PATH: &str =
+    "/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3.9";
+const FIXED_HELPER_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/helpers/footprint_helper.py");
+
+fn unique_new_footprint_uuid(
+    before: &[ObservedFootprintInstance],
+    after: &[ObservedFootprintInstance],
+) -> Result<String, FootprintBackendError> {
+    let before_ids = before
+        .iter()
+        .map(|footprint| footprint.source_uuid.as_str())
+        .collect::<HashSet<_>>();
+    if before_ids.len() != before.len() {
+        return Err(FootprintBackendError::UuidSetMismatch);
+    }
+    let after_ids = after
+        .iter()
+        .map(|footprint| footprint.source_uuid.as_str())
+        .collect::<HashSet<_>>();
+    if after_ids.len() != after.len() {
+        return Err(FootprintBackendError::UuidSetMismatch);
+    }
+    let removed = before_ids.difference(&after_ids).next().is_some();
+    let added = after_ids
+        .difference(&before_ids)
+        .map(|uuid| (*uuid).to_owned())
+        .collect::<Vec<_>>();
+    if !removed && after.len() == before.len() + 1 && added.len() == 1 {
+        Ok(added.into_iter().next().expect("length checked"))
+    } else {
+        Err(FootprintBackendError::UuidSetMismatch)
+    }
+}
+
+fn run_fixed_python_helper(
+    request: &PreparedFootprintPlacement,
+) -> Result<FootprintHelperPostcondition, FootprintBackendError> {
+    let input = serde_json::json!({
+        "board_path": request.context().board_path(),
+        "project_root": request.context().project_root(),
+        "source_registry_root": request.resolved().provenance.registry_root,
+        "source_path": request.resolved().source_path,
+        "library_identifier": request.placement().library_identifier,
+        "target_id": request.placement().target_id,
+        "position": request.placement().position,
+        "reference": request.placement().reference,
+        "value": request.placement().value,
+        "source_digest": request.resolved().provenance.source_digest,
+        "source_size": request.resolved().provenance.source_size,
+    });
+    let mut child = Command::new(FIXED_PYTHON_PATH)
+        .arg(FIXED_HELPER_PATH)
+        .arg("--fixed-footprint-placement-v2")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| FootprintBackendError::RunnerProcess(error.to_string()))?;
+    let mut stdin = match child.stdin.take() {
+        Some(stdin) => stdin,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(FootprintBackendError::RunnerProcess(
+                "helper stdin unavailable".to_owned(),
+            ));
+        }
+    };
+    let encoded = match serde_json::to_vec(&input) {
+        Ok(encoded) => encoded,
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(FootprintBackendError::RunnerProtocol("request encoding"));
+        }
+    };
+    std::thread::spawn(move || {
+        let _ = stdin.write_all(&encoded);
+    });
+    let stdout = match child.stdout.take() {
+        Some(stdout) => stdout,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(FootprintBackendError::RunnerProcess(
+                "helper stdout unavailable".to_owned(),
+            ));
+        }
+    };
+    let stderr = match child.stderr.take() {
+        Some(stderr) => stderr,
+        None => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(FootprintBackendError::RunnerProcess(
+                "helper stderr unavailable".to_owned(),
+            ));
+        }
+    };
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut limited = stdout.take((MAX_HELPER_OUTPUT_BYTES + 1) as u64);
+        let mut bytes = Vec::new();
+        let result = limited.read_to_end(&mut bytes).map(|_| bytes);
+        let _ = sender.send(result);
+    });
+    let (error_sender, error_receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut limited = stderr.take((MAX_HELPER_OUTPUT_BYTES + 1) as u64);
+        let mut bytes = Vec::new();
+        let result = limited.read_to_end(&mut bytes).map(|_| bytes);
+        let _ = error_sender.send(result);
+    });
+    let bytes = match receiver.recv_timeout(HELPER_TIMEOUT) {
+        Ok(result) => match result {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(FootprintBackendError::RunnerProcess(error.to_string()));
+            }
+        },
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(FootprintBackendError::RunnerTimeout);
+        }
+    };
+    let stderr = match error_receiver.recv_timeout(HELPER_TIMEOUT) {
+        Ok(result) => match result {
+            Ok(stderr) => stderr,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(FootprintBackendError::RunnerProcess(error.to_string()));
+            }
+        },
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(FootprintBackendError::RunnerTimeout);
+        }
+    };
+    let status = match child.wait() {
+        Ok(status) => status,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(FootprintBackendError::RunnerProcess(error.to_string()));
+        }
+    };
+    if !status.success() {
+        let detail = String::from_utf8_lossy(&stderr).trim().to_owned();
+        return Err(FootprintBackendError::RunnerProcess(if detail.is_empty() {
+            status.to_string()
+        } else {
+            detail
+        }));
+    }
+    if bytes.len() > MAX_HELPER_OUTPUT_BYTES {
+        return Err(FootprintBackendError::RunnerProtocol("response too large"));
+    }
+    let value: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|_| FootprintBackendError::RunnerProtocol("malformed JSON"))?;
+    let response = FootprintHelperPostcondition::from_json(value)?;
+    let provenance = &request.resolved().provenance;
+    if response.source_digest != provenance.source_digest
+        || response.source_size != provenance.source_size
+        || response.library_identifier != request.placement().library_identifier
+        || response.reference != request.placement().reference
+        || response.value != request.placement().value
+        || response.position != request.placement().position
+        || response.pad_count != response.pad_numbers.len()
+        || response.pad_numbers.iter().any(String::is_empty)
+        || !response.saved
+        || !response.reopened
+    {
+        return Err(FootprintBackendError::RunnerProtocol(
+            "helper postcondition mismatch",
+        ));
+    }
+    Ok(response)
+}
+
+#[allow(dead_code)]
+pub(crate) struct DisposablePythonFootprintExecutor;
+
+#[allow(dead_code)]
+impl DisposablePythonFootprintExecutor {
+    pub fn place(
+        launcher: &mut OwnedPcbnewLauncher,
+        request: &PreparedFootprintPlacement,
+        message: &str,
+    ) -> Result<FootprintPlacementReceipt, FootprintBackendError> {
+        let mut receipts = Self::place_batch(launcher, std::slice::from_ref(request), message)?;
+        Ok(receipts.remove(0))
+    }
+
+    pub fn place_batch(
+        launcher: &mut OwnedPcbnewLauncher,
+        requests: &[PreparedFootprintPlacement],
+        message: &str,
+    ) -> Result<Vec<FootprintPlacementReceipt>, FootprintBackendError> {
+        let receipts = Self::place_batch_preserving_shadow(launcher, requests, message)?;
+        launcher.cleanup().map_err(lifecycle_error)?;
+        Ok(receipts)
+    }
+
+    pub(crate) fn place_batch_preserving_shadow(
+        launcher: &mut OwnedPcbnewLauncher,
+        requests: &[PreparedFootprintPlacement],
+        _message: &str,
+    ) -> Result<Vec<FootprintPlacementReceipt>, FootprintBackendError> {
+        if requests.is_empty() {
+            return Err(FootprintBackendError::InvalidPlacement(
+                "footprint batch must not be empty",
+            ));
+        }
+        for request in requests {
+            verify_source_provenance(request)?;
+        }
+        let shadow = launcher.current_shadow().map_err(lifecycle_error)?.clone();
+        let first_context = requests[0].context();
+        if shadow.board_path() != first_context.board_path()
+            || shadow.root() != first_context.project_root()
+            || requests.iter().any(|request| {
+                request.context().board_path() != shadow.board_path()
+                    || request.context().project_root() != shadow.root()
+            })
+        {
+            return Err(FootprintBackendError::Lifecycle(
+                "prepared requests are not bound to the owned shadow".into(),
+            ));
+        }
+
+        let mut open_pid = Some(launcher.current_identity().map_err(lifecycle_error)?.pid);
+        let mut receipts = Vec::with_capacity(requests.len());
+        for request in requests {
+            let identity = launcher
+                .current_identity()
+                .map_err(lifecycle_error)?
+                .clone();
+            let mut ipc = match launcher.connect_owned() {
+                Ok(ipc) => ipc,
+                Err(error) => {
+                    return abort_python_transaction(
+                        launcher,
+                        open_pid,
+                        FootprintBackendError::Lifecycle(error.to_string()),
+                    );
+                }
+            };
+            let before = match FootprintIpc::footprints(&mut ipc, &identity.board_filename) {
+                Ok(observed) => observed,
+                Err(error) => {
+                    return abort_python_transaction(
+                        launcher,
+                        open_pid,
+                        FootprintBackendError::Ipc(error),
+                    );
+                }
+            };
+            drop(ipc);
+            if let Err(error) = launcher.close_owned(identity.pid) {
+                return abort_python_transaction(
+                    launcher,
+                    open_pid,
+                    FootprintBackendError::Lifecycle(error.to_string()),
+                );
+            }
+            open_pid = None;
+
+            let helper = match run_fixed_python_helper(request) {
+                Ok(helper) => helper,
+                Err(error) => return abort_python_transaction(launcher, open_pid, error),
+            };
+            if helper.source_digest != request.resolved().provenance.source_digest
+                || helper.source_size != request.resolved().provenance.source_size
+                || verify_source_provenance(request).is_err()
+            {
+                return abort_python_transaction(
+                    launcher,
+                    open_pid,
+                    FootprintBackendError::RunnerProtocol("source provenance changed"),
+                );
+            }
+
+            let reopened = match launcher.reopen() {
+                Ok(identity) => identity,
+                Err(error) => {
+                    return abort_python_transaction(
+                        launcher,
+                        open_pid,
+                        FootprintBackendError::Lifecycle(error.to_string()),
+                    );
+                }
+            };
+            open_pid = Some(reopened.pid);
+            let mut reopened_ipc = match launcher.connect_owned() {
+                Ok(ipc) => ipc,
+                Err(error) => {
+                    return abort_python_transaction(
+                        launcher,
+                        open_pid,
+                        FootprintBackendError::Lifecycle(error.to_string()),
+                    );
+                }
+            };
+            let after = match FootprintIpc::footprints(&mut reopened_ipc, &reopened.board_filename)
+            {
+                Ok(observed) => observed,
+                Err(error) => {
+                    return abort_python_transaction(
+                        launcher,
+                        open_pid,
+                        FootprintBackendError::Ipc(error),
+                    );
+                }
+            };
+            let uuid = match unique_new_footprint_uuid(&before, &after) {
+                Ok(uuid) => uuid,
+                Err(error) => return abort_python_transaction(launcher, open_pid, error),
+            };
+            let footprint = match after.iter().find(|footprint| footprint.source_uuid == uuid) {
+                Some(footprint) => footprint,
+                None => {
+                    return abort_python_transaction(
+                        launcher,
+                        open_pid,
+                        FootprintBackendError::UuidSetMismatch,
+                    );
+                }
+            };
+            if footprint.library_identifier.nickname != helper.library_identifier.nickname
+                || footprint.library_identifier.entry_name != helper.library_identifier.entry_name
+                || footprint.reference != helper.reference
+                || footprint.value != helper.value
+                || footprint.position_x_nm != helper.position.x
+                || footprint.position_y_nm != helper.position.y
+                || footprint.orientation_mdeg != 0
+                || footprint.side != kicad_ipc::FootprintSide::Front
+            {
+                return abort_python_transaction(
+                    launcher,
+                    open_pid,
+                    FootprintBackendError::PostconditionMismatch,
+                );
+            }
+            let mut pads =
+                match reopened_ipc.get_footprint_definition_pads(&reopened.board_filename, &uuid) {
+                    Ok(pads) => pads,
+                    Err(error) => {
+                        return abort_python_transaction(
+                            launcher,
+                            open_pid,
+                            FootprintBackendError::Ipc(error.to_string()),
+                        );
+                    }
+                };
+            pads.sort_by(|left, right| left.number.cmp(&right.number));
+            let pad_numbers: Vec<_> = pads.into_iter().map(|pad| pad.number).collect();
+            if pad_numbers != helper.pad_numbers
+                || helper.pad_count != pad_numbers.len()
+                || pad_numbers.iter().any(String::is_empty)
+            {
+                return abort_python_transaction(
+                    launcher,
+                    open_pid,
+                    FootprintBackendError::PostconditionMismatch,
+                );
+            }
+            receipts.push(FootprintPlacementReceipt {
+                resolved: request.resolved().clone(),
+                placement: request.placement().clone(),
+                postcondition: FootprintPostcondition {
+                    footprint_uuid: uuid,
+                    library_identifier: request.placement().library_identifier.clone(),
+                    reference: footprint.reference.clone(),
+                    value: footprint.value.clone(),
+                    position: request.placement().position,
+                    pad_count: pad_numbers.len(),
+                    pad_numbers,
+                    saved: helper.saved,
+                    reopened: launcher.is_reopened() && helper.reopened,
+                    source_digest: request.resolved().provenance.source_digest.clone(),
+                    source_size: request.resolved().provenance.source_size,
+                },
+            });
+        }
+        let pid = open_pid.expect("batch keeps an owned editor open");
+        if let Err(error) = launcher.close_owned(pid) {
+            return abort_python_transaction(
+                launcher,
+                Some(pid),
+                FootprintBackendError::Lifecycle(error.to_string()),
+            );
+        }
+        Ok(receipts)
+    }
+}
+
+#[allow(dead_code)]
+fn abort_python_transaction(
+    launcher: &mut OwnedPcbnewLauncher,
+    open_pid: Option<u32>,
+    error: FootprintBackendError,
+) -> Result<Vec<FootprintPlacementReceipt>, FootprintBackendError> {
+    let mut details = error.to_string();
+    if let Some(pid) = open_pid
+        && let Err(close_error) = launcher.close_owned(pid)
+    {
+        details.push_str(&format!("; close owned editor failed: {close_error}"));
+    }
+    if let Err(cleanup_error) = launcher.cleanup() {
+        details.push_str(&format!("; cleanup failed: {cleanup_error}"));
+    }
+    Err(FootprintBackendError::Lifecycle(details))
+}
+
+#[allow(dead_code)]
+fn abort_reopened_footprint<I: FootprintIpc>(
+    ipc: I,
+    launcher: &mut OwnedPcbnewLauncher,
+    pid: u32,
+    error: FootprintBackendError,
+) -> Result<FootprintPlacementReceipt, FootprintBackendError> {
+    drop(ipc);
+    abort_footprint_transaction_without_ipc(launcher, pid, error)
+}
+
+#[allow(dead_code)]
+fn abort_footprint_transaction_without_ipc(
+    launcher: &mut OwnedPcbnewLauncher,
+    pid: u32,
+    error: FootprintBackendError,
+) -> Result<FootprintPlacementReceipt, FootprintBackendError> {
+    let mut details = error.to_string();
+    if let Err(close_error) = launcher.close_owned(pid) {
+        details.push_str(&format!("; close owned editor failed: {close_error}"));
+    }
+    Err(FootprintBackendError::Lifecycle(details))
+}
+
+#[allow(dead_code)]
+fn abort_footprint_transaction<I: FootprintIpc>(
+    mut ipc: I,
+    commit: Option<String>,
+    launcher: &mut OwnedPcbnewLauncher,
+    pid: u32,
+    error: FootprintBackendError,
+) -> Result<FootprintPlacementReceipt, FootprintBackendError> {
+    let mut details = error.to_string();
+    if let Some(commit) = commit
+        && let Err(drop_error) = ipc.drop_commit(&commit)
+    {
+        details.push_str(&format!("; drop commit failed: {drop_error}"));
+    }
+    drop(ipc);
+    if let Err(close_error) = launcher.close_owned(pid) {
+        details.push_str(&format!("; close owned editor failed: {close_error}"));
+    }
+    Err(FootprintBackendError::Lifecycle(details))
+}
+
+#[allow(dead_code)]
+fn verify_source_provenance(
+    request: &PreparedFootprintPlacement,
+) -> Result<(), FootprintBackendError> {
+    let source = &request.resolved().provenance;
+    let bytes = fs::read(&source.source_path)
+        .map_err(|_| FootprintBackendError::SourceMissing(source.source_path.clone()))?;
+    if bytes.len() as u64 != source.source_size {
+        return Err(FootprintBackendError::RunnerProtocol(
+            "allowlisted footprint source changed",
+        ));
+    }
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    let digest = RevisionDigest::new(hex::encode(hasher.finalize()))
+        .expect("sha256 is a valid revision digest");
+    if digest != source.source_digest {
+        return Err(FootprintBackendError::RunnerProtocol(
+            "allowlisted footprint source changed",
+        ));
+    }
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn lifecycle_error(error: LifecycleError) -> FootprintBackendError {
+    FootprintBackendError::Lifecycle(error.to_string())
 }
 
 pub trait DisposableFootprintRunner: Send + Sync {
@@ -618,8 +1327,11 @@ fn pcb_lock_path(board: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{BoardGraphicsExecutor, verify_native_pcb_batch};
+    use kicad_checks::{CheckResult, DrcPolicy, compare_drc, run_pcb_drc};
+    use kicad_ipc::{BoardGraphicLayer, BoardGraphicSegment, CreateThroughVia, CreateTrack};
     use kicad_model::{Coordinate, DocumentSpace, StableId, Unit};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
     fn fixture() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
         let root = std::env::temp_dir().join(format!(
@@ -648,6 +1360,58 @@ mod tests {
         (root, official, project, board)
     }
 
+    fn observed(uuid: &str) -> ObservedFootprintInstance {
+        ObservedFootprintInstance {
+            source_uuid: uuid.to_owned(),
+            position_x_nm: 0,
+            position_y_nm: 0,
+            orientation_mdeg: 0,
+            side: kicad_ipc::FootprintSide::Front,
+            lock_state: kicad_ipc::ObservedLockState::Unlocked,
+            library_identifier: kicad_ipc::ObservedFootprintLibraryIdentifier {
+                nickname: "LED_SMD".to_owned(),
+                entry_name: "LED_1210_3225Metric_Pad1.42x2.65mm_HandSolder".to_owned(),
+            },
+            reference: "P1".to_owned(),
+            value: "LED".to_owned(),
+            symbol_sheet_path: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn uuid_difference_requires_exactly_one_unique_server_identity() {
+        let before = vec![observed("old")];
+        assert_eq!(
+            unique_new_footprint_uuid(&before, &[observed("old"), observed("new")]).unwrap(),
+            "new"
+        );
+        assert!(matches!(
+            unique_new_footprint_uuid(&before, &[observed("old")]),
+            Err(FootprintBackendError::UuidSetMismatch)
+        ));
+        assert!(matches!(
+            unique_new_footprint_uuid(
+                &before,
+                &[observed("old"), observed("new"), observed("newer")]
+            ),
+            Err(FootprintBackendError::UuidSetMismatch)
+        ));
+        assert!(matches!(
+            unique_new_footprint_uuid(
+                &before,
+                &[observed("old"), observed("new"), observed("new")]
+            ),
+            Err(FootprintBackendError::UuidSetMismatch)
+        ));
+        assert!(matches!(
+            unique_new_footprint_uuid(
+                &[observed("old"), observed("kept")],
+                &[observed("kept"), observed("new")]
+            ),
+            Err(FootprintBackendError::UuidSetMismatch)
+        ));
+    }
+
     fn placement(x: i64) -> AllowlistedFootprintPlacement {
         AllowlistedFootprintPlacement::new(
             StableId::new("target").unwrap(),
@@ -662,6 +1426,245 @@ mod tests {
             "LED",
         )
         .unwrap()
+    }
+
+    #[test]
+    #[ignore = "disposable KiCad 10.0.5 smoke"]
+    fn disposable_pcb_vertical_slice_saves_and_reopens_all_native_items() {
+        let live = PathBuf::from("/Users/w-mai/Projects/Hardware/PCBs/xLock/xLock.kicad_pcb");
+        let digest = |path: &Path| {
+            let mut hasher = Sha256::new();
+            hasher.update(fs::read(path).unwrap());
+            hex::encode(hasher.finalize())
+        };
+        let live_digest = digest(&live);
+        let source_root = std::env::temp_dir().join(format!(
+            "auto-kicad-source-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let server_root = std::env::temp_dir().join(format!(
+            "auto-kicad-server-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&source_root).unwrap();
+        let source_board = source_root.join("xLock.kicad_pcb");
+        fs::copy(&live, &source_board).unwrap();
+        fs::copy(
+            live.with_extension("kicad_pro"),
+            source_board.with_extension("kicad_pro"),
+        )
+        .unwrap();
+        let official = PathBuf::from(
+            "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/LED_SMD.pretty",
+        );
+        let project = PathBuf::from("/Users/w-mai/Projects/Hardware/Libs/Type-C.pretty");
+        let mut launcher = OwnedPcbnewLauncher::new(&server_root).unwrap();
+        let shadow = launcher.create_shadow(&source_board).unwrap();
+        let context = DisposableFootprintContext::new(shadow.root(), shadow.board_path()).unwrap();
+        let drc_policy = DrcPolicy {
+            allowed_root: shadow.root().to_path_buf(),
+            timeout: Duration::from_secs(60),
+        };
+        let baseline = match run_pcb_drc(shadow.board_path(), &drc_policy) {
+            CheckResult::Completed(report) => report,
+            CheckResult::Failed(error) => panic!("baseline DRC failed: {error:?}"),
+        };
+        let registry = FootprintRegistry::new(&official, &project).unwrap();
+        let make = |library, target, x, reference, value| {
+            context
+                .prepare(
+                    &registry,
+                    library,
+                    AllowlistedFootprintPlacement::new(
+                        StableId::new(target).unwrap(),
+                        library.identifier(),
+                        Coordinate {
+                            x,
+                            y: 100_000_000,
+                            unit: Unit::Nanometres,
+                            space: DocumentSpace::Board,
+                        },
+                        reference,
+                        value,
+                    )
+                    .unwrap(),
+                )
+                .unwrap()
+        };
+        let first = make(
+            AllowlistedFootprint::OfficialLed1210,
+            "led-target",
+            100_000_000,
+            "R_TEST1",
+            "LED",
+        );
+        let second = make(
+            AllowlistedFootprint::ProjectTypeC,
+            "type-c-target",
+            120_000_000,
+            "J_TEST1",
+            "USB-C",
+        );
+        launcher.launch(&shadow).unwrap();
+        let receipts = DisposablePythonFootprintExecutor::place_batch_preserving_shadow(
+            &mut launcher,
+            &[first, second],
+            "disposable fallback smoke",
+        )
+        .unwrap();
+        assert_eq!(receipts.len(), 2);
+        assert_ne!(
+            receipts[0].postcondition.footprint_uuid,
+            receipts[1].postcondition.footprint_uuid
+        );
+        assert_eq!(receipts[0].placement.reference, "R_TEST1");
+        assert_eq!(receipts[0].placement.position.x, 100_000_000);
+        assert_eq!(receipts[0].postcondition.pad_numbers, ["1", "2"]);
+        assert_eq!(receipts[1].placement.reference, "J_TEST1");
+        assert_eq!(receipts[1].placement.position.x, 120_000_000);
+        assert_eq!(receipts[1].postcondition.pad_count, 20);
+        assert!(receipts.iter().all(|receipt| {
+            is_uuid(&receipt.postcondition.footprint_uuid)
+                && receipt.postcondition.matches(&PreparedFootprintPlacement {
+                    context: context.clone(),
+                    resolved: receipt.resolved.clone(),
+                    placement: receipt.placement.clone(),
+                })
+                && !receipt.postcondition.pad_numbers.is_empty()
+        }));
+
+        let native_identity = launcher.reopen().unwrap();
+        let mut native_ipc = launcher.connect_owned().unwrap();
+        let graphics = [
+            BoardGraphicSegment {
+                start_x_nm: 80_000_000,
+                start_y_nm: 80_000_000,
+                end_x_nm: 140_000_000,
+                end_y_nm: 80_000_000,
+                width_nm: 50_000,
+                layer: BoardGraphicLayer::EdgeCuts,
+            },
+            BoardGraphicSegment {
+                start_x_nm: 140_000_000,
+                start_y_nm: 80_000_000,
+                end_x_nm: 140_000_000,
+                end_y_nm: 120_000_000,
+                width_nm: 50_000,
+                layer: BoardGraphicLayer::EdgeCuts,
+            },
+            BoardGraphicSegment {
+                start_x_nm: 140_000_000,
+                start_y_nm: 120_000_000,
+                end_x_nm: 80_000_000,
+                end_y_nm: 120_000_000,
+                width_nm: 50_000,
+                layer: BoardGraphicLayer::EdgeCuts,
+            },
+            BoardGraphicSegment {
+                start_x_nm: 80_000_000,
+                start_y_nm: 120_000_000,
+                end_x_nm: 80_000_000,
+                end_y_nm: 80_000_000,
+                width_nm: 50_000,
+                layer: BoardGraphicLayer::EdgeCuts,
+            },
+        ];
+        let tracks = [CreateTrack {
+            start_x_nm: 100_000_000,
+            start_y_nm: 100_000_000,
+            end_x_nm: 120_000_000,
+            end_y_nm: 100_000_000,
+            width_nm: 250_000,
+        }];
+        let vias = [CreateThroughVia {
+            position_x_nm: 110_000_000,
+            position_y_nm: 100_000_000,
+            pad_diameter_nm: 800_000,
+            drill_diameter_nm: 400_000,
+        }];
+        let native_receipt = BoardGraphicsExecutor::default()
+            .execute_native_batch(
+                &mut native_ipc,
+                &native_identity.board_filename,
+                &graphics,
+                &tracks,
+                &vias,
+                "disposable PCB vertical slice",
+            )
+            .unwrap();
+        assert_eq!(native_receipt.graphics.len(), 4);
+        assert_eq!(native_receipt.tracks.len(), 1);
+        assert_eq!(native_receipt.vias.len(), 1);
+        drop(native_ipc);
+        launcher.close_owned(native_identity.pid).unwrap();
+
+        let verified_identity = launcher.reopen().unwrap();
+        let mut verified_ipc = launcher.connect_owned().unwrap();
+        verify_native_pcb_batch(
+            &mut verified_ipc,
+            &verified_identity.board_filename,
+            &native_receipt,
+        )
+        .unwrap();
+        let verified_footprints =
+            FootprintIpc::footprints(&mut verified_ipc, &verified_identity.board_filename).unwrap();
+        for receipt in &receipts {
+            let footprint = verified_footprints
+                .iter()
+                .find(|footprint| footprint.source_uuid == receipt.postcondition.footprint_uuid)
+                .expect("placed footprint survives final reopen");
+            assert_eq!(
+                footprint.library_identifier.nickname,
+                receipt.postcondition.library_identifier.nickname
+            );
+            assert_eq!(
+                footprint.library_identifier.entry_name,
+                receipt.postcondition.library_identifier.entry_name
+            );
+            assert_eq!(footprint.reference, receipt.postcondition.reference);
+            assert_eq!(footprint.value, receipt.postcondition.value);
+            assert_eq!(footprint.position_x_nm, receipt.postcondition.position.x);
+            assert_eq!(footprint.position_y_nm, receipt.postcondition.position.y);
+            assert_eq!(footprint.orientation_mdeg, 0);
+            assert_eq!(footprint.side, kicad_ipc::FootprintSide::Front);
+            let mut pads = verified_ipc
+                .get_footprint_definition_pads(
+                    &verified_identity.board_filename,
+                    &receipt.postcondition.footprint_uuid,
+                )
+                .unwrap()
+                .into_iter()
+                .map(|pad| pad.number)
+                .collect::<Vec<_>>();
+            pads.sort();
+            assert_eq!(pads, receipt.postcondition.pad_numbers);
+        }
+        drop(verified_ipc);
+        launcher.close_owned(verified_identity.pid).unwrap();
+
+        let after = match run_pcb_drc(shadow.board_path(), &drc_policy) {
+            CheckResult::Completed(report) => report,
+            CheckResult::Failed(error) => panic!("after DRC failed: {error:?}"),
+        };
+        let delta = compare_drc(&baseline, &after);
+        eprintln!(
+            "disposable PCB DRC: baseline={}, after={}, introduced={}, resolved={}",
+            baseline.violations.len(),
+            after.violations.len(),
+            delta.introduced.len(),
+            delta.resolved.len()
+        );
+        launcher.cleanup().unwrap();
+        assert!(!shadow.root().exists());
+        assert_eq!(digest(&live), live_digest);
+        fs::remove_dir_all(source_root).unwrap();
+        fs::remove_dir_all(server_root).unwrap();
     }
 
     #[test]
@@ -729,6 +1732,8 @@ mod tests {
             pad_numbers: vec!["1".to_owned(), "2".to_owned()],
             saved: true,
             reopened: true,
+            source_digest: prepared.resolved().provenance.source_digest.clone(),
+            source_size: prepared.resolved().provenance.source_size,
         };
         assert!(good.matches(&prepared));
         let mut bad = good.clone();

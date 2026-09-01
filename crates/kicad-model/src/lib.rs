@@ -419,6 +419,132 @@ impl<'de> Deserialize<'de> for AllowlistedFootprintPlacement {
     }
 }
 
+pub const MAX_FOOTPRINT_PADS: usize = 128;
+pub const MAX_FOOTPRINT_GRAPHICS: usize = 256;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum FootprintGraphicLayer {
+    FrontSilkscreen,
+    BackSilkscreen,
+    FrontFab,
+    BackFab,
+    FrontCourtyard,
+    BackCourtyard,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FootprintPadDefinition {
+    pub number: String,
+    pub kind: PadKind,
+    pub shape: PadShape,
+    pub anchor: LocalCoordinateNm,
+    pub size: SizeNm,
+    pub drill: Option<SizeNm>,
+    pub layers: Vec<BoardLayer>,
+}
+
+impl FootprintPadDefinition {
+    pub fn validate(&self) -> Result<(), ModelError> {
+        if self.number.is_empty() {
+            return Err(ModelError::InvalidFootprintObservation(
+                "footprint pad number must not be empty",
+            ));
+        }
+        if self.kind == PadKind::Unknown || self.shape == PadShape::Unknown {
+            return Err(ModelError::InvalidFootprintObservation(
+                "footprint pad kind and shape must be known",
+            ));
+        }
+        self.size.validate()?;
+        if let Some(drill) = self.drill {
+            drill.validate()?;
+        }
+        if self.layers.is_empty() {
+            return Err(ModelError::InvalidFootprintObservation(
+                "footprint pad must have at least one layer",
+            ));
+        }
+        for layer in &self.layers {
+            layer.validate()?;
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FootprintGraphicDefinition {
+    pub layer: FootprintGraphicLayer,
+    pub start: LocalCoordinateNm,
+    pub end: LocalCoordinateNm,
+    pub width_nm: i64,
+}
+
+impl FootprintGraphicDefinition {
+    pub fn validate(&self) -> Result<(), ModelError> {
+        if self.width_nm <= 0 {
+            return Err(ModelError::InvalidFootprintObservation(
+                "footprint graphic width must be positive",
+            ));
+        }
+        if self.start == self.end {
+            return Err(ModelError::InvalidFootprintObservation(
+                "footprint graphic endpoints must differ",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum FootprintTextPolicy {
+    ReferenceAndValue,
+    ReferenceOnly,
+    ValueOnly,
+    Hidden,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FootprintDefinition {
+    pub anchor: LocalCoordinateNm,
+    pub pads: Vec<FootprintPadDefinition>,
+    pub graphics: Vec<FootprintGraphicDefinition>,
+    pub text_policy: FootprintTextPolicy,
+    pub through_hole: bool,
+    pub locked: bool,
+    pub model_provenance: Option<String>,
+}
+
+impl FootprintDefinition {
+    pub fn validate(&self) -> Result<(), ModelError> {
+        if self.pads.is_empty() || self.pads.len() > MAX_FOOTPRINT_PADS {
+            return Err(ModelError::InvalidFootprintObservation(
+                "footprint pad count is outside bounds",
+            ));
+        }
+        if self.graphics.len() > MAX_FOOTPRINT_GRAPHICS {
+            return Err(ModelError::InvalidFootprintObservation(
+                "footprint graphic count exceeds bounds",
+            ));
+        }
+        for pad in &self.pads {
+            pad.validate()?;
+        }
+        for graphic in &self.graphics {
+            graphic.validate()?;
+        }
+        if self
+            .model_provenance
+            .as_ref()
+            .is_some_and(|value| value.is_empty())
+        {
+            return Err(ModelError::InvalidFootprintObservation(
+                "footprint model provenance must not be empty",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub enum BoardLayer {
     FrontCopper,
@@ -2146,6 +2272,78 @@ mod tests {
 
     fn revision(value: char) -> RevisionDigest {
         RevisionDigest::new(value.to_string().repeat(64)).unwrap()
+    }
+
+    #[test]
+    fn diy_footprint_definition_validates_and_round_trips() {
+        let definition = FootprintDefinition {
+            anchor: LocalCoordinateNm { x_nm: 0, y_nm: 0 },
+            pads: vec![FootprintPadDefinition {
+                number: "1".to_owned(),
+                kind: PadKind::SurfaceMount,
+                shape: PadShape::RoundedRectangle,
+                anchor: LocalCoordinateNm { x_nm: 100, y_nm: 0 },
+                size: SizeNm {
+                    x_nm: 800,
+                    y_nm: 600,
+                },
+                drill: None,
+                layers: vec![BoardLayer::FrontCopper, BoardLayer::FrontPaste],
+            }],
+            graphics: vec![FootprintGraphicDefinition {
+                layer: FootprintGraphicLayer::FrontCourtyard,
+                start: LocalCoordinateNm {
+                    x_nm: -500,
+                    y_nm: -400,
+                },
+                end: LocalCoordinateNm {
+                    x_nm: 500,
+                    y_nm: 400,
+                },
+                width_nm: 50,
+            }],
+            text_policy: FootprintTextPolicy::ReferenceAndValue,
+            through_hole: false,
+            locked: false,
+            model_provenance: Some("fixture:diy-led".to_owned()),
+        };
+        definition.validate().unwrap();
+        let encoded = serde_json::to_vec(&definition).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<FootprintDefinition>(&encoded).unwrap(),
+            definition
+        );
+    }
+
+    #[test]
+    fn diy_footprint_definition_rejects_unsafe_children() {
+        let mut definition = FootprintDefinition {
+            anchor: LocalCoordinateNm { x_nm: 0, y_nm: 0 },
+            pads: vec![],
+            graphics: vec![],
+            text_policy: FootprintTextPolicy::Hidden,
+            through_hole: false,
+            locked: false,
+            model_provenance: None,
+        };
+        assert!(definition.validate().is_err());
+        definition.pads.push(FootprintPadDefinition {
+            number: "".to_owned(),
+            kind: PadKind::Unknown,
+            shape: PadShape::Unknown,
+            anchor: LocalCoordinateNm { x_nm: 0, y_nm: 0 },
+            size: SizeNm { x_nm: 0, y_nm: 1 },
+            drill: None,
+            layers: vec![BoardLayer::InnerCopper(0)],
+        });
+        assert!(definition.validate().is_err());
+        definition.pads[0].number = "1".to_owned();
+        definition.pads[0].kind = PadKind::SurfaceMount;
+        definition.pads[0].shape = PadShape::Circle;
+        definition.pads[0].size = SizeNm { x_nm: 1, y_nm: 1 };
+        definition.pads[0].layers = vec![BoardLayer::FrontCopper];
+        definition.model_provenance = Some(String::new());
+        assert!(definition.validate().is_err());
     }
 
     fn snapshot(symbols: Vec<Symbol>) -> ProjectSnapshot {

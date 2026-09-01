@@ -201,6 +201,7 @@ trait LiveBoardObservationSource {
     fn board_graphics(
         &mut self,
         board_filename: &str,
+        layer: kicad_ipc::BoardGraphicLayer,
     ) -> Result<Vec<kicad_ipc::ObservedBoardGraphicSegment>, kicad_ipc::IpcError>;
 
     fn footprint_instances(
@@ -231,8 +232,9 @@ impl<T: kicad_ipc::KiCadTransport> LiveBoardObservationSource for KiCadClient<T>
     fn board_graphics(
         &mut self,
         board_filename: &str,
+        layer: kicad_ipc::BoardGraphicLayer,
     ) -> Result<Vec<kicad_ipc::ObservedBoardGraphicSegment>, kicad_ipc::IpcError> {
-        self.get_board_graphics(board_filename)
+        self.get_board_graphics_on_layer(board_filename, layer)
     }
 
     fn footprint_instances(
@@ -275,9 +277,14 @@ fn observe_live_board<S: LiveBoardObservationSource>(
     document: kicad_ipc::OpenDocument,
     board_filename: &str,
 ) -> Result<LiveBoardObservation, ObserveLiveBoardError> {
-    let graphics = source
-        .board_graphics(board_filename)
+    let mut graphics = source
+        .board_graphics(board_filename, kicad_ipc::BoardGraphicLayer::DwgsUser)
         .map_err(ObserveLiveBoardError::Ipc)?;
+    graphics.extend(
+        source
+            .board_graphics(board_filename, kicad_ipc::BoardGraphicLayer::EdgeCuts)
+            .map_err(ObserveLiveBoardError::Ipc)?,
+    );
     let footprints = source
         .footprint_instances(board_filename)
         .map_err(ObserveLiveBoardError::Ipc)?;
@@ -406,6 +413,7 @@ pub struct CommitChangeRequest {
 pub struct PlanSchematicChangeRequest {
     pub project_root: String,
     pub root_schematic: String,
+    pub source_run_id: String,
     pub request_id: String,
 }
 
@@ -441,11 +449,28 @@ enum SchematicExecutionState {
     Unknown,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+struct SchematicAuditEvent {
+    sequence: u64,
+    action: &'static str,
+    source_run_id: String,
+    request_id: String,
+    plan_id: String,
+    plan_hash: String,
+    approval_hash: Option<String>,
+    before_revision: Option<RevisionDigest>,
+    after_revision: Option<RevisionDigest>,
+    before_artifact: Option<SchematicArtifactFile>,
+    after_artifact: Option<SchematicArtifactFile>,
+    outcome: String,
+}
+
 #[derive(Clone, Debug)]
 struct StoredSchematicChange {
     project_root: std::path::PathBuf,
     root_schematic: std::path::PathBuf,
     source_artifact: SchematicArtifactFile,
+    source_run_id: String,
     plan_hash: String,
     approval_hash: Option<String>,
     receipt: Option<SchematicPreviewReceipt>,
@@ -547,8 +572,7 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
             )
         }) {
             return BoardGraphicsCommitOutcome::Rejected {
-                reason: "footprint and other non-graphics authoring backends are not enabled"
-                    .into(),
+                reason: "operation kind is not supported by the PCB execution service".into(),
             };
         }
         let canonical_project_dir = match std::fs::canonicalize(project_dir) {
@@ -733,6 +757,8 @@ struct StoredDrcBaseline {
 pub struct Server {
     sessions: Arc<Mutex<BTreeMap<String, StoredChangeSession>>>,
     schematic_sessions: Arc<Mutex<BTreeMap<String, StoredSchematicChange>>>,
+    schematic_audit: Arc<Mutex<Vec<SchematicAuditEvent>>>,
+    schematic_audit_sequence: Arc<AtomicU64>,
     drc_baselines: Arc<Mutex<BTreeMap<String, StoredDrcBaseline>>>,
     schematic: Arc<dyn SchematicChangeService>,
     capabilities: Vec<Capability>,
@@ -755,6 +781,14 @@ impl std::fmt::Debug for Server {
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 pub struct CapabilityRequest {
     pub request_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+pub struct SchematicAuditRequest {
+    pub request_id: Option<String>,
+    pub source_run_id: Option<String>,
+    pub plan_id: Option<String>,
+    pub limit: Option<usize>,
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -829,6 +863,8 @@ impl Server {
         Self {
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             schematic_sessions: Arc::new(Mutex::new(BTreeMap::new())),
+            schematic_audit: Arc::new(Mutex::new(Vec::new())),
+            schematic_audit_sequence: Arc::new(AtomicU64::new(0)),
             drc_baselines: Arc::new(Mutex::new(BTreeMap::new())),
             schematic,
             capabilities: vec![
@@ -900,6 +936,7 @@ impl Server {
                 && capability.status == "verified"
         }) {
             advertised_tools.extend([
+                "kicad_schematic_audit",
                 "kicad_plan_schematic_change",
                 "kicad_preview_schematic_change",
                 "kicad_commit_schematic_change",
@@ -926,6 +963,54 @@ impl Server {
         let value = serde_json::to_value(envelope)
             .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
         Ok(rmcp::model::CallToolResult::structured(value).into())
+    }
+
+    #[tool(
+        name = "kicad_schematic_audit",
+        description = "Read the bounded, append-only audit ledger for schematic changes."
+    )]
+    pub async fn kicad_schematic_audit(
+        &self,
+        Parameters(arguments): Parameters<SchematicAuditRequest>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        if !self.schematic.verified() {
+            return Ok(self.rejected(
+                arguments
+                    .request_id
+                    .unwrap_or_else(|| "req_schematic_audit".into()),
+                "capability_not_verified",
+            ));
+        }
+        const MAX_AUDIT_EVENTS: usize = 1000;
+        let limit = arguments.limit.unwrap_or(100).min(MAX_AUDIT_EVENTS);
+        let events = self
+            .schematic_audit
+            .lock()
+            .expect("schematic audit lock")
+            .iter()
+            .filter(|event| {
+                arguments
+                    .source_run_id
+                    .as_deref()
+                    .is_none_or(|source_run_id| event.source_run_id == source_run_id)
+            })
+            .filter(|event| {
+                arguments
+                    .plan_id
+                    .as_deref()
+                    .is_none_or(|plan_id| event.plan_id == plan_id)
+            })
+            .rev()
+            .take(limit)
+            .cloned()
+            .collect::<Vec<_>>();
+        self.envelope(
+            arguments
+                .request_id
+                .unwrap_or_else(|| "req_schematic_audit".into()),
+            None,
+            json!({"events": events, "limit": limit}),
+        )
     }
 
     #[tool(
@@ -1129,7 +1214,7 @@ impl Server {
 
     #[tool(
         name = "kicad_plan_change",
-        description = "Plan bounded board graphics, a rectangular Edge.Cuts outline, an allowlisted footprint, a straight track, or a through via without mutating KiCad."
+        description = "Plan bounded board graphics, a rectangular Edge.Cuts outline, a straight track, or a through via without mutating KiCad."
     )]
     pub async fn kicad_plan_change(
         &self,
@@ -1144,6 +1229,9 @@ impl Server {
             .map_err(|error| ErrorData::internal_error(error, None))?;
         let observed_token = observation.instance_token.as_str();
         let snapshot = observation.snapshot;
+        if arguments.footprint.is_some() {
+            return Ok(self.rejected(arguments.request_id, "footprint_authoring_not_verified"));
+        }
         if !snapshot
             .capabilities
             .iter()
@@ -1266,12 +1354,26 @@ impl Server {
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
         let operation_id = StableId::new(format!("operation:{}", arguments.request_id))
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+        let expected_effect = match &kind {
+            OperationKind::AddBoardGraphicSegments { .. } => "add board graphic segments",
+            OperationKind::AddBoardOutline { .. } => "add rectangular Edge.Cuts outline",
+            OperationKind::PlaceAllowlistedFootprint { .. } => "place allowlisted native footprint",
+            OperationKind::AddStraightTrack { .. } => "add straight copper track",
+            OperationKind::AddThroughVia { .. } => "add through via",
+            _ => "apply bounded board change",
+        };
+        let targets = match &kind {
+            OperationKind::PlaceAllowlistedFootprint { placement, .. } => {
+                vec![board.clone(), placement.target_id.clone()]
+            }
+            _ => vec![board.clone()],
+        };
         let operation = Operation {
             operation_id,
             kind,
-            targets: vec![board],
+            targets,
             preconditions: vec![Precondition::Revision(base_revision.clone())],
-            expected_effects: vec!["add board graphic segments".into()],
+            expected_effects: vec![expected_effect.into()],
             risk_class: RiskClass::Medium,
             idempotency_key: arguments.request_id.clone(),
             source_run_id: arguments.source_run_id.clone(),
@@ -1498,6 +1600,12 @@ impl Server {
         if !self.schematic.verified() {
             return Ok(self.rejected(arguments.request_id, "capability_not_verified"));
         }
+        if arguments.source_run_id.trim().is_empty() {
+            return Err(ErrorData::invalid_params(
+                "source_run_id must not be empty",
+                None,
+            ));
+        }
         let root = std::fs::canonicalize(&arguments.project_root)
             .map_err(|_| ErrorData::invalid_params("project_root is unavailable", None))?;
         if !root.is_dir() {
@@ -1545,6 +1653,7 @@ impl Server {
         let plan_id = format!("schematic-plan:{}", arguments.request_id);
         let plan_hash = digest_text(&[
             TWO_RESISTOR_OPERATION_IDENTITY,
+            arguments.source_run_id.as_str(),
             root.to_string_lossy().as_ref(),
             schematic.to_string_lossy().as_ref(),
             &serde_json::to_string(&source_artifact).expect("artifact serialization"),
@@ -1553,6 +1662,7 @@ impl Server {
             project_root: root,
             root_schematic: schematic,
             source_artifact: source_artifact.clone(),
+            source_run_id: arguments.source_run_id.clone(),
             plan_hash: plan_hash.clone(),
             approval_hash: None,
             receipt: None,
@@ -1574,10 +1684,21 @@ impl Server {
             );
         }
         sessions.insert(plan_id.clone(), stored);
+        let audit = self.append_schematic_audit(
+            "plan",
+            arguments.source_run_id,
+            arguments.request_id.clone(),
+            plan_id.clone(),
+            plan_hash.clone(),
+            None,
+            Some(source_artifact.clone()),
+            None,
+            "planned".into(),
+        );
         self.envelope(
             arguments.request_id,
             Some(plan_hash.clone()),
-            json!({"plan_id": plan_id, "plan_hash": plan_hash, "operation_identity": TWO_RESISTOR_OPERATION_IDENTITY, "source_artifact": source_artifact, "state": "planned"}),
+            json!({"plan_id": plan_id, "plan_hash": plan_hash, "operation_identity": TWO_RESISTOR_OPERATION_IDENTITY, "source_artifact": source_artifact, "state": "planned", "audit": audit}),
         )
     }
 
@@ -1632,13 +1753,27 @@ impl Server {
                 self.schematic_sessions
                     .lock()
                     .expect("schematic session lock")
-                    .insert(arguments.plan_id, stored);
+                    .insert(arguments.plan_id.clone(), stored.clone());
+                let audit = self.append_schematic_audit(
+                    "preview",
+                    stored.source_run_id.clone(),
+                    arguments
+                        .request_id
+                        .clone()
+                        .unwrap_or_else(|| "req_preview_schematic_change".into()),
+                    arguments.plan_id,
+                    arguments.plan_hash.clone(),
+                    None,
+                    Some(stored.source_artifact.clone()),
+                    None,
+                    schematic_state(&outcome).into(),
+                );
                 return Ok(self.envelope_sync(
                     arguments
                         .request_id
                         .unwrap_or_else(|| "req_preview_schematic_change".into()),
                     Some(arguments.plan_hash),
-                    schematic_outcome_data(&outcome),
+                    json!({"outcome": schematic_outcome_data(&outcome), "audit": audit}),
                 ));
             }
         };
@@ -1663,11 +1798,25 @@ impl Server {
         self.schematic_sessions
             .lock()
             .expect("schematic session lock")
-            .insert(arguments.plan_id.clone(), stored);
+            .insert(arguments.plan_id.clone(), stored.clone());
+        let request_id = arguments
+            .request_id
+            .unwrap_or_else(|| "req_preview_schematic_change".into());
+        let audit = self.append_schematic_audit(
+            "preview",
+            stored.source_run_id,
+            request_id.clone(),
+            arguments.plan_id.clone(),
+            arguments.plan_hash.clone(),
+            Some(approval_hash.clone()),
+            Some(receipt.source_artifact.clone()),
+            Some(receipt.candidate_artifact.clone()),
+            "awaiting_approval".into(),
+        );
         self.envelope(
-            arguments.request_id.unwrap_or_else(|| "req_preview_schematic_change".into()),
+            request_id,
             Some(arguments.plan_hash),
-            json!({"plan_id": arguments.plan_id, "state": "awaiting_approval", "approval_hash": approval_hash, "operation_identity": receipt.operation_identity, "source_artifact": receipt.source_artifact, "candidate_artifact": receipt.candidate_artifact}),
+            json!({"plan_id": arguments.plan_id, "state": "awaiting_approval", "approval_hash": approval_hash, "operation_identity": receipt.operation_identity, "source_artifact": receipt.source_artifact, "candidate_artifact": receipt.candidate_artifact, "audit": audit}),
         )
     }
 
@@ -1757,12 +1906,68 @@ impl Server {
         self.schematic_sessions
             .lock()
             .expect("schematic session lock")
-            .insert(arguments.plan_id.clone(), stored);
-        self.envelope(arguments.request_id.unwrap_or_else(|| "req_commit_schematic_change".into()), Some(arguments.plan_hash), json!({"plan_id": arguments.plan_id, "state": schematic_state(&outcome), "outcome": schematic_outcome_data(&outcome)}))
+            .insert(arguments.plan_id.clone(), stored.clone());
+        let request_id = arguments
+            .request_id
+            .unwrap_or_else(|| "req_commit_schematic_change".into());
+        let after_artifact = match &outcome {
+            SchematicPatchOutcome::Committed { artifact } => Some(artifact.clone()),
+            _ => None,
+        };
+        let audit = self.append_schematic_audit(
+            "commit",
+            stored.source_run_id,
+            request_id.clone(),
+            arguments.plan_id.clone(),
+            arguments.plan_hash.clone(),
+            Some(arguments.approval_hash),
+            Some(stored.source_artifact.clone()),
+            after_artifact,
+            schematic_state(&outcome).into(),
+        );
+        self.envelope(request_id, Some(arguments.plan_hash), json!({"plan_id": arguments.plan_id, "state": schematic_state(&outcome), "outcome": schematic_outcome_data(&outcome), "audit": audit}))
     }
 
     fn rejected(&self, request_id: String, reason: &str) -> CallToolResponse {
         self.envelope_sync(request_id, None, json!({ "reason": reason }))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn append_schematic_audit(
+        &self,
+        action: &'static str,
+        source_run_id: String,
+        request_id: String,
+        plan_id: String,
+        plan_hash: String,
+        approval_hash: Option<String>,
+        before_artifact: Option<SchematicArtifactFile>,
+        after_artifact: Option<SchematicArtifactFile>,
+        outcome: String,
+    ) -> SchematicAuditEvent {
+        let event = SchematicAuditEvent {
+            sequence: self.schematic_audit_sequence.fetch_add(1, Ordering::SeqCst) + 1,
+            action,
+            source_run_id,
+            request_id,
+            plan_id,
+            plan_hash,
+            approval_hash,
+            before_revision: before_artifact
+                .as_ref()
+                .map(|artifact| artifact.content_digest.clone()),
+            after_revision: after_artifact
+                .as_ref()
+                .map(|artifact| artifact.content_digest.clone()),
+            before_artifact,
+            after_artifact,
+            outcome,
+        };
+        self.schematic_audit
+            .lock()
+            .expect("schematic audit lock")
+            .push(event.clone());
+        event
     }
 
     fn envelope_sync(
@@ -1837,7 +2042,10 @@ mod tests {
 
     #[derive(Clone, Debug, Eq, PartialEq)]
     enum LiveReadCall {
-        Graphics(String),
+        Graphics {
+            board_filename: String,
+            layer: kicad_ipc::BoardGraphicLayer,
+        },
         Footprints(String),
         Pads {
             board_filename: String,
@@ -1851,6 +2059,9 @@ mod tests {
     #[derive(Clone)]
     struct FakeLiveBoardSource {
         calls: Vec<LiveReadCall>,
+        dwgs_user_graphics: Vec<kicad_ipc::ObservedBoardGraphicSegment>,
+        edge_cuts_graphics: Vec<kicad_ipc::ObservedBoardGraphicSegment>,
+        failing_graphics_layer: Option<kicad_ipc::BoardGraphicLayer>,
         footprints: Vec<kicad_ipc::ObservedFootprintInstance>,
         pads: BTreeMap<String, Vec<kicad_ipc::ObservedPad>>,
         failing_pad_parent: Option<String>,
@@ -1863,10 +2074,22 @@ mod tests {
         fn board_graphics(
             &mut self,
             board_filename: &str,
+            layer: kicad_ipc::BoardGraphicLayer,
         ) -> Result<Vec<kicad_ipc::ObservedBoardGraphicSegment>, kicad_ipc::IpcError> {
-            self.calls
-                .push(LiveReadCall::Graphics(board_filename.to_owned()));
-            Ok(Vec::new())
+            self.calls.push(LiveReadCall::Graphics {
+                board_filename: board_filename.to_owned(),
+                layer,
+            });
+            if self.failing_graphics_layer == Some(layer) {
+                return Err(kicad_ipc::IpcError::InvalidObservedBoardGraphic(
+                    "fixture graphics read failed",
+                ));
+            }
+            Ok(match layer {
+                kicad_ipc::BoardGraphicLayer::DwgsUser => self.dwgs_user_graphics.clone(),
+                kicad_ipc::BoardGraphicLayer::EdgeCuts => self.edge_cuts_graphics.clone(),
+                kicad_ipc::BoardGraphicLayer::FSilkS => Vec::new(),
+            })
         }
 
         fn footprint_instances(
@@ -2035,6 +2258,9 @@ mod tests {
     fn fake_live_source() -> FakeLiveBoardSource {
         FakeLiveBoardSource {
             calls: Vec::new(),
+            dwgs_user_graphics: Vec::new(),
+            edge_cuts_graphics: Vec::new(),
+            failing_graphics_layer: None,
             footprints: vec![
                 live_footprint("footprint-a", "U1"),
                 live_footprint("footprint-b", "U2"),
@@ -2058,7 +2284,14 @@ mod tests {
 
     fn expected_live_read_calls() -> Vec<LiveReadCall> {
         vec![
-            LiveReadCall::Graphics("main.kicad_pcb".to_owned()),
+            LiveReadCall::Graphics {
+                board_filename: "main.kicad_pcb".to_owned(),
+                layer: kicad_ipc::BoardGraphicLayer::DwgsUser,
+            },
+            LiveReadCall::Graphics {
+                board_filename: "main.kicad_pcb".to_owned(),
+                layer: kicad_ipc::BoardGraphicLayer::EdgeCuts,
+            },
             LiveReadCall::Footprints("main.kicad_pcb".to_owned()),
             LiveReadCall::Pads {
                 board_filename: "main.kicad_pcb".to_owned(),
@@ -2123,6 +2356,72 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["pad-a", "pad-b"]
         );
+    }
+
+    #[test]
+    fn live_board_observation_includes_edge_cuts_in_snapshot_revision() {
+        let mut source = fake_live_source();
+        source
+            .edge_cuts_graphics
+            .push(kicad_ipc::ObservedBoardGraphicSegment {
+                graphic_id: "outline-1".to_owned(),
+                segment: kicad_ipc::BoardGraphicSegment {
+                    start_x_nm: 0,
+                    start_y_nm: 0,
+                    end_x_nm: 10_000_000,
+                    end_y_nm: 0,
+                    width_nm: 50_000,
+                    layer: kicad_ipc::BoardGraphicLayer::EdgeCuts,
+                },
+            });
+        let with_outline = observe_live_board(
+            &mut source,
+            live_version(),
+            live_document(),
+            "main.kicad_pcb",
+        )
+        .unwrap();
+        assert_eq!(with_outline.snapshot.board.graphics.len(), 1);
+        assert_eq!(
+            with_outline.snapshot.board.graphics[0].layer,
+            BoardGraphicLayer::EdgeCuts
+        );
+
+        let mut without_outline_source = fake_live_source();
+        let without_outline = observe_live_board(
+            &mut without_outline_source,
+            live_version(),
+            live_document(),
+            "main.kicad_pcb",
+        )
+        .unwrap();
+        assert_ne!(
+            with_outline.snapshot.revision().unwrap(),
+            without_outline.snapshot.revision().unwrap()
+        );
+    }
+
+    #[test]
+    fn live_board_observation_stops_on_edge_cuts_read_failure() {
+        let mut source = fake_live_source();
+        source.failing_graphics_layer = Some(kicad_ipc::BoardGraphicLayer::EdgeCuts);
+        assert!(matches!(
+            observe_live_board(
+                &mut source,
+                live_version(),
+                live_document(),
+                "main.kicad_pcb",
+            ),
+            Err(ObserveLiveBoardError::Ipc(_))
+        ));
+        assert_eq!(source.calls.len(), 2);
+        assert!(matches!(
+            source.calls[1],
+            LiveReadCall::Graphics {
+                layer: kicad_ipc::BoardGraphicLayer::EdgeCuts,
+                ..
+            }
+        ));
     }
 
     #[test]
@@ -2773,10 +3072,22 @@ mod tests {
                 commit_calls: commit_calls.clone(),
             }),
         );
+        assert!(
+            server
+                .kicad_plan_schematic_change(Parameters(PlanSchematicChangeRequest {
+                    project_root: root.to_string_lossy().into_owned(),
+                    root_schematic: schematic.to_string_lossy().into_owned(),
+                    source_run_id: "  ".into(),
+                    request_id: "schematic-empty-run".into(),
+                }))
+                .await
+                .is_err()
+        );
         let planned = server
             .kicad_plan_schematic_change(Parameters(PlanSchematicChangeRequest {
                 project_root: root.to_string_lossy().into_owned(),
                 root_schematic: schematic.to_string_lossy().into_owned(),
+                source_run_id: "run-schematic-lifecycle".into(),
                 request_id: "schematic-lifecycle".into(),
             }))
             .await
@@ -2787,6 +3098,16 @@ mod tests {
         };
         let plan_id = planned["data"]["plan_id"].as_str().unwrap().to_owned();
         let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
+        assert_eq!(planned["data"]["audit"]["action"], "plan");
+        assert_eq!(planned["data"]["audit"]["sequence"], 1);
+        assert_eq!(
+            planned["data"]["audit"]["source_run_id"],
+            "run-schematic-lifecycle"
+        );
+        assert_eq!(
+            planned["data"]["audit"]["request_id"],
+            "schematic-lifecycle"
+        );
         assert!(
             server
                 .kicad_commit_schematic_change(Parameters(CommitSchematicChangeRequest {
@@ -2814,6 +3135,10 @@ mod tests {
             .as_str()
             .unwrap()
             .to_owned();
+        assert_eq!(preview["data"]["audit"]["action"], "preview");
+        assert_eq!(preview["data"]["audit"]["sequence"], 2);
+        assert_eq!(preview["data"]["audit"]["approval_hash"], approval_hash);
+        assert!(!preview["data"]["audit"]["after_artifact"].is_null());
         assert_eq!(preview_calls.load(AtomicOrdering::SeqCst), 1);
         assert!(
             server
@@ -2840,7 +3165,32 @@ mod tests {
             _ => panic!("commit call should complete"),
         };
         assert_eq!(committed["data"]["state"], "committed");
+        assert_eq!(committed["data"]["audit"]["action"], "commit");
+        assert_eq!(committed["data"]["audit"]["sequence"], 3);
+        assert_eq!(
+            committed["data"]["audit"]["source_run_id"],
+            "run-schematic-lifecycle"
+        );
+        assert_eq!(committed["data"]["audit"]["approval_hash"], approval_hash);
+        assert!(!committed["data"]["audit"]["before_artifact"].is_null());
+        assert!(!committed["data"]["audit"]["after_artifact"].is_null());
         assert_eq!(commit_calls.load(AtomicOrdering::SeqCst), 1);
+        let audit = server
+            .kicad_schematic_audit(Parameters(SchematicAuditRequest {
+                request_id: Some("audit-read".into()),
+                source_run_id: Some("run-schematic-lifecycle".into()),
+                plan_id: None,
+                limit: Some(10),
+            }))
+            .await
+            .unwrap();
+        let audit = match audit {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("audit call should complete"),
+        };
+        assert_eq!(audit["data"]["events"].as_array().unwrap().len(), 3);
+        assert_eq!(audit["data"]["events"][0]["action"], "commit");
+        assert_eq!(audit["data"]["events"][2]["action"], "plan");
         server
             .kicad_commit_schematic_change(Parameters(CommitSchematicChangeRequest {
                 plan_id,
@@ -2940,10 +3290,9 @@ mod tests {
             .await
             .expect("capability call");
         let structured = result.structured_content.unwrap();
+        let capabilities = structured["data"]["capabilities"].as_array().unwrap();
         assert_eq!(
-            structured["data"]["capabilities"]
-                .as_array()
-                .unwrap()
+            capabilities
                 .iter()
                 .find(|capability| capability["id"] == "schematic.fixed_two_resistor_change")
                 .unwrap()["status"],
@@ -3113,6 +3462,32 @@ mod tests {
                 .message
                 .contains("exactly one of segments, outline, footprint, track, or via is required")
         );
+        assert!(server.sessions.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn plan_rejects_unverified_footprint_authoring() {
+        let server = Server::with_discovery(Arc::new(FakeDiscovery {
+            write_capability: true,
+        }));
+        let mut request = plan_request(project_snapshot(true), "req_footprint_denied");
+        request.segments = None;
+        request.footprint = Some(BoardFootprintRequest {
+            target_id: "fp-1".into(),
+            library_nickname: "LED_SMD".into(),
+            library_entry_name: "LED_1210_3225Metric_Pad1.42x2.65mm_HandSolder".into(),
+            x_nm: 1_000_000,
+            y_nm: 2_000_000,
+            reference: "D1".into(),
+            value: "LED".into(),
+        });
+        let result = server.kicad_plan_change(Parameters(request)).await.unwrap();
+        let result = match result {
+            rmcp::model::CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("plan call should complete"),
+        };
+        assert_eq!(result["ok"], false);
+        assert_eq!(result["data"]["reason"], "footprint_authoring_not_verified");
         assert!(server.sessions.lock().unwrap().is_empty());
     }
 

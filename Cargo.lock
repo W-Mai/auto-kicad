@@ -425,6 +425,7 @@ name = "kicad-adapter"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "kicad-checks",
  "kicad-engine",
  "kicad-ipc",
  "kicad-model",

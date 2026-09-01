@@ -21,6 +21,7 @@ pub const GET_BOARD_STACKUP_TYPE_URL: &str =
 pub const GET_BOARD_STACKUP_RESPONSE_TYPE_URL: &str =
     "type.googleapis.com/kiapi.board.commands.BoardStackupResponse";
 pub const GET_ITEMS_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.GetItems";
+pub const GET_ITEMS_BY_ID_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.GetItemsById";
 pub const GET_ITEMS_RESPONSE_TYPE_URL: &str =
     "type.googleapis.com/kiapi.common.commands.GetItemsResponse";
 pub const BEGIN_COMMIT_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.BeginCommit";
@@ -29,6 +30,8 @@ pub const BEGIN_COMMIT_RESPONSE_TYPE_URL: &str =
 pub const CREATE_ITEMS_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.CreateItems";
 pub const CREATE_ITEMS_RESPONSE_TYPE_URL: &str =
     "type.googleapis.com/kiapi.common.commands.CreateItemsResponse";
+pub const PARSE_AND_CREATE_ITEMS_FROM_STRING_TYPE_URL: &str =
+    "type.googleapis.com/kiapi.common.commands.ParseAndCreateItemsFromString";
 pub const FOOTPRINT_INSTANCE_TYPE_URL: &str =
     "type.googleapis.com/kiapi.board.types.FootprintInstance";
 pub const TRACK_TYPE_URL: &str = "type.googleapis.com/kiapi.board.types.Track";
@@ -1187,6 +1190,46 @@ impl<T: KiCadTransport> KiCadClient<T> {
         Ok(templates)
     }
 
+    pub fn parse_and_create_footprint_instance(
+        &mut self,
+        board_filename: &str,
+        contents: &str,
+    ) -> Result<CreatedFootprintInstanceReceipt, IpcError> {
+        if board_filename.trim().is_empty() {
+            return Err(IpcError::InvalidObservedFootprint(
+                "board filename must not be empty",
+            ));
+        }
+        if contents.trim().is_empty() {
+            return Err(IpcError::InvalidObservedFootprint(
+                "footprint contents must not be empty",
+            ));
+        }
+        let command = editor_commands::ParseAndCreateItemsFromString {
+            document: MessageField::some(board_document(board_filename)),
+            contents: contents.to_owned(),
+            ..editor_commands::ParseAndCreateItemsFromString::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            PARSE_AND_CREATE_ITEMS_FROM_STRING_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let decoded = decode_any::<editor_commands::CreateItemsResponse>(
+            &response,
+            CREATE_ITEMS_RESPONSE_TYPE_URL,
+        )?;
+        validate_create_items_status(&decoded)?;
+        validate_created_items_document(&decoded, board_filename)?;
+        let receipt = parsed_footprint_instance_receipt(&decoded)?;
+        let token = response_token(&response)?;
+        self.token = Some(token);
+        Ok(receipt)
+    }
+
     pub fn create_footprint_instance(
         &mut self,
         board_filename: &str,
@@ -1258,6 +1301,43 @@ impl<T: KiCadTransport> KiCadClient<T> {
         Ok(footprints)
     }
 
+    pub fn get_footprint_definition_pads(
+        &mut self,
+        board_filename: &str,
+        footprint_source_uuid: &str,
+    ) -> Result<Vec<ObservedPad>, IpcError> {
+        if footprint_source_uuid.is_empty() {
+            return Err(IpcError::InvalidObservedPad(
+                "parent footprint identity is missing",
+            ));
+        }
+        let command = editor_commands::GetItemsById {
+            header: MessageField::some(board_item_header(board_filename)),
+            items: vec![base_types::KIID {
+                value: footprint_source_uuid.to_owned(),
+                ..base_types::KIID::default()
+            }],
+            ..editor_commands::GetItemsById::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            GET_ITEMS_BY_ID_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let response = decode_any::<editor_commands::GetItemsResponse>(
+            &response,
+            GET_ITEMS_RESPONSE_TYPE_URL,
+        )?;
+        validate_get_items_document(&response, board_filename)?;
+        let pads = footprint_definition_pads_from_response(&response, footprint_source_uuid)?;
+        self.token = Some(token);
+        Ok(pads)
+    }
+
     pub fn get_footprint_pads(
         &mut self,
         board_filename: &str,
@@ -1327,6 +1407,83 @@ impl<T: KiCadTransport> KiCadClient<T> {
         Ok(routing)
     }
 
+    pub fn get_board_routing_by_id(
+        &mut self,
+        board_filename: &str,
+        routing_ids: &[String],
+    ) -> Result<ObservedBoardRoutingItems, IpcError> {
+        if routing_ids.is_empty()
+            || routing_ids.iter().any(String::is_empty)
+            || routing_ids
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != routing_ids.len()
+        {
+            return Err(IpcError::InvalidObservedRouting(
+                "requested routing ids must be non-empty and unique",
+            ));
+        }
+        let command = editor_commands::GetItemsById {
+            header: MessageField::some(board_item_header(board_filename)),
+            items: routing_ids
+                .iter()
+                .map(|id| base_types::KIID {
+                    value: id.clone(),
+                    ..base_types::KIID::default()
+                })
+                .collect(),
+            ..editor_commands::GetItemsById::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            GET_ITEMS_BY_ID_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let response = decode_any::<editor_commands::GetItemsResponse>(
+            &response,
+            GET_ITEMS_RESPONSE_TYPE_URL,
+        )?;
+        if let Some(document) = response
+            .header
+            .as_ref()
+            .and_then(|header| header.document.as_ref())
+            && (document.type_.enum_value_or_default() != base_types::DocumentType::DOCTYPE_PCB
+                || document.board_filename() != board_filename)
+        {
+            return Err(IpcError::InvalidObservedRouting(
+                "routing response document does not match request",
+            ));
+        }
+        if response.items.len() != routing_ids.len() {
+            return Err(IpcError::InvalidObservedRouting(
+                "routing response count does not match request",
+            ));
+        }
+        let routing = board_routing_from_response(&response)?;
+        let returned = routing
+            .tracks
+            .iter()
+            .map(|track| track.source_uuid.as_str())
+            .chain(routing.vias.iter().map(|via| via.source_uuid.as_str()))
+            .collect::<std::collections::BTreeSet<_>>();
+        let requested = routing_ids
+            .iter()
+            .map(String::as_str)
+            .collect::<std::collections::BTreeSet<_>>();
+        if returned != requested {
+            return Err(IpcError::InvalidObservedRouting(
+                "routing response identity does not match request",
+            ));
+        }
+        self.token = Some(token);
+        Ok(routing)
+    }
+
     pub fn get_board_graphics(
         &mut self,
         board_filename: &str,
@@ -1359,7 +1516,55 @@ impl<T: KiCadTransport> KiCadClient<T> {
             &response,
             GET_ITEMS_RESPONSE_TYPE_URL,
         )?;
-        let graphics = board_graphics_from_response(&response, layer)?;
+        let graphics = board_graphics_from_response(&response, board_filename, layer)?;
+        self.token = Some(token);
+        Ok(graphics)
+    }
+
+    pub fn get_board_graphics_by_id(
+        &mut self,
+        board_filename: &str,
+        graphic_ids: &[String],
+        layer: BoardGraphicLayer,
+    ) -> Result<Vec<ObservedBoardGraphicSegment>, IpcError> {
+        if graphic_ids.is_empty()
+            || graphic_ids.iter().any(String::is_empty)
+            || graphic_ids
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                != graphic_ids.len()
+        {
+            return Err(IpcError::InvalidObservedBoardGraphic(
+                "requested board graphic ids must be non-empty and unique",
+            ));
+        }
+        let command = editor_commands::GetItemsById {
+            header: MessageField::some(board_item_header(board_filename)),
+            items: graphic_ids
+                .iter()
+                .map(|id| base_types::KIID {
+                    value: id.clone(),
+                    ..base_types::KIID::default()
+                })
+                .collect(),
+            ..editor_commands::GetItemsById::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            GET_ITEMS_BY_ID_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let response = decode_any::<editor_commands::GetItemsResponse>(
+            &response,
+            GET_ITEMS_RESPONSE_TYPE_URL,
+        )?;
+        let graphics =
+            board_graphics_by_id_from_response(&response, board_filename, graphic_ids, layer)?;
         self.token = Some(token);
         Ok(graphics)
     }
@@ -2015,6 +2220,95 @@ fn reject_unknown_footprint_field(field: Option<&board_types::Field>) -> Result<
     Ok(())
 }
 
+fn validate_created_items_document(
+    response: &editor_commands::CreateItemsResponse,
+    board_filename: &str,
+) -> Result<(), IpcError> {
+    let document = response
+        .header
+        .as_ref()
+        .and_then(|header| header.document.as_ref())
+        .ok_or(IpcError::InvalidObservedFootprint(
+            "created items response document is missing",
+        ))?;
+    if document.type_.enum_value_or_default() != base_types::DocumentType::DOCTYPE_PCB
+        || document.board_filename() != board_filename
+    {
+        return Err(IpcError::InvalidObservedFootprint(
+            "created items response document does not match request",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_create_items_status(
+    response: &editor_commands::CreateItemsResponse,
+) -> Result<(), IpcError> {
+    if response.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
+        return Err(IpcError::Status(
+            ApiStatusCode::AS_BAD_REQUEST,
+            format!(
+                "parse and create items status: {:?}",
+                response.status.enum_value_or_default()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+fn parsed_footprint_instance_receipt(
+    response: &editor_commands::CreateItemsResponse,
+) -> Result<CreatedFootprintInstanceReceipt, IpcError> {
+    validate_create_items_status(response)?;
+    if response.created_items.len() != 1 {
+        return Err(IpcError::CreateItemsCountMismatch {
+            expected: 1,
+            actual: response.created_items.len(),
+        });
+    }
+    let item = created_item_status(&response.created_items[0], 0)?;
+    if item.type_url != FOOTPRINT_INSTANCE_TYPE_URL {
+        return Err(IpcError::UnexpectedMessageType {
+            expected: FOOTPRINT_INSTANCE_TYPE_URL,
+            actual: item.type_url.clone(),
+        });
+    }
+    let instance = board_types::FootprintInstance::parse_from_bytes(&item.value)
+        .map_err(|_| IpcError::MalformedEnvelope)?;
+    validate_footprint_instance(&instance)?;
+    let id = instance
+        .id
+        .as_ref()
+        .map(|id| id.value.clone())
+        .filter(|id| !id.is_empty())
+        .ok_or(IpcError::InvalidObservedFootprint(
+            "parsed footprint identity is missing",
+        ))?;
+    let position = instance.position.as_ref().unwrap();
+    let reference = field_text(instance.reference_field.as_ref())?;
+    let value = field_text(instance.value_field.as_ref())?;
+    let definition = instance.definition.as_ref().unwrap();
+    let library = definition.id.as_ref().unwrap();
+    Ok(CreatedFootprintInstanceReceipt {
+        source_uuid: id,
+        position_x_nm: position.x_nm,
+        position_y_nm: position.y_nm,
+        orientation_mdeg: (instance.orientation.as_ref().unwrap().value_degrees * 1000.0).round()
+            as i64,
+        side: match instance.layer.enum_value() {
+            Ok(board_types::BoardLayer::BL_F_Cu) => FootprintSide::Front,
+            Ok(board_types::BoardLayer::BL_B_Cu) => FootprintSide::Back,
+            _ => unreachable!(),
+        },
+        library_identifier: ObservedFootprintLibraryIdentifier {
+            nickname: library.library_nickname.clone(),
+            entry_name: library.entry_name.clone(),
+        },
+        reference,
+        value,
+    })
+}
+
 fn created_footprint_instance_receipt(
     response: &editor_commands::CreateItemsResponse,
     position_x_nm: i64,
@@ -2229,6 +2523,133 @@ fn field_text(field: Option<&board_types::Field>) -> Result<String, IpcError> {
         .ok_or(IpcError::InvalidObservedFootprint(
             "footprint field text is missing",
         ))
+}
+
+fn validate_footprint_definition_for_pad_readback(
+    instance: &board_types::FootprintInstance,
+) -> Result<(), IpcError> {
+    if instance.id.as_ref().is_none_or(|id| id.value.is_empty()) {
+        return Err(IpcError::InvalidObservedPad(
+            "footprint identity is missing",
+        ));
+    }
+    let definition = instance
+        .definition
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedPad(
+            "footprint definition is missing",
+        ))?;
+    let library = definition.id.as_ref().ok_or(IpcError::InvalidObservedPad(
+        "footprint library identity is missing",
+    ))?;
+    if library.entry_name.is_empty() {
+        return Err(IpcError::InvalidObservedPad(
+            "footprint library entry is missing",
+        ));
+    }
+    field_text(instance.reference_field.as_ref())?;
+    field_text(instance.value_field.as_ref())?;
+    instance
+        .position
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedPad(
+            "footprint position is missing",
+        ))?;
+    instance
+        .orientation
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedPad(
+            "footprint orientation is missing",
+        ))?;
+    if instance.layer.enum_value() != Ok(board_types::BoardLayer::BL_F_Cu)
+        && instance.layer.enum_value() != Ok(board_types::BoardLayer::BL_B_Cu)
+    {
+        return Err(IpcError::InvalidObservedPad(
+            "footprint layer is not front or back copper",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_get_items_document(
+    response: &editor_commands::GetItemsResponse,
+    board_filename: &str,
+) -> Result<(), IpcError> {
+    let Some(document) = response
+        .header
+        .as_ref()
+        .and_then(|header| header.document.as_ref())
+    else {
+        return Ok(());
+    };
+    if document.type_.enum_value_or_default() != base_types::DocumentType::DOCTYPE_PCB
+        || document.board_filename() != board_filename
+    {
+        return Err(IpcError::InvalidObservedPad(
+            "get items response document does not match request",
+        ));
+    }
+    Ok(())
+}
+
+fn footprint_definition_pads_from_response(
+    response: &editor_commands::GetItemsResponse,
+    footprint_source_uuid: &str,
+) -> Result<Vec<ObservedPad>, IpcError> {
+    if response.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
+        return Err(IpcError::Status(
+            ApiStatusCode::AS_BAD_REQUEST,
+            format!(
+                "get items by id status: {:?}",
+                response.status.enum_value_or_default()
+            ),
+        ));
+    }
+    if response.items.len() != 1 {
+        return Err(IpcError::InvalidObservedPad(
+            "footprint lookup must return exactly one item",
+        ));
+    }
+    let item = &response.items[0];
+    if item.type_url != FOOTPRINT_INSTANCE_TYPE_URL {
+        return Err(IpcError::UnexpectedMessageType {
+            expected: FOOTPRINT_INSTANCE_TYPE_URL,
+            actual: item.type_url.clone(),
+        });
+    }
+    let footprint = board_types::FootprintInstance::parse_from_bytes(&item.value)
+        .map_err(|_| IpcError::MalformedEnvelope)?;
+    validate_footprint_definition_for_pad_readback(&footprint)?;
+    let observed_uuid = kiid_value(footprint.id.as_ref()).ok_or(IpcError::InvalidObservedPad(
+        "footprint identity is missing",
+    ))?;
+    if observed_uuid != footprint_source_uuid {
+        return Err(IpcError::InvalidObservedPad(
+            "returned footprint identity does not match request",
+        ));
+    }
+    let definition = footprint
+        .definition
+        .as_ref()
+        .ok_or(IpcError::InvalidObservedPad(
+            "footprint definition is missing",
+        ))?;
+    let mut pads = definition
+        .items
+        .iter()
+        .filter(|item| item.type_url == "type.googleapis.com/kiapi.board.types.Pad")
+        .map(|item| footprint_pad_from_any(item, footprint_source_uuid))
+        .collect::<Result<Vec<_>, _>>()?;
+    pads.sort_by(|left, right| left.source_uuid.cmp(&right.source_uuid));
+    if pads
+        .windows(2)
+        .any(|pair| pair[0].source_uuid == pair[1].source_uuid)
+    {
+        return Err(IpcError::InvalidObservedPad(
+            "pad identities must be unique",
+        ));
+    }
+    Ok(pads)
 }
 
 fn footprint_pads_from_response(
@@ -2646,17 +3067,7 @@ fn observed_via(item: &Any) -> Result<ObservedVia, IpcError> {
                 ObservedBoardLayer::FrontCopper,
                 ObservedBoardLayer::BackCopper,
             ]
-        && value.type_.enum_value() == Ok(board_types::ViaType::VT_THROUGH)
-        && pad_stack.type_.enum_value() == Ok(board_types::PadStackType::PST_FRONT_INNER_BACK)
-        && pad_stack.copper_layers.len() == 3
-        && pad_stack.copper_layers.iter().all(|layer| {
-            matches!(
-                layer.layer.enum_value(),
-                Ok(board_types::BoardLayer::BL_F_Cu)
-                    | Ok(board_types::BoardLayer::BL_In1_Cu)
-                    | Ok(board_types::BoardLayer::BL_B_Cu)
-            )
-        });
+        && value.type_.enum_value() == Ok(board_types::ViaType::VT_THROUGH);
     let mut copper_shapes = pad_stack
         .copper_layers
         .iter()
@@ -2673,11 +3084,7 @@ fn observed_via(item: &Any) -> Result<ObservedVia, IpcError> {
     }
     if copper_shapes.iter().any(|shape| {
         !(layers.contains(&shape.layer)
-            || (allow_through_via_placeholder
-                && shape.layer == ObservedBoardLayer::InnerCopper(1)
-                && shape.shape == ObservedPadShape::Circle
-                && shape.size_x_nm == 0
-                && shape.size_y_nm == 0))
+            || (allow_through_via_placeholder && shape.layer == ObservedBoardLayer::InnerCopper(1)))
     }) {
         return Err(IpcError::InvalidObservedRouting(
             "via copper shape layer must belong to the pad stack",
@@ -3209,6 +3616,7 @@ fn routing_point(
 
 fn board_graphics_from_response(
     response: &editor_commands::GetItemsResponse,
+    board_filename: &str,
     layer: BoardGraphicLayer,
 ) -> Result<Vec<ObservedBoardGraphicSegment>, IpcError> {
     if response.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
@@ -3220,11 +3628,85 @@ fn board_graphics_from_response(
             ),
         ));
     }
+    let document = response
+        .header
+        .as_ref()
+        .and_then(|header| header.document.as_ref())
+        .ok_or(IpcError::InvalidObservedBoardGraphic(
+            "board graphic response document is missing",
+        ))?;
+    if document.type_.enum_value_or_default() != base_types::DocumentType::DOCTYPE_PCB
+        || document.board_filename() != board_filename
+    {
+        return Err(IpcError::InvalidObservedBoardGraphic(
+            "board graphic response document does not match request",
+        ));
+    }
     response
         .items
         .iter()
         .filter_map(|item| observed_board_graphic(item, layer))
         .collect()
+}
+
+fn board_graphics_by_id_from_response(
+    response: &editor_commands::GetItemsResponse,
+    board_filename: &str,
+    requested_ids: &[String],
+    layer: BoardGraphicLayer,
+) -> Result<Vec<ObservedBoardGraphicSegment>, IpcError> {
+    if response.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
+        return Err(IpcError::Status(
+            ApiStatusCode::AS_BAD_REQUEST,
+            format!(
+                "get items by id status: {:?}",
+                response.status.enum_value_or_default()
+            ),
+        ));
+    }
+    if let Some(document) = response
+        .header
+        .as_ref()
+        .and_then(|header| header.document.as_ref())
+        && (document.type_.enum_value_or_default() != base_types::DocumentType::DOCTYPE_PCB
+            || document.board_filename() != board_filename)
+    {
+        return Err(IpcError::InvalidObservedBoardGraphic(
+            "board graphic response document does not match request",
+        ));
+    }
+    if response.items.len() != requested_ids.len() {
+        return Err(IpcError::InvalidObservedBoardGraphic(
+            "board graphic response count does not match request",
+        ));
+    }
+    let requested = requested_ids
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut observed_ids = std::collections::BTreeSet::new();
+    let mut graphics = Vec::with_capacity(response.items.len());
+    for item in &response.items {
+        let decoded = decoded_board_graphic(item)?;
+        if !requested.contains(decoded.graphic_id.as_str())
+            || !observed_ids.insert(decoded.graphic_id.clone())
+        {
+            return Err(IpcError::InvalidObservedBoardGraphic(
+                "board graphic response identity does not match request",
+            ));
+        }
+        if decoded.segment.layer != layer {
+            return Err(IpcError::InvalidObservedBoardGraphic(
+                "board graphic response layer does not match request",
+            ));
+        }
+        graphics.push(ObservedBoardGraphicSegment {
+            graphic_id: decoded.graphic_id,
+            segment: decoded.segment,
+        });
+    }
+    graphics.sort_by(|left, right| left.graphic_id.cmp(&right.graphic_id));
+    Ok(graphics)
 }
 
 #[derive(Debug)]
@@ -4104,6 +4586,21 @@ mod tests {
         create_items_response_with_results(token, created_items)
     }
 
+    fn create_items_response_for_board(
+        token: &str,
+        statuses: &[(editor_commands::ItemStatusCode, &str)],
+        board_filename: &str,
+    ) -> ApiResponse {
+        let mut response = create_items_response(token, statuses);
+        let mut decoded = editor_commands::CreateItemsResponse::parse_from_bytes(
+            &response.message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        decoded.header = MessageField::some(board_item_header(board_filename));
+        response.message.as_mut().unwrap().value = decoded.write_to_bytes().unwrap();
+        response
+    }
+
     fn create_item_result(item: Any) -> editor_commands::ItemCreationResult {
         editor_commands::ItemCreationResult {
             status: MessageField::some(editor_commands::ItemStatus {
@@ -4264,6 +4761,7 @@ mod tests {
         items: Vec<Any>,
     ) -> ApiResponse {
         let response = editor_commands::GetItemsResponse {
+            header: MessageField::some(board_item_header("main.kicad_pcb")),
             status: protobuf::EnumOrUnknown::new(status),
             items,
             ..editor_commands::GetItemsResponse::default()
@@ -4346,6 +4844,16 @@ mod tests {
             value: footprint.write_to_bytes().unwrap(),
             ..Any::default()
         }
+    }
+
+    fn definition_pad_footprint_item(id: &str) -> Any {
+        let mut item = footprint_item(id);
+        let mut footprint = board_types::FootprintInstance::parse_from_bytes(&item.value).unwrap();
+        let definition = footprint.definition.as_mut().unwrap();
+        definition.id.as_mut().unwrap().library_nickname.clear();
+        definition.items.push(pad_item("pad-1", "1"));
+        item.value = footprint.write_to_bytes().unwrap();
+        item
     }
 
     fn footprint_client(response: ApiResponse) -> KiCadClient<FakeTransport> {
@@ -4559,6 +5067,21 @@ mod tests {
         }
     }
 
+    fn created_footprint_response_for_board(
+        token: &str,
+        id: &str,
+        board_filename: &str,
+    ) -> ApiResponse {
+        let mut response = created_footprint_response(token, id);
+        let mut decoded = editor_commands::CreateItemsResponse::parse_from_bytes(
+            &response.message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        decoded.header = MessageField::some(board_item_header(board_filename));
+        response.message.as_mut().unwrap().value = decoded.write_to_bytes().unwrap();
+        response
+    }
+
     fn created_footprint_response(token: &str, id: &str) -> ApiResponse {
         let mut item = footprint_item(id);
         let mut footprint = board_types::FootprintInstance::parse_from_bytes(&item.value).unwrap();
@@ -4571,6 +5094,225 @@ mod tests {
         footprint.value_field = MessageField::some(field("22k"));
         item.value = footprint.write_to_bytes().unwrap();
         create_items_response_with_results(token, vec![create_item_result(item)])
+    }
+
+    #[test]
+    fn parse_and_create_footprint_uses_exact_document_contents_and_server_receipt() {
+        let mut client = footprint_client(created_footprint_response_for_board(
+            "parsed-token",
+            "server-assigned",
+            "/tmp/project/main.kicad_pcb",
+        ));
+        let receipt = client
+            .parse_and_create_footprint_instance(
+                "/tmp/project/main.kicad_pcb",
+                "(footprint \"Resistor_SMD:R_0603\")",
+            )
+            .unwrap();
+        assert_eq!(receipt.source_uuid, "server-assigned");
+        assert_eq!(receipt.position_x_nm, 900);
+        assert_eq!(receipt.position_y_nm, -800);
+        assert_eq!(receipt.reference, "R9");
+        assert_eq!(receipt.value, "22k");
+        assert_eq!(client.instance_token().unwrap().as_str(), "parsed-token");
+
+        let request = &client.transport.requests[0];
+        assert_eq!(
+            request.message.as_ref().unwrap().type_url,
+            PARSE_AND_CREATE_ITEMS_FROM_STRING_TYPE_URL
+        );
+        let command = editor_commands::ParseAndCreateItemsFromString::parse_from_bytes(
+            &request.message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        assert_eq!(command.contents, "(footprint \"Resistor_SMD:R_0603\")");
+        let document = command.document.as_ref().unwrap();
+        assert_eq!(
+            document.type_.enum_value_or_default(),
+            base_types::DocumentType::DOCTYPE_PCB
+        );
+        assert_eq!(document.board_filename(), "/tmp/project/main.kicad_pcb");
+        assert!(command.document.is_some());
+        assert_eq!(request.header.as_ref().unwrap().client_name, "test-client");
+        assert!(request.header.as_ref().unwrap().kicad_token.is_empty());
+    }
+
+    #[test]
+    fn parse_and_create_footprint_preserves_prior_token_in_exact_request() {
+        let mut client = footprint_client(created_footprint_response_for_board(
+            "next-token",
+            "server-id",
+            "main.kicad_pcb",
+        ));
+        client.token = Some(InstanceToken::new("prior-token".to_owned()).unwrap());
+        client
+            .parse_and_create_footprint_instance("main.kicad_pcb", "(footprint)")
+            .unwrap();
+        assert_eq!(
+            client.transport.requests[0]
+                .header
+                .as_ref()
+                .unwrap()
+                .kicad_token,
+            "prior-token"
+        );
+    }
+
+    #[test]
+    fn parse_and_create_footprint_rejects_response_shape_errors_without_token_update() {
+        let mut wrong_type =
+            created_footprint_response_for_board("new-token", "server-assigned", "main.kicad_pcb");
+        wrong_type.message.as_mut().unwrap().type_url = GET_ITEMS_RESPONSE_TYPE_URL.to_owned();
+        let mut client = footprint_client(wrong_type);
+        client.token = Some(InstanceToken::new("prior-token".to_owned()).unwrap());
+        assert!(matches!(
+            client.parse_and_create_footprint_instance("main.kicad_pcb", "(footprint)"),
+            Err(IpcError::UnexpectedMessageType { .. })
+        ));
+        assert_eq!(client.instance_token().unwrap().as_str(), "prior-token");
+
+        let mut count_mismatch =
+            created_footprint_response_for_board("new-token", "server-assigned", "main.kicad_pcb");
+        let response = editor_commands::CreateItemsResponse::parse_from_bytes(
+            &count_mismatch.message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        let mut response = response;
+        response.created_items.clear();
+        count_mismatch.message.as_mut().unwrap().value = response.write_to_bytes().unwrap();
+        let mut client = footprint_client(count_mismatch);
+        client.token = Some(InstanceToken::new("prior-token".to_owned()).unwrap());
+        assert!(matches!(
+            client.parse_and_create_footprint_instance("main.kicad_pcb", "(footprint)"),
+            Err(IpcError::CreateItemsCountMismatch {
+                expected: 1,
+                actual: 0
+            })
+        ));
+        assert_eq!(client.instance_token().unwrap().as_str(), "prior-token");
+
+        let item_failure = create_items_response_for_board(
+            "new-token",
+            &[(
+                editor_commands::ItemStatusCode::ISC_INVALID_DATA,
+                "bad source",
+            )],
+            "main.kicad_pcb",
+        );
+        let mut client = footprint_client(item_failure);
+        client.token = Some(InstanceToken::new("prior-token".to_owned()).unwrap());
+        assert!(matches!(
+            client.parse_and_create_footprint_instance("main.kicad_pcb", "(footprint)"),
+            Err(IpcError::CreateItemFailed {
+                index: 0,
+                status,
+                message
+            }) if status == editor_commands::ItemStatusCode::ISC_INVALID_DATA as i32
+                && message == "bad source"
+        ));
+        assert_eq!(client.instance_token().unwrap().as_str(), "prior-token");
+    }
+
+    #[test]
+    fn parse_and_create_footprint_reports_create_status_before_document_errors() {
+        let mut response = created_footprint_response("new-token", "server-assigned");
+        let mut decoded = editor_commands::CreateItemsResponse::parse_from_bytes(
+            &response.message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        decoded.status = protobuf::EnumOrUnknown::new(base_types::ItemRequestStatus::IRS_UNKNOWN);
+        decoded.header = MessageField::none();
+        response.message.as_mut().unwrap().value = decoded.write_to_bytes().unwrap();
+        let mut client = footprint_client(response);
+        client.token = Some(InstanceToken::new("prior-token".to_owned()).unwrap());
+        assert!(matches!(
+            client.parse_and_create_footprint_instance("main.kicad_pcb", "(footprint)"),
+            Err(IpcError::Status(ApiStatusCode::AS_BAD_REQUEST, _))
+        ));
+        assert_eq!(client.instance_token().unwrap().as_str(), "prior-token");
+    }
+
+    #[test]
+    fn parse_and_create_footprint_rejects_response_document_mismatch_without_token_update() {
+        let missing = created_footprint_response("new-token", "server-assigned");
+        let mut client = footprint_client(missing);
+        client.token = Some(InstanceToken::new("prior-token".to_owned()).unwrap());
+        assert!(matches!(
+            client.parse_and_create_footprint_instance("main.kicad_pcb", "(footprint)"),
+            Err(IpcError::InvalidObservedFootprint(_))
+        ));
+        assert_eq!(client.instance_token().unwrap().as_str(), "prior-token");
+
+        let wrong_board =
+            created_footprint_response_for_board("new-token", "server-assigned", "other.kicad_pcb");
+        let mut client = footprint_client(wrong_board);
+        client.token = Some(InstanceToken::new("prior-token".to_owned()).unwrap());
+        assert!(matches!(
+            client.parse_and_create_footprint_instance("main.kicad_pcb", "(footprint)"),
+            Err(IpcError::InvalidObservedFootprint(_))
+        ));
+        assert_eq!(client.instance_token().unwrap().as_str(), "prior-token");
+    }
+
+    #[test]
+    fn parse_and_create_footprint_rejects_malformed_or_mismatched_items_without_token_update() {
+        let mut wrong_type =
+            created_footprint_response_for_board("new-token", "server-assigned", "main.kicad_pcb");
+        let response = editor_commands::CreateItemsResponse::parse_from_bytes(
+            &wrong_type.message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        let mut response = response;
+        response.created_items[0].item.as_mut().unwrap().type_url = TRACK_TYPE_URL.to_owned();
+        wrong_type.message.as_mut().unwrap().value = response.write_to_bytes().unwrap();
+        let mut client = footprint_client(wrong_type);
+        client.token = Some(InstanceToken::new("prior-token".to_owned()).unwrap());
+        assert!(matches!(
+            client.parse_and_create_footprint_instance("main.kicad_pcb", "(footprint)"),
+            Err(IpcError::UnexpectedMessageType { .. })
+        ));
+        assert_eq!(client.instance_token().unwrap().as_str(), "prior-token");
+
+        let mut malformed =
+            created_footprint_response_for_board("new-token", "server-assigned", "main.kicad_pcb");
+        let response = editor_commands::CreateItemsResponse::parse_from_bytes(
+            &malformed.message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        let mut response = response;
+        response.created_items[0].item.as_mut().unwrap().value = vec![0xff];
+        malformed.message.as_mut().unwrap().value = response.write_to_bytes().unwrap();
+        let mut client = footprint_client(malformed);
+        client.token = Some(InstanceToken::new("prior-token".to_owned()).unwrap());
+        assert!(matches!(
+            client.parse_and_create_footprint_instance("main.kicad_pcb", "(footprint)"),
+            Err(IpcError::MalformedEnvelope)
+        ));
+        assert_eq!(client.instance_token().unwrap().as_str(), "prior-token");
+    }
+
+    #[test]
+    fn parse_and_create_footprint_rejects_empty_contents_before_transport() {
+        let mut client =
+            footprint_client(created_footprint_response("new-token", "server-assigned"));
+        assert!(matches!(
+            client.parse_and_create_footprint_instance("main.kicad_pcb", ""),
+            Err(IpcError::InvalidObservedFootprint(_))
+        ));
+        assert!(client.transport.requests.is_empty());
+        assert!(matches!(
+            client.parse_and_create_footprint_instance("   ", "(footprint)"),
+            Err(IpcError::InvalidObservedFootprint(_))
+        ));
+        assert!(matches!(
+            client.parse_and_create_footprint_instance("main.kicad_pcb", "\t\n"),
+            Err(IpcError::InvalidObservedFootprint(_))
+        ));
+        assert!(matches!(
+            client.parse_and_create_footprint_instance("", "(footprint)"),
+            Err(IpcError::InvalidObservedFootprint(_))
+        ));
+        assert!(client.transport.requests.is_empty());
     }
 
     #[test]
@@ -4994,6 +5736,134 @@ mod tests {
                 "get items status: IRS_DOCUMENT_NOT_FOUND".to_owned()
             )
         );
+    }
+
+    #[test]
+    fn get_board_graphics_rejects_missing_or_mismatched_response_document() {
+        let mut missing = get_items_response(
+            "new-token",
+            base_types::ItemRequestStatus::IRS_OK,
+            Vec::new(),
+        );
+        let mut decoded = editor_commands::GetItemsResponse::parse_from_bytes(
+            &missing.message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        decoded.header = MessageField::none();
+        missing.message.as_mut().unwrap().value = decoded.write_to_bytes().unwrap();
+        let mut client = graphics_client(missing);
+        client.token = Some(InstanceToken::new("prior-token".to_owned()).unwrap());
+        assert!(matches!(
+            client.get_board_graphics("main.kicad_pcb"),
+            Err(IpcError::InvalidObservedBoardGraphic(_))
+        ));
+        assert_eq!(client.instance_token().unwrap().as_str(), "prior-token");
+
+        let mut mismatched = get_items_response(
+            "new-token",
+            base_types::ItemRequestStatus::IRS_OK,
+            Vec::new(),
+        );
+        let mut decoded = editor_commands::GetItemsResponse::parse_from_bytes(
+            &mismatched.message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        decoded.header = MessageField::some(board_item_header("other.kicad_pcb"));
+        mismatched.message.as_mut().unwrap().value = decoded.write_to_bytes().unwrap();
+        let mut client = graphics_client(mismatched);
+        assert!(matches!(
+            client.get_board_graphics("main.kicad_pcb"),
+            Err(IpcError::InvalidObservedBoardGraphic(_))
+        ));
+        assert!(client.instance_token().is_none());
+    }
+
+    #[test]
+    fn get_board_graphics_by_id_accepts_missing_header_only_with_exact_identities() {
+        let expected = BoardGraphicSegment {
+            layer: BoardGraphicLayer::EdgeCuts,
+            ..segment()
+        };
+        let mut response = get_items_response(
+            "by-id-token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![created_segment_item(
+                "graphic-1",
+                &expected,
+                base_types::LockedState::LS_UNLOCKED,
+            )],
+        );
+        let mut decoded = editor_commands::GetItemsResponse::parse_from_bytes(
+            &response.message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        decoded.header = MessageField::none();
+        response.message.as_mut().unwrap().value = decoded.write_to_bytes().unwrap();
+        let mut client = graphics_client(response);
+        let observed = client
+            .get_board_graphics_by_id(
+                "main.kicad_pcb",
+                &["graphic-1".to_owned()],
+                BoardGraphicLayer::EdgeCuts,
+            )
+            .unwrap();
+        assert_eq!(
+            observed,
+            vec![ObservedBoardGraphicSegment {
+                graphic_id: "graphic-1".to_owned(),
+                segment: expected,
+            }]
+        );
+        assert_eq!(client.instance_token().unwrap().as_str(), "by-id-token");
+        let command = editor_commands::GetItemsById::parse_from_bytes(
+            &client.transport.requests[0].message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        assert_eq!(command.items[0].value, "graphic-1");
+        assert_eq!(
+            client.transport.requests[0]
+                .message
+                .as_ref()
+                .unwrap()
+                .type_url,
+            GET_ITEMS_BY_ID_TYPE_URL
+        );
+    }
+
+    #[test]
+    fn get_board_graphics_by_id_rejects_cardinality_and_identity_mismatch_token_last() {
+        let expected = BoardGraphicSegment {
+            layer: BoardGraphicLayer::EdgeCuts,
+            ..segment()
+        };
+        for items in [
+            Vec::new(),
+            vec![
+                created_segment_item("graphic-1", &expected, base_types::LockedState::LS_UNLOCKED),
+                created_segment_item("graphic-1", &expected, base_types::LockedState::LS_UNLOCKED),
+            ],
+            vec![created_segment_item(
+                "other-graphic",
+                &expected,
+                base_types::LockedState::LS_UNLOCKED,
+            )],
+        ] {
+            let mut client = graphics_client(get_items_response(
+                "new-token",
+                base_types::ItemRequestStatus::IRS_OK,
+                items,
+            ));
+            client.token = Some(InstanceToken::new("prior-token").unwrap());
+            assert!(matches!(
+                client.get_board_graphics_by_id(
+                    "main.kicad_pcb",
+                    &["graphic-1".to_owned()],
+                    BoardGraphicLayer::EdgeCuts,
+                ),
+                Err(IpcError::InvalidObservedBoardGraphic(_))
+            ));
+            assert_eq!(client.instance_token().unwrap().as_str(), "prior-token");
+        }
     }
 
     #[test]
@@ -5493,6 +6363,77 @@ mod tests {
         assert_eq!(
             error.to_string(),
             "unknown_pcb_item_type: type.googleapis.com/kiapi.board.types.Unknown"
+        );
+    }
+
+    #[test]
+    fn get_footprint_definition_pads_uses_requested_kiid_and_nested_items() {
+        let mut client = pad_client(get_items_response(
+            "nested-token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![definition_pad_footprint_item("footprint-1")],
+        ));
+        let pads = client
+            .get_footprint_definition_pads("main.kicad_pcb", "footprint-1")
+            .unwrap();
+        assert_eq!(pads.len(), 1);
+        assert_eq!(pads[0].source_uuid, "pad-1");
+        assert_eq!(client.instance_token().unwrap().as_str(), "nested-token");
+        let command = editor_commands::GetItemsById::parse_from_bytes(
+            &client.transport.requests[0].message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        assert_eq!(command.items[0].value, "footprint-1");
+        assert_eq!(
+            client.transport.requests[0]
+                .message
+                .as_ref()
+                .unwrap()
+                .type_url,
+            GET_ITEMS_BY_ID_TYPE_URL
+        );
+
+        let mut mismatched = get_items_response(
+            "new-token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![definition_pad_footprint_item("footprint-1")],
+        );
+        let mut decoded = editor_commands::GetItemsResponse::parse_from_bytes(
+            &mismatched.message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        decoded.header = MessageField::some(board_item_header("other.kicad_pcb"));
+        mismatched.message.as_mut().unwrap().value = decoded.write_to_bytes().unwrap();
+        let mut client = pad_client(mismatched);
+        client.token = Some(InstanceToken::new("prior-token").unwrap());
+        assert!(matches!(
+            client.get_footprint_definition_pads("main.kicad_pcb", "footprint-1"),
+            Err(IpcError::InvalidObservedPad(_))
+        ));
+        assert_eq!(client.instance_token().unwrap().as_str(), "prior-token");
+
+        let mut missing = get_items_response(
+            "missing-header-token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![definition_pad_footprint_item("footprint-1")],
+        );
+        let mut decoded = editor_commands::GetItemsResponse::parse_from_bytes(
+            &missing.message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        decoded.header = MessageField::none();
+        missing.message.as_mut().unwrap().value = decoded.write_to_bytes().unwrap();
+        let mut client = pad_client(missing);
+        assert_eq!(
+            client
+                .get_footprint_definition_pads("main.kicad_pcb", "footprint-1")
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            client.instance_token().unwrap().as_str(),
+            "missing-header-token"
         );
     }
 
@@ -6326,6 +7267,55 @@ mod tests {
             "main.kicad_pcb"
         );
         assert_eq!(client.token.as_ref().unwrap().as_str(), "new");
+    }
+
+    #[test]
+    fn get_board_routing_by_id_accepts_missing_header_with_exact_identities() {
+        let mut response = get_items_response(
+            "by-id-token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![routing_via_item("via"), routing_track_item("track")],
+        );
+        let mut decoded = editor_commands::GetItemsResponse::parse_from_bytes(
+            &response.message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        decoded.header = MessageField::none();
+        response.message.as_mut().unwrap().value = decoded.write_to_bytes().unwrap();
+        let mut client = routing_client(response);
+        let routing = client
+            .get_board_routing_by_id("main.kicad_pcb", &["track".to_owned(), "via".to_owned()])
+            .unwrap();
+        assert_eq!(routing.tracks[0].source_uuid, "track");
+        assert_eq!(routing.vias[0].source_uuid, "via");
+        assert_eq!(client.instance_token().unwrap().as_str(), "by-id-token");
+        let command = editor_commands::GetItemsById::parse_from_bytes(
+            &client.transport.requests[0].message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        assert_eq!(
+            command
+                .items
+                .iter()
+                .map(|id| id.value.as_str())
+                .collect::<Vec<_>>(),
+            ["track", "via"]
+        );
+    }
+
+    #[test]
+    fn get_board_routing_by_id_rejects_identity_mismatch_token_last() {
+        let mut client = routing_client(get_items_response(
+            "new-token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![routing_track_item("other")],
+        ));
+        client.token = Some(InstanceToken::new("prior-token").unwrap());
+        assert!(matches!(
+            client.get_board_routing_by_id("main.kicad_pcb", &["track".to_owned()]),
+            Err(IpcError::InvalidObservedRouting(_))
+        ));
+        assert_eq!(client.instance_token().unwrap().as_str(), "prior-token");
     }
 
     #[test]
