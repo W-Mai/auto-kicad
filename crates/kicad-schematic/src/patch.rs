@@ -11,7 +11,7 @@ use tempfile::Builder;
 
 use crate::{NetlistDocument, NetlistRunner, parse_schematic};
 
-const SUPPORTED_FORMAT: &str = "20231120";
+const SUPPORTED_FORMAT: &str = "20260306";
 const MAX_CANDIDATE_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -323,16 +323,21 @@ fn prove_connectivity(document: &NetlistDocument) -> Result<(), PatchFailure> {
     }
 
     let intended_nodes = [("R1", "2"), ("R2", "1")];
-    if document.nets.len() != 1 {
-        return Err(rejected(SchematicPatchRejection::ConnectivityNotProven));
+    let mut target_net_count = 0;
+    for net in &document.nets {
+        let mut nodes = net
+            .nodes
+            .iter()
+            .map(|node| (node.reference.as_str(), node.pin.as_str()))
+            .collect::<Vec<_>>();
+        nodes.sort_unstable();
+        if nodes == intended_nodes {
+            target_net_count += 1;
+        } else if net.nodes.len() != 1 || !net.nodes[0].pin_type.contains("no_connect") {
+            return Err(rejected(SchematicPatchRejection::ConnectivityNotProven));
+        }
     }
-    let mut nodes = document.nets[0]
-        .nodes
-        .iter()
-        .map(|node| (node.reference.as_str(), node.pin.as_str()))
-        .collect::<Vec<_>>();
-    nodes.sort_unstable();
-    if nodes != intended_nodes {
+    if target_net_count != 1 || document.nets.len() != 3 {
         return Err(rejected(SchematicPatchRejection::ConnectivityNotProven));
     }
     Ok(())
@@ -342,11 +347,11 @@ fn has_exact_fixed_topology(bytes: &[u8]) -> bool {
     let Ok(text) = std::str::from_utf8(bytes) else {
         return false;
     };
-    text.matches("(wire (pts (xy 50 53.81) (xy 50 56.35))")
+    text.matches("(wire (pts (xy 50 46.19) (xy 50 63.97))")
         .count()
         == 1
-        && text.matches("(no_connect (at 50 46.19)").count() == 1
-        && text.matches("(no_connect (at 50 63.97)").count() == 1
+        && text.matches("(no_connect (at 50 53.81)").count() == 1
+        && text.matches("(no_connect (at 50 56.35)").count() == 1
         && text.matches("(no_connect ").count() == 2
 }
 
@@ -437,20 +442,20 @@ fn resistor_library_definition() -> &'static str {
       (symbol "R_1_1"
         (pin passive line (at 0 3.81 270) (length 1.27)
           (name "~" (effects (font (size 1.27 1.27))))
-          (number "1" (effects (font (size 1.27 1.27)))))
+          (number "2" (effects (font (size 1.27 1.27)))))
         (pin passive line (at 0 -3.81 90) (length 1.27)
           (name "~" (effects (font (size 1.27 1.27))))
-          (number "2" (effects (font (size 1.27 1.27)))))))
+          (number "1" (effects (font (size 1.27 1.27)))))))
 "#
 }
 
 fn circuit_forms(root_uuid: &str, ids: &FreshIds) -> String {
     format!(
         r#"
-  (wire (pts (xy 50 53.81) (xy 50 56.35))
+  (wire (pts (xy 50 46.19) (xy 50 63.97))
     (stroke (width 0) (type default)) (uuid "{}"))
-  (no_connect (at 50 46.19) (uuid "{}"))
-  (no_connect (at 50 63.97) (uuid "{}"))
+  (no_connect (at 50 53.81) (uuid "{}"))
+  (no_connect (at 50 56.35) (uuid "{}"))
   (symbol
     (lib_id "Device:R") (at 50 50 0) (unit 1) (exclude_from_sim no)
     (in_bom yes) (on_board yes) (dnp no) (uuid "{}")
@@ -674,7 +679,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
 
     const EMPTY: &str = r#"(kicad_sch
-  (version 20231120)
+  (version 20260306)
   (generator "eeschema")
   (generator_version "8.0")
   (uuid "11111111-1111-4111-8111-111111111111")
@@ -700,7 +705,7 @@ mod tests {
                 r#"#!/bin/sh
 if [ "$1" = "sch" ] && [ "$2" = "export" ]; then
 cat <<'XML'
-<export version="E"><design><sheet number="1" name="/" tstamps="/"/></design><components><comp ref="R1"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp><comp ref="R2"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp></components><nets><net code="1" name="Net-(R1-Pad2)"><node ref="R1" pin="2" pinfunction="~" pintype="passive"/><node ref="R2" pin="1" pinfunction="~" pintype="passive"/></net></nets></export>
+<export version="E"><design><sheet number="1" name="/" tstamps="/"/></design><components><comp ref="R1"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp><comp ref="R2"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp></components><nets><net code="1" name="Net-(R1-Pad2)"><node ref="R1" pin="2" pinfunction="~" pintype="passive"/><node ref="R2" pin="1" pinfunction="~" pintype="passive"/></net><net code="2" name="unconnected-(R1-Pad1)"><node ref="R1" pin="1" pinfunction="~" pintype="passive+no_connect"/></net><net code="3" name="unconnected-(R2-Pad2)"><node ref="R2" pin="2" pinfunction="~" pintype="passive+no_connect"/></net></nets></export>
 XML
 exit 0
 fi
@@ -798,6 +803,20 @@ exit 1
     }
 
     #[test]
+    fn rejects_unverified_20231120_format_without_change() {
+        let fixture = Fixture::new();
+        fs::write(&fixture.root, EMPTY.replace("20260306", "20231120")).unwrap();
+        let original = fs::read(&fixture.root).unwrap();
+        assert_eq!(
+            fixture.run(&fixture.artifact()),
+            SchematicPatchOutcome::Rejected {
+                reason: SchematicPatchRejection::UnsupportedFormat
+            }
+        );
+        assert_eq!(fs::read(&fixture.root).unwrap(), original);
+    }
+
+    #[test]
     fn reservation_blocks_competitors_and_cleans_up_on_drop() {
         let fixture = Fixture::new();
         let root = fs::canonicalize(&fixture.root).unwrap();
@@ -823,8 +842,8 @@ exit 1
             &String::from_utf8(candidate.clone())
                 .unwrap()
                 .replacen(
-                    "  (no_connect (at 50 46.19)",
-                    "  (junction (at 50 46.19)",
+                    "  (no_connect (at 50 56.35)",
+                    "  (junction (at 50 56.35)",
                     1
                 )
                 .into_bytes()
@@ -935,6 +954,117 @@ exit 1
         assert!(matches!(outcome, SchematicPatchOutcome::Unknown { .. }));
         assert_eq!(fs::read(&fixture.root).unwrap(), receipt.candidate_bytes);
         assert!(!fixture.dir.path().join("~root.kicad_sch.lck").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[ignore = "requires the installed KiCad 10.0.5 kicad-cli"]
+    fn disposable_runtime_patch_round_trip_with_production_kicad_cli() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("root.kicad_sch");
+        fs::write(&root, EMPTY).unwrap();
+        let project_root = fs::canonicalize(dir.path()).unwrap();
+        let canonical_root = fs::canonicalize(&root).unwrap();
+        let source = fs::read(&canonical_root).unwrap();
+        let source_artifact = artifact("root.kicad_sch", &source).unwrap();
+        let production_runner = NetlistRunner::production().expect("installed KiCad CLI");
+
+        let receipt = preview_two_resistor_circuit_with_runner(
+            &project_root,
+            &canonical_root,
+            &source_artifact,
+            &production_runner,
+        )
+        .expect("production preview");
+        assert_eq!(fs::read(&canonical_root).unwrap(), source);
+        assert!(!project_root.join("~root.kicad_sch.lck").exists());
+        assert_eq!(
+            receipt.candidate_artifact,
+            artifact("root.kicad_sch", &receipt.candidate_bytes).unwrap()
+        );
+
+        let committed = commit_two_resistor_circuit_with_runner(
+            &project_root,
+            &canonical_root,
+            &receipt,
+            &production_runner,
+        );
+        let SchematicPatchOutcome::Committed {
+            artifact: committed_artifact,
+        } = committed
+        else {
+            panic!("production commit failed: {committed:?}");
+        };
+        let committed_bytes = fs::read(&canonical_root).unwrap();
+        assert_eq!(committed_bytes, receipt.candidate_bytes);
+        assert_eq!(
+            committed_artifact,
+            artifact("root.kicad_sch", &committed_bytes).unwrap()
+        );
+        assert!(!project_root.join("~root.kicad_sch.lck").exists());
+
+        let parsed = parse_schematic("root.kicad_sch", &committed_bytes).unwrap();
+        let mut references = parsed
+            .symbols
+            .iter()
+            .map(|symbol| symbol.reference.as_str())
+            .collect::<Vec<_>>();
+        references.sort_unstable();
+        assert_eq!(references, ["R1", "R2"]);
+        assert!(parsed.symbols.iter().all(|symbol| {
+            symbol.lib_id == "Device:R" && symbol.value == "1k" && symbol.pins.len() == 2
+        }));
+        assert!(has_exact_fixed_topology(&committed_bytes));
+
+        let verification_runner = NetlistRunner::production().expect("installed KiCad CLI");
+        let netlist = verification_runner
+            .run(&project_root, &canonical_root)
+            .expect("independent production netlist export");
+        assert_eq!(netlist.document.components.len(), 2);
+        assert_eq!(netlist.document.nets.len(), 3);
+        let mut components = netlist
+            .document
+            .components
+            .iter()
+            .map(|component| {
+                (
+                    component.reference.as_str(),
+                    component.value.as_str(),
+                    component.library.as_str(),
+                    component.library_part.as_str(),
+                )
+            })
+            .collect::<Vec<_>>();
+        components.sort_unstable();
+        assert_eq!(
+            components,
+            [("R1", "1k", "Device", "R"), ("R2", "1k", "Device", "R")]
+        );
+        let target_net = netlist
+            .document
+            .nets
+            .iter()
+            .find(|net| {
+                let mut nodes = net
+                    .nodes
+                    .iter()
+                    .map(|node| (node.reference.as_str(), node.pin.as_str()))
+                    .collect::<Vec<_>>();
+                nodes.sort_unstable();
+                nodes == [("R1", "2"), ("R2", "1")]
+            })
+            .expect("unique target net");
+        let mut nodes = target_net
+            .nodes
+            .iter()
+            .map(|node| (node.reference.as_str(), node.pin.as_str()))
+            .collect::<Vec<_>>();
+        nodes.sort_unstable();
+        assert_eq!(nodes, [("R1", "2"), ("R2", "1")]);
+        verification_runner
+            .run_erc(&project_root, &canonical_root)
+            .expect("independent production ERC");
+        assert!(!project_root.join("~root.kicad_sch.lck").exists());
     }
 
     #[test]
