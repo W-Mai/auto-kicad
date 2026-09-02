@@ -7,11 +7,15 @@ use kicad_adapter::{
 use kicad_checks::{CheckResult, DrcPolicy, DrcReport, compare_drc, run_pcb_drc};
 use kicad_engine::{
     ChangePlan, ChangeSession, Engine, Operation, OperationKind, Precondition, RiskClass,
+    expand_board_outline,
 };
-use kicad_ipc::{ClientConfig, DocumentQuery, KiCadClient, NngTransport};
+use kicad_ipc::{
+    BoardGraphicLayer as IpcBoardGraphicLayer, BoardGraphicSegment as IpcBoardGraphicSegment,
+    ClientConfig, CreateThroughVia, CreateTrack, DocumentQuery, KiCadClient, NngTransport,
+};
 use kicad_model::{
-    AllowlistedFootprintPlacement, DiscoverySnapshot, FootprintLibraryIdentifier, ProjectSnapshot,
-    RevisionDigest, SchematicArtifactFile, StableId, StraightTrackIntent, ThroughViaIntent,
+    DiscoverySnapshot, ProjectSnapshot, RevisionDigest, SchematicArtifactFile, StableId,
+    StraightTrackIntent, ThroughViaIntent,
 };
 use kicad_schematic::{
     Limits as SchematicLimits, SchematicPatchOutcome, SchematicPreviewReceipt,
@@ -33,6 +37,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub const CONTRACT_SCHEMA_VERSION: &str = "1";
+const MAX_BOARD_BATCH_ITEMS: usize = 100;
 
 fn digest_bytes(bytes: &[u8]) -> RevisionDigest {
     let mut hasher = Sha256::new();
@@ -352,7 +357,52 @@ pub struct PlanBoardGraphicsRequest {
     pub footprint: Option<BoardFootprintRequest>,
     pub track: Option<BoardTrackRequest>,
     pub via: Option<BoardViaRequest>,
+    pub batch: Option<Vec<BoardBatchItemRequest>>,
     pub request_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardBatchItemRequest {
+    pub segments: Option<Vec<BoardGraphicSegmentRequest>>,
+    pub outline: Option<BoardOutlineRequest>,
+    pub track: Option<BoardTrackRequest>,
+    pub via: Option<BoardViaRequest>,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardGraphicSegmentRequest {
+    pub graphic_id: String,
+    pub start: BoardCoordinateRequest,
+    pub end: BoardCoordinateRequest,
+    pub width_nm: i64,
+    pub layer: BoardGraphicLayerRequest,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardCoordinateRequest {
+    pub x: i64,
+    pub y: i64,
+    pub unit: BoardCoordinateUnitRequest,
+    pub space: BoardCoordinateSpaceRequest,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, schemars::JsonSchema)]
+pub enum BoardCoordinateUnitRequest {
+    Nanometres,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, schemars::JsonSchema)]
+pub enum BoardCoordinateSpaceRequest {
+    Board,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, schemars::JsonSchema)]
+pub enum BoardGraphicLayerRequest {
+    DwgsUser,
+    EdgeCuts,
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -392,6 +442,181 @@ pub struct BoardFootprintRequest {
     pub y_nm: i64,
     pub reference: String,
     pub value: String,
+}
+
+impl BoardGraphicSegmentRequest {
+    fn into_model(self) -> Result<kicad_model::BoardGraphicSegment, ErrorData> {
+        Ok(kicad_model::BoardGraphicSegment {
+            graphic_id: StableId::new(self.graphic_id)
+                .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?,
+            start: self.start.into_model(),
+            end: self.end.into_model(),
+            width_nm: self.width_nm,
+            layer: match self.layer {
+                BoardGraphicLayerRequest::DwgsUser => kicad_model::BoardGraphicLayer::DwgsUser,
+                BoardGraphicLayerRequest::EdgeCuts => kicad_model::BoardGraphicLayer::EdgeCuts,
+            },
+        })
+    }
+}
+
+impl BoardCoordinateRequest {
+    fn into_model(self) -> kicad_model::Coordinate {
+        let BoardCoordinateUnitRequest::Nanometres = self.unit;
+        let BoardCoordinateSpaceRequest::Board = self.space;
+        kicad_model::Coordinate {
+            x: self.x,
+            y: self.y,
+            unit: kicad_model::Unit::Nanometres,
+            space: kicad_model::DocumentSpace::Board,
+        }
+    }
+}
+
+fn board_operation_kind(
+    board: &StableId,
+    segments: Option<Vec<BoardGraphicSegmentRequest>>,
+    outline: Option<BoardOutlineRequest>,
+    track: Option<BoardTrackRequest>,
+    via: Option<BoardViaRequest>,
+) -> Result<OperationKind, ErrorData> {
+    let kind = match (segments, outline, track, via) {
+        (Some(segments), None, None, None) => OperationKind::AddBoardGraphicSegments {
+            board: board.clone(),
+            segments: segments
+                .into_iter()
+                .map(BoardGraphicSegmentRequest::into_model)
+                .collect::<Result<_, _>>()?,
+        },
+        (None, Some(outline), None, None) => OperationKind::AddBoardOutline {
+            board: board.clone(),
+            top_left: kicad_model::Coordinate {
+                x: outline.top_left_x_nm,
+                y: outline.top_left_y_nm,
+                unit: kicad_model::Unit::Nanometres,
+                space: kicad_model::DocumentSpace::Board,
+            },
+            bottom_right: kicad_model::Coordinate {
+                x: outline.bottom_right_x_nm,
+                y: outline.bottom_right_y_nm,
+                unit: kicad_model::Unit::Nanometres,
+                space: kicad_model::DocumentSpace::Board,
+            },
+            width_nm: outline.width_nm,
+        },
+        (None, None, Some(track), None) => {
+            let intent = StraightTrackIntent::new(
+                StableId::new(track.source_uuid)
+                    .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?,
+                kicad_model::Coordinate {
+                    x: track.start_x_nm,
+                    y: track.start_y_nm,
+                    unit: kicad_model::Unit::Nanometres,
+                    space: kicad_model::DocumentSpace::Board,
+                },
+                kicad_model::Coordinate {
+                    x: track.end_x_nm,
+                    y: track.end_y_nm,
+                    unit: kicad_model::Unit::Nanometres,
+                    space: kicad_model::DocumentSpace::Board,
+                },
+                track.width_nm,
+            )
+            .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+            OperationKind::AddStraightTrack {
+                board: board.clone(),
+                intent,
+            }
+        }
+        (None, None, None, Some(via)) => {
+            let intent = ThroughViaIntent::new(
+                StableId::new(via.source_uuid)
+                    .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?,
+                kicad_model::Coordinate {
+                    x: via.x_nm,
+                    y: via.y_nm,
+                    unit: kicad_model::Unit::Nanometres,
+                    space: kicad_model::DocumentSpace::Board,
+                },
+                via.pad_diameter_nm,
+                via.drill_diameter_nm,
+            )
+            .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+            OperationKind::AddThroughVia {
+                board: board.clone(),
+                intent,
+            }
+        }
+        _ => {
+            return Err(ErrorData::invalid_params(
+                "exactly one of segments, outline, track, or via is required per batch item",
+                None,
+            ));
+        }
+    };
+    Ok(kind)
+}
+
+fn board_operation_kinds(
+    request: &PlanBoardGraphicsRequest,
+    board: &StableId,
+) -> Result<(Vec<OperationKind>, bool), ErrorData> {
+    let legacy_count = [
+        request.segments.is_some(),
+        request.outline.is_some(),
+        request.track.is_some(),
+        request.via.is_some(),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count();
+
+    match (request.batch.as_ref(), legacy_count) {
+        (Some(batch), 0) if !batch.is_empty() && batch.len() <= MAX_BOARD_BATCH_ITEMS => batch
+            .iter()
+            .map(|item| {
+                board_operation_kind(
+                    board,
+                    item.segments.clone(),
+                    item.outline.clone(),
+                    item.track.clone(),
+                    item.via.clone(),
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map(|kinds| (kinds, true)),
+        (None, 1) => {
+            let segments = request
+                .segments
+                .clone()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+            board_operation_kind(
+                board,
+                segments,
+                request.outline.clone(),
+                request.track.clone(),
+                request.via.clone(),
+            )
+            .map(|kind| (vec![kind], false))
+        }
+        _ => Err(ErrorData::invalid_params(
+            "exactly one of segments, outline, footprint, track, or via is required; use a non-empty batch instead",
+            None,
+        )),
+    }
+}
+
+fn expected_board_effect(kind: &OperationKind) -> &'static str {
+    match kind {
+        OperationKind::AddBoardGraphicSegments { .. } => "add board graphic segments",
+        OperationKind::AddBoardOutline { .. } => "add rectangular Edge.Cuts outline",
+        OperationKind::PlaceAllowlistedFootprint { .. } => "place allowlisted native footprint",
+        OperationKind::AddStraightTrack { .. } => "add straight copper track",
+        OperationKind::AddThroughVia { .. } => "add through via",
+        _ => "apply bounded board change",
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -714,12 +939,90 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
                 reason: "live identity or revision is stale".into(),
             };
         }
-        BoardGraphicsExecutor::default().execute_batch(
-            &mut client,
-            operations,
-            board_filename,
-            "auto-kicad MCP approved board graphics change",
-        )
+        let mut graphics = Vec::new();
+        let mut tracks = Vec::new();
+        let mut vias = Vec::new();
+        for operation in operations {
+            match &operation.kind {
+                OperationKind::AddBoardGraphicSegments { segments, .. } => {
+                    graphics.extend(segments.iter().map(|segment| IpcBoardGraphicSegment {
+                        start_x_nm: segment.start.x,
+                        start_y_nm: segment.start.y,
+                        end_x_nm: segment.end.x,
+                        end_y_nm: segment.end.y,
+                        width_nm: segment.width_nm,
+                        layer: match segment.layer {
+                            kicad_model::BoardGraphicLayer::DwgsUser => {
+                                IpcBoardGraphicLayer::DwgsUser
+                            }
+                            kicad_model::BoardGraphicLayer::EdgeCuts => {
+                                IpcBoardGraphicLayer::EdgeCuts
+                            }
+                        },
+                    }));
+                }
+                OperationKind::AddBoardOutline {
+                    top_left,
+                    bottom_right,
+                    width_nm,
+                    ..
+                } => {
+                    graphics.extend(
+                        expand_board_outline(*top_left, *bottom_right, *width_nm)
+                            .into_iter()
+                            .map(|segment| IpcBoardGraphicSegment {
+                                start_x_nm: segment.start.x,
+                                start_y_nm: segment.start.y,
+                                end_x_nm: segment.end.x,
+                                end_y_nm: segment.end.y,
+                                width_nm: segment.width_nm,
+                                layer: match segment.layer {
+                                    kicad_model::BoardGraphicLayer::DwgsUser => {
+                                        IpcBoardGraphicLayer::DwgsUser
+                                    }
+                                    kicad_model::BoardGraphicLayer::EdgeCuts => {
+                                        IpcBoardGraphicLayer::EdgeCuts
+                                    }
+                                },
+                            }),
+                    );
+                }
+                OperationKind::AddStraightTrack { intent, .. } => {
+                    tracks.push(CreateTrack {
+                        start_x_nm: intent.start.x,
+                        start_y_nm: intent.start.y,
+                        end_x_nm: intent.end.x,
+                        end_y_nm: intent.end.y,
+                        width_nm: intent.width_nm,
+                    });
+                }
+                OperationKind::AddThroughVia { intent, .. } => {
+                    vias.push(CreateThroughVia {
+                        position_x_nm: intent.position.x,
+                        position_y_nm: intent.position.y,
+                        pad_diameter_nm: intent.size_nm,
+                        drill_diameter_nm: intent.drill_nm,
+                    });
+                }
+                _ => {
+                    return BoardGraphicsCommitOutcome::Rejected {
+                        reason: "operation kind is not supported by the PCB execution service"
+                            .into(),
+                    };
+                }
+            }
+        }
+        BoardGraphicsExecutor::default()
+            .execute_native_batch(
+                &mut client,
+                board_filename,
+                &graphics,
+                &tracks,
+                &vias,
+                "auto-kicad MCP approved board graphics change",
+            )
+            .map(|_| BoardGraphicsCommitOutcome::CommittedAndSaved)
+            .unwrap_or_else(|outcome| outcome)
     }
 }
 
@@ -1244,147 +1547,53 @@ impl Server {
             .document_id
             .clone()
             .ok_or_else(|| ErrorData::internal_error("board identity is unavailable", None))?;
-        let kind = match (
-            arguments.segments,
-            arguments.outline,
-            arguments.footprint,
-            arguments.track,
-            arguments.via,
-        ) {
-            (Some(segments), None, None, None, None) => OperationKind::AddBoardGraphicSegments {
-                board: board.clone(),
-                segments: serde_json::from_value(segments)
-                    .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?,
-            },
-            (None, Some(outline), None, None, None) => OperationKind::AddBoardOutline {
-                board: board.clone(),
-                top_left: kicad_model::Coordinate {
-                    x: outline.top_left_x_nm,
-                    y: outline.top_left_y_nm,
-                    unit: kicad_model::Unit::Nanometres,
-                    space: kicad_model::DocumentSpace::Board,
-                },
-                bottom_right: kicad_model::Coordinate {
-                    x: outline.bottom_right_x_nm,
-                    y: outline.bottom_right_y_nm,
-                    unit: kicad_model::Unit::Nanometres,
-                    space: kicad_model::DocumentSpace::Board,
-                },
-                width_nm: outline.width_nm,
-            },
-            (None, None, Some(footprint), None, None) => {
-                let target_id = StableId::new(footprint.target_id)
-                    .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
-                let library_identifier = FootprintLibraryIdentifier {
-                    nickname: footprint.library_nickname,
-                    entry_name: footprint.library_entry_name,
-                };
-                let placement = AllowlistedFootprintPlacement::new(
-                    target_id,
-                    library_identifier,
-                    kicad_model::Coordinate {
-                        x: footprint.x_nm,
-                        y: footprint.y_nm,
-                        unit: kicad_model::Unit::Nanometres,
-                        space: kicad_model::DocumentSpace::Board,
-                    },
-                    footprint.reference,
-                    footprint.value,
-                )
-                .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
-                OperationKind::PlaceAllowlistedFootprint {
-                    board: board.clone(),
-                    placement,
-                }
-            }
-            (None, None, None, Some(track), None) => {
-                let intent = StraightTrackIntent::new(
-                    StableId::new(track.source_uuid)
-                        .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?,
-                    kicad_model::Coordinate {
-                        x: track.start_x_nm,
-                        y: track.start_y_nm,
-                        unit: kicad_model::Unit::Nanometres,
-                        space: kicad_model::DocumentSpace::Board,
-                    },
-                    kicad_model::Coordinate {
-                        x: track.end_x_nm,
-                        y: track.end_y_nm,
-                        unit: kicad_model::Unit::Nanometres,
-                        space: kicad_model::DocumentSpace::Board,
-                    },
-                    track.width_nm,
-                )
-                .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
-                OperationKind::AddStraightTrack {
-                    board: board.clone(),
-                    intent,
-                }
-            }
-            (None, None, None, None, Some(via)) => {
-                let intent = ThroughViaIntent::new(
-                    StableId::new(via.source_uuid)
-                        .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?,
-                    kicad_model::Coordinate {
-                        x: via.x_nm,
-                        y: via.y_nm,
-                        unit: kicad_model::Unit::Nanometres,
-                        space: kicad_model::DocumentSpace::Board,
-                    },
-                    via.pad_diameter_nm,
-                    via.drill_diameter_nm,
-                )
-                .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
-                OperationKind::AddThroughVia {
-                    board: board.clone(),
-                    intent,
-                }
-            }
-            _ => {
-                return Err(ErrorData::invalid_params(
-                    "exactly one of segments, outline, footprint, track, or via is required",
-                    None,
-                ));
-            }
-        };
+        let (kinds, is_batch) = board_operation_kinds(&arguments, &board)?;
         let base_revision = snapshot
             .revision()
             .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
         let plan_id = StableId::new(format!("plan:{}", arguments.request_id))
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
-        let operation_id = StableId::new(format!("operation:{}", arguments.request_id))
-            .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
-        let expected_effect = match &kind {
-            OperationKind::AddBoardGraphicSegments { .. } => "add board graphic segments",
-            OperationKind::AddBoardOutline { .. } => "add rectangular Edge.Cuts outline",
-            OperationKind::PlaceAllowlistedFootprint { .. } => "place allowlisted native footprint",
-            OperationKind::AddStraightTrack { .. } => "add straight copper track",
-            OperationKind::AddThroughVia { .. } => "add through via",
-            _ => "apply bounded board change",
-        };
-        let targets = match &kind {
-            OperationKind::PlaceAllowlistedFootprint { placement, .. } => {
-                vec![board.clone(), placement.target_id.clone()]
-            }
-            _ => vec![board.clone()],
-        };
-        let operation = Operation {
-            operation_id,
-            kind,
-            targets,
-            preconditions: vec![Precondition::Revision(base_revision.clone())],
-            expected_effects: vec![expected_effect.into()],
-            risk_class: RiskClass::Medium,
-            idempotency_key: arguments.request_id.clone(),
-            source_run_id: arguments.source_run_id.clone(),
-        };
+        let operations = kinds
+            .into_iter()
+            .enumerate()
+            .map(|(index, kind)| {
+                let operation_id = if is_batch {
+                    format!("operation:{}:{index}", arguments.request_id)
+                } else {
+                    format!("operation:{}", arguments.request_id)
+                };
+                let operation_id =
+                    StableId::new(operation_id).expect("deterministic operation id is valid");
+                let expected_effect = expected_board_effect(&kind);
+                let targets = match &kind {
+                    OperationKind::PlaceAllowlistedFootprint { placement, .. } => {
+                        vec![board.clone(), placement.target_id.clone()]
+                    }
+                    _ => vec![board.clone()],
+                };
+                Operation {
+                    operation_id,
+                    kind,
+                    targets,
+                    preconditions: vec![Precondition::Revision(base_revision.clone())],
+                    expected_effects: vec![expected_effect.into()],
+                    risk_class: RiskClass::Medium,
+                    idempotency_key: if is_batch {
+                        format!("{}:{index}", arguments.request_id)
+                    } else {
+                        arguments.request_id.clone()
+                    },
+                    source_run_id: arguments.source_run_id.clone(),
+                }
+            })
+            .collect();
         let server_token = observed_token.to_owned();
         let plan = ChangePlan {
             plan_id: plan_id.clone(),
             source_run_id: arguments.source_run_id,
             base_revision,
             instance_token: server_token.clone(),
-            operations: vec![operation],
+            operations,
         };
         let engine = Engine::new(snapshot, server_token.clone());
         let session = engine
@@ -2856,7 +3065,54 @@ mod tests {
             footprint: None,
             track: None,
             via: None,
+            batch: None,
             request_id: request_id.into(),
+        }
+    }
+
+    fn batch_outline() -> BoardBatchItemRequest {
+        BoardBatchItemRequest {
+            segments: None,
+            outline: Some(BoardOutlineRequest {
+                top_left_x_nm: 0,
+                top_left_y_nm: 0,
+                bottom_right_x_nm: 10_000_000,
+                bottom_right_y_nm: 8_000_000,
+                width_nm: 100_000,
+            }),
+            track: None,
+            via: None,
+        }
+    }
+
+    fn batch_track(source_uuid: &str) -> BoardBatchItemRequest {
+        BoardBatchItemRequest {
+            segments: None,
+            outline: None,
+            track: Some(BoardTrackRequest {
+                source_uuid: source_uuid.into(),
+                start_x_nm: 1_000_000,
+                start_y_nm: 2_000_000,
+                end_x_nm: 3_000_000,
+                end_y_nm: 4_000_000,
+                width_nm: 250_000,
+            }),
+            via: None,
+        }
+    }
+
+    fn batch_via(source_uuid: &str) -> BoardBatchItemRequest {
+        BoardBatchItemRequest {
+            segments: None,
+            outline: None,
+            track: None,
+            via: Some(BoardViaRequest {
+                source_uuid: source_uuid.into(),
+                x_nm: 5_000_000,
+                y_nm: 6_000_000,
+                pad_diameter_nm: 800_000,
+                drill_diameter_nm: 400_000,
+            }),
         }
     }
 
@@ -3434,6 +3690,149 @@ mod tests {
                 )
                 .unwrap(),
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_accepts_ordered_mixed_board_batch_with_stable_operation_ids() {
+        let server = Server::with_discovery(Arc::new(FakeDiscovery {
+            write_capability: true,
+        }));
+        let mut request = plan_request(project_snapshot(true), "req_batch");
+        request.segments = None;
+        request.batch = Some(vec![
+            batch_outline(),
+            batch_track("track-1"),
+            batch_via("via-1"),
+        ]);
+
+        let planned = server.kicad_plan_change(Parameters(request)).await.unwrap();
+        assert!(matches!(planned, CallToolResponse::Complete(_)));
+
+        let sessions = server.sessions.lock().unwrap();
+        let plan = &sessions["plan:req_batch"].session.plan;
+        assert_eq!(plan.operations.len(), 3);
+        assert_eq!(
+            plan.operations
+                .iter()
+                .map(|operation| operation.operation_id.to_string())
+                .collect::<Vec<_>>(),
+            [
+                "operation:req_batch:0",
+                "operation:req_batch:1",
+                "operation:req_batch:2"
+            ]
+        );
+        assert_eq!(
+            plan.operations
+                .iter()
+                .map(|operation| operation.idempotency_key.as_str())
+                .collect::<Vec<_>>(),
+            ["req_batch:0", "req_batch:1", "req_batch:2"]
+        );
+        assert!(matches!(
+            plan.operations[0].kind,
+            OperationKind::AddBoardOutline { .. }
+        ));
+        assert!(matches!(
+            plan.operations[1].kind,
+            OperationKind::AddStraightTrack { .. }
+        ));
+        assert!(matches!(
+            plan.operations[2].kind,
+            OperationKind::AddThroughVia { .. }
+        ));
+        for operation in &plan.operations {
+            assert_eq!(operation.targets, [StableId::new("board").unwrap()]);
+            assert_eq!(operation.source_run_id, "run");
+            assert_eq!(
+                operation.preconditions,
+                [Precondition::Revision(plan.base_revision.clone())]
+            );
+        }
+    }
+
+    #[test]
+    fn batch_parser_rejects_empty_oversized_and_multi_form_items() {
+        let board = StableId::new("board").unwrap();
+        let mut request = plan_request(project_snapshot(true), "req_batch_invalid");
+        request.segments = None;
+        request.batch = Some(Vec::new());
+        assert!(board_operation_kinds(&request, &board).is_err());
+
+        request.batch = Some(vec![batch_outline(); MAX_BOARD_BATCH_ITEMS + 1]);
+        assert!(board_operation_kinds(&request, &board).is_err());
+
+        request.batch = Some(vec![BoardBatchItemRequest {
+            segments: None,
+            outline: Some(batch_outline().outline.unwrap()),
+            track: Some(batch_track("track-1").track.unwrap()),
+            via: None,
+        }]);
+        assert!(board_operation_kinds(&request, &board).is_err());
+
+        request.batch = Some(vec![BoardBatchItemRequest {
+            segments: None,
+            outline: None,
+            track: None,
+            via: None,
+        }]);
+        assert!(board_operation_kinds(&request, &board).is_err());
+    }
+
+    #[tokio::test]
+    async fn approved_mixed_batch_is_forwarded_in_plan_order() {
+        let operation_batches = Arc::new(Mutex::new(Vec::new()));
+        let server = Server::with_discovery_and_execution(
+            Arc::new(FakeDiscovery {
+                write_capability: true,
+            }),
+            Arc::new(CapturingExecution {
+                calls: Arc::new(Mutex::new(0)),
+                revisions: Arc::new(Mutex::new(Vec::new())),
+                operation_batches: operation_batches.clone(),
+                outcome: BoardGraphicsCommitOutcome::CommittedAndSaved,
+            }),
+        );
+        let mut request = plan_request(project_snapshot(true), "req_batch_commit");
+        request.segments = None;
+        request.batch = Some(vec![
+            batch_outline(),
+            batch_track("track-1"),
+            batch_via("via-1"),
+        ]);
+        let planned = server.kicad_plan_change(Parameters(request)).await.unwrap();
+        let planned = match planned {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("plan call should complete"),
+        };
+        let plan_id = planned["data"]["plan_id"].as_str().unwrap().to_owned();
+        let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
+        server
+            .kicad_preview_change(Parameters(PreviewChangeRequest {
+                plan_id: plan_id.clone(),
+                plan_hash: plan_hash.clone(),
+                request_id: Some("req_batch_preview".into()),
+            }))
+            .await
+            .unwrap();
+        server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id,
+                plan_hash: plan_hash.clone(),
+                approval_hash: plan_hash,
+                request_id: Some("req_batch_commit_call".into()),
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *operation_batches.lock().unwrap(),
+            [vec![
+                StableId::new("operation:req_batch_commit:0").unwrap(),
+                StableId::new("operation:req_batch_commit:1").unwrap(),
+                StableId::new("operation:req_batch_commit:2").unwrap(),
+            ]]
         );
     }
 
