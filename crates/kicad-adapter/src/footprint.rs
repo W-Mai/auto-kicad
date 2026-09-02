@@ -111,6 +111,109 @@ impl PreparedFootprintPlacement {
     }
 }
 
+#[allow(dead_code)]
+pub(crate) fn place_allowlisted_footprints(
+    server_root: &Path,
+    registry: &FootprintRegistry,
+    source_board: &Path,
+    placements: &[AllowlistedFootprintPlacement],
+) -> Result<Vec<FootprintPlacementReceipt>, FootprintBackendError> {
+    let mut launcher = OwnedPcbnewLauncher::new(server_root).map_err(lifecycle_error)?;
+    let shadow = match launcher.create_shadow(source_board) {
+        Ok(shadow) => shadow,
+        Err(error) => {
+            return cleanup_disposable_footprint_failure(&mut launcher, lifecycle_error(error));
+        }
+    };
+    let context = match DisposableFootprintContext::new(shadow.root(), shadow.board_path()) {
+        Ok(context) => context,
+        Err(error) => return cleanup_disposable_footprint_failure(&mut launcher, error),
+    };
+    if let Err(error) = context.validate_before_place() {
+        return cleanup_disposable_footprint_failure(&mut launcher, error);
+    }
+    if placements.is_empty() {
+        return cleanup_disposable_footprint_failure(
+            &mut launcher,
+            FootprintBackendError::InvalidPlacement("footprint batch must not be empty"),
+        );
+    }
+
+    let mut requests = Vec::with_capacity(placements.len());
+    for placement in placements.iter().cloned() {
+        let library = match AllowlistedFootprint::from_identifier(&placement.library_identifier) {
+            Some(library) => library,
+            None => {
+                return cleanup_disposable_footprint_failure(
+                    &mut launcher,
+                    FootprintBackendError::UnsupportedLibrary,
+                );
+            }
+        };
+        match context.prepare(registry, library, placement) {
+            Ok(request) => requests.push(request),
+            Err(error) => return cleanup_disposable_footprint_failure(&mut launcher, error),
+        }
+    }
+
+    let shadow = shadow.clone();
+    if let Err(error) = launcher.launch(&shadow) {
+        return cleanup_disposable_footprint_failure(&mut launcher, lifecycle_error(error));
+    }
+    let receipts = match DisposablePythonFootprintExecutor::place_batch_preserving_shadow(
+        &mut launcher,
+        &requests,
+        "allowlisted footprint placement",
+    ) {
+        Ok(receipts) => receipts,
+        Err(error) => return cleanup_disposable_footprint_failure(&mut launcher, error),
+    };
+    launcher.cleanup().map_err(lifecycle_error)?;
+    Ok(receipts)
+}
+
+fn cleanup_disposable_footprint_failure(
+    launcher: &mut OwnedPcbnewLauncher,
+    error: FootprintBackendError,
+) -> Result<Vec<FootprintPlacementReceipt>, FootprintBackendError> {
+    let mut cleanup_errors = Vec::new();
+    let shadow_root = launcher
+        .current_shadow()
+        .ok()
+        .map(|shadow| shadow.root().to_path_buf());
+    if let Ok(identity) = launcher.current_identity().cloned() {
+        let mut use_lifecycle_cleanup = true;
+        match launcher.close_owned(identity.pid) {
+            Ok(()) => {}
+            Err(LifecycleError::NoOwnedEditor) => {
+                use_lifecycle_cleanup = false;
+                if let Some(shadow_root) = &shadow_root
+                    && let Err(error) = fs::remove_dir_all(shadow_root)
+                {
+                    cleanup_errors.push(error.to_string());
+                }
+            }
+            Err(error) => cleanup_errors.push(error.to_string()),
+        }
+        if use_lifecycle_cleanup && let Err(error) = launcher.cleanup() {
+            cleanup_errors.push(error.to_string());
+        }
+    } else if let Some(shadow_root) = &shadow_root
+        && let Err(error) = fs::remove_dir_all(shadow_root)
+    {
+        cleanup_errors.push(error.to_string());
+    }
+    if cleanup_errors.is_empty() {
+        Err(error)
+    } else {
+        Err(FootprintBackendError::Lifecycle(format!(
+            "{}; {}",
+            error,
+            cleanup_errors.join("; ")
+        )))
+    }
+}
+
 #[derive(Debug)]
 pub enum FootprintBackendError {
     InvalidRoot,
@@ -1333,6 +1436,14 @@ mod tests {
     use kicad_model::{Coordinate, DocumentSpace, StableId, Unit};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+    struct FixtureCleanup(PathBuf);
+
+    impl Drop for FixtureCleanup {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
     fn fixture() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
         let root = std::env::temp_dir().join(format!(
             "auto-kicad-footprint-{}",
@@ -1665,6 +1776,26 @@ mod tests {
         assert_eq!(digest(&live), live_digest);
         fs::remove_dir_all(source_root).unwrap();
         fs::remove_dir_all(server_root).unwrap();
+    }
+
+    #[test]
+    fn preparation_failure_cleans_up_shadow() {
+        let (root, official, project, board) = fixture();
+        let _cleanup = FixtureCleanup(root.clone());
+        fs::write(board.with_extension("kicad_pro"), "{}").unwrap();
+        let server_root = root.join("server");
+        let registry = FootprintRegistry::new(&official, &project).unwrap();
+        let mut invalid = placement(0);
+        invalid.position.x = MAX_PLACEMENT_COORDINATE_NM + 1;
+
+        assert!(matches!(
+            place_allowlisted_footprints(&server_root, &registry, &board, &[invalid]),
+            Err(FootprintBackendError::InvalidPlacement(_))
+        ));
+        assert!(
+            fs::read_dir(&server_root).unwrap().next().is_none(),
+            "failed preparation must not leave a shadow"
+        );
     }
 
     #[test]
