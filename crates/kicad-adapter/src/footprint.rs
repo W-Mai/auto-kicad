@@ -1692,12 +1692,14 @@ mod tests {
             end_x_nm: 120_000_000,
             end_y_nm: 100_000_000,
             width_nm: 250_000,
+            net: None,
         }];
         let vias = [CreateThroughVia {
             position_x_nm: 110_000_000,
             position_y_nm: 100_000_000,
             pad_diameter_nm: 800_000,
             drill_diameter_nm: 400_000,
+            net: None,
         }];
         let native_receipt = BoardGraphicsExecutor::default()
             .execute_native_batch(

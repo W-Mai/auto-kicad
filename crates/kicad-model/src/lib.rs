@@ -1013,11 +1013,23 @@ pub struct ObservedRoutingNet {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RoutingEndpointRef {
+    pub pad_id: StableId,
+    pub footprint_placement_id: StableId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StraightTrackIntent {
     pub source_uuid: StableId,
     pub start: Coordinate,
     pub end: Coordinate,
     pub width_nm: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_pad: Option<RoutingEndpointRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_pad: Option<RoutingEndpointRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net: Option<ObservedNetIdentity>,
 }
 
 impl StraightTrackIntent {
@@ -1032,6 +1044,41 @@ impl StraightTrackIntent {
             start,
             end,
             width_nm,
+            start_pad: None,
+            end_pad: None,
+            net: None,
+        };
+        intent.validate()?;
+        Ok(intent)
+    }
+
+    pub fn new_endpoint_bound(
+        source_uuid: StableId,
+        start: Coordinate,
+        end: Coordinate,
+        width_nm: i64,
+        start_pad: RoutingEndpointRef,
+        end_pad: RoutingEndpointRef,
+        net: ObservedNetIdentity,
+    ) -> Result<Self, ModelError> {
+        if start_pad == end_pad {
+            return Err(ModelError::InvalidRoutingObservation(
+                "track endpoints must reference different pads",
+            ));
+        }
+        if net.name.is_empty() {
+            return Err(ModelError::InvalidRoutingObservation(
+                "routing net name must not be empty",
+            ));
+        }
+        let intent = Self {
+            source_uuid,
+            start,
+            end,
+            width_nm,
+            start_pad: Some(start_pad),
+            end_pad: Some(end_pad),
+            net: Some(net),
         };
         intent.validate()?;
         Ok(intent)
@@ -1067,6 +1114,8 @@ pub struct ThroughViaIntent {
     pub position: Coordinate,
     pub size_nm: i64,
     pub drill_nm: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub net: Option<ObservedNetIdentity>,
 }
 
 impl ThroughViaIntent {
@@ -1081,6 +1130,30 @@ impl ThroughViaIntent {
             position,
             size_nm,
             drill_nm,
+            net: None,
+        };
+        intent.validate()?;
+        Ok(intent)
+    }
+
+    pub fn new_net_bound(
+        source_uuid: StableId,
+        position: Coordinate,
+        size_nm: i64,
+        drill_nm: i64,
+        net: ObservedNetIdentity,
+    ) -> Result<Self, ModelError> {
+        if net.name.is_empty() {
+            return Err(ModelError::InvalidRoutingObservation(
+                "routing net name must not be empty",
+            ));
+        }
+        let intent = Self {
+            source_uuid,
+            position,
+            size_nm,
+            drill_nm,
+            net: Some(net),
         };
         intent.validate()?;
         Ok(intent)

@@ -191,21 +191,28 @@ pub struct CreatedBoardGraphicReceipt {
     pub lock_state: ObservedLockState,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreateNetIdentity {
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CreateTrack {
     pub start_x_nm: i64,
     pub start_y_nm: i64,
     pub end_x_nm: i64,
     pub end_y_nm: i64,
     pub width_nm: i64,
+    pub net: Option<CreateNetIdentity>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CreateThroughVia {
     pub position_x_nm: i64,
     pub position_y_nm: i64,
     pub pad_diameter_nm: i64,
     pub drill_diameter_nm: i64,
+    pub net: Option<CreateNetIdentity>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -964,7 +971,7 @@ impl<T: KiCadTransport> KiCadClient<T> {
     ) -> Result<CreatedTrackReceipt, IpcError> {
         let item = create_track_item(track)?;
         let response = self.create_items(board_filename, vec![item])?;
-        let receipt = created_track_receipt(&response, track)?;
+        let receipt = created_track_receipt(&response, track, track.net.as_ref())?;
         self.token = Some(response.1);
         Ok(receipt)
     }
@@ -976,7 +983,7 @@ impl<T: KiCadTransport> KiCadClient<T> {
     ) -> Result<CreatedThroughViaReceipt, IpcError> {
         let item = create_through_via_item(via)?;
         let response = self.create_items(board_filename, vec![item])?;
-        let receipt = created_through_via_receipt(&response, via)?;
+        let receipt = created_through_via_receipt(&response, via, via.net.as_ref())?;
         self.token = Some(response.1);
         Ok(receipt)
     }
@@ -3895,6 +3902,11 @@ fn create_track_item(track: &CreateTrack) -> Result<Any, IpcError> {
             "track width must be positive",
         ));
     }
+    if track.net.as_ref().is_some_and(|net| net.name.is_empty()) {
+        return Err(IpcError::InvalidObservedRouting(
+            "track net name must not be empty",
+        ));
+    }
     if track.start_x_nm == track.end_x_nm && track.start_y_nm == track.end_y_nm {
         return Err(IpcError::InvalidObservedRouting(
             "track endpoints must differ",
@@ -3916,6 +3928,14 @@ fn create_track_item(track: &CreateTrack) -> Result<Any, IpcError> {
             ..base_types::Distance::default()
         }),
         layer: protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Cu),
+        net: track
+            .net
+            .as_ref()
+            .map(|net| board_types::Net {
+                name: net.name.clone(),
+                ..board_types::Net::default()
+            })
+            .into(),
         ..board_types::Track::default()
     };
     Ok(Any {
@@ -3931,6 +3951,11 @@ fn create_through_via_item(via: &CreateThroughVia) -> Result<Any, IpcError> {
     if via.pad_diameter_nm <= 0 || via.drill_diameter_nm <= 0 {
         return Err(IpcError::InvalidObservedRouting(
             "via pad and drill diameters must be positive",
+        ));
+    }
+    if via.net.as_ref().is_some_and(|net| net.name.is_empty()) {
+        return Err(IpcError::InvalidObservedRouting(
+            "via net name must not be empty",
         ));
     }
     if via.drill_diameter_nm > via.pad_diameter_nm {
@@ -3978,6 +4003,14 @@ fn create_through_via_item(via: &CreateThroughVia) -> Result<Any, IpcError> {
             ..board_types::PadStack::default()
         }),
         type_: protobuf::EnumOrUnknown::new(board_types::ViaType::VT_THROUGH),
+        net: via
+            .net
+            .as_ref()
+            .map(|net| board_types::Net {
+                name: net.name.clone(),
+                ..board_types::Net::default()
+            })
+            .into(),
         ..board_types::Via::default()
     };
     Ok(Any {
@@ -4008,6 +4041,7 @@ fn created_item_status(
 fn created_track_receipt(
     response: &(editor_commands::CreateItemsResponse, InstanceToken),
     requested: &CreateTrack,
+    expected_net: Option<&CreateNetIdentity>,
 ) -> Result<CreatedTrackReceipt, IpcError> {
     if response.0.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
         return Err(IpcError::Status(
@@ -4058,8 +4092,25 @@ fn created_track_receipt(
                 "created track width is missing",
             ))?
             .value_nm,
+        net: track.net.as_ref().map(|net| CreateNetIdentity {
+            name: net.name.clone(),
+        }),
     };
-    if &observed != requested || track.layer.enum_value() != Ok(board_types::BoardLayer::BL_F_Cu) {
+    let net_matches = expected_net.is_none_or(|expected| {
+        track
+            .net
+            .as_ref()
+            .is_some_and(|actual| actual.name == expected.name && !actual.name.is_empty())
+    });
+    let geometry_matches = observed.start_x_nm == requested.start_x_nm
+        && observed.start_y_nm == requested.start_y_nm
+        && observed.end_x_nm == requested.end_x_nm
+        && observed.end_y_nm == requested.end_y_nm
+        && observed.width_nm == requested.width_nm;
+    if !geometry_matches
+        || !net_matches
+        || track.layer.enum_value() != Ok(board_types::BoardLayer::BL_F_Cu)
+    {
         return Err(IpcError::InvalidObservedRouting(
             "created track does not match the request",
         ));
@@ -4075,6 +4126,7 @@ fn created_track_receipt(
 fn created_through_via_receipt(
     response: &(editor_commands::CreateItemsResponse, InstanceToken),
     requested: &CreateThroughVia,
+    expected_net: Option<&CreateNetIdentity>,
 ) -> Result<CreatedThroughViaReceipt, IpcError> {
     if response.0.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
         return Err(IpcError::Status(
@@ -4140,7 +4192,20 @@ fn created_through_via_receipt(
         position_y_nm: position.y_nm,
         pad_diameter_nm: pad_size.x_nm,
         drill_diameter_nm: drill_size.x_nm,
+        net: via.net.as_ref().map(|net| CreateNetIdentity {
+            name: net.name.clone(),
+        }),
     };
+    let net_matches = expected_net.is_none_or(|expected| {
+        via.net
+            .as_ref()
+            .is_some_and(|actual| actual.name == expected.name && !actual.name.is_empty())
+    });
+    if !net_matches {
+        return Err(IpcError::InvalidObservedRouting(
+            "created via net does not match the request",
+        ));
+    }
     let expected_layers = [
         board_types::BoardLayer::BL_F_Cu,
         board_types::BoardLayer::BL_B_Cu,
@@ -7362,6 +7427,7 @@ mod tests {
             position_y_nm: 20,
             pad_diameter_nm: 600,
             drill_diameter_nm: 300,
+            net: None,
         };
         let item = create_through_via_item(&requested).unwrap();
         let via = board_types::Via::parse_from_bytes(&item.value).unwrap();
@@ -7418,6 +7484,7 @@ mod tests {
             position_y_nm: 20,
             pad_diameter_nm: 600,
             drill_diameter_nm: 300,
+            net: None,
         };
         let created = canonical_created_through_via(
             create_through_via_item(&requested).unwrap(),
@@ -7445,6 +7512,7 @@ mod tests {
             position_y_nm: 20,
             pad_diameter_nm: 600,
             drill_diameter_nm: 300,
+            net: None,
         };
         let canonical =
             || canonical_created_through_via(create_through_via_item(&requested).unwrap(), "via");
@@ -7497,6 +7565,7 @@ mod tests {
             position_y_nm: 20,
             pad_diameter_nm: 500,
             drill_diameter_nm: 200,
+            net: None,
         };
         let response = create_items_response_with_results(
             "new-token",

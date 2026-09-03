@@ -1,10 +1,11 @@
 use kicad_adapter::{
-    BoardGraphicsCommitOutcome, BoardGraphicsExecutor, DiscoveryInput, DocumentObservation,
-    FootprintObservationError, LiveBoardObservation, LiveBoardObservationError,
-    ObservedFootprintWithPads, artifact_discovery_snapshot, board_document_id,
-    board_footprint_observation, discovery_snapshot, live_board_observation,
+    BoardGraphicsCommitOutcome, BoardGraphicsExecutor, DiscoveryInput, DisposablePcbLifecycle,
+    DocumentObservation, FootprintObservationError, LiveBoardObservation,
+    LiveBoardObservationError, ObservedFootprintWithPads, OwnedPcbnewLauncher,
+    artifact_discovery_snapshot, board_document_id, board_footprint_observation,
+    discovery_snapshot, live_board_observation,
 };
-use kicad_checks::{CheckResult, DrcPolicy, DrcReport, compare_drc, run_pcb_drc};
+use kicad_checks::{BaselineDelta, CheckResult, DrcPolicy, DrcReport, compare_drc, run_pcb_drc};
 use kicad_engine::{
     ChangePlan, ChangeSession, Engine, Operation, OperationKind, Precondition, RiskClass,
     expand_board_outline,
@@ -276,6 +277,650 @@ impl<T: kicad_ipc::KiCadTransport> LiveBoardObservationSource for KiCadClient<T>
     }
 }
 
+fn observe_owned_shadow(
+    launcher: &mut OwnedPcbnewLauncher,
+) -> Result<LiveBoardObservation, String> {
+    let mut client = launcher
+        .connect_owned()
+        .map_err(|error| error.to_string())?;
+    let version = client.get_version().map_err(|error| error.to_string())?;
+    let mut documents = client
+        .get_open_documents(DocumentQuery::Pcb)
+        .map_err(|error| error.to_string())?;
+    if documents.len() != 1 {
+        return Err(format!(
+            "expected exactly one owned shadow PCB document, found {}",
+            documents.len()
+        ));
+    }
+    let document = documents.pop().expect("document count checked");
+    let board_filename = match &document.kind {
+        kicad_ipc::OpenDocumentKind::Pcb { board_filename } if !board_filename.is_empty() => {
+            board_filename.clone()
+        }
+        _ => return Err("owned shadow document is not a usable PCB".into()),
+    };
+    observe_live_board(&mut client, version, document, &board_filename)
+        .map_err(|error| error.to_string())
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ShadowSourceFingerprint {
+    board: Option<(RevisionDigest, u64, Option<std::time::SystemTime>)>,
+    project: Option<(RevisionDigest, u64, Option<std::time::SystemTime>)>,
+}
+
+fn shadow_source_fingerprint(source_board: &std::path::Path) -> ShadowSourceFingerprint {
+    fn fingerprint(
+        path: &std::path::Path,
+    ) -> Option<(RevisionDigest, u64, Option<std::time::SystemTime>)> {
+        let bytes = std::fs::read(path).ok()?;
+        let metadata = std::fs::metadata(path).ok()?;
+        Some((
+            digest_bytes(&bytes),
+            metadata.len(),
+            metadata.modified().ok(),
+        ))
+    }
+
+    ShadowSourceFingerprint {
+        board: fingerprint(source_board),
+        project: fingerprint(&source_board.with_extension("kicad_pro")),
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ShadowValidationState {
+    Committed,
+    Rejected,
+    Unknown,
+}
+
+#[derive(Clone, Debug)]
+pub struct ShadowValidationOutcome {
+    pub state: ShadowValidationState,
+    pub fresh_revision: Option<RevisionDigest>,
+    pub reopened_revision: Option<RevisionDigest>,
+    pub reopened: bool,
+    pub normalized_snapshot_matches: bool,
+    pub baseline: Option<DrcReport>,
+    pub after: Option<DrcReport>,
+    pub delta: Option<BaselineDelta>,
+    pub source_unchanged: bool,
+    pub shadow_cleaned: bool,
+    pub reason: Option<String>,
+}
+
+impl ShadowValidationOutcome {
+    fn rejected(reason: impl Into<String>) -> Self {
+        Self {
+            state: ShadowValidationState::Rejected,
+            fresh_revision: None,
+            reopened_revision: None,
+            reopened: false,
+            normalized_snapshot_matches: false,
+            baseline: None,
+            after: None,
+            delta: None,
+            source_unchanged: true,
+            shadow_cleaned: false,
+            reason: Some(reason.into()),
+        }
+    }
+
+    fn unknown(reason: impl Into<String>) -> Self {
+        Self {
+            state: ShadowValidationState::Unknown,
+            fresh_revision: None,
+            reopened_revision: None,
+            reopened: false,
+            normalized_snapshot_matches: false,
+            baseline: None,
+            after: None,
+            delta: None,
+            source_unchanged: true,
+            shadow_cleaned: false,
+            reason: Some(reason.into()),
+        }
+    }
+}
+
+fn validate_shadow_operation_kinds(operations: &[Operation]) -> Result<(), String> {
+    if operations.is_empty() {
+        return Err("shadow operation batch is empty".into());
+    }
+    if operations.iter().any(|operation| {
+        !matches!(
+            operation.kind,
+            OperationKind::AddBoardGraphicSegments { .. } | OperationKind::AddBoardOutline { .. }
+        )
+    }) {
+        return Err("shadow validation only accepts graphics-only board operations".into());
+    }
+    Ok(())
+}
+
+fn bind_shadow_operations(
+    operations: &[Operation],
+    shadow_board: &StableId,
+) -> Result<Vec<Operation>, String> {
+    validate_shadow_operation_kinds(operations)?;
+    let template_board = operations
+        .first()
+        .and_then(|operation| operation.targets.first())
+        .ok_or_else(|| "shadow operation has no source board target".to_owned())?;
+    let mut bound = Vec::with_capacity(operations.len());
+    for operation in operations {
+        if operation.targets.len() != 1 || operation.targets.first() != Some(template_board) {
+            return Err("shadow operation targets are not uniformly board-scoped".into());
+        }
+        let operation_board = match &operation.kind {
+            OperationKind::AddBoardGraphicSegments { board, .. }
+            | OperationKind::AddBoardOutline { board, .. } => board,
+            OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. } => {
+                return Err("shadow validation only accepts graphics operations".into());
+            }
+            _ => return Err("shadow validation only accepts supported board operations".into()),
+        };
+        if operation_board != template_board {
+            return Err("shadow operation kind board differs from its target".into());
+        }
+        let mut operation = operation.clone();
+        operation.kind = match &operation.kind {
+            OperationKind::AddBoardGraphicSegments { segments, .. } => {
+                OperationKind::AddBoardGraphicSegments {
+                    board: shadow_board.clone(),
+                    segments: segments.clone(),
+                }
+            }
+            OperationKind::AddBoardOutline {
+                top_left,
+                bottom_right,
+                width_nm,
+                ..
+            } => OperationKind::AddBoardOutline {
+                board: shadow_board.clone(),
+                top_left: *top_left,
+                bottom_right: *bottom_right,
+                width_nm: *width_nm,
+            },
+            _ => {
+                return Err("shadow validation only accepts graphics-only board operations".into());
+            }
+        };
+        operation.targets = vec![shadow_board.clone()];
+        bound.push(operation);
+    }
+    Ok(bound)
+}
+
+fn validate_shadow_operations(
+    observation: &LiveBoardObservation,
+    operations: &[Operation],
+) -> Result<(), String> {
+    let board = observation
+        .snapshot
+        .board
+        .document_id
+        .as_ref()
+        .ok_or_else(|| "shadow observation has no board identity".to_owned())?;
+    for operation in operations {
+        let operation_board = match &operation.kind {
+            OperationKind::AddBoardGraphicSegments { board, .. }
+            | OperationKind::AddBoardOutline { board, .. } => board,
+            OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. } => {
+                return Err("shadow validation only accepts graphics operations".into());
+            }
+            _ => return Err("shadow validation only accepts supported board operations".into()),
+        };
+        if operation.targets.len() != 1
+            || operation.targets.first() != Some(board)
+            || operation_board != board
+        {
+            return Err("shadow operation target does not match fresh board identity".into());
+        }
+    }
+    Ok(())
+}
+
+fn expected_shadow_snapshot(
+    observation: &LiveBoardObservation,
+    operations: &[Operation],
+) -> Result<ProjectSnapshot, String> {
+    let mut expected = observation.snapshot.clone();
+    for operation in operations {
+        match &operation.kind {
+            OperationKind::AddBoardGraphicSegments { segments, .. } => {
+                expected.board.graphics.extend(segments.iter().cloned());
+            }
+            OperationKind::AddBoardOutline {
+                top_left,
+                bottom_right,
+                width_nm,
+                ..
+            } => expected.board.graphics.extend(expand_board_outline(
+                *top_left,
+                *bottom_right,
+                *width_nm,
+            )),
+            _ => return Err("shadow postcondition contains a non-graphics operation".into()),
+        }
+    }
+    expected.validate().map_err(|error| error.to_string())?;
+    Ok(expected.canonical())
+}
+
+fn validate_shadow_graphics(
+    observation: &LiveBoardObservation,
+    operations: &[Operation],
+) -> Result<(), String> {
+    let mut expected = Vec::new();
+    for operation in operations {
+        match &operation.kind {
+            OperationKind::AddBoardGraphicSegments { segments, .. } => {
+                expected.extend(segments.iter().cloned());
+            }
+            OperationKind::AddBoardOutline {
+                top_left,
+                bottom_right,
+                width_nm,
+                ..
+            } => expected.extend(expand_board_outline(*top_left, *bottom_right, *width_nm)),
+            _ => return Err("shadow postcondition contains a non-graphics operation".into()),
+        }
+    }
+    let mut expected_ids = std::collections::BTreeSet::new();
+    for graphic in expected {
+        if !expected_ids.insert(graphic.graphic_id.clone()) {
+            return Err(format!(
+                "shadow postcondition expected duplicate graphic {}",
+                graphic.graphic_id
+            ));
+        }
+        let mut matches = observation
+            .snapshot
+            .board
+            .graphics
+            .iter()
+            .filter(|actual| actual.graphic_id == graphic.graphic_id);
+        let Some(actual) = matches.next() else {
+            return Err(format!(
+                "shadow postcondition graphic {} is missing",
+                graphic.graphic_id
+            ));
+        };
+        if matches.next().is_some() || actual != &graphic {
+            return Err(format!(
+                "shadow postcondition graphic {} does not match",
+                graphic.graphic_id
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn cleanup_shadow(
+    launcher: &mut OwnedPcbnewLauncher,
+    source_board: &std::path::Path,
+    source_before: &ShadowSourceFingerprint,
+    mut outcome: ShadowValidationOutcome,
+) -> ShadowValidationOutcome {
+    let mut cleanup_errors = Vec::new();
+    if launcher.editor_is_open() {
+        match launcher.current_identity() {
+            Ok(identity) => {
+                if let Err(error) = launcher.close_owned(identity.pid) {
+                    cleanup_errors.push(error.to_string());
+                }
+            }
+            Err(error) => cleanup_errors.push(error.to_string()),
+        }
+    }
+    if launcher.current_shadow().is_ok()
+        && let Err(error) = launcher.cleanup()
+    {
+        cleanup_errors.push(error.to_string());
+    }
+    outcome.shadow_cleaned = launcher.current_shadow().is_err();
+    outcome.source_unchanged = shadow_source_fingerprint(source_board) == *source_before;
+    if !cleanup_errors.is_empty() || !outcome.shadow_cleaned || !outcome.source_unchanged {
+        outcome.state = ShadowValidationState::Unknown;
+        let mut reasons = cleanup_errors;
+        if !outcome.shadow_cleaned {
+            reasons.push("shadow cleanup was not proven".into());
+        }
+        if !outcome.source_unchanged {
+            reasons.push("source board or project fingerprint changed".into());
+        }
+        outcome.reason = Some(reasons.join("; "));
+    }
+    outcome
+}
+
+pub fn validate_disposable_shadow(
+    server_root: &std::path::Path,
+    source_board: &std::path::Path,
+    operations: &[Operation],
+    drc_timeout: Duration,
+) -> ShadowValidationOutcome {
+    if let Err(reason) = validate_shadow_operation_kinds(operations) {
+        return ShadowValidationOutcome::rejected(reason);
+    }
+    let source_before = shadow_source_fingerprint(source_board);
+    if source_before.board.is_none() || source_before.project.is_none() {
+        return ShadowValidationOutcome::rejected(
+            "source board and matching project must be readable before shadow validation",
+        );
+    }
+    let mut launcher = match OwnedPcbnewLauncher::new(server_root) {
+        Ok(launcher) => launcher,
+        Err(error) => return ShadowValidationOutcome::rejected(error.to_string()),
+    };
+    let shadow = match launcher.create_shadow(source_board) {
+        Ok(shadow) => shadow,
+        Err(error) => return ShadowValidationOutcome::rejected(error.to_string()),
+    };
+    let canonical_server_root = match std::fs::canonicalize(server_root) {
+        Ok(root) => root,
+        Err(error) => {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::rejected(error.to_string()),
+            );
+        }
+    };
+    if !shadow.is_within(&canonical_server_root) {
+        return cleanup_shadow(
+            &mut launcher,
+            source_board,
+            &source_before,
+            ShadowValidationOutcome::rejected("shadow paths escaped the server root"),
+        );
+    }
+    if let Err(error) = launcher.launch(&shadow) {
+        return cleanup_shadow(
+            &mut launcher,
+            source_board,
+            &source_before,
+            ShadowValidationOutcome::rejected(error.to_string()),
+        );
+    }
+    let observation = match observe_owned_shadow(&mut launcher) {
+        Ok(observation) => observation,
+        Err(error) => {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::unknown(error),
+            );
+        }
+    };
+    let expected_revision = match observation.snapshot.revision() {
+        Ok(revision) => revision,
+        Err(error) => {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::unknown(error.to_string()),
+            );
+        }
+    };
+    let canonical_shadow_root = match std::fs::canonicalize(shadow.root()) {
+        Ok(root) => root,
+        Err(error) => {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::unknown(error.to_string()),
+            );
+        }
+    };
+    let canonical_shadow_board = match std::fs::canonicalize(shadow.board_path()) {
+        Ok(path) => path,
+        Err(error) => {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::unknown(error.to_string()),
+            );
+        }
+    };
+    if observation.project_dir != canonical_shadow_root
+        || observation.board_path != canonical_shadow_board
+    {
+        return cleanup_shadow(
+            &mut launcher,
+            source_board,
+            &source_before,
+            ShadowValidationOutcome::rejected(
+                "fresh shadow observation did not match the owned shadow paths",
+            ),
+        );
+    }
+    let shadow_board = match observation.snapshot.board.document_id.as_ref() {
+        Some(board) => board,
+        None => {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::rejected("fresh shadow observation has no board identity"),
+            );
+        }
+    };
+    let bound_operations = match bind_shadow_operations(operations, shadow_board) {
+        Ok(operations) => operations,
+        Err(reason) => {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::rejected(reason),
+            );
+        }
+    };
+    if validate_shadow_operations(&observation, &bound_operations).is_err() {
+        return cleanup_shadow(
+            &mut launcher,
+            source_board,
+            &source_before,
+            ShadowValidationOutcome::rejected(
+                "fresh shadow operation identity did not match the owned board",
+            ),
+        );
+    }
+    let policy = DrcPolicy {
+        allowed_root: shadow.root().to_path_buf(),
+        timeout: drc_timeout,
+    };
+    let baseline = match run_pcb_drc(shadow.board_path(), &policy) {
+        CheckResult::Completed(report) => report,
+        CheckResult::Failed(error) => {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::rejected(format!("shadow baseline DRC failed: {error:?}")),
+            );
+        }
+    };
+    let mut client = match launcher.connect_owned() {
+        Ok(client) => client,
+        Err(error) => {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::unknown(error.to_string()),
+            );
+        }
+    };
+    let mutation = BoardGraphicsExecutor::default().execute_bound_batch(
+        &mut client,
+        &bound_operations,
+        &observation.snapshot,
+        &expected_revision,
+        &observation.board_filename,
+        "auto-kicad disposable shadow validation",
+    );
+    drop(client);
+    if !matches!(mutation, BoardGraphicsCommitOutcome::CommittedAndSaved) {
+        let outcome = match mutation {
+            BoardGraphicsCommitOutcome::Rejected { reason } => {
+                ShadowValidationOutcome::rejected(reason)
+            }
+            BoardGraphicsCommitOutcome::CommittedButNotSaved { reason }
+            | BoardGraphicsCommitOutcome::Unknown { reason } => {
+                ShadowValidationOutcome::unknown(reason)
+            }
+            BoardGraphicsCommitOutcome::CommittedAndSaved => unreachable!("matched above"),
+        };
+        return cleanup_shadow(&mut launcher, source_board, &source_before, outcome);
+    }
+    let old_pid = match launcher.current_identity() {
+        Ok(identity) => identity.pid,
+        Err(error) => {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::unknown(error.to_string()),
+            );
+        }
+    };
+    if let Err(error) = launcher.close_owned(old_pid) {
+        return cleanup_shadow(
+            &mut launcher,
+            source_board,
+            &source_before,
+            ShadowValidationOutcome::unknown(error.to_string()),
+        );
+    }
+    if let Err(error) = launcher.reopen() {
+        return cleanup_shadow(
+            &mut launcher,
+            source_board,
+            &source_before,
+            ShadowValidationOutcome::unknown(error.to_string()),
+        );
+    }
+    let reopened = match observe_owned_shadow(&mut launcher) {
+        Ok(observation) => observation,
+        Err(error) => {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::unknown(error),
+            );
+        }
+    };
+    let reopened_revision = match reopened.snapshot.revision() {
+        Ok(revision) => revision,
+        Err(error) => {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::unknown(error.to_string()),
+            );
+        }
+    };
+    let expected_snapshot = match expected_shadow_snapshot(&observation, &bound_operations) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::unknown(error),
+            );
+        }
+    };
+    let normalized_snapshot_matches = reopened.snapshot.canonical() == expected_snapshot;
+    if !normalized_snapshot_matches {
+        return cleanup_shadow(
+            &mut launcher,
+            source_board,
+            &source_before,
+            ShadowValidationOutcome {
+                state: ShadowValidationState::Unknown,
+                fresh_revision: Some(expected_revision),
+                reopened_revision: Some(reopened_revision),
+                reopened: true,
+                normalized_snapshot_matches: false,
+                baseline: None,
+                after: None,
+                delta: None,
+                source_unchanged: true,
+                shadow_cleaned: false,
+                reason: Some(
+                    "reopened shadow normalized snapshot does not match expected snapshot".into(),
+                ),
+            },
+        );
+    }
+    if reopened.project_dir != canonical_shadow_root
+        || reopened.board_path != canonical_shadow_board
+    {
+        return cleanup_shadow(
+            &mut launcher,
+            source_board,
+            &source_before,
+            ShadowValidationOutcome::unknown("reopened shadow document identity changed"),
+        );
+    }
+    if let Err(error) = validate_shadow_graphics(&reopened, &bound_operations) {
+        return cleanup_shadow(
+            &mut launcher,
+            source_board,
+            &source_before,
+            ShadowValidationOutcome::unknown(error),
+        );
+    }
+    let after = match run_pcb_drc(shadow.board_path(), &policy) {
+        CheckResult::Completed(report) => report,
+        CheckResult::Failed(error) => {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::unknown(format!(
+                    "shadow postcondition DRC failed: {error:?}"
+                )),
+            );
+        }
+    };
+    let delta = compare_drc(&baseline, &after);
+    let introduced = delta.introduced.len();
+    let mut outcome = ShadowValidationOutcome {
+        state: if introduced == 0 {
+            ShadowValidationState::Committed
+        } else {
+            ShadowValidationState::Rejected
+        },
+        fresh_revision: Some(expected_revision),
+        reopened_revision: Some(reopened_revision),
+        baseline: Some(baseline),
+        after: Some(after),
+        delta: Some(delta),
+        reopened: true,
+        normalized_snapshot_matches,
+        source_unchanged: true,
+        shadow_cleaned: false,
+        reason: (introduced != 0)
+            .then(|| format!("shadow DRC introduced {} violation(s)", introduced)),
+    };
+    outcome = cleanup_shadow(&mut launcher, source_board, &source_before, outcome);
+    outcome
+}
+
 fn observe_live_board<S: LiveBoardObservationSource>(
     source: &mut S,
     version: kicad_ipc::VersionInfo,
@@ -406,6 +1051,20 @@ pub enum BoardGraphicLayerRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardRoutingEndpointRequest {
+    pub pad_id: String,
+    pub footprint_placement_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardRoutingNetRequest {
+    pub net_id: String,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 pub struct BoardTrackRequest {
     pub source_uuid: String,
     pub start_x_nm: i64,
@@ -413,6 +1072,12 @@ pub struct BoardTrackRequest {
     pub end_x_nm: i64,
     pub end_y_nm: i64,
     pub width_nm: i64,
+    #[serde(default)]
+    pub start_pad: Option<BoardRoutingEndpointRequest>,
+    #[serde(default)]
+    pub end_pad: Option<BoardRoutingEndpointRequest>,
+    #[serde(default)]
+    pub net: Option<BoardRoutingNetRequest>,
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -422,6 +1087,8 @@ pub struct BoardViaRequest {
     pub y_nm: i64,
     pub pad_diameter_nm: i64,
     pub drill_diameter_nm: i64,
+    #[serde(default)]
+    pub net: Option<BoardRoutingNetRequest>,
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -505,23 +1172,55 @@ fn board_operation_kind(
             width_nm: outline.width_nm,
         },
         (None, None, Some(track), None) => {
-            let intent = StraightTrackIntent::new(
-                StableId::new(track.source_uuid)
-                    .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?,
-                kicad_model::Coordinate {
-                    x: track.start_x_nm,
-                    y: track.start_y_nm,
-                    unit: kicad_model::Unit::Nanometres,
-                    space: kicad_model::DocumentSpace::Board,
-                },
-                kicad_model::Coordinate {
-                    x: track.end_x_nm,
-                    y: track.end_y_nm,
-                    unit: kicad_model::Unit::Nanometres,
-                    space: kicad_model::DocumentSpace::Board,
-                },
-                track.width_nm,
-            )
+            let source_uuid = StableId::new(track.source_uuid)
+                .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+            let start = kicad_model::Coordinate {
+                x: track.start_x_nm,
+                y: track.start_y_nm,
+                unit: kicad_model::Unit::Nanometres,
+                space: kicad_model::DocumentSpace::Board,
+            };
+            let end = kicad_model::Coordinate {
+                x: track.end_x_nm,
+                y: track.end_y_nm,
+                unit: kicad_model::Unit::Nanometres,
+                space: kicad_model::DocumentSpace::Board,
+            };
+            let intent = match (track.start_pad, track.end_pad, track.net) {
+                (Some(start_pad), Some(end_pad), Some(net)) => {
+                    StraightTrackIntent::new_endpoint_bound(
+                        source_uuid,
+                        start,
+                        end,
+                        track.width_nm,
+                        kicad_model::RoutingEndpointRef {
+                            pad_id: StableId::new(start_pad.pad_id).map_err(|error| {
+                                ErrorData::invalid_params(error.to_string(), None)
+                            })?,
+                            footprint_placement_id: StableId::new(start_pad.footprint_placement_id)
+                                .map_err(|error| {
+                                    ErrorData::invalid_params(error.to_string(), None)
+                                })?,
+                        },
+                        kicad_model::RoutingEndpointRef {
+                            pad_id: StableId::new(end_pad.pad_id).map_err(|error| {
+                                ErrorData::invalid_params(error.to_string(), None)
+                            })?,
+                            footprint_placement_id: StableId::new(end_pad.footprint_placement_id)
+                                .map_err(|error| {
+                                ErrorData::invalid_params(error.to_string(), None)
+                            })?,
+                        },
+                        kicad_model::ObservedNetIdentity {
+                            net_id: StableId::new(net.net_id).map_err(|error| {
+                                ErrorData::invalid_params(error.to_string(), None)
+                            })?,
+                            name: net.name,
+                        },
+                    )
+                }
+                _ => StraightTrackIntent::new(source_uuid, start, end, track.width_nm),
+            }
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
             OperationKind::AddStraightTrack {
                 board: board.clone(),
@@ -529,18 +1228,33 @@ fn board_operation_kind(
             }
         }
         (None, None, None, Some(via)) => {
-            let intent = ThroughViaIntent::new(
-                StableId::new(via.source_uuid)
-                    .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?,
-                kicad_model::Coordinate {
-                    x: via.x_nm,
-                    y: via.y_nm,
-                    unit: kicad_model::Unit::Nanometres,
-                    space: kicad_model::DocumentSpace::Board,
-                },
-                via.pad_diameter_nm,
-                via.drill_diameter_nm,
-            )
+            let source_uuid = StableId::new(via.source_uuid)
+                .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+            let position = kicad_model::Coordinate {
+                x: via.x_nm,
+                y: via.y_nm,
+                unit: kicad_model::Unit::Nanometres,
+                space: kicad_model::DocumentSpace::Board,
+            };
+            let intent = match via.net {
+                Some(net) => ThroughViaIntent::new_net_bound(
+                    source_uuid,
+                    position,
+                    via.pad_diameter_nm,
+                    via.drill_diameter_nm,
+                    kicad_model::ObservedNetIdentity {
+                        net_id: StableId::new(net.net_id)
+                            .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?,
+                        name: net.name,
+                    },
+                ),
+                None => ThroughViaIntent::new(
+                    source_uuid,
+                    position,
+                    via.pad_diameter_nm,
+                    via.drill_diameter_nm,
+                ),
+            }
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
             OperationKind::AddThroughVia {
                 board: board.clone(),
@@ -757,6 +1471,61 @@ struct StoredChangeSession {
     board_path: std::path::PathBuf,
     project_dir: std::path::PathBuf,
     execution_state: StoredExecutionState,
+    shadow_validation: Option<ShadowValidationOutcome>,
+    shadow_validation_plan_hash: Option<String>,
+}
+
+pub trait ShadowValidationService: Send + Sync {
+    fn validate(
+        &self,
+        source_board: &std::path::Path,
+        operations: &[Operation],
+        timeout: Duration,
+    ) -> ShadowValidationOutcome;
+}
+
+#[derive(Clone, Debug)]
+pub struct IpcShadowValidationService {
+    server_root: std::path::PathBuf,
+}
+
+impl IpcShadowValidationService {
+    pub fn new(server_root: impl Into<std::path::PathBuf>) -> Self {
+        Self {
+            server_root: server_root.into(),
+        }
+    }
+}
+
+impl ShadowValidationService for IpcShadowValidationService {
+    fn validate(
+        &self,
+        source_board: &std::path::Path,
+        operations: &[Operation],
+        timeout: Duration,
+    ) -> ShadowValidationOutcome {
+        validate_disposable_shadow(&self.server_root, source_board, operations, timeout)
+    }
+}
+
+fn shadow_validation_data(outcome: &ShadowValidationOutcome) -> Value {
+    json!({
+        "state": match outcome.state {
+            ShadowValidationState::Committed => "committed",
+            ShadowValidationState::Rejected => "rejected",
+            ShadowValidationState::Unknown => "unknown",
+        },
+        "fresh_revision": outcome.fresh_revision,
+        "reopened_revision": outcome.reopened_revision,
+        "reopened": outcome.reopened,
+        "normalized_snapshot_matches": outcome.normalized_snapshot_matches,
+        "baseline": outcome.baseline,
+        "after": outcome.after,
+        "delta": outcome.delta,
+        "source_unchanged": outcome.source_unchanged,
+        "shadow_cleaned": outcome.shadow_cleaned,
+        "reason": outcome.reason,
+    })
 }
 
 pub trait BoardGraphicsExecutionService: Send + Sync {
@@ -994,6 +1763,9 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
                         end_x_nm: intent.end.x,
                         end_y_nm: intent.end.y,
                         width_nm: intent.width_nm,
+                        net: intent.net.as_ref().map(|net| kicad_ipc::CreateNetIdentity {
+                            name: net.name.clone(),
+                        }),
                     });
                 }
                 OperationKind::AddThroughVia { intent, .. } => {
@@ -1002,6 +1774,9 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
                         position_y_nm: intent.position.y,
                         pad_diameter_nm: intent.size_nm,
                         drill_diameter_nm: intent.drill_nm,
+                        net: intent.net.as_ref().map(|net| kicad_ipc::CreateNetIdentity {
+                            name: net.name.clone(),
+                        }),
                     });
                 }
                 _ => {
@@ -1012,17 +1787,35 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
                 }
             }
         }
-        BoardGraphicsExecutor::default()
-            .execute_native_batch(
-                &mut client,
-                board_filename,
-                &graphics,
-                &tracks,
-                &vias,
-                "auto-kicad MCP approved board graphics change",
+        let has_routing = operations.iter().any(|operation| {
+            matches!(
+                operation.kind,
+                OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. }
             )
-            .map(|_| BoardGraphicsCommitOutcome::CommittedAndSaved)
-            .unwrap_or_else(|outcome| outcome)
+        });
+        let all_routing = operations.iter().all(|operation| {
+            matches!(
+                operation.kind,
+                OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. }
+            )
+        });
+        if has_routing && !all_routing {
+            return BoardGraphicsCommitOutcome::Rejected {
+                reason: "routing and graphics operations cannot share a transaction".into(),
+            };
+        }
+        BoardGraphicsExecutor::default().execute_bound_batch(
+            &mut client,
+            operations,
+            &observation.snapshot,
+            &revision,
+            board_filename,
+            if all_routing {
+                "auto-kicad MCP approved board routing change"
+            } else {
+                "auto-kicad MCP approved board graphics change"
+            },
+        )
     }
 }
 
@@ -1068,6 +1861,7 @@ pub struct Server {
     discovery: Arc<dyn DiscoveryService>,
     execution: Arc<dyn BoardGraphicsExecutionService>,
     validation: Arc<dyn BoardValidationService>,
+    shadow_validation: Option<Arc<dyn ShadowValidationService>>,
     baseline_sequence: Arc<AtomicU64>,
     tool_router: ToolRouter<Self>,
 }
@@ -1114,9 +1908,12 @@ pub struct Envelope {
 
 impl Default for Server {
     fn default() -> Self {
-        Self::with_discovery_and_execution(
+        Self::with_discovery_and_execution_and_shadow(
             Arc::new(IpcDiscoveryService),
             Arc::new(IpcBoardGraphicsExecutionService),
+            Arc::new(IpcShadowValidationService::new(
+                std::env::temp_dir().join("auto-kicad-shadow"),
+            )),
         )
     }
 }
@@ -1131,6 +1928,20 @@ impl Server {
         execution: Arc<dyn BoardGraphicsExecutionService>,
     ) -> Self {
         Self::with_services(discovery, execution, Arc::new(IpcBoardValidationService))
+    }
+
+    pub fn with_discovery_and_execution_and_shadow(
+        discovery: Arc<dyn DiscoveryService>,
+        execution: Arc<dyn BoardGraphicsExecutionService>,
+        shadow_validation: Arc<dyn ShadowValidationService>,
+    ) -> Self {
+        Self::with_all_services_and_shadow(
+            discovery,
+            execution,
+            Arc::new(IpcBoardValidationService),
+            Arc::new(ProductionSchematicChangeService),
+            Some(shadow_validation),
+        )
     }
 
     pub fn with_services(
@@ -1151,6 +1962,16 @@ impl Server {
         execution: Arc<dyn BoardGraphicsExecutionService>,
         validation: Arc<dyn BoardValidationService>,
         schematic: Arc<dyn SchematicChangeService>,
+    ) -> Self {
+        Self::with_all_services_and_shadow(discovery, execution, validation, schematic, None)
+    }
+
+    fn with_all_services_and_shadow(
+        discovery: Arc<dyn DiscoveryService>,
+        execution: Arc<dyn BoardGraphicsExecutionService>,
+        validation: Arc<dyn BoardValidationService>,
+        schematic: Arc<dyn SchematicChangeService>,
+        shadow_validation: Option<Arc<dyn ShadowValidationService>>,
     ) -> Self {
         let schematic_verified = schematic.verified();
         let mut tool_router = Self::tool_router();
@@ -1203,6 +2024,7 @@ impl Server {
             discovery,
             execution,
             validation,
+            shadow_validation,
             baseline_sequence: Arc::new(AtomicU64::new(0)),
             tool_router,
         }
@@ -1610,6 +2432,8 @@ impl Server {
                 board_path: observation.board_path,
                 project_dir: observation.project_dir,
                 execution_state: StoredExecutionState::Ready,
+                shadow_validation: None,
+                shadow_validation_plan_hash: None,
             },
         );
         self.envelope(
@@ -1649,9 +2473,43 @@ impl Server {
             .preview_session(&mut stored.session)
             .and_then(|preview| {
                 engine.validate(&mut stored.session)?;
-                engine.request_approval(&mut stored.session)?;
                 Ok(preview)
             })
+            .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+        if let Some(shadow_validation) = &self.shadow_validation {
+            let outcome = shadow_validation.validate(
+                &stored.board_path,
+                &stored.session.plan.operations,
+                Duration::from_secs(30),
+            );
+            let shadow_ok = matches!(outcome.state, ShadowValidationState::Committed);
+            stored.shadow_validation = Some(outcome.clone());
+            stored.shadow_validation_plan_hash = Some(preview.plan_hash.clone());
+            if !shadow_ok {
+                self.sessions
+                    .lock()
+                    .expect("session lock")
+                    .insert(arguments.plan_id.clone(), stored);
+                return Ok(self.envelope_sync(
+                    arguments
+                        .request_id
+                        .unwrap_or_else(|| "req_preview_change".into()),
+                    None,
+                    json!({
+                        "plan_id": arguments.plan_id,
+                        "plan_hash": preview.plan_hash,
+                        "state": match outcome.state {
+                            ShadowValidationState::Rejected => "rejected",
+                            ShadowValidationState::Unknown => "unknown",
+                            ShadowValidationState::Committed => unreachable!("shadow_ok checked above"),
+                        },
+                        "shadow_validation": shadow_validation_data(&outcome),
+                    }),
+                ));
+            }
+        }
+        engine
+            .request_approval(&mut stored.session)
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
         self.sessions
             .lock()
@@ -1662,6 +2520,11 @@ impl Server {
             .revision()
             .map_err(|error| ErrorData::internal_error(error.to_string(), None))?
             .to_string();
+        let shadow_data = stored
+            .shadow_validation
+            .as_ref()
+            .map(shadow_validation_data)
+            .unwrap_or(Value::Null);
         self.envelope(
             arguments
                 .request_id
@@ -1673,6 +2536,7 @@ impl Server {
                 "before": preview.before,
                 "after": preview.after,
                 "base_revision": stored.session.plan.base_revision,
+                "shadow_validation": shadow_data,
                 "state": "awaiting_approval"
             }),
         )
@@ -1697,6 +2561,21 @@ impl Server {
             || arguments.approval_hash != arguments.plan_hash
         {
             return Err(ErrorData::invalid_params("approval mismatch", None));
+        }
+        if self.shadow_validation.is_some()
+            && (stored.shadow_validation_plan_hash.as_deref() != Some(arguments.plan_hash.as_str())
+                || !stored.shadow_validation.as_ref().is_some_and(|outcome| {
+                    matches!(outcome.state, ShadowValidationState::Committed)
+                        && outcome.reopened
+                        && outcome.normalized_snapshot_matches
+                        && outcome.source_unchanged
+                        && outcome.shadow_cleaned
+                }))
+        {
+            return Err(ErrorData::invalid_params(
+                "shadow validation is required before commit",
+                None,
+            ));
         }
         if stored.execution_state != StoredExecutionState::Ready {
             return Err(ErrorData::invalid_params(
@@ -2237,7 +3116,7 @@ mod tests {
     use kicad_model::{
         Board, BoardGraphicLayer, BoardGraphicSegment, CapabilityObservation, CapabilityStatus,
         Coordinate, Diagnostic, DocumentSpace, ObservedBoardFootprints, ProjectSnapshot, Schematic,
-        Unit,
+        StraightTrackIntent, Unit,
     };
     use rmcp::{ClientHandler, ServiceExt, model::CallToolRequestParams};
     use std::collections::VecDeque;
@@ -3056,6 +3935,148 @@ mod tests {
         }
     }
 
+    fn fresh_shadow_observation() -> LiveBoardObservation {
+        let mut source = fake_live_source();
+        observe_live_board(
+            &mut source,
+            live_version(),
+            live_document(),
+            "main.kicad_pcb",
+        )
+        .unwrap()
+    }
+
+    fn shadow_graphics_operation(board: StableId) -> Operation {
+        Operation {
+            operation_id: StableId::new("shadow-operation").unwrap(),
+            kind: OperationKind::AddBoardGraphicSegments {
+                board: board.clone(),
+                segments: vec![graphic("shadow-graphic")],
+            },
+            targets: vec![board],
+            preconditions: Vec::new(),
+            expected_effects: vec!["add board graphic segments".into()],
+            risk_class: RiskClass::Low,
+            idempotency_key: "shadow-operation".into(),
+            source_run_id: "shadow-run".into(),
+        }
+    }
+
+    #[test]
+    fn shadow_binding_rebinds_only_supported_board_operations_to_fresh_identity() {
+        let observation = fresh_shadow_observation();
+        let original_board = observation.snapshot.board.document_id.clone().unwrap();
+        let shadow_board = StableId::new("shadow-board").unwrap();
+        let original = shadow_graphics_operation(original_board);
+        let bound = bind_shadow_operations(std::slice::from_ref(&original), &shadow_board).unwrap();
+        assert_eq!(bound.len(), 1);
+        assert_eq!(bound[0].targets, vec![shadow_board.clone()]);
+        assert!(validate_shadow_operations(&observation, std::slice::from_ref(&original)).is_ok());
+        assert!(validate_shadow_operations(&observation, &bound).is_err());
+    }
+
+    #[test]
+    fn shadow_admission_rejects_routing_before_any_shadow_side_effect() {
+        let board = StableId::new("board").unwrap();
+        let intent = StraightTrackIntent::new(
+            StableId::new("track").unwrap(),
+            Coordinate {
+                x: 0,
+                y: 0,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            },
+            Coordinate {
+                x: 1_000,
+                y: 0,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            },
+            100,
+        )
+        .unwrap();
+        let operation = Operation {
+            operation_id: StableId::new("routing-operation").unwrap(),
+            kind: OperationKind::AddStraightTrack {
+                board: board.clone(),
+                intent,
+            },
+            targets: vec![board],
+            preconditions: Vec::new(),
+            expected_effects: vec!["add straight copper track".into()],
+            risk_class: RiskClass::Medium,
+            idempotency_key: "routing-operation".into(),
+            source_run_id: "shadow-run".into(),
+        };
+        let error = validate_shadow_operation_kinds(std::slice::from_ref(&operation)).unwrap_err();
+        assert!(error.contains("graphics-only"));
+    }
+
+    #[test]
+    fn shadow_graphics_postcondition_matches_segments_and_expanded_outline() {
+        let mut observation = fresh_shadow_observation();
+        let board = observation.snapshot.board.document_id.clone().unwrap();
+        let explicit = graphic("shadow-graphic");
+        let outline = expand_board_outline(
+            Coordinate {
+                x: 2_000,
+                y: 2_000,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            },
+            Coordinate {
+                x: 4_000,
+                y: 5_000,
+                unit: Unit::Nanometres,
+                space: DocumentSpace::Board,
+            },
+            100,
+        );
+        observation.snapshot.board.graphics.push(explicit.clone());
+        observation.snapshot.board.graphics.extend(outline.clone());
+        let explicit_operation = shadow_graphics_operation(board.clone());
+        let outline_operation = Operation {
+            operation_id: StableId::new("shadow-outline-operation").unwrap(),
+            kind: OperationKind::AddBoardOutline {
+                board: board.clone(),
+                top_left: outline[0].start,
+                bottom_right: outline[2].start,
+                width_nm: outline[0].width_nm,
+            },
+            targets: vec![board.clone()],
+            preconditions: Vec::new(),
+            expected_effects: vec!["add rectangular Edge.Cuts outline".into()],
+            risk_class: RiskClass::Medium,
+            idempotency_key: "shadow-outline-operation".into(),
+            source_run_id: "shadow-run".into(),
+        };
+        assert!(
+            validate_shadow_graphics(
+                &observation,
+                &[explicit_operation, outline_operation.clone()],
+            )
+            .is_ok()
+        );
+        observation
+            .snapshot
+            .board
+            .graphics
+            .retain(|segment| segment.graphic_id != outline[0].graphic_id);
+        assert!(validate_shadow_graphics(&observation, &[outline_operation]).is_err());
+    }
+
+    #[test]
+    fn shadow_source_fingerprint_detects_missing_or_changed_sources() {
+        let missing = shadow_source_fingerprint(Path::new("/definitely/missing/board.kicad_pcb"));
+        assert!(missing.board.is_none());
+        assert!(missing.project.is_none());
+        let fixture = TempBoard::new();
+        let board_path = fixture.root.join("board.kicad_pcb");
+        let before = shadow_source_fingerprint(&board_path);
+        std::fs::write(&board_path, "changed").unwrap();
+        assert_ne!(before, shadow_source_fingerprint(&board_path));
+    }
+
     fn plan_request(_snapshot: ProjectSnapshot, request_id: &str) -> PlanBoardGraphicsRequest {
         PlanBoardGraphicsRequest {
             endpoint: "ipc:///tmp/kicad/api.sock".into(),
@@ -3096,6 +4117,9 @@ mod tests {
                 end_x_nm: 3_000_000,
                 end_y_nm: 4_000_000,
                 width_nm: 250_000,
+                start_pad: None,
+                end_pad: None,
+                net: None,
             }),
             via: None,
         }
@@ -3112,6 +4136,7 @@ mod tests {
                 y_nm: 6_000_000,
                 pad_diameter_nm: 800_000,
                 drill_diameter_nm: 400_000,
+                net: None,
             }),
         }
     }
@@ -3614,83 +4639,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn plan_converts_typed_routing_requests_to_routing_operations() {
+    async fn plan_rejects_coordinate_only_routing_requests() {
         let server = Server::with_discovery(Arc::new(FakeDiscovery {
             write_capability: true,
         }));
-        let mut track_request = plan_request(project_snapshot(true), "req_track");
-        track_request.segments = None;
-        track_request.track = Some(BoardTrackRequest {
+        let mut request = plan_request(project_snapshot(true), "req_track");
+        request.segments = None;
+        request.track = Some(BoardTrackRequest {
             source_uuid: "track-1".into(),
             start_x_nm: 1_000_000,
             start_y_nm: 2_000_000,
             end_x_nm: 3_000_000,
             end_y_nm: 4_000_000,
             width_nm: 250_000,
+            start_pad: None,
+            end_pad: None,
+            net: None,
         });
-        server
-            .kicad_plan_change(Parameters(track_request))
+        let error = server
+            .kicad_plan_change(Parameters(request))
             .await
-            .unwrap();
-
-        let mut via_request = plan_request(project_snapshot(true), "req_via");
-        via_request.segments = None;
-        via_request.via = Some(BoardViaRequest {
-            source_uuid: "via-1".into(),
-            x_nm: 5_000_000,
-            y_nm: 6_000_000,
-            pad_diameter_nm: 800_000,
-            drill_diameter_nm: 400_000,
-        });
-        server
-            .kicad_plan_change(Parameters(via_request))
-            .await
-            .unwrap();
-
-        let sessions = server.sessions.lock().unwrap();
-        let track = &sessions["plan:req_track"].session.plan.operations[0].kind;
-        assert_eq!(
-            track,
-            &OperationKind::AddStraightTrack {
-                board: StableId::new("board").unwrap(),
-                intent: StraightTrackIntent::new(
-                    StableId::new("track-1").unwrap(),
-                    Coordinate {
-                        x: 1_000_000,
-                        y: 2_000_000,
-                        unit: Unit::Nanometres,
-                        space: DocumentSpace::Board,
-                    },
-                    Coordinate {
-                        x: 3_000_000,
-                        y: 4_000_000,
-                        unit: Unit::Nanometres,
-                        space: DocumentSpace::Board,
-                    },
-                    250_000,
-                )
-                .unwrap(),
-            }
-        );
-        let via = &sessions["plan:req_via"].session.plan.operations[0].kind;
-        assert_eq!(
-            via,
-            &OperationKind::AddThroughVia {
-                board: StableId::new("board").unwrap(),
-                intent: ThroughViaIntent::new(
-                    StableId::new("via-1").unwrap(),
-                    Coordinate {
-                        x: 5_000_000,
-                        y: 6_000_000,
-                        unit: Unit::Nanometres,
-                        space: DocumentSpace::Board,
-                    },
-                    800_000,
-                    400_000,
-                )
-                .unwrap(),
-            }
-        );
+            .unwrap_err();
+        assert!(error.message.contains("track endpoint binding is required"));
+        assert!(server.sessions.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -3706,50 +4677,12 @@ mod tests {
             batch_via("via-1"),
         ]);
 
-        let planned = server.kicad_plan_change(Parameters(request)).await.unwrap();
-        assert!(matches!(planned, CallToolResponse::Complete(_)));
-
-        let sessions = server.sessions.lock().unwrap();
-        let plan = &sessions["plan:req_batch"].session.plan;
-        assert_eq!(plan.operations.len(), 3);
-        assert_eq!(
-            plan.operations
-                .iter()
-                .map(|operation| operation.operation_id.to_string())
-                .collect::<Vec<_>>(),
-            [
-                "operation:req_batch:0",
-                "operation:req_batch:1",
-                "operation:req_batch:2"
-            ]
-        );
-        assert_eq!(
-            plan.operations
-                .iter()
-                .map(|operation| operation.idempotency_key.as_str())
-                .collect::<Vec<_>>(),
-            ["req_batch:0", "req_batch:1", "req_batch:2"]
-        );
-        assert!(matches!(
-            plan.operations[0].kind,
-            OperationKind::AddBoardOutline { .. }
-        ));
-        assert!(matches!(
-            plan.operations[1].kind,
-            OperationKind::AddStraightTrack { .. }
-        ));
-        assert!(matches!(
-            plan.operations[2].kind,
-            OperationKind::AddThroughVia { .. }
-        ));
-        for operation in &plan.operations {
-            assert_eq!(operation.targets, [StableId::new("board").unwrap()]);
-            assert_eq!(operation.source_run_id, "run");
-            assert_eq!(
-                operation.preconditions,
-                [Precondition::Revision(plan.base_revision.clone())]
-            );
-        }
+        let error = server
+            .kicad_plan_change(Parameters(request))
+            .await
+            .unwrap_err();
+        assert!(error.message.contains("track endpoint binding is required"));
+        assert!(server.sessions.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -3801,38 +4734,18 @@ mod tests {
             batch_track("track-1"),
             batch_via("via-1"),
         ]);
-        let planned = server.kicad_plan_change(Parameters(request)).await.unwrap();
-        let planned = match planned {
-            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
-            _ => panic!("plan call should complete"),
-        };
-        let plan_id = planned["data"]["plan_id"].as_str().unwrap().to_owned();
-        let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
-        server
-            .kicad_preview_change(Parameters(PreviewChangeRequest {
-                plan_id: plan_id.clone(),
-                plan_hash: plan_hash.clone(),
-                request_id: Some("req_batch_preview".into()),
-            }))
+        let error = server
+            .kicad_plan_change(Parameters(request))
             .await
-            .unwrap();
-        server
-            .kicad_commit_change(Parameters(CommitChangeRequest {
-                plan_id,
-                plan_hash: plan_hash.clone(),
-                approval_hash: plan_hash,
-                request_id: Some("req_batch_commit_call".into()),
-            }))
-            .await
-            .unwrap();
-
+            .unwrap_err();
+        assert!(error.message.contains("track endpoint binding is required"));
         assert_eq!(
             *operation_batches.lock().unwrap(),
-            [vec![
-                StableId::new("operation:req_batch_commit:0").unwrap(),
-                StableId::new("operation:req_batch_commit:1").unwrap(),
-                StableId::new("operation:req_batch_commit:2").unwrap(),
-            ]]
+            Vec::<Vec<StableId>>::new()
+        );
+        assert_eq!(
+            *operation_batches.lock().unwrap(),
+            Vec::<Vec<StableId>>::new()
         );
     }
 
@@ -3849,6 +4762,9 @@ mod tests {
             end_x_nm: 1_000_000,
             end_y_nm: 0,
             width_nm: 250_000,
+            start_pad: None,
+            end_pad: None,
+            net: None,
         });
 
         let error = server
@@ -4335,6 +5251,167 @@ mod tests {
             StoredExecutionState::Unknown
         );
         assert_eq!(*saved_calls.lock().unwrap(), 1);
+    }
+
+    #[derive(Clone)]
+    struct FakeShadowValidation {
+        outcome: ShadowValidationOutcome,
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl ShadowValidationService for FakeShadowValidation {
+        fn validate(&self, _: &Path, _: &[Operation], _: Duration) -> ShadowValidationOutcome {
+            self.calls.fetch_add(1, AtomicOrdering::SeqCst);
+            self.outcome.clone()
+        }
+    }
+
+    fn shadow_outcome(state: ShadowValidationState) -> ShadowValidationOutcome {
+        let committed = matches!(state, ShadowValidationState::Committed);
+        ShadowValidationOutcome {
+            state,
+            fresh_revision: None,
+            reopened_revision: None,
+            reopened: committed,
+            normalized_snapshot_matches: committed,
+            baseline: None,
+            after: None,
+            delta: None,
+            source_unchanged: true,
+            shadow_cleaned: true,
+            reason: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn rejected_shadow_does_not_enter_approval_or_execute_live_change() {
+        let shadow_calls = Arc::new(AtomicUsize::new(0));
+        let execution_calls = Arc::new(Mutex::new(0));
+        let server = Server::with_discovery_and_execution_and_shadow(
+            Arc::new(FakeDiscovery {
+                write_capability: true,
+            }),
+            Arc::new(FakeExecution {
+                outcome: BoardGraphicsCommitOutcome::CommittedAndSaved,
+                calls: execution_calls.clone(),
+            }),
+            Arc::new(FakeShadowValidation {
+                outcome: shadow_outcome(ShadowValidationState::Rejected),
+                calls: shadow_calls.clone(),
+            }),
+        );
+        let planned = server
+            .kicad_plan_change(Parameters(plan_request(
+                project_snapshot(true),
+                "req_shadow_rejected",
+            )))
+            .await
+            .unwrap();
+        let planned = match planned {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("plan call should complete"),
+        };
+        let plan_id = planned["data"]["plan_id"].as_str().unwrap().to_owned();
+        let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
+        let preview = server
+            .kicad_preview_change(Parameters(PreviewChangeRequest {
+                plan_id: plan_id.clone(),
+                plan_hash: plan_hash.clone(),
+                request_id: Some("req_shadow_rejected_preview".into()),
+            }))
+            .await
+            .unwrap();
+        let preview = match preview {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("preview call should complete"),
+        };
+        assert_eq!(preview["ok"], false);
+        assert_eq!(preview["data"]["state"], "rejected");
+        assert_eq!(shadow_calls.load(AtomicOrdering::SeqCst), 1);
+        assert_eq!(*execution_calls.lock().unwrap(), 0);
+        assert_eq!(
+            server.sessions.lock().unwrap()[&plan_id].execution_state,
+            StoredExecutionState::Ready
+        );
+        assert!(
+            server.sessions.lock().unwrap()[&plan_id].session.state
+                != kicad_engine::SessionState::AwaitingApproval
+        );
+        assert!(
+            server
+                .kicad_commit_change(Parameters(CommitChangeRequest {
+                    plan_id,
+                    plan_hash: plan_hash.clone(),
+                    approval_hash: plan_hash,
+                    request_id: Some("req_shadow_rejected_commit".into()),
+                }))
+                .await
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn committed_shadow_is_bound_to_preview_plan_and_allows_exact_commit() {
+        let shadow_calls = Arc::new(AtomicUsize::new(0));
+        let execution_calls = Arc::new(Mutex::new(0));
+        let server = Server::with_discovery_and_execution_and_shadow(
+            Arc::new(FakeDiscovery {
+                write_capability: true,
+            }),
+            Arc::new(FakeExecution {
+                outcome: BoardGraphicsCommitOutcome::CommittedAndSaved,
+                calls: execution_calls.clone(),
+            }),
+            Arc::new(FakeShadowValidation {
+                outcome: shadow_outcome(ShadowValidationState::Committed),
+                calls: shadow_calls.clone(),
+            }),
+        );
+        let planned = server
+            .kicad_plan_change(Parameters(plan_request(
+                project_snapshot(true),
+                "req_shadow_committed",
+            )))
+            .await
+            .unwrap();
+        let planned = match planned {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("plan call should complete"),
+        };
+        let plan_id = planned["data"]["plan_id"].as_str().unwrap().to_owned();
+        let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
+        server
+            .kicad_preview_change(Parameters(PreviewChangeRequest {
+                plan_id: plan_id.clone(),
+                plan_hash: plan_hash.clone(),
+                request_id: Some("req_shadow_committed_preview".into()),
+            }))
+            .await
+            .unwrap();
+        {
+            let sessions = server.sessions.lock().unwrap();
+            let stored = &sessions[&plan_id];
+            assert_eq!(
+                stored.shadow_validation_plan_hash.as_deref(),
+                Some(plan_hash.as_str())
+            );
+            assert!(matches!(
+                stored.shadow_validation.as_ref().unwrap().state,
+                ShadowValidationState::Committed
+            ));
+        }
+        let committed = server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id,
+                plan_hash: plan_hash.clone(),
+                approval_hash: plan_hash,
+                request_id: Some("req_shadow_committed_commit".into()),
+            }))
+            .await
+            .unwrap();
+        assert!(matches!(committed, CallToolResponse::Complete(_)));
+        assert_eq!(shadow_calls.load(AtomicOrdering::SeqCst), 1);
+        assert_eq!(*execution_calls.lock().unwrap(), 1);
     }
 
     #[derive(Clone)]

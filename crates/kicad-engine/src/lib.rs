@@ -4,10 +4,11 @@ use std::fmt::{Display, Formatter};
 use kicad_model::{
     AllowlistedFootprintPlacement, BoardGraphicSegment, BoardLayer, Coordinate, DocumentSpace,
     DrillShape, ExactAngleDegrees, FiniteRatio, Footprint, LocalCoordinateNm, LockState,
-    ObservedBoardRouting, ObservedTrack, ObservedTrackGeometry, ObservedVia, ObservedViaDrill,
-    ObservedViaPadStack, PadCopperShape, PadShape, PadStackType, ProjectSnapshot, RevisionDigest,
-    SizeNm, StableId, StraightTrackIntent, Symbol, ThroughViaIntent, UnconnectedLayerRemoval,
-    ViaDrillCappingMode, ViaDrillFillingMode, ViaType,
+    ObservedBoardRouting, ObservedFootprintPlacement, ObservedPad, ObservedTrack,
+    ObservedTrackGeometry, ObservedVia, ObservedViaDrill, ObservedViaPadStack, PadCopperShape,
+    PadShape, PadStackType, ProjectSnapshot, RevisionDigest, RoutingEndpointRef, SizeNm, StableId,
+    StraightTrackIntent, Symbol, ThroughViaIntent, UnconnectedLayerRemoval, ViaDrillCappingMode,
+    ViaDrillFillingMode, ViaType, board_net_id,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -128,6 +129,13 @@ impl ChangePlan {
     }
 
     pub fn validate(&self, snapshot: &ProjectSnapshot) -> Result<(), EngineError> {
+        if self.base_revision
+            != snapshot
+                .revision()
+                .map_err(|error| EngineError::Serialization(error.to_string()))?
+        {
+            return Err(EngineError::RevisionStale);
+        }
         if self.operations.is_empty() {
             return Err(EngineError::InvalidPlan("operation list must not be empty"));
         }
@@ -341,6 +349,7 @@ impl ChangePlan {
                     intent
                         .validate()
                         .map_err(|_| EngineError::InvalidPlan("invalid straight track intent"))?;
+                    validate_routing_track_binding(snapshot, board, intent)?;
                     validate_routing_position(intent.start)?;
                     validate_routing_position(intent.end)?;
                     if !routing_ids.insert(intent.source_uuid.clone()) {
@@ -359,6 +368,12 @@ impl ChangePlan {
                     intent
                         .validate()
                         .map_err(|_| EngineError::InvalidPlan("invalid through via intent"))?;
+                    if intent.net.is_none() {
+                        return Err(EngineError::InvalidPlan(
+                            "through via net binding is required",
+                        ));
+                    }
+                    validate_observed_routing_net(snapshot, intent.net.as_ref())?;
                     validate_routing_position(intent.position)?;
                     if !routing_ids.insert(intent.source_uuid.clone()) {
                         return Err(EngineError::TargetAlreadyExists(intent.source_uuid.clone()));
@@ -686,7 +701,14 @@ fn apply_operations(
                     width_nm: intent.width_nm,
                     layer: BoardLayer::FrontCopper,
                     lock_state: LockState::Unlocked,
-                    net: None,
+                    net: intent
+                        .net
+                        .as_ref()
+                        .map(|net| kicad_model::ObservedRoutingNet {
+                            net_id: Some(net.net_id.clone()),
+                            code: None,
+                            name: net.name.clone(),
+                        }),
                     observed_revision: routing.observed_revision.clone(),
                 });
                 snapshot.native_routing = Some(
@@ -770,7 +792,14 @@ fn apply_operations(
                         back_post_machining: None,
                     },
                     lock_state: LockState::Unlocked,
-                    net: None,
+                    net: intent
+                        .net
+                        .as_ref()
+                        .map(|net| kicad_model::ObservedRoutingNet {
+                            net_id: Some(net.net_id.clone()),
+                            code: None,
+                            name: net.name.clone(),
+                        }),
                     via_type: ViaType::Through,
                     observed_revision: routing.observed_revision.clone(),
                 });
@@ -790,6 +819,202 @@ fn validate_routing_position(position: Coordinate) -> Result<(), EngineError> {
         || position.y.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
     {
         return Err(EngineError::InvalidPlan("routing position bounds exceeded"));
+    }
+    Ok(())
+}
+
+pub fn validate_routing_net(
+    net: Option<&kicad_model::ObservedNetIdentity>,
+    board_id: &StableId,
+) -> Result<(), EngineError> {
+    let Some(net) = net else {
+        return Err(EngineError::InvalidPlan("routing net binding is required"));
+    };
+    if net.name.is_empty() || net.net_id != board_net_id(board_id, &net.name) {
+        return Err(EngineError::InvalidPlan("routing net binding is invalid"));
+    }
+    Ok(())
+}
+
+pub fn validate_observed_routing_net(
+    snapshot: &ProjectSnapshot,
+    net: Option<&kicad_model::ObservedNetIdentity>,
+) -> Result<(), EngineError> {
+    let Some(net) = net else {
+        return Err(EngineError::InvalidPlan("routing net binding is required"));
+    };
+    validate_routing_net(
+        Some(net),
+        snapshot
+            .board
+            .document_id
+            .as_ref()
+            .ok_or(EngineError::InvalidPlan(
+                "board identity is required for routing",
+            ))?,
+    )?;
+    if !requested_net_is_observed(snapshot, net) {
+        return Err(EngineError::InvalidPlan(
+            "routing net binding was not observed on the board",
+        ));
+    }
+    Ok(())
+}
+
+fn observed_net_matches(
+    requested: &kicad_model::ObservedNetIdentity,
+    observed: &kicad_model::ObservedRoutingNet,
+) -> bool {
+    !observed.name.is_empty()
+        && observed.name == requested.name
+        && observed.net_id.as_ref() == Some(&requested.net_id)
+}
+
+fn requested_net_is_observed(
+    snapshot: &ProjectSnapshot,
+    requested: &kicad_model::ObservedNetIdentity,
+) -> bool {
+    snapshot
+        .native_footprints
+        .as_ref()
+        .into_iter()
+        .flat_map(|footprints| footprints.placements.iter())
+        .flat_map(|placement| placement.pads.iter())
+        .filter_map(|pad| pad.net.as_ref())
+        .any(|net| net == requested)
+        || snapshot
+            .native_routing
+            .as_ref()
+            .into_iter()
+            .flat_map(|routing| {
+                routing
+                    .tracks
+                    .iter()
+                    .map(|track| &track.net)
+                    .chain(routing.vias.iter().map(|via| &via.net))
+            })
+            .filter_map(Option::as_ref)
+            .any(|net| observed_net_matches(requested, net))
+}
+
+pub fn resolve_routing_endpoint<'a>(
+    snapshot: &'a ProjectSnapshot,
+    endpoint: &RoutingEndpointRef,
+) -> Result<(&'a ObservedFootprintPlacement, &'a ObservedPad), EngineError> {
+    let Some(observed) = &snapshot.native_footprints else {
+        return Err(EngineError::InvalidPlan(
+            "native pad observation is required",
+        ));
+    };
+    let mut matches = observed.placements.iter().flat_map(|placement| {
+        placement
+            .pads
+            .iter()
+            .filter_map(move |pad| (pad.pad_id == endpoint.pad_id).then_some((placement, pad)))
+    });
+    let Some((placement, pad)) = matches.next() else {
+        return Err(EngineError::InvalidPlan(
+            "routing endpoint pad was not observed",
+        ));
+    };
+    if matches.next().is_some() {
+        return Err(EngineError::InvalidPlan(
+            "routing endpoint pad is ambiguous",
+        ));
+    }
+    if placement.placement_id != endpoint.footprint_placement_id
+        || pad.footprint_placement_id != endpoint.footprint_placement_id
+    {
+        return Err(EngineError::InvalidPlan("routing endpoint parent mismatch"));
+    }
+    if pad.pad_id != kicad_model::footprint_pad_id(&placement.placement_id, &pad.source_uuid) {
+        return Err(EngineError::InvalidPlan(
+            "routing endpoint pad identity is invalid",
+        ));
+    }
+    Ok((placement, pad))
+}
+
+pub fn pad_board_position(
+    placement: &ObservedFootprintPlacement,
+    pad: &ObservedPad,
+) -> Result<Coordinate, EngineError> {
+    if placement.position.space != DocumentSpace::Board
+        || placement.position.unit != kicad_model::Unit::Nanometres
+    {
+        return Err(EngineError::InvalidPlan(
+            "footprint position is not board nanometres",
+        ));
+    }
+    let x = i128::from(pad.position.x_nm);
+    let mut y = i128::from(pad.position.y_nm);
+    if placement.side == kicad_model::BoardSide::Back {
+        y = -y;
+    }
+    let angle = (placement.orientation_mdeg.rem_euclid(360_000)) as f64 / 1_000.0;
+    let radians = angle.to_radians();
+    let rotated_x = (x as f64 * radians.cos() - y as f64 * radians.sin()).round() as i128;
+    let rotated_y = (x as f64 * radians.sin() + y as f64 * radians.cos()).round() as i128;
+    let x = i64::try_from(i128::from(placement.position.x) + rotated_x)
+        .map_err(|_| EngineError::InvalidPlan("resolved pad position overflows"))?;
+    let y = i64::try_from(i128::from(placement.position.y) + rotated_y)
+        .map_err(|_| EngineError::InvalidPlan("resolved pad position overflows"))?;
+    Ok(Coordinate {
+        x,
+        y,
+        unit: kicad_model::Unit::Nanometres,
+        space: DocumentSpace::Board,
+    })
+}
+
+pub fn validate_routing_track_binding(
+    snapshot: &ProjectSnapshot,
+    board: &StableId,
+    intent: &StraightTrackIntent,
+) -> Result<(), EngineError> {
+    let Some(start_ref) = &intent.start_pad else {
+        return Err(EngineError::InvalidPlan(
+            "track endpoint binding is required",
+        ));
+    };
+    let Some(end_ref) = &intent.end_pad else {
+        return Err(EngineError::InvalidPlan(
+            "track endpoint binding is required",
+        ));
+    };
+    let Some(requested_net) = &intent.net else {
+        return Err(EngineError::InvalidPlan("track net binding is required"));
+    };
+    if requested_net.name.is_empty()
+        || requested_net.net_id != board_net_id(board, &requested_net.name)
+    {
+        return Err(EngineError::InvalidPlan("track net binding is invalid"));
+    }
+    let (start_placement, start_pad) = resolve_routing_endpoint(snapshot, start_ref)?;
+    let (end_placement, end_pad) = resolve_routing_endpoint(snapshot, end_ref)?;
+    let Some(start_net) = &start_pad.net else {
+        return Err(EngineError::InvalidPlan("start pad net is missing"));
+    };
+    let Some(end_net) = &end_pad.net else {
+        return Err(EngineError::InvalidPlan("end pad net is missing"));
+    };
+    if start_net.name.is_empty()
+        || end_net.name.is_empty()
+        || start_net.net_id != kicad_model::board_net_id(board, &start_net.name)
+        || end_net.net_id != kicad_model::board_net_id(board, &end_net.name)
+        || start_net != end_net
+        || requested_net != start_net
+    {
+        return Err(EngineError::InvalidPlan(
+            "routing pads and net do not match",
+        ));
+    }
+    let start = pad_board_position(start_placement, start_pad)?;
+    let end = pad_board_position(end_placement, end_pad)?;
+    if intent.start != start || intent.end != end {
+        return Err(EngineError::InvalidPlan(
+            "track geometry does not match observed pads",
+        ));
     }
     Ok(())
 }
@@ -913,7 +1138,11 @@ fn validate_graphics(segments: &[BoardGraphicSegment]) -> Result<(), EngineError
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kicad_model::{Board, Schematic, Unit};
+    use kicad_model::{
+        Board, BoardSide, FootprintLibraryIdentifier, ObservedBoardFootprints, ObservedNetIdentity,
+        PadKind, Schematic, Unit, footprint_definition_id, footprint_pad_id,
+        footprint_placement_id,
+    };
     fn id(v: &str) -> StableId {
         StableId::new(v).unwrap()
     }
@@ -934,6 +1163,107 @@ mod tests {
             native_routing: None,
             native_stackup: None,
         }
+    }
+    fn board_coordinate(x: i64, y: i64) -> Coordinate {
+        Coordinate {
+            x,
+            y,
+            unit: Unit::Nanometres,
+            space: DocumentSpace::Board,
+        }
+    }
+    fn observed_routing_snapshot(
+        side: BoardSide,
+    ) -> (
+        ProjectSnapshot,
+        RoutingEndpointRef,
+        RoutingEndpointRef,
+        ObservedNetIdentity,
+    ) {
+        let board_id = id("board");
+        let net = ObservedNetIdentity {
+            net_id: board_net_id(&board_id, "GND"),
+            name: "GND".into(),
+        };
+        let library_identifier = FootprintLibraryIdentifier {
+            nickname: "Resistor_SMD".into(),
+            entry_name: "R_0603_1608Metric".into(),
+        };
+        let placements = [("footprint-a", 100_i64), ("footprint-b", 300_i64)]
+            .into_iter()
+            .map(|(source, x)| {
+                let source_uuid = id(source);
+                let placement_id = footprint_placement_id(&board_id, &source_uuid);
+                let pad_source_uuid = id(&format!("pad-{source}"));
+                let pad = ObservedPad {
+                    pad_id: footprint_pad_id(&placement_id, &pad_source_uuid),
+                    source_uuid: pad_source_uuid,
+                    footprint_placement_id: placement_id.clone(),
+                    number: "1".into(),
+                    kind: PadKind::SurfaceMount,
+                    lock_state: LockState::Unlocked,
+                    position: LocalCoordinateNm { x_nm: 0, y_nm: 50 },
+                    stack_type: PadStackType::Normal,
+                    orientation_mdeg: 0,
+                    layers: vec![BoardLayer::FrontCopper],
+                    copper_shapes: vec![PadCopperShape {
+                        layer: BoardLayer::FrontCopper,
+                        shape: PadShape::Circle,
+                        size: SizeNm {
+                            x_nm: 100,
+                            y_nm: 100,
+                        },
+                        offset: LocalCoordinateNm { x_nm: 0, y_nm: 0 },
+                        corner_rounding_ratio: FiniteRatio::new(0.0).unwrap(),
+                        chamfer_ratio: FiniteRatio::new(0.0).unwrap(),
+                        chamfer_top_left: false,
+                        chamfer_top_right: false,
+                        chamfer_bottom_left: false,
+                        chamfer_bottom_right: false,
+                        trapezoid_delta: LocalCoordinateNm { x_nm: 0, y_nm: 0 },
+                        custom_anchor_shape: None,
+                    }],
+                    drill: None,
+                    net: Some(net.clone()),
+                    observed_revision: digest('0'),
+                };
+                ObservedFootprintPlacement {
+                    placement_id,
+                    source_uuid,
+                    definition_id: footprint_definition_id(&library_identifier),
+                    library_identifier: library_identifier.clone(),
+                    reference: source.into(),
+                    value: "10k".into(),
+                    position: board_coordinate(x, 200),
+                    orientation_mdeg: 0,
+                    side,
+                    lock_state: LockState::Unlocked,
+                    symbol_sheet_path: Vec::new(),
+                    pads: vec![pad],
+                    observed_revision: digest('0'),
+                }
+            })
+            .collect::<Vec<_>>();
+        let native = ObservedBoardFootprints::new(board_id.clone(), placements).unwrap();
+        let start_pad = native.placements[0].pads[0].pad_id.clone();
+        let end_pad = native.placements[1].pads[0].pad_id.clone();
+        let start_placement = footprint_placement_id(&board_id, &id("footprint-a"));
+        let end_placement = footprint_placement_id(&board_id, &id("footprint-b"));
+        let mut snapshot = snapshot();
+        snapshot.board.document_id = Some(board_id.clone());
+        snapshot.native_footprints = Some(native);
+        (
+            snapshot,
+            RoutingEndpointRef {
+                pad_id: start_pad,
+                footprint_placement_id: start_placement,
+            },
+            RoutingEndpointRef {
+                pad_id: end_pad,
+                footprint_placement_id: end_placement,
+            },
+            net,
+        )
     }
     fn symbol(uuid: &str) -> Symbol {
         Symbol {
@@ -1698,7 +2028,72 @@ mod tests {
     }
 
     #[test]
-    fn routing_intents_preview_into_f_cu_and_through_via_native_routing() {
+    fn endpoint_bound_same_net_track_passes_change_plan_validation() {
+        let (snapshot, start_pad, end_pad, net) = observed_routing_snapshot(BoardSide::Front);
+        let intent = StraightTrackIntent::new_endpoint_bound(
+            id("track"),
+            board_coordinate(100, 250),
+            board_coordinate(300, 250),
+            100,
+            start_pad,
+            end_pad,
+            net,
+        )
+        .unwrap();
+        let engine = Engine::new(snapshot, "token");
+        let operation = op(
+            OperationKind::AddStraightTrack {
+                board: id("board"),
+                intent,
+            },
+            "board",
+            "track",
+        );
+        assert!(engine.preview(&plan(&engine, vec![operation])).is_ok());
+    }
+
+    #[test]
+    fn back_side_pad_position_mirrors_local_y_axis() {
+        let (snapshot, start_pad, _, _) = observed_routing_snapshot(BoardSide::Back);
+        let (placement, pad) = resolve_routing_endpoint(&snapshot, &start_pad).unwrap();
+        assert_eq!(
+            pad_board_position(placement, pad).unwrap(),
+            board_coordinate(100, 150)
+        );
+    }
+
+    #[test]
+    fn endpoint_bound_track_rejects_geometry_drift_before_preview() {
+        let (snapshot, start_pad, end_pad, net) = observed_routing_snapshot(BoardSide::Front);
+        let intent = StraightTrackIntent::new_endpoint_bound(
+            id("track"),
+            board_coordinate(100, 251),
+            board_coordinate(300, 250),
+            100,
+            start_pad,
+            end_pad,
+            net,
+        )
+        .unwrap();
+        let engine = Engine::new(snapshot, "token");
+        let operation = op(
+            OperationKind::AddStraightTrack {
+                board: id("board"),
+                intent,
+            },
+            "board",
+            "track",
+        );
+        assert_eq!(
+            engine.preview(&plan(&engine, vec![operation])),
+            Err(EngineError::InvalidPlan(
+                "track geometry does not match observed pads",
+            ))
+        );
+    }
+
+    #[test]
+    fn coordinate_only_routing_is_rejected_before_preview() {
         let engine = Engine::new(snapshot(), "token");
         let coordinate = |x, y| Coordinate {
             x,
@@ -1706,66 +2101,23 @@ mod tests {
             unit: Unit::Nanometres,
             space: DocumentSpace::Board,
         };
-        let track =
+        let intent =
             StraightTrackIntent::new(id("track"), coordinate(0, 0), coordinate(1_000, 2_000), 100)
                 .unwrap();
-        let via = ThroughViaIntent::new(id("via"), coordinate(3_000, 4_000), 600, 300).unwrap();
-        let operations = vec![
-            op(
-                OperationKind::AddStraightTrack {
-                    board: id("board"),
-                    intent: track,
-                },
-                "board",
-                "track",
-            ),
-            op(
-                OperationKind::AddThroughVia {
-                    board: id("board"),
-                    intent: via,
-                },
-                "board",
-                "via",
-            ),
-        ];
-        let preview = engine.preview(&plan(&engine, operations)).unwrap();
-        let routing = preview.after.native_routing.unwrap();
-        assert_eq!(routing.board_id, id("board"));
-        assert_eq!(routing.tracks.len(), 1);
-        assert_eq!(routing.tracks[0].layer, BoardLayer::FrontCopper);
-        assert_eq!(routing.vias.len(), 1);
-        assert_eq!(routing.vias[0].via_type, ViaType::Through);
-        assert_eq!(
-            routing.vias[0].pad_stack.stack_type,
-            PadStackType::FrontInnerBack
+        let operation = op(
+            OperationKind::AddStraightTrack {
+                board: id("board"),
+                intent,
+            },
+            "board",
+            "track",
         );
         assert_eq!(
-            routing.vias[0].pad_stack.layers,
-            vec![
-                BoardLayer::FrontCopper,
-                BoardLayer::InnerCopper(1),
-                BoardLayer::BackCopper,
-            ]
+            engine.preview(&plan(&engine, vec![operation])),
+            Err(EngineError::InvalidPlan(
+                "track endpoint binding is required"
+            ))
         );
-        assert_eq!(
-            routing.vias[0]
-                .pad_stack
-                .copper_shapes
-                .iter()
-                .map(|shape| (shape.layer, shape.size.x_nm, shape.size.y_nm))
-                .collect::<Vec<_>>(),
-            vec![
-                (BoardLayer::FrontCopper, 600, 600),
-                (BoardLayer::InnerCopper(1), 0, 0),
-                (BoardLayer::BackCopper, 600, 600),
-            ]
-        );
-        let drill = routing.vias[0].pad_stack.primary_drill.as_ref().unwrap();
-        assert_eq!(
-            (drill.start_layer, drill.end_layer),
-            (BoardLayer::FrontCopper, BoardLayer::BackCopper)
-        );
-        assert_eq!((drill.size.x_nm, drill.size.y_nm), (300, 300));
     }
 
     #[test]
@@ -1798,7 +2150,9 @@ mod tests {
         second.idempotency_key = "same-second-key".into();
         assert_eq!(
             engine.preview(&plan(&engine, vec![make_track("same", 0), second])),
-            Err(EngineError::TargetAlreadyExists(id("same")))
+            Err(EngineError::InvalidPlan(
+                "track endpoint binding is required"
+            ))
         );
         let oversized = op(
             OperationKind::AddThroughVia {
@@ -1816,7 +2170,9 @@ mod tests {
         );
         assert_eq!(
             engine.preview(&plan(&engine, vec![oversized])),
-            Err(EngineError::InvalidPlan("routing position bounds exceeded"))
+            Err(EngineError::InvalidPlan(
+                "through via net binding is required"
+            ))
         );
         let wrong_board = op(
             OperationKind::AddStraightTrack {

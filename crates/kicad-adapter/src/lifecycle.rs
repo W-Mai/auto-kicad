@@ -304,6 +304,10 @@ impl OwnedPcbnewLauncher {
             .ok_or(LifecycleError::NoOwnedEditor)
     }
 
+    pub fn editor_is_open(&self) -> bool {
+        self.child.is_some()
+    }
+
     pub fn connect_owned(&mut self) -> Result<KiCadClient<NngTransport>, LifecycleError> {
         let editor = self
             .lifecycle
@@ -352,6 +356,12 @@ impl Drop for OwnedPcbnewLauncher {
         if let Some(mut child) = self.child.take() {
             let _ = child.kill();
             let _ = child.wait();
+            if let Some(editor) = self.lifecycle.editor.as_ref() {
+                let _ = self.lifecycle.close_owned(editor.pid);
+            }
+        }
+        if self.lifecycle.shadow.is_some() {
+            let _ = self.lifecycle.cleanup();
         }
     }
 }
@@ -580,9 +590,10 @@ impl DisposablePcbLifecycle for FilesystemDisposablePcbLifecycle {
                 "owned editor must close before cleanup",
             ));
         }
-        let shadow = self.shadow.take().ok_or(LifecycleError::NoShadow)?;
-        fs::remove_dir_all(shadow.root)
+        let shadow = self.shadow.as_ref().ok_or(LifecycleError::NoShadow)?;
+        fs::remove_dir_all(&shadow.root)
             .map_err(|error| LifecycleError::Cleanup(error.to_string()))?;
+        self.shadow = None;
         self.editor = None;
         Ok(())
     }
