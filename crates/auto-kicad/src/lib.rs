@@ -1333,6 +1333,43 @@ fn expected_board_effect(kind: &OperationKind) -> &'static str {
     }
 }
 
+fn shadow_validation_state(state: &ShadowValidationState) -> &'static str {
+    match state {
+        ShadowValidationState::Committed => "committed",
+        ShadowValidationState::Rejected => "rejected",
+        ShadowValidationState::Unknown => "unknown",
+    }
+}
+
+fn validation_evidence_hash(
+    plan_hash: &str,
+    outcome: &ShadowValidationOutcome,
+) -> Result<String, String> {
+    let evidence = json!({
+        "schema_version": CONTRACT_SCHEMA_VERSION,
+        "plan_hash": plan_hash,
+        "shadow_validation": {
+            "state": shadow_validation_state(&outcome.state),
+            "fresh_revision": outcome.fresh_revision,
+            "reopened_revision": outcome.reopened_revision,
+            "reopened": outcome.reopened,
+            "normalized_snapshot_matches": outcome.normalized_snapshot_matches,
+            "baseline": outcome.baseline,
+            "after": outcome.after,
+            "delta": outcome.delta,
+            "source_unchanged": outcome.source_unchanged,
+            "shadow_cleaned": outcome.shadow_cleaned,
+            "reason": outcome.reason,
+        },
+    });
+    let bytes = serde_json::to_vec(&evidence).map_err(|error| error.to_string())?;
+    Ok(digest_bytes(&bytes).to_string())
+}
+
+fn approval_hash(plan_hash: &str, evidence_hash: &str) -> String {
+    digest_text(&["pcb-approval-v1", plan_hash, evidence_hash])
+}
+
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 pub struct PreviewChangeRequest {
     pub plan_id: String,
@@ -1345,6 +1382,7 @@ pub struct CommitChangeRequest {
     pub plan_id: String,
     pub plan_hash: String,
     pub approval_hash: String,
+    pub validation_evidence_hash: String,
     pub request_id: Option<String>,
 }
 
@@ -1472,7 +1510,8 @@ struct StoredChangeSession {
     project_dir: std::path::PathBuf,
     execution_state: StoredExecutionState,
     shadow_validation: Option<ShadowValidationOutcome>,
-    shadow_validation_plan_hash: Option<String>,
+    validation_evidence_hash: Option<String>,
+    approval_hash: Option<String>,
 }
 
 pub trait ShadowValidationService: Send + Sync {
@@ -2433,7 +2472,8 @@ impl Server {
                 project_dir: observation.project_dir,
                 execution_state: StoredExecutionState::Ready,
                 shadow_validation: None,
-                shadow_validation_plan_hash: None,
+                validation_evidence_hash: None,
+                approval_hash: None,
             },
         );
         self.envelope(
@@ -2476,37 +2516,50 @@ impl Server {
                 Ok(preview)
             })
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
-        if let Some(shadow_validation) = &self.shadow_validation {
-            let outcome = shadow_validation.validate(
-                &stored.board_path,
-                &stored.session.plan.operations,
-                Duration::from_secs(30),
-            );
-            let shadow_ok = matches!(outcome.state, ShadowValidationState::Committed);
-            stored.shadow_validation = Some(outcome.clone());
-            stored.shadow_validation_plan_hash = Some(preview.plan_hash.clone());
-            if !shadow_ok {
-                self.sessions
-                    .lock()
-                    .expect("session lock")
-                    .insert(arguments.plan_id.clone(), stored);
-                return Ok(self.envelope_sync(
-                    arguments
-                        .request_id
-                        .unwrap_or_else(|| "req_preview_change".into()),
-                    None,
-                    json!({
-                        "plan_id": arguments.plan_id,
-                        "plan_hash": preview.plan_hash,
-                        "state": match outcome.state {
-                            ShadowValidationState::Rejected => "rejected",
-                            ShadowValidationState::Unknown => "unknown",
-                            ShadowValidationState::Committed => unreachable!("shadow_ok checked above"),
-                        },
-                        "shadow_validation": shadow_validation_data(&outcome),
-                    }),
-                ));
-            }
+        let shadow_validation = self.shadow_validation.as_ref().ok_or_else(|| {
+            ErrorData::invalid_params("shadow validation is required before approval", None)
+        })?;
+        let outcome = shadow_validation.validate(
+            &stored.board_path,
+            &stored.session.plan.operations,
+            Duration::from_secs(30),
+        );
+        let shadow_ok = matches!(outcome.state, ShadowValidationState::Committed);
+        stored.shadow_validation = Some(outcome.clone());
+        if shadow_ok {
+            let evidence_hash = validation_evidence_hash(&preview.plan_hash, &outcome)
+                .map_err(|error| ErrorData::internal_error(error, None))?;
+            stored.approval_hash = Some(approval_hash(&preview.plan_hash, &evidence_hash));
+            stored.validation_evidence_hash = Some(evidence_hash);
+        } else {
+            stored.approval_hash = None;
+            stored.validation_evidence_hash = None;
+        }
+        if !shadow_ok {
+            let validation_evidence_hash = stored.validation_evidence_hash.clone();
+            let approval_hash = stored.approval_hash.clone();
+            self.sessions
+                .lock()
+                .expect("session lock")
+                .insert(arguments.plan_id.clone(), stored);
+            return Ok(self.envelope_sync(
+                arguments
+                    .request_id
+                    .unwrap_or_else(|| "req_preview_change".into()),
+                None,
+                json!({
+                    "plan_id": arguments.plan_id,
+                    "plan_hash": preview.plan_hash,
+                    "validation_evidence_hash": validation_evidence_hash,
+                    "approval_hash": approval_hash,
+                    "state": match outcome.state {
+                        ShadowValidationState::Rejected => "rejected",
+                        ShadowValidationState::Unknown => "unknown",
+                        ShadowValidationState::Committed => unreachable!("shadow_ok checked above"),
+                    },
+                    "shadow_validation": shadow_validation_data(&outcome),
+                }),
+            ));
         }
         engine
             .request_approval(&mut stored.session)
@@ -2533,6 +2586,8 @@ impl Server {
             json!({
                 "plan_id": stored.session.plan.plan_id,
                 "plan_hash": preview.plan_hash,
+                "validation_evidence_hash": stored.validation_evidence_hash,
+                "approval_hash": stored.approval_hash,
                 "before": preview.before,
                 "after": preview.after,
                 "base_revision": stored.session.plan.base_revision,
@@ -2557,21 +2612,29 @@ impl Server {
             .get(&arguments.plan_id)
             .cloned()
             .ok_or_else(|| ErrorData::invalid_params("unknown plan_id", None))?;
-        if stored.session.plan_hash != arguments.plan_hash
-            || arguments.approval_hash != arguments.plan_hash
-        {
+        if stored.session.plan_hash != arguments.plan_hash {
+            return Err(ErrorData::invalid_params("plan hash mismatch", None));
+        }
+        if self.shadow_validation.is_none() {
+            return Err(ErrorData::invalid_params(
+                "shadow validation is required before commit",
+                None,
+            ));
+        }
+        let evidence_matches = stored.validation_evidence_hash.as_deref()
+            == Some(arguments.validation_evidence_hash.as_str());
+        let approval_matches =
+            stored.approval_hash.as_deref() == Some(arguments.approval_hash.as_str());
+        if !evidence_matches || !approval_matches {
             return Err(ErrorData::invalid_params("approval mismatch", None));
         }
-        if self.shadow_validation.is_some()
-            && (stored.shadow_validation_plan_hash.as_deref() != Some(arguments.plan_hash.as_str())
-                || !stored.shadow_validation.as_ref().is_some_and(|outcome| {
-                    matches!(outcome.state, ShadowValidationState::Committed)
-                        && outcome.reopened
-                        && outcome.normalized_snapshot_matches
-                        && outcome.source_unchanged
-                        && outcome.shadow_cleaned
-                }))
-        {
+        if !stored.shadow_validation.as_ref().is_some_and(|outcome| {
+            matches!(outcome.state, ShadowValidationState::Committed)
+                && outcome.reopened
+                && outcome.normalized_snapshot_matches
+                && outcome.source_unchanged
+                && outcome.shadow_cleaned
+        }) {
             return Err(ErrorData::invalid_params(
                 "shadow validation is required before commit",
                 None,
@@ -2595,7 +2658,7 @@ impl Server {
             stored.session.plan.instance_token.clone(),
         );
         engine
-            .approve(&mut stored.session, &arguments.approval_hash)
+            .approve(&mut stored.session, &arguments.plan_hash)
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
 
         let mut sessions = self.sessions.lock().expect("session lock");
@@ -4836,9 +4899,16 @@ mod tests {
 
     #[tokio::test]
     async fn preview_returns_before_and_after_without_mutating_session_snapshot() {
-        let server = Server::with_discovery(Arc::new(FakeDiscovery {
-            write_capability: true,
-        }));
+        let server = Server::with_discovery_and_execution_and_shadow(
+            Arc::new(FakeDiscovery {
+                write_capability: true,
+            }),
+            Arc::new(IpcBoardGraphicsExecutionService),
+            Arc::new(FakeShadowValidation {
+                outcome: shadow_outcome(ShadowValidationState::Committed),
+                calls: Arc::new(AtomicUsize::new(0)),
+            }),
+        );
         let planned = server
             .kicad_plan_change(Parameters(plan_request(
                 project_snapshot(true),
@@ -4889,6 +4959,69 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn missing_shadow_validation_rejects_preview_and_commit_without_execution() {
+        let execution_calls = Arc::new(Mutex::new(0));
+        let server = Server::with_discovery_and_execution(
+            Arc::new(FakeDiscovery {
+                write_capability: true,
+            }),
+            Arc::new(FakeExecution {
+                outcome: BoardGraphicsCommitOutcome::CommittedAndSaved,
+                calls: execution_calls.clone(),
+            }),
+        );
+        let planned = server
+            .kicad_plan_change(Parameters(plan_request(
+                project_snapshot(true),
+                "req_missing_shadow",
+            )))
+            .await
+            .unwrap();
+        let planned = match planned {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("plan call should complete"),
+        };
+        let plan_id = planned["data"]["plan_id"].as_str().unwrap().to_owned();
+        let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
+
+        let preview = server
+            .kicad_preview_change(Parameters(PreviewChangeRequest {
+                plan_id: plan_id.clone(),
+                plan_hash: plan_hash.clone(),
+                request_id: Some("req_missing_shadow_preview".into()),
+            }))
+            .await;
+        let preview_error =
+            preview.expect_err("preview must fail closed without shadow validation");
+        assert!(
+            preview_error
+                .message
+                .contains("shadow validation is required before approval")
+        );
+        assert_ne!(
+            server.sessions.lock().unwrap()[&plan_id].session.state,
+            kicad_engine::SessionState::AwaitingApproval
+        );
+
+        let commit = server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id,
+                plan_hash: plan_hash.clone(),
+                approval_hash: plan_hash,
+                validation_evidence_hash: String::new(),
+                request_id: Some("req_missing_shadow_commit".into()),
+            }))
+            .await;
+        let commit_error = commit.expect_err("commit must fail closed without shadow validation");
+        assert!(
+            commit_error
+                .message
+                .contains("shadow validation is required before commit")
+        );
+        assert_eq!(*execution_calls.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
     async fn commit_requires_preview_and_exact_approval_and_executes_once() {
         let calls = Arc::new(Mutex::new(0));
         let revisions = Arc::new(Mutex::new(Vec::new()));
@@ -4899,11 +5032,15 @@ mod tests {
             operation_batches: operation_batches.clone(),
             outcome: BoardGraphicsCommitOutcome::CommittedAndSaved,
         });
-        let server = Server::with_discovery_and_execution(
+        let server = Server::with_discovery_and_execution_and_shadow(
             Arc::new(FakeDiscovery {
                 write_capability: true,
             }),
             execution,
+            Arc::new(FakeShadowValidation {
+                outcome: shadow_outcome(ShadowValidationState::Committed),
+                calls: Arc::new(AtomicUsize::new(0)),
+            }),
         );
         let planned = server
             .kicad_plan_change(Parameters(plan_request(
@@ -4933,6 +5070,7 @@ mod tests {
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
                 approval_hash: plan_hash.clone(),
+                validation_evidence_hash: String::new(),
                 request_id: Some("req_early".into()),
             }))
             .await;
@@ -4945,12 +5083,24 @@ mod tests {
             }))
             .await
             .unwrap();
-        assert!(matches!(preview, CallToolResponse::Complete(_)));
+        let preview = match preview {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("preview call should complete"),
+        };
+        let approval_hash = preview["data"]["approval_hash"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let validation_evidence_hash = preview["data"]["validation_evidence_hash"]
+            .as_str()
+            .unwrap()
+            .to_owned();
         let wrong = server
             .kicad_commit_change(Parameters(CommitChangeRequest {
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
                 approval_hash: "wrong".into(),
+                validation_evidence_hash: String::new(),
                 request_id: Some("req_wrong".into()),
             }))
             .await;
@@ -4959,7 +5109,8 @@ mod tests {
             .kicad_commit_change(Parameters(CommitChangeRequest {
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
-                approval_hash: plan_hash.clone(),
+                approval_hash: approval_hash.clone(),
+                validation_evidence_hash: validation_evidence_hash.clone(),
                 request_id: Some("req_commit_ok".into()),
             }))
             .await
@@ -4975,7 +5126,8 @@ mod tests {
             .kicad_commit_change(Parameters(CommitChangeRequest {
                 plan_id,
                 plan_hash: plan_hash.clone(),
-                approval_hash: plan_hash,
+                approval_hash,
+                validation_evidence_hash,
                 request_id: Some("req_commit_replay".into()),
             }))
             .await;
@@ -4986,9 +5138,16 @@ mod tests {
     async fn planned_multi_operation_server(
         outcome: BoardGraphicsCommitOutcome,
         request_id: &str,
-    ) -> (Server, String, String, Arc<Mutex<Vec<Vec<StableId>>>>) {
+    ) -> (
+        Server,
+        String,
+        String,
+        String,
+        String,
+        Arc<Mutex<Vec<Vec<StableId>>>>,
+    ) {
         let operation_batches = Arc::new(Mutex::new(Vec::new()));
-        let server = Server::with_discovery_and_execution(
+        let server = Server::with_discovery_and_execution_and_shadow(
             Arc::new(FakeDiscovery {
                 write_capability: true,
             }),
@@ -4997,6 +5156,10 @@ mod tests {
                 revisions: Arc::new(Mutex::new(Vec::new())),
                 operation_batches: operation_batches.clone(),
                 outcome,
+            }),
+            Arc::new(FakeShadowValidation {
+                outcome: shadow_outcome(ShadowValidationState::Committed),
+                calls: Arc::new(AtomicUsize::new(0)),
             }),
         );
         let planned = server
@@ -5022,7 +5185,7 @@ mod tests {
             session.plan_hash = session.plan.hash().unwrap();
             session.plan_hash.clone()
         };
-        server
+        let preview = server
             .kicad_preview_change(Parameters(PreviewChangeRequest {
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
@@ -5030,12 +5193,36 @@ mod tests {
             }))
             .await
             .unwrap();
-        (server, plan_id, plan_hash, operation_batches)
+        let preview = match preview {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("preview call should complete"),
+        };
+        (
+            server,
+            plan_id,
+            plan_hash,
+            preview["data"]["approval_hash"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+            preview["data"]["validation_evidence_hash"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+            operation_batches,
+        )
     }
 
     #[tokio::test]
     async fn commit_executes_every_approved_operation_once_in_order() {
-        let (server, plan_id, plan_hash, operation_batches) = planned_multi_operation_server(
+        let (
+            server,
+            plan_id,
+            plan_hash,
+            approval_hash,
+            validation_evidence_hash,
+            operation_batches,
+        ) = planned_multi_operation_server(
             BoardGraphicsCommitOutcome::CommittedAndSaved,
             "req_multi",
         )
@@ -5045,7 +5232,8 @@ mod tests {
             .kicad_commit_change(Parameters(CommitChangeRequest {
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
-                approval_hash: plan_hash,
+                approval_hash,
+                validation_evidence_hash,
                 request_id: Some("req_multi_commit".into()),
             }))
             .await
@@ -5066,7 +5254,14 @@ mod tests {
 
     #[tokio::test]
     async fn batch_execution_failure_does_not_mark_session_committed() {
-        let (server, plan_id, plan_hash, operation_batches) = planned_multi_operation_server(
+        let (
+            server,
+            plan_id,
+            plan_hash,
+            approval_hash,
+            validation_evidence_hash,
+            operation_batches,
+        ) = planned_multi_operation_server(
             BoardGraphicsCommitOutcome::Rejected {
                 reason: "second operation failed".into(),
             },
@@ -5078,7 +5273,8 @@ mod tests {
             .kicad_commit_change(Parameters(CommitChangeRequest {
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
-                approval_hash: plan_hash,
+                approval_hash,
+                validation_evidence_hash,
                 request_id: Some("req_multi_failure_commit".into()),
             }))
             .await
@@ -5100,7 +5296,7 @@ mod tests {
     #[tokio::test]
     async fn in_flight_claim_rejects_without_calling_executor() {
         let calls = Arc::new(Mutex::new(0));
-        let (server, plan_id, plan_hash) = planned_server(
+        let (server, plan_id, plan_hash, approval_hash, validation_evidence_hash) = planned_server(
             BoardGraphicsCommitOutcome::CommittedAndSaved,
             calls.clone(),
             "req_in_flight",
@@ -5117,7 +5313,8 @@ mod tests {
             .kicad_commit_change(Parameters(CommitChangeRequest {
                 plan_id,
                 plan_hash: plan_hash.clone(),
-                approval_hash: plan_hash,
+                approval_hash,
+                validation_evidence_hash,
                 request_id: Some("req_in_flight_commit".into()),
             }))
             .await;
@@ -5129,12 +5326,16 @@ mod tests {
         outcome: BoardGraphicsCommitOutcome,
         calls: Arc<Mutex<usize>>,
         request_id: &str,
-    ) -> (Server, String, String) {
-        let server = Server::with_discovery_and_execution(
+    ) -> (Server, String, String, String, String) {
+        let server = Server::with_discovery_and_execution_and_shadow(
             Arc::new(FakeDiscovery {
                 write_capability: true,
             }),
             Arc::new(FakeExecution { outcome, calls }),
+            Arc::new(FakeShadowValidation {
+                outcome: shadow_outcome(ShadowValidationState::Committed),
+                calls: Arc::new(AtomicUsize::new(0)),
+            }),
         );
         let result = server
             .kicad_plan_change(Parameters(plan_request(project_snapshot(true), request_id)))
@@ -5146,7 +5347,7 @@ mod tests {
         };
         let plan_id = result["data"]["plan_id"].as_str().unwrap().to_owned();
         let plan_hash = result["data"]["plan_hash"].as_str().unwrap().to_owned();
-        server
+        let preview = server
             .kicad_preview_change(Parameters(PreviewChangeRequest {
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
@@ -5154,13 +5355,29 @@ mod tests {
             }))
             .await
             .unwrap();
-        (server, plan_id, plan_hash)
+        let preview = match preview {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("preview call should complete"),
+        };
+        (
+            server,
+            plan_id,
+            plan_hash,
+            preview["data"]["approval_hash"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+            preview["data"]["validation_evidence_hash"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        )
     }
 
     #[tokio::test]
     async fn rejected_can_retry_but_unknown_and_saved_states_cannot() {
         let rejected_calls = Arc::new(Mutex::new(0));
-        let (server, plan_id, plan_hash) = planned_server(
+        let (server, plan_id, plan_hash, approval_hash, validation_evidence_hash) = planned_server(
             BoardGraphicsCommitOutcome::Rejected {
                 reason: "stale revision".into(),
             },
@@ -5172,7 +5389,8 @@ mod tests {
             .kicad_commit_change(Parameters(CommitChangeRequest {
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
-                approval_hash: plan_hash.clone(),
+                approval_hash: approval_hash.clone(),
+                validation_evidence_hash: validation_evidence_hash.clone(),
                 request_id: Some("req_rejected_commit".into()),
             }))
             .await
@@ -5189,7 +5407,13 @@ mod tests {
         );
 
         let unknown_calls = Arc::new(Mutex::new(0));
-        let (unknown_server, unknown_id, unknown_hash) = planned_server(
+        let (
+            unknown_server,
+            unknown_id,
+            unknown_hash,
+            unknown_approval_hash,
+            unknown_validation_evidence_hash,
+        ) = planned_server(
             BoardGraphicsCommitOutcome::Unknown {
                 reason: "connection lost after write".into(),
             },
@@ -5201,7 +5425,8 @@ mod tests {
             .kicad_commit_change(Parameters(CommitChangeRequest {
                 plan_id: unknown_id.clone(),
                 plan_hash: unknown_hash.clone(),
-                approval_hash: unknown_hash.clone(),
+                approval_hash: unknown_approval_hash.clone(),
+                validation_evidence_hash: unknown_validation_evidence_hash.clone(),
                 request_id: Some("req_unknown_commit".into()),
             }))
             .await
@@ -5214,7 +5439,8 @@ mod tests {
             .kicad_commit_change(Parameters(CommitChangeRequest {
                 plan_id: unknown_id,
                 plan_hash: unknown_hash.clone(),
-                approval_hash: unknown_hash,
+                approval_hash: unknown_approval_hash,
+                validation_evidence_hash: unknown_validation_evidence_hash,
                 request_id: Some("req_unknown_retry".into()),
             }))
             .await;
@@ -5222,7 +5448,13 @@ mod tests {
         assert_eq!(*unknown_calls.lock().unwrap(), 1);
 
         let saved_calls = Arc::new(Mutex::new(0));
-        let (saved_server, saved_id, saved_hash) = planned_server(
+        let (
+            saved_server,
+            saved_id,
+            saved_hash,
+            saved_approval_hash,
+            saved_validation_evidence_hash,
+        ) = planned_server(
             BoardGraphicsCommitOutcome::CommittedButNotSaved {
                 reason: "save failed".into(),
             },
@@ -5234,7 +5466,8 @@ mod tests {
             .kicad_commit_change(Parameters(CommitChangeRequest {
                 plan_id: saved_id.clone(),
                 plan_hash: saved_hash.clone(),
-                approval_hash: saved_hash.clone(),
+                approval_hash: saved_approval_hash,
+                validation_evidence_hash: saved_validation_evidence_hash,
                 request_id: Some("req_save_commit".into()),
             }))
             .await
@@ -5343,6 +5576,7 @@ mod tests {
                     plan_id,
                     plan_hash: plan_hash.clone(),
                     approval_hash: plan_hash,
+                    validation_evidence_hash: String::new(),
                     request_id: Some("req_shadow_rejected_commit".into()),
                 }))
                 .await
@@ -5380,7 +5614,7 @@ mod tests {
         };
         let plan_id = planned["data"]["plan_id"].as_str().unwrap().to_owned();
         let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
-        server
+        let preview = server
             .kicad_preview_change(Parameters(PreviewChangeRequest {
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
@@ -5388,23 +5622,57 @@ mod tests {
             }))
             .await
             .unwrap();
+        let preview = match preview {
+            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+            _ => panic!("preview call should complete"),
+        };
+        let validation_evidence_hash = preview["data"]["validation_evidence_hash"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let derived_approval_hash = preview["data"]["approval_hash"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        assert_ne!(derived_approval_hash, plan_hash);
+        assert_eq!(
+            derived_approval_hash,
+            approval_hash(&plan_hash, &validation_evidence_hash)
+        );
+        assert_eq!(preview["data"]["shadow_validation"]["state"], "committed");
         {
             let sessions = server.sessions.lock().unwrap();
             let stored = &sessions[&plan_id];
             assert_eq!(
-                stored.shadow_validation_plan_hash.as_deref(),
-                Some(plan_hash.as_str())
+                stored.validation_evidence_hash.as_deref(),
+                Some(validation_evidence_hash.as_str())
+            );
+            assert_eq!(
+                stored.approval_hash.as_deref(),
+                Some(derived_approval_hash.as_str())
             );
             assert!(matches!(
                 stored.shadow_validation.as_ref().unwrap().state,
                 ShadowValidationState::Committed
             ));
         }
+        let mismatched_evidence = server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id: plan_id.clone(),
+                plan_hash: plan_hash.clone(),
+                approval_hash: derived_approval_hash.clone(),
+                validation_evidence_hash: "wrong-evidence".into(),
+                request_id: Some("req_shadow_mismatched_evidence".into()),
+            }))
+            .await;
+        assert!(mismatched_evidence.is_err());
+        assert_eq!(*execution_calls.lock().unwrap(), 0);
         let committed = server
             .kicad_commit_change(Parameters(CommitChangeRequest {
                 plan_id,
-                plan_hash: plan_hash.clone(),
-                approval_hash: plan_hash,
+                plan_hash,
+                approval_hash: derived_approval_hash,
+                validation_evidence_hash,
                 request_id: Some("req_shadow_committed_commit".into()),
             }))
             .await
