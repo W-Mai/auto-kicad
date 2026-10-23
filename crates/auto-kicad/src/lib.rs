@@ -12,7 +12,7 @@ use kicad_engine::{
 };
 use kicad_ipc::{
     BoardGraphicLayer as IpcBoardGraphicLayer, BoardGraphicSegment as IpcBoardGraphicSegment,
-    ClientConfig, CreateThroughVia, CreateTrack, DocumentQuery, KiCadClient, NngTransport,
+    ClientConfig, DocumentQuery, KiCadClient, NngTransport,
 };
 use kicad_model::{
     DiscoverySnapshot, ProjectSnapshot, RevisionDigest, SchematicArtifactFile, StableId,
@@ -394,23 +394,52 @@ fn validate_shadow_operation_kinds(operations: &[Operation]) -> Result<(), Strin
     if operations.iter().any(|operation| {
         !matches!(
             operation.kind,
-            OperationKind::AddBoardGraphicSegments { .. } | OperationKind::AddBoardOutline { .. }
+            OperationKind::AddBoardGraphicSegments { .. }
+                | OperationKind::AddBoardOutline { .. }
+                | OperationKind::AddStraightTrack { .. }
+                | OperationKind::AddThroughVia { .. }
         )
     }) {
-        return Err("shadow validation only accepts graphics-only board operations".into());
+        return Err("shadow validation only accepts supported board operations".into());
     }
     Ok(())
 }
 
 fn bind_shadow_operations(
     operations: &[Operation],
-    shadow_board: &StableId,
+    shadow: &ProjectSnapshot,
 ) -> Result<Vec<Operation>, String> {
+    let shadow_board = shadow
+        .board
+        .document_id
+        .as_ref()
+        .ok_or("shadow has no board identity")?;
     validate_shadow_operation_kinds(operations)?;
     let template_board = operations
         .first()
         .and_then(|operation| operation.targets.first())
         .ok_or_else(|| "shadow operation has no source board target".to_owned())?;
+    let source = shadow
+        .in_board_scope(shadow.project_id.clone(), template_board.clone())
+        .map_err(|e| e.to_string())?;
+    kicad_adapter::prepare_bound_native_batch(
+        operations,
+        &source,
+        &source.revision().map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("invalid source operation binding: {e:?}"))?;
+    let rebind_endpoint = |endpoint: &kicad_model::RoutingEndpointRef| -> Result<kicad_model::RoutingEndpointRef, String> {
+        let (placement, pad) = kicad_engine::resolve_routing_endpoint(&source, endpoint).map_err(|e| e.to_string())?;
+        let placement_id = kicad_model::footprint_placement_id(shadow_board, &placement.source_uuid);
+        Ok(kicad_model::RoutingEndpointRef {
+            pad_id: kicad_model::footprint_pad_id(&placement_id, &pad.source_uuid),
+            footprint_placement_id: placement_id,
+        })
+    };
+    let rebind_net = |net: &kicad_model::ObservedNetIdentity| kicad_model::ObservedNetIdentity {
+        net_id: kicad_model::board_net_id(shadow_board, &net.name),
+        name: net.name.clone(),
+    };
     let mut bound = Vec::with_capacity(operations.len());
     for operation in operations {
         if operation.targets.len() != 1 || operation.targets.first() != Some(template_board) {
@@ -418,10 +447,9 @@ fn bind_shadow_operations(
         }
         let operation_board = match &operation.kind {
             OperationKind::AddBoardGraphicSegments { board, .. }
-            | OperationKind::AddBoardOutline { board, .. } => board,
-            OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. } => {
-                return Err("shadow validation only accepts graphics operations".into());
-            }
+            | OperationKind::AddBoardOutline { board, .. }
+            | OperationKind::AddStraightTrack { board, .. }
+            | OperationKind::AddThroughVia { board, .. } => board,
             _ => return Err("shadow validation only accepts supported board operations".into()),
         };
         if operation_board != template_board {
@@ -429,6 +457,28 @@ fn bind_shadow_operations(
         }
         let mut operation = operation.clone();
         operation.kind = match &operation.kind {
+            OperationKind::AddStraightTrack { intent, .. } => {
+                let mut intent = intent.clone();
+                intent.start_pad = intent
+                    .start_pad
+                    .as_ref()
+                    .map(&rebind_endpoint)
+                    .transpose()?;
+                intent.end_pad = intent.end_pad.as_ref().map(&rebind_endpoint).transpose()?;
+                intent.net = intent.net.as_ref().map(&rebind_net);
+                OperationKind::AddStraightTrack {
+                    board: shadow_board.clone(),
+                    intent,
+                }
+            }
+            OperationKind::AddThroughVia { intent, .. } => {
+                let mut intent = intent.clone();
+                intent.net = intent.net.as_ref().map(&rebind_net);
+                OperationKind::AddThroughVia {
+                    board: shadow_board.clone(),
+                    intent,
+                }
+            }
             OperationKind::AddBoardGraphicSegments { segments, .. } => {
                 OperationKind::AddBoardGraphicSegments {
                     board: shadow_board.clone(),
@@ -447,7 +497,7 @@ fn bind_shadow_operations(
                 width_nm: *width_nm,
             },
             _ => {
-                return Err("shadow validation only accepts graphics-only board operations".into());
+                return Err("shadow validation only accepts supported board operations".into());
             }
         };
         operation.targets = vec![shadow_board.clone()];
@@ -469,10 +519,9 @@ fn validate_shadow_operations(
     for operation in operations {
         let operation_board = match &operation.kind {
             OperationKind::AddBoardGraphicSegments { board, .. }
-            | OperationKind::AddBoardOutline { board, .. } => board,
-            OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. } => {
-                return Err("shadow validation only accepts graphics operations".into());
-            }
+            | OperationKind::AddBoardOutline { board, .. }
+            | OperationKind::AddStraightTrack { board, .. }
+            | OperationKind::AddThroughVia { board, .. } => board,
             _ => return Err("shadow validation only accepts supported board operations".into()),
         };
         if operation.targets.len() != 1
@@ -502,7 +551,8 @@ fn shadow_graphic_segments(
             } => {
                 graphics.extend(expand_board_outline(*top_left, *bottom_right, *width_nm));
             }
-            _ => return Err("shadow postcondition contains a non-graphics operation".into()),
+            OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. } => {}
+            _ => return Err("shadow postcondition contains an unsupported operation".into()),
         }
     }
     Ok(graphics)
@@ -553,6 +603,87 @@ fn expected_shadow_snapshot(
     }
     expected.board.graphics.extend(graphics);
     expected.validate().map_err(|error| error.to_string())?;
+    Ok(expected.canonical())
+}
+
+fn expected_native_shadow_snapshot(
+    observation: &LiveBoardObservation,
+    operations: &[Operation],
+    receipts: &kicad_adapter::NativePcbBatchReceipt,
+    routing: kicad_ipc::ObservedBoardRoutingItems,
+) -> Result<ProjectSnapshot, String> {
+    let mut expected = expected_shadow_snapshot(observation, operations, &receipts.graphics)?;
+    let board = expected
+        .board
+        .document_id
+        .as_ref()
+        .ok_or("missing board identity")?
+        .clone();
+    let added = kicad_adapter::board_routing_observation(board.clone(), routing)
+        .map_err(|e| e.to_string())?;
+    let batch = kicad_adapter::prepare_bound_native_batch(
+        operations,
+        &observation.snapshot,
+        &observation.snapshot.revision().map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("invalid expected native batch: {e:?}"))?;
+    if batch.tracks.len() != receipts.tracks.len()
+        || batch.vias.len() != receipts.vias.len()
+        || batch
+            .tracks
+            .iter()
+            .zip(&receipts.tracks)
+            .any(|(track, receipt)| receipt.request_index != 0 || track != &receipt.track)
+        || batch
+            .vias
+            .iter()
+            .zip(&receipts.vias)
+            .any(|(via, receipt)| receipt.request_index != 0 || via != &receipt.via)
+    {
+        return Err("routing receipts differ from the bound plan".into());
+    }
+    if added.tracks.is_empty() && added.vias.is_empty() {
+        return Ok(expected);
+    }
+    let mut existing = expected
+        .native_routing
+        .take()
+        .ok_or("missing baseline routing observation")?;
+    let mut ids = expected
+        .board
+        .graphics
+        .iter()
+        .map(|g| g.graphic_id.clone())
+        .chain(existing.tracks.iter().map(|t| t.source_uuid.clone()))
+        .chain(existing.vias.iter().map(|v| v.source_uuid.clone()))
+        .chain(
+            expected
+                .native_footprints
+                .iter()
+                .flat_map(|f| f.placements.iter())
+                .flat_map(|f| {
+                    std::iter::once(f.source_uuid.clone())
+                        .chain(f.pads.iter().map(|p| p.source_uuid.clone()))
+                }),
+        )
+        .collect::<std::collections::BTreeSet<_>>();
+    for id in added
+        .tracks
+        .iter()
+        .map(|t| &t.source_uuid)
+        .chain(added.vias.iter().map(|v| &v.source_uuid))
+    {
+        if !ids.insert(id.clone()) {
+            return Err("routing receipt reused an existing identity".into());
+        }
+    }
+    existing.tracks.extend(added.tracks);
+    existing.vias.extend(added.vias);
+    expected.native_routing = Some(
+        kicad_model::ObservedBoardRouting::new(board, existing.tracks, existing.vias)
+            .map_err(|e| e.to_string())?,
+    );
+    expected.validate().map_err(|e| e.to_string())?;
     Ok(expected.canonical())
 }
 
@@ -734,8 +865,8 @@ fn validate_disposable_shadow_bound(
             ),
         );
     }
-    let shadow_board = match observation.snapshot.board.document_id.as_ref() {
-        Some(board) => board,
+    match observation.snapshot.board.document_id.as_ref() {
+        Some(_) => {}
         None => {
             return cleanup_shadow(
                 &mut launcher,
@@ -745,7 +876,7 @@ fn validate_disposable_shadow_bound(
             );
         }
     };
-    let bound_operations = match bind_shadow_operations(operations, shadow_board) {
+    let bound_operations = match bind_shadow_operations(operations, &observation.snapshot) {
         Ok(operations) => operations,
         Err(reason) => {
             return cleanup_shadow(
@@ -792,26 +923,29 @@ fn validate_disposable_shadow_bound(
             );
         }
     };
-    let graphics = match shadow_graphic_segments(&bound_operations) {
-        Ok(graphics) => graphics.iter().map(native_graphic).collect::<Vec<_>>(),
+    let batch = match kicad_adapter::prepare_bound_native_batch(
+        &bound_operations,
+        &observation.snapshot,
+        &expected_revision,
+    ) {
+        Ok(batch) => batch,
         Err(reason) => {
             return cleanup_shadow(
                 &mut launcher,
                 source_board,
                 &source_before,
-                ShadowValidationOutcome::rejected(reason),
+                ShadowValidationOutcome::rejected(format!("invalid shadow batch: {reason:?}")),
             );
         }
     };
     let mutation = BoardGraphicsExecutor::default().execute_native_batch(
         &mut client,
         &observation.board_filename,
-        &graphics,
-        &[],
-        &[],
+        &batch.graphics,
+        &batch.tracks,
+        &batch.vias,
         "auto-kicad disposable shadow validation",
     );
-    drop(client);
     let receipt = match mutation {
         Ok(receipt) => receipt,
         Err(mutation) => {
@@ -830,6 +964,22 @@ fn validate_disposable_shadow_bound(
             return cleanup_shadow(&mut launcher, source_board, &source_before, outcome);
         }
     };
+    let routing = match kicad_adapter::read_verified_native_routing(
+        &mut client,
+        &observation.board_filename,
+        &receipt,
+    ) {
+        Ok(routing) => routing,
+        Err(error) => {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::unknown(error),
+            );
+        }
+    };
+    drop(client);
     if let Err(error) = launcher.reload_owned() {
         return cleanup_shadow(
             &mut launcher,
@@ -861,7 +1011,7 @@ fn validate_disposable_shadow_bound(
         }
     };
     let expected_snapshot =
-        match expected_shadow_snapshot(&observation, &bound_operations, &receipt.graphics) {
+        match expected_native_shadow_snapshot(&observation, &bound_operations, &receipt, routing) {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 return cleanup_shadow(
@@ -1850,113 +2000,13 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
                 reason: "live identity or revision is stale".into(),
             };
         }
-        let mut graphics = Vec::new();
-        let mut tracks = Vec::new();
-        let mut vias = Vec::new();
-        for operation in operations {
-            match &operation.kind {
-                OperationKind::AddBoardGraphicSegments { segments, .. } => {
-                    graphics.extend(segments.iter().map(|segment| IpcBoardGraphicSegment {
-                        start_x_nm: segment.start.x,
-                        start_y_nm: segment.start.y,
-                        end_x_nm: segment.end.x,
-                        end_y_nm: segment.end.y,
-                        width_nm: segment.width_nm,
-                        layer: match segment.layer {
-                            kicad_model::BoardGraphicLayer::DwgsUser => {
-                                IpcBoardGraphicLayer::DwgsUser
-                            }
-                            kicad_model::BoardGraphicLayer::EdgeCuts => {
-                                IpcBoardGraphicLayer::EdgeCuts
-                            }
-                        },
-                    }));
-                }
-                OperationKind::AddBoardOutline {
-                    top_left,
-                    bottom_right,
-                    width_nm,
-                    ..
-                } => {
-                    graphics.extend(
-                        expand_board_outline(*top_left, *bottom_right, *width_nm)
-                            .into_iter()
-                            .map(|segment| IpcBoardGraphicSegment {
-                                start_x_nm: segment.start.x,
-                                start_y_nm: segment.start.y,
-                                end_x_nm: segment.end.x,
-                                end_y_nm: segment.end.y,
-                                width_nm: segment.width_nm,
-                                layer: match segment.layer {
-                                    kicad_model::BoardGraphicLayer::DwgsUser => {
-                                        IpcBoardGraphicLayer::DwgsUser
-                                    }
-                                    kicad_model::BoardGraphicLayer::EdgeCuts => {
-                                        IpcBoardGraphicLayer::EdgeCuts
-                                    }
-                                },
-                            }),
-                    );
-                }
-                OperationKind::AddStraightTrack { intent, .. } => {
-                    tracks.push(CreateTrack {
-                        start_x_nm: intent.start.x,
-                        start_y_nm: intent.start.y,
-                        end_x_nm: intent.end.x,
-                        end_y_nm: intent.end.y,
-                        width_nm: intent.width_nm,
-                        net: intent.net.as_ref().map(|net| kicad_ipc::CreateNetIdentity {
-                            name: net.name.clone(),
-                        }),
-                    });
-                }
-                OperationKind::AddThroughVia { intent, .. } => {
-                    vias.push(CreateThroughVia {
-                        position_x_nm: intent.position.x,
-                        position_y_nm: intent.position.y,
-                        pad_diameter_nm: intent.size_nm,
-                        drill_diameter_nm: intent.drill_nm,
-                        net: intent.net.as_ref().map(|net| kicad_ipc::CreateNetIdentity {
-                            name: net.name.clone(),
-                        }),
-                    });
-                }
-                _ => {
-                    return BoardGraphicsCommitOutcome::Rejected {
-                        reason: "operation kind is not supported by the PCB execution service"
-                            .into(),
-                    };
-                }
-            }
-        }
-        let has_routing = operations.iter().any(|operation| {
-            matches!(
-                operation.kind,
-                OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. }
-            )
-        });
-        let all_routing = operations.iter().all(|operation| {
-            matches!(
-                operation.kind,
-                OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. }
-            )
-        });
-        if has_routing && !all_routing {
-            return BoardGraphicsCommitOutcome::Rejected {
-                reason: "routing and graphics operations cannot share a transaction".into(),
-            };
-        }
         BoardGraphicsExecutor::default().execute_bound_batch(
             &mut client,
             operations,
             &observation.snapshot,
             &revision,
             board_filename,
-            if all_routing {
-                "auto-kicad MCP approved board routing change"
-            } else {
-                "auto-kicad MCP approved board graphics change"
-            },
+            "auto-kicad MCP approved board change",
         )
     }
 }
@@ -4164,7 +4214,17 @@ mod tests {
         let original_board = observation.snapshot.board.document_id.clone().unwrap();
         let shadow_board = StableId::new("shadow-board").unwrap();
         let original = shadow_graphics_operation(original_board);
-        let bound = bind_shadow_operations(std::slice::from_ref(&original), &shadow_board).unwrap();
+        let bound = bind_shadow_operations(
+            std::slice::from_ref(&original),
+            &observation
+                .snapshot
+                .in_board_scope(
+                    observation.snapshot.project_id.clone(),
+                    shadow_board.clone(),
+                )
+                .unwrap(),
+        )
+        .unwrap();
         assert_eq!(bound.len(), 1);
         assert_eq!(bound[0].targets, vec![shadow_board.clone()]);
         assert!(validate_shadow_operations(&observation, std::slice::from_ref(&original)).is_ok());
@@ -4172,7 +4232,7 @@ mod tests {
     }
 
     #[test]
-    fn shadow_admission_rejects_routing_before_any_shadow_side_effect() {
+    fn shadow_binding_rejects_unbound_routing_before_any_mutation() {
         let board = StableId::new("board").unwrap();
         let intent = StraightTrackIntent::new(
             StableId::new("track").unwrap(),
@@ -4204,8 +4264,142 @@ mod tests {
             idempotency_key: "routing-operation".into(),
             source_run_id: "shadow-run".into(),
         };
-        let error = validate_shadow_operation_kinds(std::slice::from_ref(&operation)).unwrap_err();
-        assert!(error.contains("graphics-only"));
+        assert!(validate_shadow_operation_kinds(std::slice::from_ref(&operation)).is_ok());
+        assert!(
+            bind_shadow_operations(&[operation], &fresh_shadow_observation().snapshot).is_err()
+        );
+    }
+
+    #[test]
+    fn routing_shadow_rebinds_endpoints_and_preserves_native_state_in_mixed_batches() {
+        let mut observation = fresh_shadow_observation();
+        let board = observation.snapshot.board.document_id.clone().unwrap();
+        let mut placements = observation
+            .snapshot
+            .native_footprints
+            .take()
+            .unwrap()
+            .placements;
+        placements[1].position.x += 10_000_000;
+        observation.snapshot.native_footprints =
+            Some(ObservedBoardFootprints::new(board.clone(), placements).unwrap());
+        let placements = &observation
+            .snapshot
+            .native_footprints
+            .as_ref()
+            .unwrap()
+            .placements;
+        let endpoint = |index: usize| kicad_model::RoutingEndpointRef {
+            pad_id: placements[index].pads[0].pad_id.clone(),
+            footprint_placement_id: placements[index].placement_id.clone(),
+        };
+        let intent = StraightTrackIntent::new_endpoint_bound(
+            StableId::new("planned-track").unwrap(),
+            kicad_engine::pad_board_position(&placements[0], &placements[0].pads[0]).unwrap(),
+            kicad_engine::pad_board_position(&placements[1], &placements[1].pads[0]).unwrap(),
+            200_000,
+            endpoint(0),
+            endpoint(1),
+            placements[0].pads[0].net.clone().unwrap(),
+        )
+        .unwrap();
+        let mut track = shadow_graphics_operation(board.clone());
+        track.kind = OperationKind::AddStraightTrack {
+            board: board.clone(),
+            intent,
+        };
+        let operations = vec![shadow_graphics_operation(board.clone()), track];
+        let shadow_board = StableId::new("shadow-board").unwrap();
+        let shadow = observation
+            .snapshot
+            .in_board_scope(
+                StableId::new("shadow-project").unwrap(),
+                shadow_board.clone(),
+            )
+            .unwrap();
+        let bound = bind_shadow_operations(&operations, &shadow).unwrap();
+        let prepared =
+            kicad_adapter::prepare_bound_native_batch(&bound, &shadow, &shadow.revision().unwrap())
+                .unwrap();
+        assert_eq!(prepared.graphics.len(), 1);
+        assert_eq!(prepared.tracks.len(), 1);
+        let OperationKind::AddStraightTrack { intent, .. } = &bound[1].kind else {
+            panic!("expected track")
+        };
+        assert_eq!(
+            intent.net.as_ref().unwrap().net_id,
+            kicad_model::board_net_id(&shadow_board, "GND")
+        );
+        let mut invalid = operations.clone();
+        let OperationKind::AddStraightTrack { intent, .. } = &mut invalid[1].kind else {
+            unreachable!()
+        };
+        intent.start_pad.as_mut().unwrap().footprint_placement_id =
+            StableId::new("wrong-parent").unwrap();
+        assert!(bind_shadow_operations(&invalid, &shadow).is_err());
+
+        let batch = kicad_adapter::prepare_bound_native_batch(
+            &operations,
+            &observation.snapshot,
+            &observation.snapshot.revision().unwrap(),
+        )
+        .unwrap();
+        let track = batch.tracks[0].clone();
+        let receipts = kicad_adapter::NativePcbBatchReceipt {
+            graphics: vec![kicad_ipc::CreatedBoardGraphicReceipt {
+                request_index: 0,
+                graphic_id: "created-graphic".into(),
+                lock_state: kicad_ipc::ObservedLockState::Unlocked,
+                segment: batch.graphics[0].clone(),
+            }],
+            tracks: vec![kicad_ipc::CreatedTrackReceipt {
+                request_index: 0,
+                source_uuid: "created-track".into(),
+                lock_state: kicad_ipc::ObservedLockState::Unlocked,
+                track: track.clone(),
+            }],
+            vias: vec![],
+        };
+        let routing = kicad_ipc::ObservedBoardRoutingItems {
+            tracks: vec![kicad_ipc::ObservedTrack {
+                source_uuid: "created-track".into(),
+                geometry: kicad_ipc::ObservedTrackGeometry::Segment {
+                    start: kicad_ipc::ObservedRoutingPoint {
+                        x_nm: track.start_x_nm,
+                        y_nm: track.start_y_nm,
+                    },
+                    end: kicad_ipc::ObservedRoutingPoint {
+                        x_nm: track.end_x_nm,
+                        y_nm: track.end_y_nm,
+                    },
+                },
+                width_nm: track.width_nm,
+                layer: kicad_ipc::ObservedBoardLayer::FrontCopper,
+                lock_state: kicad_ipc::ObservedLockState::Unlocked,
+                net: Some(kicad_ipc::ObservedRoutingNet {
+                    code: Some(1),
+                    name: "GND".into(),
+                }),
+            }],
+            vias: vec![],
+        };
+        let expected =
+            expected_native_shadow_snapshot(&observation, &operations, &receipts, routing).unwrap();
+        assert_eq!(
+            expected.native_footprints,
+            observation.snapshot.native_footprints
+        );
+        assert_eq!(expected.native_stackup, observation.snapshot.native_stackup);
+        assert_eq!(
+            expected.native_routing.as_ref().unwrap().tracks[0]
+                .source_uuid
+                .as_str(),
+            "created-track"
+        );
+        assert_ne!(
+            expected.revision().unwrap(),
+            observation.snapshot.revision().unwrap()
+        );
     }
 
     #[test]

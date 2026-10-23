@@ -1421,6 +1421,139 @@ pub struct NativePcbBatchReceipt {
     pub vias: Vec<CreatedThroughViaReceipt>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NativePcbBatch {
+    pub graphics: Vec<IpcBoardGraphicSegment>,
+    pub tracks: Vec<CreateTrack>,
+    pub vias: Vec<CreateThroughVia>,
+}
+
+pub fn prepare_bound_native_batch(
+    operations: &[Operation],
+    snapshot: &ProjectSnapshot,
+    expected_revision: &RevisionDigest,
+) -> Result<NativePcbBatch, BoardGraphicsCommitOutcome> {
+    let reject = |reason: &str| BoardGraphicsCommitOutcome::Rejected {
+        reason: reason.into(),
+    };
+    if snapshot.revision().ok().as_ref() != Some(expected_revision) {
+        return Err(reject("board observation revision is stale"));
+    }
+    let board = snapshot
+        .board
+        .document_id
+        .as_ref()
+        .ok_or_else(|| reject("board identity is missing"))?;
+    if operations.is_empty() {
+        return Err(reject("operation batch is empty"));
+    }
+    for operation in operations {
+        if operation.targets.as_slice() != [board.clone()] {
+            return Err(reject("operation target differs from observed board"));
+        }
+        let operation_board = match &operation.kind {
+            OperationKind::AddStraightTrack { board, intent } => {
+                intent.validate().map_err(|e| reject(&e.to_string()))?;
+                validate_routing_track_binding(snapshot, board, intent)
+                    .map_err(|e| reject(&e.to_string()))?;
+                board
+            }
+            OperationKind::AddThroughVia { board, intent } => {
+                intent.validate().map_err(|e| reject(&e.to_string()))?;
+                validate_observed_routing_net(snapshot, intent.net.as_ref())
+                    .map_err(|e| reject(&e.to_string()))?;
+                board
+            }
+            OperationKind::AddBoardGraphicSegments { board, .. }
+            | OperationKind::AddBoardOutline { board, .. } => board,
+            _ => return Err(reject("unsupported native board operation")),
+        };
+        if operation_board != board {
+            return Err(reject("operation board differs from observation"));
+        }
+    }
+    let mut graphics = Vec::new();
+    let mut tracks = Vec::new();
+    let mut vias = Vec::new();
+    for operation in operations {
+        match &operation.kind {
+            OperationKind::AddBoardGraphicSegments { segments, .. } => {
+                graphics.extend(segments.iter().map(|segment| IpcBoardGraphicSegment {
+                    start_x_nm: segment.start.x,
+                    start_y_nm: segment.start.y,
+                    end_x_nm: segment.end.x,
+                    end_y_nm: segment.end.y,
+                    width_nm: segment.width_nm,
+                    layer: match segment.layer {
+                        kicad_model::BoardGraphicLayer::DwgsUser => IpcBoardGraphicLayer::DwgsUser,
+                        kicad_model::BoardGraphicLayer::EdgeCuts => IpcBoardGraphicLayer::EdgeCuts,
+                    },
+                }));
+            }
+            OperationKind::AddBoardOutline {
+                top_left,
+                bottom_right,
+                width_nm,
+                ..
+            } => {
+                graphics.extend(
+                    expand_board_outline(*top_left, *bottom_right, *width_nm)
+                        .into_iter()
+                        .map(|segment| IpcBoardGraphicSegment {
+                            start_x_nm: segment.start.x,
+                            start_y_nm: segment.start.y,
+                            end_x_nm: segment.end.x,
+                            end_y_nm: segment.end.y,
+                            width_nm: segment.width_nm,
+                            layer: match segment.layer {
+                                kicad_model::BoardGraphicLayer::DwgsUser => {
+                                    IpcBoardGraphicLayer::DwgsUser
+                                }
+                                kicad_model::BoardGraphicLayer::EdgeCuts => {
+                                    IpcBoardGraphicLayer::EdgeCuts
+                                }
+                            },
+                        }),
+                );
+            }
+            OperationKind::AddStraightTrack { intent, .. } => {
+                tracks.push(CreateTrack {
+                    start_x_nm: intent.start.x,
+                    start_y_nm: intent.start.y,
+                    end_x_nm: intent.end.x,
+                    end_y_nm: intent.end.y,
+                    width_nm: intent.width_nm,
+                    net: intent.net.as_ref().map(|net| CreateNetIdentity {
+                        name: net.name.clone(),
+                    }),
+                });
+            }
+            OperationKind::AddThroughVia { intent, .. } => {
+                vias.push(CreateThroughVia {
+                    position_x_nm: intent.position.x,
+                    position_y_nm: intent.position.y,
+                    pad_diameter_nm: intent.size_nm,
+                    drill_diameter_nm: intent.drill_nm,
+                    net: intent.net.as_ref().map(|net| CreateNetIdentity {
+                        name: net.name.clone(),
+                    }),
+                });
+            }
+            _ => {
+                return Err(BoardGraphicsCommitOutcome::Rejected {
+                    reason: "operation kind is not supported by the PCB execution service".into(),
+                });
+            }
+        }
+    }
+
+    Ok(NativePcbBatch {
+        graphics,
+        tracks,
+        vias,
+    })
+}
+
 impl<T: KiCadTransport> BoardGraphicsIpc for KiCadClient<T> {
     fn begin_commit(&mut self) -> Result<String, String> {
         KiCadClient::begin_commit(self)
@@ -1707,63 +1840,20 @@ impl BoardGraphicsExecutor {
         board_filename: &str,
         message: &str,
     ) -> BoardGraphicsCommitOutcome {
-        if snapshot.revision().ok().as_ref() != Some(expected_revision) {
-            return BoardGraphicsCommitOutcome::Rejected {
-                reason: "routing observation revision is stale".into(),
-            };
-        }
-        let has_routing = operations.iter().any(|operation| {
-            matches!(
-                operation.kind,
-                OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. }
-            )
-        });
-        let all_routing = operations.iter().all(|operation| {
-            matches!(
-                operation.kind,
-                OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. }
-            )
-        });
-        if has_routing && !all_routing {
-            return BoardGraphicsCommitOutcome::Rejected {
-                reason: "routing and graphics operations cannot share a transaction".into(),
-            };
-        }
-        let Some(observed_board_id) = snapshot.board.document_id.as_ref() else {
-            return BoardGraphicsCommitOutcome::Rejected {
-                reason: "board identity is missing from observation".into(),
-            };
+        let batch = match prepare_bound_native_batch(operations, snapshot, expected_revision) {
+            Ok(batch) => batch,
+            Err(outcome) => return outcome,
         };
-        if operations.iter().any(|operation| match &operation.kind {
-            OperationKind::AddStraightTrack { board, intent } => {
-                board != observed_board_id
-                    || validate_routing_track_binding(snapshot, board, intent).is_err()
-            }
-            OperationKind::AddThroughVia { board, intent } => {
-                board != observed_board_id
-                    || validate_observed_routing_net(snapshot, intent.net.as_ref()).is_err()
-            }
-            OperationKind::AddBoardGraphicSegments { board, .. }
-            | OperationKind::AddBoardOutline { board, .. } => board != observed_board_id,
-            _ => false,
-        }) {
-            return BoardGraphicsCommitOutcome::Rejected {
-                reason: if has_routing {
-                    "routing endpoint or net binding is stale or mismatched"
-                } else {
-                    "graphics board identity does not match observation"
-                }
-                .into(),
-            };
-        }
-        let kinds = operations
-            .iter()
-            .map(|operation| &operation.kind)
-            .collect::<Vec<_>>();
-        if all_routing {
-            self.execute_routing(ipc, &kinds, board_filename, message)
-        } else {
-            self.execute_kinds(ipc, &kinds, board_filename, message)
+        match self.execute_native_batch(
+            ipc,
+            board_filename,
+            &batch.graphics,
+            &batch.tracks,
+            &batch.vias,
+            message,
+        ) {
+            Ok(_) => BoardGraphicsCommitOutcome::CommittedAndSaved,
+            Err(outcome) => outcome,
         }
     }
 
@@ -2195,17 +2285,6 @@ pub fn verify_native_pcb_batch<I: BoardGraphicsIpc>(
             observed_graphics.extend(ipc.read_board_graphics_by_id(board_filename, &ids, layer)?);
         }
     }
-    let routing_ids = receipt
-        .tracks
-        .iter()
-        .map(|track| track.source_uuid.clone())
-        .chain(receipt.vias.iter().map(|via| via.source_uuid.clone()))
-        .collect::<Vec<_>>();
-    let observed_routing = if routing_ids.is_empty() {
-        IpcBoardRoutingItems::default()
-    } else {
-        ipc.read_board_routing_by_id(board_filename, &routing_ids)?
-    };
     let mut matched = BTreeSet::new();
     for expected in &receipt.graphics {
         let mut candidates = observed_graphics
@@ -2230,6 +2309,30 @@ pub fn verify_native_pcb_batch<I: BoardGraphicsIpc>(
             ));
         }
     }
+    read_verified_native_routing(ipc, board_filename, receipt).map(|_| ())
+}
+
+pub fn read_verified_native_routing<I: BoardGraphicsIpc>(
+    ipc: &mut I,
+    board_filename: &str,
+    receipt: &NativePcbBatchReceipt,
+) -> Result<IpcBoardRoutingItems, String> {
+    let routing_ids = receipt
+        .tracks
+        .iter()
+        .map(|track| track.source_uuid.clone())
+        .chain(receipt.vias.iter().map(|via| via.source_uuid.clone()))
+        .collect::<Vec<_>>();
+    let observed_routing = if routing_ids.is_empty() {
+        IpcBoardRoutingItems::default()
+    } else {
+        ipc.read_board_routing_by_id(board_filename, &routing_ids)?
+    };
+    if observed_routing.tracks.len() != receipt.tracks.len()
+        || observed_routing.vias.len() != receipt.vias.len()
+    {
+        return Err("routing readback count differs from creation receipts".into());
+    }
     let mut matched = BTreeSet::new();
     for expected in &receipt.tracks {
         let mut candidates = observed_routing
@@ -2252,7 +2355,6 @@ pub fn verify_native_pcb_batch<I: BoardGraphicsIpc>(
             ));
         }
     }
-    let mut matched = BTreeSet::new();
     for expected in &receipt.vias {
         let mut candidates = observed_routing
             .vias
@@ -2268,7 +2370,7 @@ pub fn verify_native_pcb_batch<I: BoardGraphicsIpc>(
             return Err(format!("saved via {} does not match", expected.source_uuid));
         }
     }
-    Ok(())
+    Ok(observed_routing)
 }
 
 fn legacy_track_receipt_matches(receipt: &CreateTrack, requested: &CreateTrack) -> bool {
@@ -2299,11 +2401,14 @@ fn observed_track_matches(
         receipt.track.end_x_nm,
         receipt.track.end_y_nm,
     );
-    let net_matches = expected_net.is_none_or(|expected| {
+    let expected_name = expected_net
+        .map(|net| net.name.as_str())
+        .or_else(|| receipt.track.net.as_ref().map(|net| net.name.as_str()));
+    let net_matches = expected_name.is_none_or(|expected| {
         observed
             .net
             .as_ref()
-            .is_some_and(|actual| actual.name == expected.name && !actual.name.is_empty())
+            .is_some_and(|actual| actual.name == expected && !actual.name.is_empty())
     });
     normalized_track_geometry(start.x_nm, start.y_nm, end.x_nm, end.y_nm) == requested
         && observed.width_nm == receipt.track.width_nm
@@ -2370,11 +2475,14 @@ fn observed_via_matches(
     let Some(drill) = observed.pad_stack.primary_drill.as_ref() else {
         return false;
     };
-    let net_matches = expected_net.is_none_or(|expected| {
+    let expected_name = expected_net
+        .map(|net| net.name.as_str())
+        .or_else(|| receipt.via.net.as_ref().map(|net| net.name.as_str()));
+    let net_matches = expected_name.is_none_or(|expected| {
         observed
             .net
             .as_ref()
-            .is_some_and(|actual| actual.name == expected.name && !actual.name.is_empty())
+            .is_some_and(|actual| actual.name == expected && !actual.name.is_empty())
     });
     observed.position.x_nm == via.position_x_nm
         && observed.position.y_nm == via.position_y_nm
@@ -4581,6 +4689,62 @@ mod tests {
     }
 
     #[test]
+    fn routing_readback_rejects_changed_networks_with_server_assigned_ids() {
+        let receipt = CreatedTrackReceipt {
+            request_index: 0,
+            source_uuid: "server-track".into(),
+            lock_state: IpcLockState::Unlocked,
+            track: CreateTrack {
+                start_x_nm: 1,
+                start_y_nm: 2,
+                end_x_nm: 3,
+                end_y_nm: 4,
+                width_nm: 100,
+                net: Some(CreateNetIdentity { name: "GND".into() }),
+            },
+        };
+        let mut track = IpcTrack {
+            source_uuid: "server-track".into(),
+            geometry: IpcTrackGeometry::Segment {
+                start: kicad_ipc::ObservedRoutingPoint { x_nm: 1, y_nm: 2 },
+                end: kicad_ipc::ObservedRoutingPoint { x_nm: 3, y_nm: 4 },
+            },
+            width_nm: 100,
+            layer: IpcBoardLayer::FrontCopper,
+            lock_state: IpcLockState::Unlocked,
+            net: Some(kicad_ipc::ObservedRoutingNet {
+                code: Some(1),
+                name: "GND".into(),
+            }),
+        };
+        assert!(observed_track_matches(&track, &receipt, None));
+        track.net.as_mut().unwrap().name = "VCC".into();
+        assert!(!observed_track_matches(&track, &receipt, None));
+        track.net = None;
+        assert!(!observed_track_matches(&track, &receipt, None));
+        let via_receipt = CreatedThroughViaReceipt {
+            request_index: 0,
+            source_uuid: "server-via".into(),
+            lock_state: IpcLockState::Unlocked,
+            via: CreateThroughVia {
+                position_x_nm: 5,
+                position_y_nm: 6,
+                pad_diameter_nm: 200,
+                drill_diameter_nm: 100,
+                net: Some(CreateNetIdentity { name: "GND".into() }),
+            },
+        };
+        let mut via = observed_via_for_test("server-via");
+        via.net = Some(kicad_ipc::ObservedRoutingNet {
+            code: Some(1),
+            name: "GND".into(),
+        });
+        assert!(observed_via_matches(&via, &via_receipt, None));
+        via.net.as_mut().unwrap().name = "VCC".into();
+        assert!(!observed_via_matches(&via, &via_receipt, None));
+    }
+
+    #[test]
     fn bound_batch_preserves_graphics_only_execution_path() {
         let board_id = StableId::new("board").unwrap();
         let snapshot = ProjectSnapshot {
@@ -4602,7 +4766,7 @@ mod tests {
                 board: board_id,
                 segments: vec![graphic()],
             },
-            targets: Vec::new(),
+            targets: vec![snapshot.board.document_id.clone().unwrap()],
             preconditions: Vec::new(),
             expected_effects: Vec::new(),
             risk_class: kicad_engine::RiskClass::Low,
@@ -4627,7 +4791,7 @@ mod tests {
                 "create:board.kicad_pcb",
                 "commit:c1",
                 "save:board.kicad_pcb",
-                "read:board.kicad_pcb",
+                "read-by-id:board.kicad_pcb",
             ]
         );
     }
@@ -4651,7 +4815,7 @@ mod tests {
         let operation = Operation {
             operation_id: StableId::new("op-track").unwrap(),
             kind: track_operation_for_test(),
-            targets: Vec::new(),
+            targets: vec![snapshot.board.document_id.clone().unwrap()],
             preconditions: Vec::new(),
             expected_effects: Vec::new(),
             risk_class: kicad_engine::RiskClass::Low,
@@ -4671,7 +4835,7 @@ mod tests {
         assert!(matches!(
             outcome,
             BoardGraphicsCommitOutcome::Rejected { reason }
-                if reason.contains("endpoint or net binding")
+                if reason.contains("binding is required") || reason.contains("was not observed")
         ));
         assert!(ipc.calls.is_empty());
     }
@@ -4714,7 +4878,7 @@ mod tests {
                 )
                 .unwrap(),
             },
-            targets: Vec::new(),
+            targets: vec![snapshot.board.document_id.clone().unwrap()],
             preconditions: Vec::new(),
             expected_effects: Vec::new(),
             risk_class: kicad_engine::RiskClass::Low,
@@ -4775,7 +4939,7 @@ mod tests {
         let operation = Operation {
             operation_id: StableId::new("op-via").unwrap(),
             kind: via_operation_for_test(),
-            targets: Vec::new(),
+            targets: vec![snapshot.board.document_id.clone().unwrap()],
             preconditions: Vec::new(),
             expected_effects: Vec::new(),
             risk_class: kicad_engine::RiskClass::Low,
@@ -4837,7 +5001,7 @@ mod tests {
                 )
                 .unwrap(),
             },
-            targets: Vec::new(),
+            targets: vec![snapshot.board.document_id.clone().unwrap()],
             preconditions: Vec::new(),
             expected_effects: Vec::new(),
             risk_class: kicad_engine::RiskClass::Low,
@@ -4857,7 +5021,7 @@ mod tests {
         assert!(matches!(
             outcome,
             BoardGraphicsCommitOutcome::Rejected { reason }
-                if reason.contains("endpoint or net binding")
+                if reason.contains("binding is required") || reason.contains("was not observed")
         ));
         assert!(ipc.calls.is_empty());
     }

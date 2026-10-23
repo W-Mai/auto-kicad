@@ -15,7 +15,7 @@ The server uses MCP over standard input/output. Configure an MCP client to launc
 
 1. Save the PCB and project settings in KiCad.
 2. Call `kicad_inspect_project` for the target editor endpoint.
-3. Call `kicad_plan_change` to prepare board graphics or a rectangular Edge.Cuts outline.
+3. Call `kicad_plan_change` to prepare board graphics, a rectangular Edge.Cuts outline, pad-bound front-copper tracks or net-bound through vias.
 4. Call `kicad_preview_change` to validate a disposable copy. Review its result before approving.
 5. Call `kicad_commit_change` with the exact plan, validation evidence and approval hashes returned by the preview.
 
@@ -23,7 +23,7 @@ Preview copies the saved PCB, project and optional custom design rules. It verif
 
 ## Scope
 
-PCB observation covers supported graphics, footprint placements and pads, routing and stackup metadata. The public authoring path supports board graphics and rectangular outlines. Straight-track and through-via planning exists, but routing preview and footprint authoring are not yet enabled. Unsupported objects or lossy observations can reject inspection.
+PCB observation covers supported graphics, footprint placements and pads, routing and stackup metadata. The public authoring path supports board graphics, rectangular outlines, pad-bound straight tracks on F.Cu and net-bound through vias, including mixed batches. Routing previews remap pad identities into the disposable board and verify server-assigned creation IDs, geometry and networks. Routing has offline contract coverage; live routing verification remains pending. Footprint authoring is not yet enabled. Unsupported objects or lossy observations can reject inspection.
 
 Schematic authoring is restricted to the fixed two-resistor operation exposed by the schematic tools when its backend is available. General schematic editing, schematic-to-PCB synchronization, zone authoring, automatic placement/routing and manufacturing release are not implemented. Sessions and approvals are held in memory; restart requires new planning and validation.
 
