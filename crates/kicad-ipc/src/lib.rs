@@ -1058,6 +1058,35 @@ impl<T: KiCadTransport> KiCadClient<T> {
         self.end_commit(commit, editor_commands::CommitAction::CMA_COMMIT, message)
     }
 
+    /// Discard memory state and synchronously reload the specified saved board.
+    pub fn revert_board(&mut self, board_filename: &str) -> Result<(), IpcError> {
+        let expected_token = self.token.clone().ok_or(IpcError::EmptyInstanceToken)?;
+        let command = editor_commands::RevertDocument {
+            document: MessageField::some(board_document(board_filename)),
+            ..Default::default()
+        };
+        let request = command_request(
+            &self.config,
+            Some(&expected_token),
+            "type.googleapis.com/kiapi.common.commands.RevertDocument",
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        if token != expected_token {
+            return Err(IpcError::Status(
+                ApiStatusCode::AS_TOKEN_MISMATCH,
+                "editor changed during reload".into(),
+            ));
+        }
+        let _ = decode_any::<protobuf::well_known_types::empty::Empty>(
+            &response,
+            EMPTY_RESPONSE_TYPE_URL,
+        )?;
+        Ok(())
+    }
+
     pub fn save_board(&mut self, board_filename: &str) -> Result<(), IpcError> {
         let command = editor_commands::SaveDocument {
             document: MessageField::some(board_document(board_filename)),
@@ -6139,6 +6168,40 @@ mod tests {
             ));
             assert_eq!(client.instance_token().unwrap().as_str(), "prior-token");
         }
+    }
+
+    #[test]
+    fn board_reload_requires_bound_token_and_preserves_document_identity() {
+        let mut response = open_documents_response("token");
+        response.message = MessageField::some(Any {
+            type_url: EMPTY_RESPONSE_TYPE_URL.into(),
+            ..Default::default()
+        });
+        let mut client = graphics_client(response.clone());
+        assert_eq!(
+            client.revert_board("main.kicad_pcb"),
+            Err(IpcError::EmptyInstanceToken)
+        );
+        assert!(client.transport.requests.is_empty());
+        client.token = Some(InstanceToken::new("token").unwrap());
+        client.revert_board("main.kicad_pcb").unwrap();
+        let request = &client.transport.requests[0];
+        assert_eq!(
+            request.message.as_ref().unwrap().type_url,
+            "type.googleapis.com/kiapi.common.commands.RevertDocument"
+        );
+        let command = editor_commands::RevertDocument::parse_from_bytes(
+            &request.message.as_ref().unwrap().value,
+        )
+        .unwrap();
+        assert_eq!(
+            command.document,
+            MessageField::some(board_document("main.kicad_pcb"))
+        );
+        response.header.as_mut().unwrap().kicad_token = "changed".into();
+        client.transport.responses.push(response);
+        assert!(client.revert_board("main.kicad_pcb").is_err());
+        assert_eq!(client.instance_token().unwrap().as_str(), "token");
     }
 
     #[test]

@@ -1445,13 +1445,17 @@ mod tests {
     }
 
     fn fixture() -> (PathBuf, PathBuf, PathBuf, PathBuf) {
+        static SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let sequence = SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let root = std::env::temp_dir().join(format!(
-            "auto-kicad-footprint-{}",
+            "auto-kicad-footprint-{}-{sequence}-{}",
+            std::process::id(),
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ));
+        fs::create_dir(&root).unwrap();
         let official = root.join("official");
         let project = root.join("project");
         fs::create_dir_all(&official).unwrap();

@@ -2221,6 +2221,61 @@ pub struct ProjectSnapshot {
 }
 
 impl ProjectSnapshot {
+    /// Rebind derived identities when comparing an independently opened board copy.
+    pub fn in_board_scope(
+        &self,
+        project_id: StableId,
+        board_id: StableId,
+    ) -> Result<Self, ModelError> {
+        self.validate()?;
+        let mut copy = self.clone();
+        copy.project_id = project_id;
+        copy.board.document_id = Some(board_id.clone());
+        if let Some(native) = copy.native_footprints.take() {
+            let mut placements = native.placements;
+            for placement in &mut placements {
+                placement.placement_id = footprint_placement_id(&board_id, &placement.source_uuid);
+                for pad in &mut placement.pads {
+                    pad.footprint_placement_id = placement.placement_id.clone();
+                    pad.pad_id = footprint_pad_id(&placement.placement_id, &pad.source_uuid);
+                    if let Some(net) = pad.net.as_mut() {
+                        net.net_id = board_net_id(&board_id, &net.name);
+                    }
+                }
+            }
+            copy.native_footprints =
+                Some(ObservedBoardFootprints::new(board_id.clone(), placements)?);
+        }
+        if let Some(native) = copy.native_routing.take() {
+            let mut tracks = native.tracks;
+            let mut vias = native.vias;
+            for track in &mut tracks {
+                track.track_id = board_track_id(&board_id, &track.source_uuid);
+                if let Some(net) = track.net.as_mut() {
+                    net.net_id = (!net.name.is_empty()).then(|| board_net_id(&board_id, &net.name));
+                }
+            }
+            for via in &mut vias {
+                via.via_id = board_via_id(&board_id, &via.source_uuid);
+                if let Some(net) = via.net.as_mut() {
+                    net.net_id = (!net.name.is_empty()).then(|| board_net_id(&board_id, &net.name));
+                }
+            }
+            copy.native_routing = Some(ObservedBoardRouting::new(board_id.clone(), tracks, vias)?);
+        }
+        if let Some(native) = copy.native_stackup.take() {
+            copy.native_stackup = Some(ObservedBoardStackup::new(
+                board_id,
+                native.finish,
+                native.impedance,
+                native.edge,
+                native.layers,
+            )?);
+        }
+        copy.validate()?;
+        Ok(copy.canonical())
+    }
+
     pub fn canonical(&self) -> Self {
         let mut snapshot = self.clone();
         snapshot.capabilities.sort();

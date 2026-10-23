@@ -304,10 +304,11 @@ fn observe_owned_shadow(
         .map_err(|error| error.to_string())
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 struct ShadowSourceFingerprint {
     board: Option<(RevisionDigest, u64, Option<std::time::SystemTime>)>,
     project: Option<(RevisionDigest, u64, Option<std::time::SystemTime>)>,
+    rules: Option<(RevisionDigest, u64, Option<std::time::SystemTime>)>,
 }
 
 fn shadow_source_fingerprint(source_board: &std::path::Path) -> ShadowSourceFingerprint {
@@ -326,6 +327,7 @@ fn shadow_source_fingerprint(source_board: &std::path::Path) -> ShadowSourceFing
     ShadowSourceFingerprint {
         board: fingerprint(source_board),
         project: fingerprint(&source_board.with_extension("kicad_pro")),
+        rules: fingerprint(&source_board.with_extension("kicad_dru")),
     }
 }
 
@@ -598,6 +600,22 @@ pub fn validate_disposable_shadow(
     operations: &[Operation],
     drc_timeout: Duration,
 ) -> ShadowValidationOutcome {
+    validate_disposable_shadow_bound(server_root, source_board, operations, drc_timeout, None)
+}
+
+fn validate_disposable_shadow_bound(
+    server_root: &std::path::Path,
+    source_board: &std::path::Path,
+    operations: &[Operation],
+    drc_timeout: Duration,
+    expected_source: Option<&ProjectSnapshot>,
+) -> ShadowValidationOutcome {
+    static PREVIEW_EDITOR: Mutex<()> = Mutex::new(());
+    let Ok(_preview_guard) = PREVIEW_EDITOR.try_lock() else {
+        return ShadowValidationOutcome::rejected(
+            "preview editor is busy; retry after the active preview finishes",
+        );
+    };
     if let Err(reason) = validate_shadow_operation_kinds(operations) {
         return ShadowValidationOutcome::rejected(reason);
     }
@@ -653,6 +671,24 @@ pub fn validate_disposable_shadow(
             );
         }
     };
+    if let Some(expected) = expected_source {
+        let copied = expected.board.document_id.as_ref().and_then(|board| {
+            observation
+                .snapshot
+                .in_board_scope(expected.project_id.clone(), board.clone())
+                .ok()
+        });
+        if copied.as_ref() != Some(&expected.canonical()) {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::rejected(
+                    "saved PCB differs from the editor state; save the project and create a new plan",
+                ),
+            );
+        }
+    }
     let expected_revision = match observation.snapshot.revision() {
         Ok(revision) => revision,
         Err(error) => {
@@ -794,26 +830,7 @@ pub fn validate_disposable_shadow(
             return cleanup_shadow(&mut launcher, source_board, &source_before, outcome);
         }
     };
-    let old_pid = match launcher.current_identity() {
-        Ok(identity) => identity.pid,
-        Err(error) => {
-            return cleanup_shadow(
-                &mut launcher,
-                source_board,
-                &source_before,
-                ShadowValidationOutcome::unknown(error.to_string()),
-            );
-        }
-    };
-    if let Err(error) = launcher.close_owned(old_pid) {
-        return cleanup_shadow(
-            &mut launcher,
-            source_board,
-            &source_before,
-            ShadowValidationOutcome::unknown(error.to_string()),
-        );
-    }
-    if let Err(error) = launcher.reopen() {
+    if let Err(error) = launcher.reload_owned() {
         return cleanup_shadow(
             &mut launcher,
             source_board,
@@ -1348,10 +1365,12 @@ fn shadow_validation_state(state: &ShadowValidationState) -> &'static str {
 fn validation_evidence_hash(
     plan_hash: &str,
     outcome: &ShadowValidationOutcome,
+    source_files: &ShadowSourceFingerprint,
 ) -> Result<String, String> {
     let evidence = json!({
         "schema_version": CONTRACT_SCHEMA_VERSION,
         "plan_hash": plan_hash,
+        "source_files": source_files,
         "shadow_validation": {
             "state": shadow_validation_state(&outcome.state),
             "fresh_revision": outcome.fresh_revision,
@@ -1512,6 +1531,7 @@ struct StoredChangeSession {
     board_filename: String,
     board_path: std::path::PathBuf,
     project_dir: std::path::PathBuf,
+    source_files: ShadowSourceFingerprint,
     execution_state: StoredExecutionState,
     shadow_validation: Option<ShadowValidationOutcome>,
     validation_evidence_hash: Option<String>,
@@ -1521,7 +1541,8 @@ struct StoredChangeSession {
 pub trait ShadowValidationService: Send + Sync {
     fn validate(
         &self,
-        source_board: &std::path::Path,
+        endpoint: &str,
+        source: &LiveBoardObservation,
         operations: &[Operation],
         timeout: Duration,
     ) -> ShadowValidationOutcome;
@@ -1540,14 +1561,92 @@ impl IpcShadowValidationService {
     }
 }
 
+struct LiveShadowExport(std::path::PathBuf);
+
+impl Drop for LiveShadowExport {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn export_live_shadow(
+    root: &std::path::Path,
+    endpoint: &str,
+    source: &LiveBoardObservation,
+) -> Result<(LiveShadowExport, std::path::PathBuf), String> {
+    std::fs::create_dir_all(root).map_err(|error| error.to_string())?;
+    let root = std::fs::canonicalize(root).map_err(|error| error.to_string())?;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| error.to_string())?
+        .as_nanos();
+    let export_root = root.join(format!("auto-kicad-export-{}-{stamp}", std::process::id()));
+    std::fs::create_dir(&export_root).map_err(|error| error.to_string())?;
+    let export = LiveShadowExport(export_root);
+    let filename = source
+        .board_path
+        .file_name()
+        .ok_or("source board filename is missing")?;
+    let destination = export.0.join(filename);
+    if IpcDiscoveryService
+        .live_board_observation(endpoint, None)
+        .as_ref()
+        != Ok(source)
+    {
+        return Err("source editor changed before copying".into());
+    }
+    for extension in ["kicad_pcb", "kicad_pro", "kicad_dru"] {
+        let source_path = source.board_path.with_extension(extension);
+        if extension != "kicad_dru" || source_path.exists() {
+            std::fs::copy(source_path, destination.with_extension(extension))
+                .map_err(|error| error.to_string())?;
+        }
+    }
+    Ok((export, destination))
+}
+
 impl ShadowValidationService for IpcShadowValidationService {
     fn validate(
         &self,
-        source_board: &std::path::Path,
+        endpoint: &str,
+        source: &LiveBoardObservation,
         operations: &[Operation],
         timeout: Duration,
     ) -> ShadowValidationOutcome {
-        validate_disposable_shadow(&self.server_root, source_board, operations, timeout)
+        if let Err(reason) = validate_shadow_operation_kinds(operations) {
+            return ShadowValidationOutcome::rejected(reason);
+        }
+        let fingerprint = shadow_source_fingerprint(&source.board_path);
+        let (export, path) = match export_live_shadow(&self.server_root, endpoint, source) {
+            Ok(export) => export,
+            Err(reason) => return ShadowValidationOutcome::rejected(reason),
+        };
+        let mut outcome = validate_disposable_shadow_bound(
+            &self.server_root,
+            &path,
+            operations,
+            timeout,
+            Some(&source.snapshot),
+        );
+        if shadow_source_fingerprint(&source.board_path) != fingerprint
+            || IpcDiscoveryService
+                .live_board_observation(endpoint, None)
+                .as_ref()
+                != Ok(source)
+        {
+            outcome.state = ShadowValidationState::Rejected;
+            outcome.source_unchanged = false;
+            outcome.reason = Some(format!(
+                "source changed during shadow validation; {}",
+                outcome.reason.unwrap_or_default()
+            ));
+        }
+        if let Err(error) = std::fs::remove_dir_all(&export.0) {
+            outcome.state = ShadowValidationState::Unknown;
+            outcome.shadow_cleaned = false;
+            outcome.reason = Some(format!("export cleanup failed: {error}"));
+        }
+        outcome
     }
 }
 
@@ -2472,6 +2571,7 @@ impl Server {
                 session,
                 endpoint: arguments.endpoint,
                 board_filename: observation.board_filename,
+                source_files: shadow_source_fingerprint(&observation.board_path),
                 board_path: observation.board_path,
                 project_dir: observation.project_dir,
                 execution_state: StoredExecutionState::Ready,
@@ -2523,16 +2623,33 @@ impl Server {
         let shadow_validation = self.shadow_validation.as_ref().ok_or_else(|| {
             ErrorData::invalid_params("shadow validation is required before approval", None)
         })?;
+        let source = self
+            .discovery
+            .live_board_observation(&stored.endpoint, None)
+            .map_err(|error| ErrorData::internal_error(error, None))?;
+        if source.snapshot != stored.session.snapshot
+            || source.instance_token.as_str() != stored.session.plan.instance_token
+            || source.board_path != stored.board_path
+            || source.project_dir != stored.project_dir
+            || shadow_source_fingerprint(&stored.board_path) != stored.source_files
+        {
+            return Err(ErrorData::invalid_params(
+                "source changed since planning",
+                None,
+            ));
+        }
         let outcome = shadow_validation.validate(
-            &stored.board_path,
+            &stored.endpoint,
+            &source,
             &stored.session.plan.operations,
             Duration::from_secs(30),
         );
         let shadow_ok = matches!(outcome.state, ShadowValidationState::Committed);
         stored.shadow_validation = Some(outcome.clone());
         if shadow_ok {
-            let evidence_hash = validation_evidence_hash(&preview.plan_hash, &outcome)
-                .map_err(|error| ErrorData::internal_error(error, None))?;
+            let evidence_hash =
+                validation_evidence_hash(&preview.plan_hash, &outcome, &stored.source_files)
+                    .map_err(|error| ErrorData::internal_error(error, None))?;
             stored.approval_hash = Some(approval_hash(&preview.plan_hash, &evidence_hash));
             stored.validation_evidence_hash = Some(evidence_hash);
         } else {
@@ -2641,6 +2758,12 @@ impl Server {
         }) {
             return Err(ErrorData::invalid_params(
                 "shadow validation is required before commit",
+                None,
+            ));
+        }
+        if shadow_source_fingerprint(&stored.board_path) != stored.source_files {
+            return Err(ErrorData::invalid_params(
+                "source files changed since planning",
                 None,
             ));
         }
@@ -4170,6 +4293,163 @@ mod tests {
         assert_eq!(before, shadow_source_fingerprint(&board));
     }
 
+    #[tokio::test]
+    #[ignore = "requires installed KiCad PCB editor and CLI"]
+    async fn live_mcp_preview_rejects_unsaved_state_and_commits_saved_graphics() {
+        let fixture = TempBoard::new();
+        let board = fixture.root.join("board.kicad_pcb");
+        std::fs::write(
+            &board,
+            r#"(kicad_pcb (version 20260206) (generator "pcbnew")
+            (general (thickness 1.6)) (paper "A4")
+            (layers (0 "F.Cu" signal) (2 "B.Cu" signal) (17 "Dwgs.User" user) (25 "Edge.Cuts" user))
+            (setup (pad_to_mask_clearance 0)))"#,
+        )
+        .unwrap();
+        std::fs::write(board.with_extension("kicad_pro"), "{}").unwrap();
+        let mut source_editor = OwnedPcbnewLauncher::new(&fixture.root.join("source")).unwrap();
+        let source_project = source_editor.create_shadow(&board).unwrap();
+        let identity = source_editor.launch(&source_project).unwrap();
+        let mut client = source_editor.connect_owned().unwrap();
+        let commit = client.begin_commit().unwrap();
+        let segment = native_graphic(&graphic("unsaved"));
+        client
+            .create_board_graphics(&identity.board_filename, &[segment])
+            .unwrap();
+        client
+            .commit_changes(&commit, "temporary unsaved source fixture")
+            .unwrap();
+        let unsaved = observe_owned_shadow(&mut source_editor).unwrap();
+        let disk_before = shadow_source_fingerprint(source_project.board_path());
+        let validation = IpcShadowValidationService::new(fixture.root.join("unsaved-validation"));
+        let operation =
+            shadow_graphics_operation(unsaved.snapshot.board.document_id.clone().unwrap());
+        let rejected = validation.validate(
+            &identity.endpoint,
+            &unsaved,
+            &[operation],
+            Duration::from_secs(30),
+        );
+        assert_eq!(
+            rejected.state,
+            ShadowValidationState::Rejected,
+            "{rejected:?}"
+        );
+        assert!(
+            rejected
+                .reason
+                .as_ref()
+                .unwrap()
+                .contains("save the project")
+        );
+        assert_eq!(unsaved, observe_owned_shadow(&mut source_editor).unwrap());
+        assert_eq!(
+            disk_before,
+            shadow_source_fingerprint(source_project.board_path())
+        );
+        client.save_board(&identity.board_filename).unwrap();
+        drop(client);
+        let before = observe_owned_shadow(&mut source_editor).unwrap();
+        let source_disk = shadow_source_fingerprint(source_project.board_path());
+        assert_eq!(before.snapshot.board.graphics.len(), 1);
+        let shadow_root = fixture.root.join("validation");
+        let server = Server::with_discovery_and_execution_and_shadow(
+            Arc::new(IpcDiscoveryService),
+            Arc::new(IpcBoardGraphicsExecutionService),
+            Arc::new(IpcShadowValidationService::new(&shadow_root)),
+        );
+        let mut request = plan_request(before.snapshot.clone(), "live-graphics");
+        let mut addition = graphic("planned");
+        addition.start.y = 2_000_000;
+        addition.end.y = 2_000_000;
+        request.segments = Some(serde_json::to_value(vec![addition]).unwrap());
+        request.endpoint = identity.endpoint.clone();
+        let planned = server.kicad_plan_change(Parameters(request)).await.unwrap();
+        let CallToolResponse::Complete(planned) = planned else {
+            panic!("plan incomplete")
+        };
+        let plan = planned.structured_content.unwrap();
+        assert_eq!(plan["ok"], true, "{plan}");
+        let preview = server
+            .kicad_preview_change(Parameters(PreviewChangeRequest {
+                plan_id: plan["data"]["plan_id"].as_str().unwrap().into(),
+                plan_hash: plan["data"]["plan_hash"].as_str().unwrap().into(),
+                request_id: None,
+            }))
+            .await
+            .unwrap();
+        let CallToolResponse::Complete(preview) = preview else {
+            panic!("preview incomplete")
+        };
+        let preview = preview.structured_content.unwrap();
+        assert_eq!(preview["ok"], true, "{preview}");
+        assert_eq!(before, observe_owned_shadow(&mut source_editor).unwrap());
+        assert_eq!(
+            source_disk,
+            shadow_source_fingerprint(source_project.board_path())
+        );
+        assert!(std::fs::read_dir(&shadow_root).unwrap().next().is_none());
+        let committed = server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id: plan["data"]["plan_id"].as_str().unwrap().into(),
+                plan_hash: plan["data"]["plan_hash"].as_str().unwrap().into(),
+                approval_hash: preview["data"]["approval_hash"].as_str().unwrap().into(),
+                validation_evidence_hash: preview["data"]["validation_evidence_hash"]
+                    .as_str()
+                    .unwrap()
+                    .into(),
+                request_id: None,
+            }))
+            .await
+            .unwrap();
+        let CallToolResponse::Complete(committed) = committed else {
+            panic!("commit incomplete")
+        };
+        let committed = committed.structured_content.unwrap();
+        assert_eq!(committed["ok"], true, "{committed}");
+        source_editor.reload_owned().unwrap();
+        assert_eq!(source_editor.current_identity().unwrap().pid, identity.pid);
+        let after = observe_owned_shadow(&mut source_editor).unwrap();
+        assert_eq!(after.snapshot.board.graphics.len(), 2);
+        assert!(
+            after
+                .snapshot
+                .board
+                .graphics
+                .contains(&before.snapshot.board.graphics[0])
+        );
+    }
+
+    #[test]
+    fn copied_snapshot_rebinding_preserves_content_and_is_reversible() {
+        let original = fresh_shadow_observation().snapshot;
+        let board_id = original.board.document_id.clone().unwrap();
+        let rebound = original
+            .in_board_scope(
+                StableId::new("copied-project").unwrap(),
+                StableId::new("copied-board").unwrap(),
+            )
+            .unwrap();
+        assert_ne!(rebound.revision().unwrap(), original.revision().unwrap());
+        assert_eq!(
+            rebound
+                .in_board_scope(original.project_id.clone(), board_id)
+                .unwrap(),
+            original.canonical()
+        );
+        let mut modified = rebound;
+        modified.board.graphics.push(graphic("extra"));
+        assert_ne!(
+            modified
+                .in_board_scope(
+                    original.project_id.clone(),
+                    original.board.document_id.clone().unwrap()
+                )
+                .unwrap(),
+            original.canonical()
+        );
+    }
+
     #[test]
     fn shadow_source_fingerprint_detects_missing_or_changed_sources() {
         let missing = shadow_source_fingerprint(Path::new("/definitely/missing/board.kicad_pcb"));
@@ -5295,6 +5575,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn changed_project_rules_invalidate_approval_before_execution() {
+        let calls = Arc::new(Mutex::new(0));
+        let (server, plan_id, plan_hash, approval_hash, validation_evidence_hash) = planned_server(
+            BoardGraphicsCommitOutcome::CommittedAndSaved,
+            calls.clone(),
+            "rules-change",
+        )
+        .await;
+        let fixture = TempBoard::new();
+        let board = fixture.root.join("board.kicad_pcb");
+        {
+            let mut sessions = server.sessions.lock().unwrap();
+            let stored = sessions.get_mut(&plan_id).unwrap();
+            stored.board_path = board.clone();
+            stored.source_files = shadow_source_fingerprint(&board);
+        }
+        std::fs::write(board.with_extension("kicad_dru"), "(version 1)").unwrap();
+        let result = server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id,
+                plan_hash,
+                approval_hash,
+                validation_evidence_hash,
+                request_id: None,
+            }))
+            .await;
+        assert!(result.is_err());
+        assert_eq!(*calls.lock().unwrap(), 0);
+    }
+
+    #[tokio::test]
     async fn batch_execution_failure_does_not_mark_session_committed() {
         let (
             server,
@@ -5535,7 +5846,13 @@ mod tests {
     }
 
     impl ShadowValidationService for FakeShadowValidation {
-        fn validate(&self, _: &Path, _: &[Operation], _: Duration) -> ShadowValidationOutcome {
+        fn validate(
+            &self,
+            _: &str,
+            _: &LiveBoardObservation,
+            _: &[Operation],
+            _: Duration,
+        ) -> ShadowValidationOutcome {
             self.calls.fetch_add(1, AtomicOrdering::SeqCst);
             self.outcome.clone()
         }

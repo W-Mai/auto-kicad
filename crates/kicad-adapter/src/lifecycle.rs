@@ -103,7 +103,7 @@ impl OwnedPcbnewLauncher {
         Ok(Self {
             lifecycle: FilesystemDisposablePcbLifecycle::new(server_root)?,
             child: None,
-            startup_timeout: Duration::from_secs(15),
+            startup_timeout: Duration::from_secs(60),
         })
     }
 
@@ -187,6 +187,7 @@ impl OwnedPcbnewLauncher {
         let endpoint_candidates = Self::owned_endpoints(pid, !default_socket_existed);
         let deadline = Instant::now() + self.startup_timeout;
         let mut child = Some(child);
+        let mut last_diagnostic = String::new();
         let identity = loop {
             let early_status = match child
                 .as_mut()
@@ -211,7 +212,9 @@ impl OwnedPcbnewLauncher {
                 let mut owned = child.take().expect("child retained until handshake");
                 let _ = owned.kill();
                 let _ = owned.wait();
-                return Err(LifecycleError::StartupTimeout);
+                return Err(LifecycleError::Handshake(format!(
+                    "startup timeout for pid {pid}: {last_diagnostic}"
+                )));
             }
             let mut found_identity = None;
             for endpoint in &endpoint_candidates {
@@ -226,7 +229,10 @@ impl OwnedPcbnewLauncher {
                 };
                 if let Ok(transport) = NngTransport::connect(config.clone()) {
                     let mut client = KiCadClient::new(transport, config);
-                    if let Ok(documents) = client.get_open_documents(DocumentQuery::Pcb)
+                    let response = client.get_open_documents(DocumentQuery::Pcb);
+                    let diagnostic = format!("{endpoint}: {response:?}");
+                    last_diagnostic = diagnostic;
+                    if let Ok(documents) = response
                         && documents.len() == 1
                         && let OpenDocumentKind::Pcb {
                             board_filename: found,
@@ -323,6 +329,42 @@ impl OwnedPcbnewLauncher {
         let transport = NngTransport::connect(config.clone())
             .map_err(|error| LifecycleError::Handshake(error.to_string()))?;
         Ok(KiCadClient::new(transport, config))
+    }
+
+    /// Reload only the owned saved shadow, retaining its process and window.
+    pub fn reload_owned(&mut self) -> Result<(), LifecycleError> {
+        let identity = self.current_identity()?.clone();
+        let shadow = self.current_shadow()?.clone();
+        let mut client = self.connect_owned()?;
+        let before = client
+            .get_open_documents(DocumentQuery::Pcb)
+            .map_err(|error| LifecycleError::Handshake(error.to_string()))?;
+        if before.len() != 1
+            || before[0].kind
+                != (OpenDocumentKind::Pcb {
+                    board_filename: identity.board_filename.clone(),
+                })
+            || before[0]
+                .project_path
+                .as_ref()
+                .and_then(|path| fs::canonicalize(path).ok())
+                .as_deref()
+                != Some(shadow.root())
+        {
+            return Err(LifecycleError::DocumentMismatch);
+        }
+        let token = client.instance_token().cloned();
+        client
+            .revert_board(&identity.board_filename)
+            .map_err(|error| LifecycleError::Handshake(error.to_string()))?;
+        let after = client
+            .get_open_documents(DocumentQuery::Pcb)
+            .map_err(|error| LifecycleError::Handshake(error.to_string()))?;
+        if after != before || client.instance_token() != token.as_ref() {
+            return Err(LifecycleError::DocumentMismatch);
+        }
+        self.lifecycle.reopened = true;
+        Ok(())
     }
 
     pub fn reopen(&mut self) -> Result<OwnedEditorIdentity, LifecycleError> {
@@ -503,6 +545,13 @@ impl DisposablePcbLifecycle for FilesystemDisposablePcbLifecycle {
         let project_path = root.join(format!("{stem}.kicad_pro"));
         if let Err(error) = fs::copy(&source_board, &board_path)
             .and_then(|_| fs::copy(&source_project, &project_path).map(|_| ()))
+        {
+            let _ = fs::remove_dir_all(&root);
+            return Err(LifecycleError::ShadowCreation(error.to_string()));
+        }
+        let rules = source_board.with_extension("kicad_dru");
+        if rules.exists()
+            && let Err(error) = fs::copy(&rules, board_path.with_extension("kicad_dru"))
         {
             let _ = fs::remove_dir_all(&root);
             return Err(LifecycleError::ShadowCreation(error.to_string()));
@@ -795,6 +844,21 @@ mod tests {
         assert_eq!(fs::read_dir(shadow.root()).unwrap().count(), 2);
         lifecycle.cleanup().unwrap();
         fs::remove_dir_all(source_root).unwrap();
+    }
+
+    #[test]
+    fn shadow_preserves_custom_design_rules() {
+        let (root, board) = fixture();
+        let rules = "(version 1)";
+        fs::write(board.with_extension("kicad_dru"), rules).unwrap();
+        let mut lifecycle = FilesystemDisposablePcbLifecycle::new(&root.join("server")).unwrap();
+        let shadow = lifecycle.create_shadow(&board).unwrap();
+        assert_eq!(
+            fs::read_to_string(shadow.board_path().with_extension("kicad_dru")).unwrap(),
+            rules
+        );
+        lifecycle.cleanup().unwrap();
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
