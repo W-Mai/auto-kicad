@@ -798,6 +798,14 @@ fn apply_shadow_operations(
         &batch.vias,
         "auto-kicad disposable shadow validation",
     )?;
+    // Read serialized pad-stack defaults from the owned editor after reload.
+    drop(client);
+    launcher
+        .reload_owned()
+        .map_err(|error| unknown(error.to_string()))?;
+    let mut client = launcher
+        .connect_owned()
+        .map_err(|error| unknown(error.to_string()))?;
     let routing = kicad_adapter::read_verified_native_routing(
         &mut client,
         &observation.board_filename,

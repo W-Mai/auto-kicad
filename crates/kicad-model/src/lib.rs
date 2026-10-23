@@ -1436,7 +1436,9 @@ impl ObservedViaPadStack {
             if !is_placeholder {
                 validate_routing_copper_shape(shape)?;
             }
-            if !(self.layers.contains(&shape.layer) || is_placeholder) {
+            let is_inner_representative =
+                allow_through_via_placeholder && shape.layer == BoardLayer::InnerCopper(1);
+            if !(self.layers.contains(&shape.layer) || is_inner_representative) {
                 return Err(ModelError::InvalidRoutingObservation(
                     "via copper shape layer must belong to its pad stack",
                 ));
@@ -3702,6 +3704,59 @@ mod tests {
         changed.pad_stack.angle_degrees = ExactAngleDegrees::new(45.000_000_2).unwrap();
         let changed = ObservedBoardRouting::new(board_id, vec![], vec![changed]).unwrap();
         assert_ne!(observation.observed_revision, changed.observed_revision);
+    }
+
+    #[test]
+    fn through_via_preserves_inner_representative_before_and_after_save() {
+        let board = id("board");
+        let mut via = observed_via(&board);
+        via.via_type = ViaType::Through;
+        via.pad_stack.layers = vec![BoardLayer::FrontCopper, BoardLayer::BackCopper];
+        via.pad_stack.secondary_drill = None;
+        via.pad_stack.tertiary_drill = None;
+        let inner = via
+            .pad_stack
+            .copper_shapes
+            .iter_mut()
+            .find(|shape| shape.layer == BoardLayer::InnerCopper(1))
+            .unwrap();
+        inner.shape = PadShape::Circle;
+        inner.size = SizeNm { x_nm: 0, y_nm: 0 };
+        let before = ObservedBoardRouting::new(board.clone(), vec![], vec![via.clone()]).unwrap();
+        let inner = via
+            .pad_stack
+            .copper_shapes
+            .iter_mut()
+            .find(|shape| shape.layer == BoardLayer::InnerCopper(1))
+            .unwrap();
+        inner.size = SizeNm {
+            x_nm: 600_000,
+            y_nm: 600_000,
+        };
+        let after = ObservedBoardRouting::new(board.clone(), vec![], vec![via.clone()]).unwrap();
+        assert_ne!(before.observed_revision, after.observed_revision);
+        assert_eq!(
+            after.vias[0].pad_stack.layers,
+            [BoardLayer::FrontCopper, BoardLayer::BackCopper]
+        );
+        assert_eq!(
+            serde_json::from_value::<ObservedBoardRouting>(serde_json::to_value(&after).unwrap())
+                .unwrap(),
+            after
+        );
+        via.via_type = ViaType::BlindBuried;
+        assert!(ObservedBoardRouting::new(board.clone(), vec![], vec![via.clone()]).is_err());
+        via.via_type = ViaType::Through;
+        via.pad_stack.stack_type = PadStackType::Normal;
+        assert!(ObservedBoardRouting::new(board.clone(), vec![], vec![via.clone()]).is_err());
+        via.pad_stack.stack_type = PadStackType::FrontInnerBack;
+        via.pad_stack
+            .copper_shapes
+            .iter_mut()
+            .find(|shape| shape.layer == BoardLayer::InnerCopper(1))
+            .unwrap()
+            .layer = BoardLayer::InnerCopper(2);
+        assert!(ObservedBoardRouting::new(board, vec![], vec![via]).is_err());
     }
 
     #[test]
