@@ -67,6 +67,20 @@ pub fn bind_schematic_footprint(
     {
         return Err("netlist footprint or value differs from the schematic".into());
     }
+    let raw = project
+        .files
+        .iter()
+        .flat_map(|file| &file.symbols)
+        .filter(|raw| {
+            raw.source_uuid == symbol.source_uuid.as_str() && raw.reference == symbol.reference
+        })
+        .collect::<Vec<_>>();
+    if raw.len() != 1
+        || raw[0].footprint.as_deref() != Some(identifier.as_str())
+        || raw[0].value != symbol.value
+    {
+        return Err("saved schematic fields differ from the netlist".into());
+    }
     let mut symbol_path = symbol
         .sheet_instance_path
         .split('/')

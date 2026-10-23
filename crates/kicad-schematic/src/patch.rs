@@ -12,6 +12,7 @@ use tempfile::Builder;
 use crate::{NetlistDocument, NetlistRunner, parse_schematic};
 
 const SUPPORTED_FORMAT: &str = "20260306";
+const RESISTOR_FOOTPRINT: &str = "Resistor_SMD:R_0603_1608Metric";
 const MAX_CANDIDATE_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -21,7 +22,7 @@ pub enum SchematicPatchOutcome {
     Unknown { reason: String },
 }
 
-pub const TWO_RESISTOR_OPERATION_IDENTITY: &str = "fixed-two-resistor-circuit-v1";
+pub const TWO_RESISTOR_OPERATION_IDENTITY: &str = "fixed-two-resistor-circuit-v2";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SchematicPreviewReceipt {
@@ -288,7 +289,10 @@ fn validate_candidate(
     references.sort_unstable();
     if references != ["R1", "R2"]
         || parsed.symbols.iter().any(|symbol| {
-            symbol.lib_id != "Device:R" || symbol.value != "1k" || symbol.pins.len() != 2
+            symbol.lib_id != "Device:R"
+                || symbol.value != "1k"
+                || symbol.pins.len() != 2
+                || symbol.footprint.as_deref() != Some(RESISTOR_FOOTPRINT)
         })
         || !has_exact_fixed_topology(bytes)
     {
@@ -318,7 +322,12 @@ fn prove_connectivity(document: &NetlistDocument) -> Result<(), PatchFailure> {
         })
         .collect::<Vec<_>>();
     components.sort_unstable();
-    if components != [("R1", "1k", "Device", "R"), ("R2", "1k", "Device", "R")] {
+    if components != [("R1", "1k", "Device", "R"), ("R2", "1k", "Device", "R")]
+        || document
+            .components
+            .iter()
+            .any(|component| component.footprint.as_deref() != Some(RESISTOR_FOOTPRINT))
+    {
         return Err(rejected(SchematicPatchRejection::ConnectivityNotProven));
     }
 
@@ -461,7 +470,7 @@ fn circuit_forms(root_uuid: &str, ids: &FreshIds) -> String {
     (in_bom yes) (on_board yes) (dnp no) (uuid "{}")
     (property "Reference" "R1" (at 52.54 48.73 0) (effects (font (size 1.27 1.27))))
     (property "Value" "1k" (at 52.54 51.27 0) (effects (font (size 1.27 1.27))))
-    (property "Footprint" "" (at 48.22 50 90) (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Footprint" "Resistor_SMD:R_0603_1608Metric" (at 48.22 50 90) (effects (font (size 1.27 1.27)) (hide yes)))
     (property "Datasheet" "~" (at 50 50 0) (effects (font (size 1.27 1.27)) (hide yes)))
     (property "Description" "Resistor" (at 50 50 0) (effects (font (size 1.27 1.27)) (hide yes)))
     (pin "1" (uuid "{}")) (pin "2" (uuid "{}"))
@@ -471,7 +480,7 @@ fn circuit_forms(root_uuid: &str, ids: &FreshIds) -> String {
     (in_bom yes) (on_board yes) (dnp no) (uuid "{}")
     (property "Reference" "R2" (at 52.54 58.89 0) (effects (font (size 1.27 1.27))))
     (property "Value" "1k" (at 52.54 61.43 0) (effects (font (size 1.27 1.27))))
-    (property "Footprint" "" (at 48.22 60.16 90) (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Footprint" "Resistor_SMD:R_0603_1608Metric" (at 48.22 60.16 90) (effects (font (size 1.27 1.27)) (hide yes)))
     (property "Datasheet" "~" (at 50 60.16 0) (effects (font (size 1.27 1.27)) (hide yes)))
     (property "Description" "Resistor" (at 50 60.16 0) (effects (font (size 1.27 1.27)) (hide yes)))
     (pin "1" (uuid "{}")) (pin "2" (uuid "{}"))
@@ -531,16 +540,16 @@ fn fresh_uuid() -> String {
     hasher.update(NEXT.fetch_add(1, Ordering::Relaxed).to_le_bytes());
     let digest = hasher.finalize();
     format!(
-        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-4{:02x}{:02x}-8{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
+        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
         digest[0],
         digest[1],
         digest[2],
         digest[3],
         digest[4],
         digest[5],
-        digest[6] & 0x0f,
+        (digest[6] & 0x0f) | 0x40,
         digest[7],
-        digest[8] & 0x3f,
+        (digest[8] & 0x3f) | 0x80,
         digest[9],
         digest[10],
         digest[11],
@@ -705,7 +714,7 @@ mod tests {
                 r#"#!/bin/sh
 if [ "$1" = "sch" ] && [ "$2" = "export" ]; then
 cat <<'XML'
-<export version="E"><design><sheet number="1" name="/" tstamps="/"/></design><components><comp ref="R1"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp><comp ref="R2"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp></components><nets><net code="1" name="Net-(R1-Pad2)"><node ref="R1" pin="2" pinfunction="~" pintype="passive"/><node ref="R2" pin="1" pinfunction="~" pintype="passive"/></net><net code="2" name="unconnected-(R1-Pad1)"><node ref="R1" pin="1" pinfunction="~" pintype="passive+no_connect"/></net><net code="3" name="unconnected-(R2-Pad2)"><node ref="R2" pin="2" pinfunction="~" pintype="passive+no_connect"/></net></nets></export>
+<export version="E"><design><sheet number="1" name="/" tstamps="/"/></design><components><comp ref="R1"><value>1k</value><footprint>Resistor_SMD:R_0603_1608Metric</footprint><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp><comp ref="R2"><value>1k</value><footprint>Resistor_SMD:R_0603_1608Metric</footprint><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp></components><nets><net code="1" name="Net-(R1-Pad2)"><node ref="R1" pin="2" pinfunction="~" pintype="passive"/><node ref="R2" pin="1" pinfunction="~" pintype="passive"/></net><net code="2" name="unconnected-(R1-Pad1)"><node ref="R1" pin="1" pinfunction="~" pintype="passive+no_connect"/></net><net code="3" name="unconnected-(R2-Pad2)"><node ref="R2" pin="2" pinfunction="~" pintype="passive+no_connect"/></net></nets></export>
 XML
 exit 0
 fi
@@ -749,6 +758,28 @@ exit 1
                 &receipt,
                 &self.runner,
             )
+        }
+    }
+
+    #[test]
+    fn generated_identities_use_canonical_uuid_layout() {
+        let ids = (0..64)
+            .map(|_| fresh_uuid())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(ids.len(), 64);
+        for id in ids {
+            let parts = id.split('-').collect::<Vec<_>>();
+            assert_eq!(
+                parts.iter().map(|part| part.len()).collect::<Vec<_>>(),
+                [8, 4, 4, 4, 12]
+            );
+            assert!(
+                parts
+                    .iter()
+                    .all(|part| part.bytes().all(|byte| byte.is_ascii_hexdigit()))
+            );
+            assert_eq!(id.as_bytes()[14], b'4');
+            assert!(b"89ab".contains(&id.as_bytes()[19]));
         }
     }
 
@@ -849,7 +880,7 @@ exit 1
                 .into_bytes()
         ));
 
-        let xml = br#"<export version="E"><design><sheet number="1" name="/" tstamps="/"/></design><components><comp ref="R1"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp><comp ref="R2"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp><comp ref="R3"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp></components><nets><net code="1" name="n"><node ref="R1" pin="2" pinfunction="~" pintype="passive"/><node ref="R2" pin="1" pinfunction="~" pintype="passive"/><node ref="R3" pin="1" pinfunction="~" pintype="passive"/></net></nets></export>"#;
+        let xml = br#"<export version="E"><design><sheet number="1" name="/" tstamps="/"/></design><components><comp ref="R1"><value>1k</value><footprint>Resistor_SMD:R_0603_1608Metric</footprint><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp><comp ref="R2"><value>1k</value><footprint>Resistor_SMD:R_0603_1608Metric</footprint><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp><comp ref="R3"><value>1k</value><footprint>Resistor_SMD:R_0603_1608Metric</footprint><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp></components><nets><net code="1" name="n"><node ref="R1" pin="2" pinfunction="~" pintype="passive"/><node ref="R2" pin="1" pinfunction="~" pintype="passive"/><node ref="R3" pin="1" pinfunction="~" pintype="passive"/></net></nets></export>"#;
         let document = crate::parse_netlist_xml(xml, crate::NetlistLimits::default()).unwrap();
         assert!(matches!(
             prove_connectivity(&document),
@@ -858,7 +889,7 @@ exit 1
             ))
         ));
 
-        let xml_with_extra_net = br#"<export version="E"><design><sheet number="1" name="/" tstamps="/"/></design><components><comp ref="R1"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp><comp ref="R2"><value>1k</value><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp></components><nets><net code="1" name="n"><node ref="R1" pin="2" pinfunction="~" pintype="passive"/><node ref="R2" pin="1" pinfunction="~" pintype="passive"/></net><net code="2" name="other"/></nets></export>"#;
+        let xml_with_extra_net = br#"<export version="E"><design><sheet number="1" name="/" tstamps="/"/></design><components><comp ref="R1"><value>1k</value><footprint>Resistor_SMD:R_0603_1608Metric</footprint><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp><comp ref="R2"><value>1k</value><footprint>Resistor_SMD:R_0603_1608Metric</footprint><libsource lib="Device" part="R"/><sheetpath names="/" tstamps="/"/></comp></components><nets><net code="1" name="n"><node ref="R1" pin="2" pinfunction="~" pintype="passive"/><node ref="R2" pin="1" pinfunction="~" pintype="passive"/></net><net code="2" name="other"/></nets></export>"#;
         let document =
             crate::parse_netlist_xml(xml_with_extra_net, crate::NetlistLimits::default()).unwrap();
         assert!(matches!(
@@ -958,7 +989,7 @@ exit 1
 
     #[cfg(unix)]
     #[test]
-    #[ignore = "requires the installed KiCad 10.0.5 kicad-cli"]
+    #[ignore = "requires the installed KiCad kicad-cli"]
     fn disposable_runtime_patch_round_trip_with_production_kicad_cli() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("root.kicad_sch");

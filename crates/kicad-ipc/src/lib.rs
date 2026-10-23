@@ -287,6 +287,7 @@ pub struct FootprintAssociation {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FootprintInstanceTemplateMetadata {
+    pub source_uuid: String,
     pub library_identifier: ObservedFootprintLibraryIdentifier,
     pub orientation_mdeg: i64,
     pub side: FootprintSide,
@@ -2353,6 +2354,7 @@ fn footprint_templates_from_response(
                 association: None,
                 bytes: item.value.clone(),
                 metadata: FootprintInstanceTemplateMetadata {
+                    source_uuid: observed.source_uuid,
                     library_identifier: observed.library_identifier,
                     orientation_mdeg: observed.orientation_mdeg,
                     side: observed.side,
@@ -5874,6 +5876,7 @@ mod tests {
             association: None,
             bytes: source.write_to_bytes().unwrap(),
             metadata: FootprintInstanceTemplateMetadata {
+                source_uuid: "source".into(),
                 library_identifier: ObservedFootprintLibraryIdentifier {
                     nickname: "Resistor_SMD".into(),
                     entry_name: "R_0603".into(),

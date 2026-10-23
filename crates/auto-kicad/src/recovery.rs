@@ -116,6 +116,7 @@ impl ExecutionStore {
             .map_err(|_| invalid("project writer is busy"))?;
         let records = self.records_dir(&project);
         fs::create_dir_all(&records)?;
+        sync_directory(&self.root)?;
         Ok(ProjectWriter {
             _lock: lock,
             project,

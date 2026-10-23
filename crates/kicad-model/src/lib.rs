@@ -348,6 +348,16 @@ impl FootprintLibraryIdentifier {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct FootprintSourceBinding {
+    pub schematic: SchematicArtifactRevision,
+    pub symbol: ObservedSchematicSymbol,
+    pub symbol_path: Vec<StableId>,
+    pub pad_nets: std::collections::BTreeMap<String, Option<String>>,
+    pub library_digest: RevisionDigest,
+    pub library_size: u64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct AllowlistedFootprintPlacement {
     pub target_id: StableId,
@@ -355,6 +365,8 @@ pub struct AllowlistedFootprintPlacement {
     pub position: Coordinate,
     pub reference: String,
     pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<Box<FootprintSourceBinding>>,
 }
 
 impl AllowlistedFootprintPlacement {
@@ -371,6 +383,7 @@ impl AllowlistedFootprintPlacement {
             position,
             reference: reference.into(),
             value: value.into(),
+            source: None,
         };
         placement.validate()?;
         Ok(placement)
@@ -389,6 +402,51 @@ impl AllowlistedFootprintPlacement {
                 "footprint position must use board-space nanometres",
             ));
         }
+        if let Some(source) = &self.source {
+            source.schematic.validate()?;
+            let identifier = format!(
+                "{}:{}",
+                self.library_identifier.nickname, self.library_identifier.entry_name
+            );
+            if source.schematic.files.is_empty()
+                || source.schematic.editor_lock_present
+                || source.symbol.observed_revision != source.schematic.digest
+                || source.symbol.reference != self.reference
+                || source.symbol.value != self.value
+                || source.symbol.footprint_field.as_deref() != Some(identifier.as_str())
+                || source
+                    .symbol_path
+                    .iter()
+                    .map(StableId::as_str)
+                    .collect::<Vec<_>>()
+                    != source
+                        .symbol
+                        .sheet_instance_path
+                        .split('/')
+                        .filter(|part| !part.is_empty())
+                        .chain(std::iter::once(source.symbol.source_uuid.as_str()))
+                        .collect::<Vec<_>>()
+                || !(2..=64).contains(&source.symbol_path.len())
+                || source.symbol.pins.len() != source.pad_nets.len()
+                || source.library_size == 0
+                || source.pad_nets.is_empty()
+                || source.pad_nets.len() > MAX_FOOTPRINT_PADS
+                || source.pad_nets.iter().any(|(number, net)| {
+                    number.is_empty() || net.as_ref().is_some_and(String::is_empty)
+                })
+                || source
+                    .symbol
+                    .pins
+                    .iter()
+                    .map(|pin| pin.number.clone())
+                    .collect::<BTreeSet<_>>()
+                    != source.pad_nets.keys().cloned().collect()
+            {
+                return Err(ModelError::InvalidAllowlistedFootprintPlacement(
+                    "footprint source evidence is inconsistent",
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -405,17 +463,22 @@ impl<'de> Deserialize<'de> for AllowlistedFootprintPlacement {
             position: Coordinate,
             reference: String,
             value: String,
+            #[serde(default)]
+            source: Option<Box<FootprintSourceBinding>>,
         }
 
         let raw = RawPlacement::deserialize(deserializer)?;
-        Self::new(
+        let mut placement = Self::new(
             raw.target_id,
             raw.library_identifier,
             raw.position,
             raw.reference,
             raw.value,
         )
-        .map_err(serde::de::Error::custom)
+        .map_err(serde::de::Error::custom)?;
+        placement.source = raw.source;
+        placement.validate().map_err(serde::de::Error::custom)?;
+        Ok(placement)
     }
 }
 

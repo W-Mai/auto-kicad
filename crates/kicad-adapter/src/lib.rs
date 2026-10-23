@@ -2699,9 +2699,43 @@ mod tests {
             Some(&binding.symbol.source_uuid)
         );
         assert_eq!(binding.schematic_revision, project.revision.digest);
+        let mut sourced = placement.clone();
+        sourced.source = Some(Box::new(kicad_model::FootprintSourceBinding {
+            schematic: project.revision.clone(),
+            symbol: binding.symbol.clone(),
+            symbol_path: binding.symbol_path.clone(),
+            pad_nets: binding.pad_nets.clone(),
+            library_digest: RevisionDigest::new("a".repeat(64)).unwrap(),
+            library_size: 42,
+        }));
+        sourced.validate().unwrap();
+        let value = serde_json::to_value(&sourced).unwrap();
+        assert_eq!(
+            serde_json::from_value::<kicad_model::AllowlistedFootprintPlacement>(value.clone())
+                .unwrap(),
+            sourced
+        );
+        let mut wrong_path = value.clone();
+        wrong_path["source"]["symbol_path"][0] = serde_json::json!("wrong-root");
+        assert!(
+            serde_json::from_value::<kicad_model::AllowlistedFootprintPlacement>(wrong_path)
+                .is_err()
+        );
+        let mut missing_pin = value;
+        missing_pin["source"]["pad_nets"] = serde_json::json!({});
+        assert!(
+            serde_json::from_value::<kicad_model::AllowlistedFootprintPlacement>(missing_pin)
+                .is_err()
+        );
+
         let mut stale = netlist.clone();
         stale.components[0].footprint = Some("Other:Wrong".into());
         assert!(bindings::bind_schematic_footprint(&project, &stale, &board, &placement).is_err());
+        let mut changed_cst = project.clone();
+        changed_cst.files[0].symbols[0].footprint = Some("Other:Wrong".into());
+        assert!(
+            bindings::bind_schematic_footprint(&changed_cst, &netlist, &board, &placement).is_err()
+        );
         let (locked, _) = schematic_fixture(true);
         assert!(bindings::bind_schematic_footprint(&locked, &netlist, &board, &placement).is_err());
         let mut actual = board_footprint_observation(

@@ -19,14 +19,19 @@ pub const MAX_PLACEMENT_COORDINATE_NM: i64 = 2_000_000_000;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AllowlistedFootprint {
     OfficialLed1210,
+    OfficialResistor0603,
     ProjectTypeC,
 }
 
 impl AllowlistedFootprint {
     pub fn from_identifier(identifier: &FootprintLibraryIdentifier) -> Option<Self> {
-        [Self::OfficialLed1210, Self::ProjectTypeC]
-            .into_iter()
-            .find(|library| library.identifier() == *identifier)
+        [
+            Self::OfficialLed1210,
+            Self::OfficialResistor0603,
+            Self::ProjectTypeC,
+        ]
+        .into_iter()
+        .find(|library| library.identifier() == *identifier)
     }
 
     pub fn identifier(self) -> FootprintLibraryIdentifier {
@@ -34,6 +39,10 @@ impl AllowlistedFootprint {
             Self::OfficialLed1210 => FootprintLibraryIdentifier {
                 nickname: "LED_SMD".to_owned(),
                 entry_name: "LED_1210_3225Metric_Pad1.42x2.65mm_HandSolder".to_owned(),
+            },
+            Self::OfficialResistor0603 => FootprintLibraryIdentifier {
+                nickname: "Resistor_SMD".into(),
+                entry_name: "R_0603_1608Metric".into(),
             },
             Self::ProjectTypeC => FootprintLibraryIdentifier {
                 nickname: "Type-C".to_owned(),
@@ -46,6 +55,7 @@ impl AllowlistedFootprint {
         match self {
             Self::OfficialLed1210 => "LED_1210_3225Metric_Pad1.42x2.65mm_HandSolder.kicad_mod",
             Self::ProjectTypeC => "USB_C_GCT_USB4085.kicad_mod",
+            Self::OfficialResistor0603 => "R_0603_1608Metric.kicad_mod",
         }
     }
 }
@@ -302,7 +312,9 @@ impl FootprintRegistry {
         library: AllowlistedFootprint,
     ) -> Result<ResolvedFootprint, FootprintBackendError> {
         let root = match library {
-            AllowlistedFootprint::OfficialLed1210 => &self.official_library,
+            AllowlistedFootprint::OfficialLed1210 | AllowlistedFootprint::OfficialResistor0603 => {
+                &self.official_library
+            }
             AllowlistedFootprint::ProjectTypeC => &self.project_library,
         };
         let source_path = root.join(library.source_subpath());
@@ -324,7 +336,10 @@ impl FootprintRegistry {
             source_path: source_path.clone(),
             provenance: LibraryProvenance {
                 source_kind: match library {
-                    AllowlistedFootprint::OfficialLed1210 => FootprintSourceKind::OfficialLibrary,
+                    AllowlistedFootprint::OfficialLed1210
+                    | AllowlistedFootprint::OfficialResistor0603 => {
+                        FootprintSourceKind::OfficialLibrary
+                    }
                     AllowlistedFootprint::ProjectTypeC => FootprintSourceKind::ProjectLibrary,
                 },
                 registry_root: root.clone(),
@@ -886,6 +901,161 @@ const FIXED_PYTHON_PATH: &str =
     "/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3.9";
 const FIXED_HELPER_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/helpers/footprint_helper.py");
 
+#[derive(Clone, Debug)]
+pub struct SourceFootprintTemplate {
+    pub resolved: ResolvedFootprint,
+    pub placement: AllowlistedFootprintPlacement,
+    pub template: FootprintInstanceTemplate,
+    pub observed: crate::ObservedFootprintWithPads,
+}
+
+struct TemplateScratch(PathBuf);
+
+impl Drop for TemplateScratch {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+/// Capture a source-derived native definition while retaining the owned editor process.
+pub fn capture_source_footprint_template(
+    launcher: &mut OwnedPcbnewLauncher,
+    registry: &FootprintRegistry,
+    placement: AllowlistedFootprintPlacement,
+) -> Result<SourceFootprintTemplate, FootprintBackendError> {
+    validate_placement(&placement)?;
+    let library = AllowlistedFootprint::from_identifier(&placement.library_identifier)
+        .ok_or(FootprintBackendError::UnsupportedLibrary)?;
+    let resolved = registry.resolve(library)?;
+    let shadow = launcher.current_shadow().map_err(lifecycle_error)?.clone();
+    let identity = launcher
+        .current_identity()
+        .map_err(lifecycle_error)?
+        .clone();
+    let mut ipc = launcher.connect_owned().map_err(lifecycle_error)?;
+    let before = ipc
+        .get_footprint_instances(&identity.board_filename)
+        .map_err(|e| FootprintBackendError::Ipc(e.to_string()))?;
+    if before
+        .iter()
+        .any(|existing| existing.reference == placement.reference)
+    {
+        return Err(FootprintBackendError::InvalidPlacement(
+            "footprint reference already exists",
+        ));
+    }
+    ipc.save_board(&identity.board_filename)
+        .map_err(|e| FootprintBackendError::Ipc(e.to_string()))?;
+    drop(ipc);
+    let original = fs::read(shadow.board_path())
+        .map_err(|e| FootprintBackendError::RunnerProcess(e.to_string()))?;
+    if original.len() > 128 * 1024 * 1024 {
+        return Err(FootprintBackendError::InvalidPlacement(
+            "template board exceeds size limit",
+        ));
+    }
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| FootprintBackendError::RunnerProcess(e.to_string()))?
+        .as_nanos();
+    let root = shadow
+        .root()
+        .join(format!("footprint-template-{}-{now}", std::process::id()));
+    fs::create_dir(&root).map_err(|e| FootprintBackendError::RunnerProcess(e.to_string()))?;
+    let scratch = TemplateScratch(root);
+    let staged_board = scratch.0.join("template.kicad_pcb");
+    fs::write(&staged_board, &original)
+        .map_err(|e| FootprintBackendError::RunnerProcess(e.to_string()))?;
+    fs::copy(
+        shadow.project_path(),
+        staged_board.with_extension("kicad_pro"),
+    )
+    .map_err(|e| FootprintBackendError::RunnerProcess(e.to_string()))?;
+    let request = PreparedFootprintPlacement {
+        context: DisposableFootprintContext::new(&scratch.0, &staged_board)?,
+        resolved: resolved.clone(),
+        placement: placement.clone(),
+    };
+    request.context.validate_before_place()?;
+    verify_source_provenance(&request)?;
+    let helper = run_fixed_python_helper(&request)?;
+    verify_source_provenance(&request)?;
+    let staged_bytes =
+        fs::read(&staged_board).map_err(|e| FootprintBackendError::RunnerProcess(e.to_string()))?;
+    let result = (|| {
+        fs::write(shadow.board_path(), staged_bytes)
+            .map_err(|e| FootprintBackendError::RunnerProcess(e.to_string()))?;
+        launcher.reload_owned().map_err(lifecycle_error)?;
+        let mut ipc = launcher.connect_owned().map_err(lifecycle_error)?;
+        let after = ipc
+            .get_footprint_instances(&identity.board_filename)
+            .map_err(|e| FootprintBackendError::Ipc(e.to_string()))?;
+        let uuid = unique_new_footprint_uuid(&before, &after)?;
+        let footprint = after
+            .into_iter()
+            .find(|item| item.source_uuid == uuid)
+            .ok_or(FootprintBackendError::UuidSetMismatch)?;
+        if footprint.library_identifier.nickname != placement.library_identifier.nickname
+            || footprint.library_identifier.entry_name != placement.library_identifier.entry_name
+            || footprint.reference != placement.reference
+            || footprint.value != placement.value
+            || footprint.position_x_nm != placement.position.x
+            || footprint.position_y_nm != placement.position.y
+            || footprint.side != kicad_ipc::FootprintSide::Front
+            || footprint.orientation_mdeg != 0
+        {
+            return Err(FootprintBackendError::PostconditionMismatch);
+        }
+        let pads = ipc
+            .get_footprint_definition_pads(&identity.board_filename, &uuid)
+            .map_err(|e| FootprintBackendError::Ipc(e.to_string()))?;
+        let mut numbers = pads
+            .iter()
+            .map(|pad| pad.number.clone())
+            .collect::<Vec<_>>();
+        numbers.sort();
+        if numbers != helper.pad_numbers {
+            return Err(FootprintBackendError::PostconditionMismatch);
+        }
+        let templates = ipc
+            .capture_footprint_instance_templates(&identity.board_filename)
+            .map_err(|e| FootprintBackendError::Ipc(e.to_string()))?;
+        let mut matches = templates
+            .into_iter()
+            .filter(|template| template.metadata().source_uuid == uuid);
+        let template = matches
+            .next()
+            .ok_or(FootprintBackendError::TemplateNotFound)?;
+        if matches.next().is_some() {
+            return Err(FootprintBackendError::TemplateNotFound);
+        }
+        verify_source_provenance(&request)?;
+        Ok(SourceFootprintTemplate {
+            resolved,
+            placement,
+            template,
+            observed: crate::ObservedFootprintWithPads { footprint, pads },
+        })
+    })();
+    // Restoration is mandatory on both success and failure; only the owned shadow is rewritten.
+    fs::write(shadow.board_path(), &original).map_err(|e| {
+        FootprintBackendError::Lifecycle(format!("template baseline restoration failed: {e}"))
+    })?;
+    launcher.reload_owned().map_err(lifecycle_error)?;
+    let mut ipc = launcher.connect_owned().map_err(lifecycle_error)?;
+    let restored = ipc
+        .get_footprint_instances(&identity.board_filename)
+        .map_err(|e| FootprintBackendError::Ipc(e.to_string()))?;
+    if restored != before
+        || launcher.current_identity().map_err(lifecycle_error)?.pid != identity.pid
+    {
+        return Err(FootprintBackendError::Lifecycle(
+            "template capture did not restore the owned baseline".into(),
+        ));
+    }
+    result
+}
+
 fn unique_new_footprint_uuid(
     before: &[ObservedFootprintInstance],
     after: &[ObservedFootprintInstance],
@@ -932,6 +1102,7 @@ fn run_fixed_python_helper(
         "source_digest": request.resolved().provenance.source_digest,
         "source_size": request.resolved().provenance.source_size,
     });
+    let deadline = std::time::Instant::now() + HELPER_TIMEOUT;
     let mut child = Command::new(FIXED_PYTHON_PATH)
         .arg(FIXED_HELPER_PATH)
         .arg("--fixed-footprint-placement-v2")
@@ -995,7 +1166,9 @@ fn run_fixed_python_helper(
         let result = limited.read_to_end(&mut bytes).map(|_| bytes);
         let _ = error_sender.send(result);
     });
-    let bytes = match receiver.recv_timeout(HELPER_TIMEOUT) {
+    let bytes = match receiver
+        .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+    {
         Ok(result) => match result {
             Ok(bytes) => bytes,
             Err(error) => {
@@ -1010,7 +1183,9 @@ fn run_fixed_python_helper(
             return Err(FootprintBackendError::RunnerTimeout);
         }
     };
-    let stderr = match error_receiver.recv_timeout(HELPER_TIMEOUT) {
+    let stderr = match error_receiver
+        .recv_timeout(deadline.saturating_duration_since(std::time::Instant::now()))
+    {
         Ok(result) => match result {
             Ok(stderr) => stderr,
             Err(error) => {
@@ -1025,12 +1200,22 @@ fn run_fixed_python_helper(
             return Err(FootprintBackendError::RunnerTimeout);
         }
     };
-    let status = match child.wait() {
-        Ok(status) => status,
-        Err(error) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(FootprintBackendError::RunnerProcess(error.to_string()));
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10))
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(FootprintBackendError::RunnerTimeout);
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(FootprintBackendError::RunnerProcess(error.to_string()));
+            }
         }
     };
     if !status.success() {
@@ -1491,6 +1676,23 @@ mod tests {
             value: "LED".to_owned(),
             symbol_sheet_path: Vec::new(),
         }
+    }
+
+    #[test]
+    fn template_capture_requires_an_owned_editor_before_helper_or_board_writes() {
+        let (root, official, project, board) = fixture();
+        let _cleanup = FixtureCleanup(root.clone());
+        fs::write(board.with_extension("kicad_pro"), "{}").unwrap();
+        let registry = FootprintRegistry::new(&official, &project).unwrap();
+        let mut launcher = OwnedPcbnewLauncher::new(&root.join("preview")).unwrap();
+        let shadow = launcher.create_shadow(&board).unwrap();
+        let before = fs::read(shadow.board_path()).unwrap();
+        assert!(
+            capture_source_footprint_template(&mut launcher, &registry, placement(10)).is_err()
+        );
+        assert_eq!(fs::read(shadow.board_path()).unwrap(), before);
+        assert!(!launcher.editor_is_open());
+        assert_eq!(fs::read_dir(shadow.root()).unwrap().count(), 2);
     }
 
     #[test]

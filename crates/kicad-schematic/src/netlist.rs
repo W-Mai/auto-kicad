@@ -97,7 +97,7 @@ pub struct NetlistRunner {
 }
 
 impl NetlistRunner {
-    pub(crate) fn production() -> Result<Self, NetlistRunnerError> {
+    pub fn production() -> Result<Self, NetlistRunnerError> {
         if !cfg!(unix) {
             return Err(NetlistRunnerError::UnsupportedPlatform);
         }
@@ -110,6 +110,7 @@ impl NetlistRunner {
             })
             .collect::<Vec<_>>();
         candidates.extend([
+            PathBuf::from("/Applications/KiCad/KiCad.app/Contents/MacOS/kicad-cli"),
             PathBuf::from("/opt/homebrew/bin/kicad-cli"),
             PathBuf::from("/usr/local/bin/kicad-cli"),
             PathBuf::from("/usr/bin/kicad-cli"),

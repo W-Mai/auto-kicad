@@ -1,3 +1,4 @@
+mod footprint_authoring;
 pub mod recovery;
 
 use kicad_adapter::{
@@ -352,6 +353,7 @@ pub struct ShadowValidationOutcome {
     pub delta: Option<BaselineDelta>,
     pub source_unchanged: bool,
     pub shadow_cleaned: bool,
+    pub prepared_footprints: Vec<kicad_adapter::footprint::SourceFootprintTemplate>,
     pub reason: Option<String>,
 }
 
@@ -368,6 +370,7 @@ impl ShadowValidationOutcome {
             delta: None,
             source_unchanged: true,
             shadow_cleaned: false,
+            prepared_footprints: Vec::new(),
             reason: Some(reason.into()),
         }
     }
@@ -384,6 +387,7 @@ impl ShadowValidationOutcome {
             delta: None,
             source_unchanged: true,
             shadow_cleaned: false,
+            prepared_footprints: Vec::new(),
             reason: Some(reason.into()),
         }
     }
@@ -392,6 +396,18 @@ impl ShadowValidationOutcome {
 fn validate_shadow_operation_kinds(operations: &[Operation]) -> Result<(), String> {
     if operations.is_empty() {
         return Err("shadow operation batch is empty".into());
+    }
+    if let [
+        Operation {
+            kind: OperationKind::PlaceAllowlistedFootprint { placement, .. },
+            ..
+        },
+    ] = operations
+    {
+        if placement.source.is_none() {
+            return Err("footprint source evidence is required".into());
+        }
+        return placement.validate().map_err(|e| e.to_string());
     }
     if operations.iter().any(|operation| {
         !matches!(
@@ -405,6 +421,22 @@ fn validate_shadow_operation_kinds(operations: &[Operation]) -> Result<(), Strin
         return Err("shadow validation only accepts supported board operations".into());
     }
     Ok(())
+}
+
+fn operation_matches_board(operation: &Operation, observed: &StableId) -> bool {
+    match &operation.kind {
+        OperationKind::PlaceAllowlistedFootprint { board, placement } => {
+            board == observed
+                && operation.targets == vec![board.clone(), placement.target_id.clone()]
+        }
+        OperationKind::AddBoardGraphicSegments { board, .. }
+        | OperationKind::AddBoardOutline { board, .. }
+        | OperationKind::AddStraightTrack { board, .. }
+        | OperationKind::AddThroughVia { board, .. } => {
+            board == observed && operation.targets == vec![board.clone()]
+        }
+        _ => false,
+    }
 }
 
 fn bind_shadow_operations(
@@ -424,12 +456,17 @@ fn bind_shadow_operations(
     let source = shadow
         .in_board_scope(shadow.project_id.clone(), template_board.clone())
         .map_err(|e| e.to_string())?;
-    kicad_adapter::prepare_bound_native_batch(
-        operations,
-        &source,
-        &source.revision().map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| format!("invalid source operation binding: {e:?}"))?;
+    if !matches!(
+        operations[0].kind,
+        OperationKind::PlaceAllowlistedFootprint { .. }
+    ) {
+        kicad_adapter::prepare_bound_native_batch(
+            operations,
+            &source,
+            &source.revision().map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| format!("invalid source operation binding: {e:?}"))?;
+    }
     let rebind_endpoint = |endpoint: &kicad_model::RoutingEndpointRef| -> Result<kicad_model::RoutingEndpointRef, String> {
         let (placement, pad) = kicad_engine::resolve_routing_endpoint(&source, endpoint).map_err(|e| e.to_string())?;
         let placement_id = kicad_model::footprint_placement_id(shadow_board, &placement.source_uuid);
@@ -444,11 +481,12 @@ fn bind_shadow_operations(
     };
     let mut bound = Vec::with_capacity(operations.len());
     for operation in operations {
-        if operation.targets.len() != 1 || operation.targets.first() != Some(template_board) {
+        if !operation_matches_board(operation, template_board) {
             return Err("shadow operation targets are not uniformly board-scoped".into());
         }
         let operation_board = match &operation.kind {
-            OperationKind::AddBoardGraphicSegments { board, .. }
+            OperationKind::PlaceAllowlistedFootprint { board, .. }
+            | OperationKind::AddBoardGraphicSegments { board, .. }
             | OperationKind::AddBoardOutline { board, .. }
             | OperationKind::AddStraightTrack { board, .. }
             | OperationKind::AddThroughVia { board, .. } => board,
@@ -459,6 +497,12 @@ fn bind_shadow_operations(
         }
         let mut operation = operation.clone();
         operation.kind = match &operation.kind {
+            OperationKind::PlaceAllowlistedFootprint { placement, .. } => {
+                OperationKind::PlaceAllowlistedFootprint {
+                    board: shadow_board.clone(),
+                    placement: placement.clone(),
+                }
+            }
             OperationKind::AddStraightTrack { intent, .. } => {
                 let mut intent = intent.clone();
                 intent.start_pad = intent
@@ -502,7 +546,7 @@ fn bind_shadow_operations(
                 return Err("shadow validation only accepts supported board operations".into());
             }
         };
-        operation.targets = vec![shadow_board.clone()];
+        operation.targets[0] = shadow_board.clone();
         bound.push(operation);
     }
     Ok(bound)
@@ -518,20 +562,11 @@ fn validate_shadow_operations(
         .document_id
         .as_ref()
         .ok_or_else(|| "shadow observation has no board identity".to_owned())?;
-    for operation in operations {
-        let operation_board = match &operation.kind {
-            OperationKind::AddBoardGraphicSegments { board, .. }
-            | OperationKind::AddBoardOutline { board, .. }
-            | OperationKind::AddStraightTrack { board, .. }
-            | OperationKind::AddThroughVia { board, .. } => board,
-            _ => return Err("shadow validation only accepts supported board operations".into()),
-        };
-        if operation.targets.len() != 1
-            || operation.targets.first() != Some(board)
-            || operation_board != board
-        {
-            return Err("shadow operation target does not match fresh board identity".into());
-        }
+    if operations
+        .iter()
+        .any(|operation| !operation_matches_board(operation, board))
+    {
+        return Err("shadow operation target does not match fresh board identity".into());
     }
     Ok(())
 }
@@ -689,6 +724,93 @@ fn expected_native_shadow_snapshot(
     Ok(expected.canonical())
 }
 
+fn apply_shadow_operations(
+    launcher: &mut OwnedPcbnewLauncher,
+    observation: &LiveBoardObservation,
+    operations: &[Operation],
+    source_project: &std::path::Path,
+) -> Result<
+    (
+        ProjectSnapshot,
+        Vec<kicad_adapter::footprint::SourceFootprintTemplate>,
+    ),
+    BoardGraphicsCommitOutcome,
+> {
+    let unknown = |reason: String| BoardGraphicsCommitOutcome::Unknown { reason };
+    if let [
+        Operation {
+            kind: OperationKind::PlaceAllowlistedFootprint { placement, .. },
+            ..
+        },
+    ] = operations
+    {
+        let registry = footprint_authoring::verify_sources(source_project, placement)
+            .map_err(|reason| BoardGraphicsCommitOutcome::Rejected { reason })?;
+        let prepared = kicad_adapter::footprint::capture_source_footprint_template(
+            launcher,
+            &registry,
+            placement.clone(),
+        )
+        .map_err(|e| unknown(e.to_string()))?;
+        let prepared = footprint_authoring::bind_template(prepared).map_err(unknown)?;
+        let restored = observe_owned_shadow(launcher).map_err(unknown)?;
+        if restored.snapshot.canonical() != observation.snapshot.canonical() {
+            return Err(unknown(
+                "source template capture changed the shadow baseline".into(),
+            ));
+        }
+        let board = observation
+            .snapshot
+            .board
+            .document_id
+            .as_ref()
+            .ok_or_else(|| unknown("missing board identity".into()))?;
+        let mut client = launcher
+            .connect_owned()
+            .map_err(|e| unknown(e.to_string()))?;
+        let added = footprint_authoring::execute(
+            &mut client,
+            &observation.board_filename,
+            board,
+            &prepared,
+        )?;
+        footprint_authoring::verify_sources(source_project, placement).map_err(unknown)?;
+        return Ok((
+            footprint_authoring::expected_snapshot(&observation.snapshot, added)
+                .map_err(unknown)?,
+            vec![prepared],
+        ));
+    }
+    let revision = observation
+        .snapshot
+        .revision()
+        .map_err(|e| unknown(e.to_string()))?;
+    let batch =
+        kicad_adapter::prepare_bound_native_batch(operations, &observation.snapshot, &revision)?;
+    let mut client = launcher
+        .connect_owned()
+        .map_err(|e| unknown(e.to_string()))?;
+    let receipts = BoardGraphicsExecutor::default().execute_native_batch(
+        &mut client,
+        &observation.board_filename,
+        &batch.graphics,
+        &batch.tracks,
+        &batch.vias,
+        "auto-kicad disposable shadow validation",
+    )?;
+    let routing = kicad_adapter::read_verified_native_routing(
+        &mut client,
+        &observation.board_filename,
+        &receipts,
+    )
+    .map_err(unknown)?;
+    Ok((
+        expected_native_shadow_snapshot(observation, operations, &receipts, routing)
+            .map_err(unknown)?,
+        Vec::new(),
+    ))
+}
+
 fn cleanup_shadow(
     launcher: &mut OwnedPcbnewLauncher,
     source_board: &std::path::Path,
@@ -733,7 +855,14 @@ pub fn validate_disposable_shadow(
     operations: &[Operation],
     drc_timeout: Duration,
 ) -> ShadowValidationOutcome {
-    validate_disposable_shadow_bound(server_root, source_board, operations, drc_timeout, None)
+    validate_disposable_shadow_bound(
+        server_root,
+        source_board,
+        operations,
+        drc_timeout,
+        None,
+        source_board.parent().unwrap_or(server_root),
+    )
 }
 
 fn validate_disposable_shadow_bound(
@@ -742,6 +871,7 @@ fn validate_disposable_shadow_bound(
     operations: &[Operation],
     drc_timeout: Duration,
     expected_source: Option<&ProjectSnapshot>,
+    source_project: &std::path::Path,
 ) -> ShadowValidationOutcome {
     static PREVIEW_EDITOR: Mutex<()> = Mutex::new(());
     let Ok(_preview_guard) = PREVIEW_EDITOR.try_lock() else {
@@ -914,74 +1044,29 @@ fn validate_disposable_shadow_bound(
             );
         }
     };
-    let mut client = match launcher.connect_owned() {
-        Ok(client) => client,
-        Err(error) => {
-            return cleanup_shadow(
-                &mut launcher,
-                source_board,
-                &source_before,
-                ShadowValidationOutcome::unknown(error.to_string()),
-            );
-        }
-    };
-    let batch = match kicad_adapter::prepare_bound_native_batch(
+    let (expected_snapshot, prepared_footprints) = match apply_shadow_operations(
+        &mut launcher,
+        &observation,
         &bound_operations,
-        &observation.snapshot,
-        &expected_revision,
+        source_project,
     ) {
-        Ok(batch) => batch,
-        Err(reason) => {
-            return cleanup_shadow(
-                &mut launcher,
-                source_board,
-                &source_before,
-                ShadowValidationOutcome::rejected(format!("invalid shadow batch: {reason:?}")),
-            );
-        }
-    };
-    let mutation = BoardGraphicsExecutor::default().execute_native_batch(
-        &mut client,
-        &observation.board_filename,
-        &batch.graphics,
-        &batch.tracks,
-        &batch.vias,
-        "auto-kicad disposable shadow validation",
-    );
-    let receipt = match mutation {
-        Ok(receipt) => receipt,
-        Err(mutation) => {
-            let outcome = match mutation {
+        Ok(result) => result,
+        Err(outcome) => {
+            let outcome = match outcome {
                 BoardGraphicsCommitOutcome::Rejected { reason } => {
                     ShadowValidationOutcome::rejected(reason)
                 }
-                BoardGraphicsCommitOutcome::CommittedButNotSaved { reason }
-                | BoardGraphicsCommitOutcome::Unknown { reason } => {
+                BoardGraphicsCommitOutcome::Unknown { reason }
+                | BoardGraphicsCommitOutcome::CommittedButNotSaved { reason } => {
                     ShadowValidationOutcome::unknown(reason)
                 }
                 BoardGraphicsCommitOutcome::CommittedAndSaved => {
-                    ShadowValidationOutcome::unknown("missing native creation receipts")
+                    ShadowValidationOutcome::unknown("missing shadow postcondition")
                 }
             };
             return cleanup_shadow(&mut launcher, source_board, &source_before, outcome);
         }
     };
-    let routing = match kicad_adapter::read_verified_native_routing(
-        &mut client,
-        &observation.board_filename,
-        &receipt,
-    ) {
-        Ok(routing) => routing,
-        Err(error) => {
-            return cleanup_shadow(
-                &mut launcher,
-                source_board,
-                &source_before,
-                ShadowValidationOutcome::unknown(error),
-            );
-        }
-    };
-    drop(client);
     if let Err(error) = launcher.reload_owned() {
         return cleanup_shadow(
             &mut launcher,
@@ -1012,18 +1097,6 @@ fn validate_disposable_shadow_bound(
             );
         }
     };
-    let expected_snapshot =
-        match expected_native_shadow_snapshot(&observation, &bound_operations, &receipt, routing) {
-            Ok(snapshot) => snapshot,
-            Err(error) => {
-                return cleanup_shadow(
-                    &mut launcher,
-                    source_board,
-                    &source_before,
-                    ShadowValidationOutcome::unknown(error),
-                );
-            }
-        };
     let normalized_snapshot_matches = reopened.snapshot.canonical() == expected_snapshot;
     if !normalized_snapshot_matches {
         return cleanup_shadow(
@@ -1041,6 +1114,7 @@ fn validate_disposable_shadow_bound(
                 delta: None,
                 source_unchanged: true,
                 shadow_cleaned: false,
+                prepared_footprints: Vec::new(),
                 reason: Some(
                     "reopened shadow normalized snapshot does not match expected snapshot".into(),
                 ),
@@ -1087,6 +1161,7 @@ fn validate_disposable_shadow_bound(
         normalized_snapshot_matches,
         source_unchanged: true,
         shadow_cleaned: false,
+        prepared_footprints,
         reason: (introduced != 0)
             .then(|| format!("shadow DRC introduced {} violation(s)", introduced)),
     };
@@ -1768,6 +1843,14 @@ impl ShadowValidationService for IpcShadowValidationService {
         if let Err(reason) = validate_shadow_operation_kinds(operations) {
             return ShadowValidationOutcome::rejected(reason);
         }
+        for operation in operations {
+            if let OperationKind::PlaceAllowlistedFootprint { placement, .. } = &operation.kind
+                && let Err(reason) =
+                    footprint_authoring::verify_sources(&source.project_dir, placement)
+            {
+                return ShadowValidationOutcome::rejected(reason);
+            }
+        }
         let fingerprint = shadow_source_fingerprint(&source.board_path);
         let (export, path) = match export_live_shadow(&self.server_root, endpoint, source) {
             Ok(export) => export,
@@ -1779,6 +1862,7 @@ impl ShadowValidationService for IpcShadowValidationService {
             operations,
             timeout,
             Some(&source.snapshot),
+            &source.project_dir,
         );
         if shadow_source_fingerprint(&source.board_path) != fingerprint
             || IpcDiscoveryService
@@ -1834,6 +1918,28 @@ pub trait BoardGraphicsExecutionService: Send + Sync {
         expected_revision: &RevisionDigest,
         operations: &[Operation],
     ) -> BoardGraphicsCommitOutcome;
+    #[allow(clippy::too_many_arguments)]
+    fn execute_prepared(
+        &self,
+        endpoint: &str,
+        board_filename: &str,
+        board_path: &std::path::Path,
+        project_dir: &std::path::Path,
+        expected_token: &str,
+        expected_revision: &RevisionDigest,
+        operations: &[Operation],
+        _prepared: &[kicad_adapter::footprint::SourceFootprintTemplate],
+    ) -> BoardGraphicsCommitOutcome {
+        self.execute(
+            endpoint,
+            board_filename,
+            board_path,
+            project_dir,
+            expected_token,
+            expected_revision,
+            operations,
+        )
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1850,10 +1956,59 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
         expected_revision: &RevisionDigest,
         operations: &[Operation],
     ) -> BoardGraphicsCommitOutcome {
+        self.execute_live(
+            endpoint,
+            board_filename,
+            board_path,
+            project_dir,
+            expected_token,
+            expected_revision,
+            operations,
+            &[],
+        )
+    }
+    fn execute_prepared(
+        &self,
+        endpoint: &str,
+        board_filename: &str,
+        board_path: &std::path::Path,
+        project_dir: &std::path::Path,
+        expected_token: &str,
+        expected_revision: &RevisionDigest,
+        operations: &[Operation],
+        prepared: &[kicad_adapter::footprint::SourceFootprintTemplate],
+    ) -> BoardGraphicsCommitOutcome {
+        self.execute_live(
+            endpoint,
+            board_filename,
+            board_path,
+            project_dir,
+            expected_token,
+            expected_revision,
+            operations,
+            prepared,
+        )
+    }
+}
+
+impl IpcBoardGraphicsExecutionService {
+    #[allow(clippy::too_many_arguments)]
+    fn execute_live(
+        &self,
+        endpoint: &str,
+        board_filename: &str,
+        board_path: &std::path::Path,
+        project_dir: &std::path::Path,
+        expected_token: &str,
+        expected_revision: &RevisionDigest,
+        operations: &[Operation],
+        prepared: &[kicad_adapter::footprint::SourceFootprintTemplate],
+    ) -> BoardGraphicsCommitOutcome {
         if operations.iter().any(|operation| {
             !matches!(
                 &operation.kind,
-                OperationKind::AddBoardGraphicSegments { .. }
+                OperationKind::PlaceAllowlistedFootprint { .. }
+                    | OperationKind::AddBoardGraphicSegments { .. }
                     | OperationKind::AddBoardOutline { .. }
                     | OperationKind::AddStraightTrack { .. }
                     | OperationKind::AddThroughVia { .. }
@@ -1968,18 +2123,10 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
             }
         };
         let observed_board_id = observation.snapshot.board.document_id.as_ref();
-        let operations_match_observed_board = operations.iter().all(|operation| {
-            operation.targets.len() == 1
-                && Some(&operation.targets[0]) == observed_board_id
-                && match &operation.kind {
-                    OperationKind::AddBoardGraphicSegments { board, .. }
-                    | OperationKind::AddBoardOutline { board, .. }
-                    | OperationKind::AddStraightTrack { board, .. }
-                    | OperationKind::AddThroughVia { board, .. } => {
-                        Some(board) == observed_board_id
-                    }
-                    _ => false,
-                }
+        let operations_match_observed_board = observed_board_id.is_some_and(|board| {
+            operations
+                .iter()
+                .all(|operation| operation_matches_board(operation, board))
         });
         if observation.board_path != canonical_board_path
             || observation.project_dir != canonical_project_dir
@@ -2001,6 +2148,62 @@ impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
             return BoardGraphicsCommitOutcome::Rejected {
                 reason: "live identity or revision is stale".into(),
             };
+        }
+        if let [
+            Operation {
+                kind: OperationKind::PlaceAllowlistedFootprint { placement, .. },
+                ..
+            },
+        ] = operations
+        {
+            let result = (|| -> Result<(), BoardGraphicsCommitOutcome> {
+                footprint_authoring::verify_sources(project_dir, placement)
+                    .map_err(|reason| BoardGraphicsCommitOutcome::Rejected { reason })?;
+                let [template] = prepared else {
+                    return Err(BoardGraphicsCommitOutcome::Rejected {
+                        reason: "validated footprint template is missing".into(),
+                    });
+                };
+                if template.placement != *placement {
+                    return Err(BoardGraphicsCommitOutcome::Rejected {
+                        reason: "validated footprint template differs from plan".into(),
+                    });
+                }
+                let unknown = |reason: String| BoardGraphicsCommitOutcome::Unknown { reason };
+                let board = observation
+                    .snapshot
+                    .board
+                    .document_id
+                    .as_ref()
+                    .ok_or_else(|| unknown("missing board identity".into()))?;
+                let added =
+                    footprint_authoring::execute(&mut client, board_filename, board, template)?;
+                let expected = footprint_authoring::expected_snapshot(&observation.snapshot, added)
+                    .map_err(unknown)?;
+                let document = client
+                    .get_open_documents(DocumentQuery::Pcb)
+                    .map_err(|e| unknown(e.to_string()))?;
+                if document.len() != 1 {
+                    return Err(unknown("PCB document changed after placement".into()));
+                }
+                let version = client.get_version().map_err(|e| unknown(e.to_string()))?;
+                let after =
+                    observe_live_board(&mut client, version, document[0].clone(), board_filename)
+                        .map_err(|e| unknown(format!("{e:?}")))?;
+                if after.snapshot.canonical() != expected
+                    || after.board_path != observation.board_path
+                    || after.instance_token != observation.instance_token
+                {
+                    return Err(unknown(
+                        "placed board does not match approved footprint postcondition".into(),
+                    ));
+                }
+                footprint_authoring::verify_sources(project_dir, placement).map_err(unknown)?;
+                Ok(())
+            })();
+            return result
+                .map(|_| BoardGraphicsCommitOutcome::CommittedAndSaved)
+                .unwrap_or_else(|outcome| outcome);
         }
         BoardGraphicsExecutor::default().execute_bound_batch(
             &mut client,
@@ -2205,6 +2408,18 @@ impl Server {
             schematic,
             capabilities: vec![
                 Capability {
+                    id: "pcb.native_authoring",
+                    domain: "pcb",
+                    mode: "write",
+                    status: "live_verification_pending",
+                },
+                Capability {
+                    id: "pcb.source_bound_footprint",
+                    domain: "pcb",
+                    mode: "write",
+                    status: "live_verification_pending",
+                },
+                Capability {
                     id: "pcb.drc.validate",
                     domain: "pcb",
                     mode: "read",
@@ -2251,7 +2466,7 @@ impl Server {
 impl Server {
     #[tool(
         name = "kicad_capabilities",
-        description = "Report verified KiCad capabilities and advertised tools."
+        description = "Report KiCad capability status and enabled tools."
     )]
     pub async fn kicad_capabilities(
         &self,
@@ -2260,25 +2475,12 @@ impl Server {
         let request_id = arguments
             .request_id
             .unwrap_or_else(|| "req_capabilities".to_owned());
-        let mut advertised_tools = vec![
-            "kicad_capabilities",
-            "kicad_inspect_project",
-            "kicad_validate_project",
-            "kicad_plan_change",
-            "kicad_preview_change",
-            "kicad_commit_change",
-        ];
-        if self.capabilities.iter().any(|capability| {
-            capability.id == "schematic.fixed_two_resistor_change"
-                && capability.status == "verified"
-        }) {
-            advertised_tools.extend([
-                "kicad_schematic_audit",
-                "kicad_plan_schematic_change",
-                "kicad_preview_schematic_change",
-                "kicad_commit_schematic_change",
-            ]);
-        }
+        let advertised_tools = self
+            .tool_router
+            .list_all()
+            .into_iter()
+            .map(|tool| tool.name.to_string())
+            .collect::<Vec<_>>();
         let envelope = Envelope {
             ok: true,
             request_id,
@@ -2574,7 +2776,7 @@ impl Server {
 
     #[tool(
         name = "kicad_plan_change",
-        description = "Plan bounded board graphics, a rectangular Edge.Cuts outline, a straight track, or a through via without mutating KiCad."
+        description = "Plan bounded board graphics, an outline, pad-bound routing, or one source-bound allowlisted footprint without mutating KiCad."
     )]
     pub async fn kicad_plan_change(
         &self,
@@ -2588,10 +2790,32 @@ impl Server {
             .live_board_observation(&arguments.endpoint, None)
             .map_err(|error| ErrorData::internal_error(error, None))?;
         let observed_token = observation.instance_token.as_str();
+        let footprint = if let Some(request) = &arguments.footprint {
+            if arguments.batch.is_some()
+                || arguments.segments.is_some()
+                || arguments.outline.is_some()
+                || arguments.track.is_some()
+                || arguments.via.is_some()
+            {
+                return Err(ErrorData::invalid_params(
+                    "footprint placement requires its own plan",
+                    None,
+                ));
+            }
+            match footprint_authoring::prepare(request, &observation) {
+                Ok(placement) => Some(placement),
+                Err(reason) => {
+                    return Ok(self.envelope_sync(
+                        arguments.request_id,
+                        None,
+                        json!({"reason": "footprint_source_unavailable", "detail": reason}),
+                    ));
+                }
+            }
+        } else {
+            None
+        };
         let snapshot = observation.snapshot;
-        if arguments.footprint.is_some() {
-            return Ok(self.rejected(arguments.request_id, "footprint_authoring_not_verified"));
-        }
         if !snapshot
             .capabilities
             .iter()
@@ -2604,7 +2828,17 @@ impl Server {
             .document_id
             .clone()
             .ok_or_else(|| ErrorData::internal_error("board identity is unavailable", None))?;
-        let (kinds, is_batch) = board_operation_kinds(&arguments, &board)?;
+        let (kinds, is_batch) = if let Some(placement) = footprint {
+            (
+                vec![OperationKind::PlaceAllowlistedFootprint {
+                    board: board.clone(),
+                    placement,
+                }],
+                false,
+            )
+        } else {
+            board_operation_kinds(&arguments, &board)?
+        };
         let base_revision = snapshot
             .revision()
             .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
@@ -2686,7 +2920,7 @@ impl Server {
 
     #[tool(
         name = "kicad_preview_change",
-        description = "Preview and validate a planned KiCad board graphics change, then await approval."
+        description = "Preview and validate a planned KiCad PCB change, then await approval."
     )]
     pub async fn kicad_preview_change(
         &self,
@@ -2802,6 +3036,7 @@ impl Server {
                 "plan_hash": preview.plan_hash,
                 "validation_evidence_hash": stored.validation_evidence_hash,
                 "approval_hash": stored.approval_hash,
+                "operations": stored.session.plan.operations,
                 "before": preview.before,
                 "after": preview.after,
                 "base_revision": stored.session.plan.base_revision,
@@ -2903,7 +3138,7 @@ impl Server {
         current.execution_state = StoredExecutionState::InFlight;
         drop(sessions);
 
-        let outcome = self.execution.execute(
+        let outcome = self.execution.execute_prepared(
             &stored.endpoint,
             &stored.board_filename,
             &stored.board_path,
@@ -2911,6 +3146,11 @@ impl Server {
             &stored.session.plan.instance_token,
             &stored.session.plan.base_revision,
             &stored.session.plan.operations,
+            &stored
+                .shadow_validation
+                .as_ref()
+                .expect("shadow validated above")
+                .prepared_footprints,
         );
         let (ok, state, outcome_data) = match &outcome {
             BoardGraphicsCommitOutcome::CommittedAndSaved => {
@@ -4543,6 +4783,187 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires one owned KiCad PCB editor, CLI and official libraries"]
+    fn source_bound_circuit_and_routing_reuse_one_owned_editor() {
+        let fixture = TempBoard::new();
+        let root = std::fs::canonicalize(&fixture.root).unwrap();
+        let board_path = root.join("board.kicad_pcb");
+        std::fs::write(&board_path, r#"(kicad_pcb (version 20260206) (generator "pcbnew")
+          (general (thickness 1.6)) (paper "A4")
+          (layers (0 "F.Cu" signal) (2 "B.Cu" signal) (9 "F.Adhes" user "F.Adhesive") (11 "B.Adhes" user "B.Adhesive")
+            (13 "F.Paste" user) (15 "B.Paste" user) (5 "F.SilkS" user "F.Silkscreen") (7 "B.SilkS" user "B.Silkscreen")
+            (1 "F.Mask" user) (3 "B.Mask" user) (17 "Dwgs.User" user) (25 "Edge.Cuts" user) (31 "F.CrtYd" user "F.Courtyard") (35 "F.Fab" user))
+          (setup (pad_to_mask_clearance 0))
+          (gr_line (start 0 0) (end 20 0) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000001"))
+          (gr_line (start 20 0) (end 20 15) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000002"))
+          (gr_line (start 20 15) (end 0 15) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000003"))
+          (gr_line (start 0 15) (end 0 0) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000004")))"#).unwrap();
+        std::fs::write(board_path.with_extension("kicad_pro"), "{}").unwrap();
+        let sch = root.join("board.kicad_sch");
+        let empty = b"(kicad_sch (version 20260306) (generator eeschema) (uuid 11111111-1111-4111-8111-111111111111) (paper A4) (lib_symbols))";
+        std::fs::write(&sch, empty).unwrap();
+        let artifact = kicad_model::SchematicArtifactFile::new(
+            "board.kicad_sch",
+            empty.len() as u64,
+            digest_bytes(empty),
+        )
+        .unwrap();
+        assert!(matches!(
+            kicad_schematic::create_two_resistor_circuit(&root, &sch, &artifact),
+            kicad_schematic::SchematicPatchOutcome::Committed { .. }
+        ));
+        let source = shadow_source_fingerprint(&board_path);
+        let schematic_source = std::fs::read(&sch).unwrap();
+        let mut launcher = OwnedPcbnewLauncher::new(&root.join("preview")).unwrap();
+        let shadow = launcher.create_shadow(&board_path).unwrap();
+        let result = (|| -> Result<(), String> {
+            launcher.launch(&shadow).map_err(|e| e.to_string())?;
+            let pid = launcher.current_identity().map_err(|e| e.to_string())?.pid;
+            let policy = DrcPolicy {
+                allowed_root: shadow.root().to_path_buf(),
+                timeout: Duration::from_secs(30),
+            };
+            let CheckResult::Completed(baseline) = run_pcb_drc(shadow.board_path(), &policy) else {
+                return Err("baseline DRC failed".into());
+            };
+            let mut observation = observe_owned_shadow(&mut launcher)?;
+            let board = observation
+                .snapshot
+                .board
+                .document_id
+                .clone()
+                .ok_or("missing board")?;
+            for (reference, x_nm) in [("R1", 5_000_000), ("R2", 10_000_000)] {
+                let mut source_observation = observation.clone();
+                source_observation.project_dir = root.clone();
+                source_observation.board_path = board_path.clone();
+                let placement = footprint_authoring::prepare(
+                    &BoardFootprintRequest {
+                        target_id: format!("placed-{reference}"),
+                        library_nickname: "Resistor_SMD".into(),
+                        library_entry_name: "R_0603_1608Metric".into(),
+                        x_nm,
+                        y_nm: 5_000_000,
+                        reference: reference.into(),
+                        value: "1k".into(),
+                    },
+                    &source_observation,
+                )?;
+                let mut operation = shadow_graphics_operation(board.clone());
+                operation.targets.push(placement.target_id.clone());
+                operation.kind = OperationKind::PlaceAllowlistedFootprint {
+                    board: board.clone(),
+                    placement,
+                };
+                let (expected, templates) =
+                    apply_shadow_operations(&mut launcher, &observation, &[operation], &root)
+                        .map_err(|e| format!("footprint execution: {e:?}"))?;
+                if templates.len() != 1 {
+                    return Err("missing source template".into());
+                }
+                launcher.reload_owned().map_err(|e| e.to_string())?;
+                observation = observe_owned_shadow(&mut launcher)?;
+                if observation.snapshot.canonical() != expected {
+                    return Err("footprint reload mismatch".into());
+                }
+                if launcher.current_identity().map_err(|e| e.to_string())?.pid != pid {
+                    return Err("editor was restarted".into());
+                }
+            }
+            let endpoint = |reference: &str, number: &str| -> Result<_, String> {
+                let footprint = observation
+                    .snapshot
+                    .native_footprints
+                    .as_ref()
+                    .ok_or("missing footprints")?
+                    .placements
+                    .iter()
+                    .find(|fp| fp.reference == reference)
+                    .ok_or("missing reference")?;
+                let pad = footprint
+                    .pads
+                    .iter()
+                    .find(|pad| pad.number == number)
+                    .ok_or("missing pad")?;
+                Ok((
+                    kicad_model::RoutingEndpointRef {
+                        pad_id: pad.pad_id.clone(),
+                        footprint_placement_id: footprint.placement_id.clone(),
+                    },
+                    Coordinate {
+                        x: footprint.position.x + pad.position.x_nm,
+                        y: footprint.position.y + pad.position.y_nm,
+                        unit: Unit::Nanometres,
+                        space: DocumentSpace::Board,
+                    },
+                    pad.net.clone().ok_or("missing pad net")?,
+                ))
+            };
+            let (start_pad, start, net) = endpoint("R1", "2")?;
+            let (end_pad, end, end_net) = endpoint("R2", "1")?;
+            if net != end_net {
+                return Err("schematic pin networks differ".into());
+            }
+            let mut track = shadow_graphics_operation(board.clone());
+            track.kind = OperationKind::AddStraightTrack {
+                board: board.clone(),
+                intent: StraightTrackIntent::new_endpoint_bound(
+                    StableId::new("planned-track").unwrap(),
+                    start,
+                    end,
+                    250_000,
+                    start_pad,
+                    end_pad,
+                    net.clone(),
+                )
+                .map_err(|e| e.to_string())?,
+            };
+            let mut via = shadow_graphics_operation(board.clone());
+            via.kind = OperationKind::AddThroughVia {
+                board: board.clone(),
+                intent: ThroughViaIntent::new_net_bound(
+                    StableId::new("planned-via").unwrap(),
+                    Coordinate {
+                        x: (start.x + end.x) / 2,
+                        y: start.y,
+                        ..start
+                    },
+                    600_000,
+                    300_000,
+                    net,
+                )
+                .map_err(|e| e.to_string())?,
+            };
+            let operations = [shadow_graphics_operation(board), track, via];
+            let (expected, _) =
+                apply_shadow_operations(&mut launcher, &observation, &operations, &root)
+                    .map_err(|e| format!("routing execution: {e:?}"))?;
+            launcher.reload_owned().map_err(|e| e.to_string())?;
+            let actual = observe_owned_shadow(&mut launcher)?;
+            if actual.snapshot.canonical() != expected {
+                return Err("routing reload mismatch".into());
+            }
+            if launcher.current_identity().map_err(|e| e.to_string())?.pid != pid {
+                return Err("editor was restarted".into());
+            }
+            let CheckResult::Completed(after) = run_pcb_drc(shadow.board_path(), &policy) else {
+                return Err("postcondition DRC failed".into());
+            };
+            let delta = compare_drc(&baseline, &after);
+            if !delta.introduced.is_empty() {
+                return Err(format!("introduced DRC: {:?}", delta.introduced));
+            }
+            Ok(())
+        })();
+        let cleanup = launcher.cleanup();
+        assert_eq!(source, shadow_source_fingerprint(&board_path));
+        assert_eq!(schematic_source, std::fs::read(&sch).unwrap());
+        assert!(cleanup.is_ok(), "cleanup: {cleanup:?}");
+        assert!(!shadow.root().exists());
+        assert!(result.is_ok(), "single-editor circuit: {result:?}");
+    }
+
+    #[test]
     #[ignore = "requires one owned KiCad PCB editor and CLI"]
     fn disposable_mixed_routing_shadow_uses_one_editor() {
         let fixture = TempBoard::new();
@@ -4832,6 +5253,96 @@ mod tests {
         let before = shadow_source_fingerprint(&board_path);
         std::fs::write(&board_path, "changed").unwrap();
         assert_ne!(before, shadow_source_fingerprint(&board_path));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires installed KiCad CLI and official libraries; opens no editor"]
+    async fn production_cli_binds_fixed_circuit_footprints_without_editor() {
+        let fixture = TempBoard::new();
+        let root = std::fs::canonicalize(&fixture.root).unwrap();
+        let sch = root.join("board.kicad_sch");
+        let empty = b"(kicad_sch (version 20260306) (generator eeschema) (uuid 11111111-1111-4111-8111-111111111111) (paper A4) (lib_symbols))";
+        std::fs::write(&sch, empty).unwrap();
+        let source = kicad_model::SchematicArtifactFile::new(
+            "board.kicad_sch",
+            empty.len() as u64,
+            digest_bytes(empty),
+        )
+        .unwrap();
+        let receipt = kicad_schematic::preview_two_resistor_circuit(&root, &sch, &source).unwrap();
+        assert_eq!(std::fs::read(&sch).unwrap(), empty);
+        assert!(matches!(
+            kicad_schematic::commit_two_resistor_circuit(&root, &sch, &receipt),
+            kicad_schematic::SchematicPatchOutcome::Committed { .. }
+        ));
+        let snapshot = project_snapshot(true);
+        let observation = LiveBoardObservation {
+            snapshot: snapshot.clone(),
+            instance_token: kicad_ipc::InstanceToken::new("source-test").unwrap(),
+            board_filename: "board.kicad_pcb".into(),
+            board_path: root.join("board.kicad_pcb"),
+            project_dir: root.clone(),
+        };
+        let request = BoardFootprintRequest {
+            target_id: "placed-r1".into(),
+            library_nickname: "Resistor_SMD".into(),
+            library_entry_name: "R_0603_1608Metric".into(),
+            x_nm: 5_000_000,
+            y_nm: 5_000_000,
+            reference: "R1".into(),
+            value: "1k".into(),
+        };
+        let placement = footprint_authoring::prepare(&request, &observation).unwrap();
+        let binding = placement.source.as_ref().unwrap();
+        assert_eq!(binding.symbol_path.len(), 2);
+        assert_eq!(
+            binding.symbol_path[0].as_str(),
+            "11111111-1111-4111-8111-111111111111"
+        );
+        assert_eq!(binding.pad_nets.len(), 2);
+        assert!(binding.pad_nets["2"].as_ref().unwrap().contains("R1"));
+        let serialized = serde_json::to_value(&placement).unwrap();
+        assert_eq!(
+            serde_json::from_value::<kicad_model::AllowlistedFootprintPlacement>(serialized)
+                .unwrap(),
+            placement
+        );
+        let server = Server::with_discovery(Arc::new(ValidationDiscovery {
+            root: root.clone(),
+            board_path: observation.board_path.clone(),
+            snapshot: snapshot.clone(),
+            token: "source-test".into(),
+        }));
+        let mut plan = plan_request(snapshot, "footprint-source-plan");
+        plan.segments = None;
+        plan.footprint = Some(request);
+        let result = server.kicad_plan_change(Parameters(plan)).await.unwrap();
+        let CallToolResponse::Complete(result) = result else {
+            panic!("complete plan expected")
+        };
+        assert_eq!(result.structured_content.unwrap()["ok"], true);
+        let sessions = server.sessions.lock().unwrap();
+        let stored = sessions.get("plan:footprint-source-plan").unwrap();
+        let OperationKind::PlaceAllowlistedFootprint {
+            placement: planned, ..
+        } = &stored.session.plan.operations[0].kind
+        else {
+            panic!("footprint operation expected")
+        };
+        assert_eq!(planned, &placement);
+        drop(sessions);
+        let mut invalid = placement.clone();
+        invalid.source.as_mut().unwrap().symbol_path[0] = StableId::new("wrong-root").unwrap();
+        assert!(invalid.validate().is_err());
+        let mut invalid = placement.clone();
+        invalid.source.as_mut().unwrap().pad_nets.remove("2");
+        assert!(invalid.validate().is_err());
+        let lock = root.join("~board.kicad_sch.lck");
+        std::fs::write(&lock, b"locked").unwrap();
+        assert!(footprint_authoring::verify_sources(&root, &placement).is_err());
+        std::fs::remove_file(lock).unwrap();
+        std::fs::write(&sch, empty).unwrap();
+        assert!(footprint_authoring::verify_sources(&root, &placement).is_err());
     }
 
     fn plan_request(_snapshot: ProjectSnapshot, request_id: &str) -> PlanBoardGraphicsRequest {
@@ -5283,6 +5794,10 @@ mod tests {
             .expect("capability call");
         let structured = result.structured_content.unwrap();
         assert_eq!(
+            structured["data"]["advertised_tools"],
+            serde_json::to_value(names).unwrap()
+        );
+        assert_eq!(
             structured["data"]["capabilities"]
                 .as_array()
                 .unwrap()
@@ -5328,6 +5843,10 @@ mod tests {
             .await
             .expect("capability call");
         let structured = result.structured_content.unwrap();
+        assert_eq!(
+            structured["data"]["advertised_tools"],
+            serde_json::to_value(names).unwrap()
+        );
         let capabilities = structured["data"]["capabilities"].as_array().unwrap();
         assert_eq!(
             capabilities
@@ -5538,7 +6057,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn plan_rejects_unverified_footprint_authoring() {
+    async fn plan_rejects_footprint_without_verified_source() {
         let server = Server::with_discovery(Arc::new(FakeDiscovery {
             write_capability: true,
         }));
@@ -5559,7 +6078,7 @@ mod tests {
             _ => panic!("plan call should complete"),
         };
         assert_eq!(result["ok"], false);
-        assert_eq!(result["data"]["reason"], "footprint_authoring_not_verified");
+        assert_eq!(result["data"]["reason"], "footprint_source_unavailable");
         assert!(server.sessions.lock().unwrap().is_empty());
     }
 
@@ -6301,6 +6820,7 @@ mod tests {
             delta: None,
             source_unchanged: true,
             shadow_cleaned: true,
+            prepared_footprints: Vec::new(),
             reason: None,
         }
     }
