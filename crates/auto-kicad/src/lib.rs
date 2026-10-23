@@ -4999,12 +4999,8 @@ mod tests {
         assert!(!shadow.root().exists());
     }
 
-    #[test]
-    #[ignore = "requires one owned KiCad PCB editor and CLI"]
-    fn disposable_mixed_routing_shadow_uses_one_editor() {
-        let fixture = TempBoard::new();
-        let board_path = fixture.root.join("board.kicad_pcb");
-        std::fs::write(&board_path, r#"(kicad_pcb (version 20260206) (generator "pcbnew")
+    fn routing_fixture_board() -> &'static str {
+        r#"(kicad_pcb (version 20260206) (generator "pcbnew")
           (general (thickness 1.6)) (paper "A4")
           (layers (0 "F.Cu" signal) (2 "B.Cu" signal) (9 "F.Adhes" user "F.Adhesive") (11 "B.Adhes" user "B.Adhesive")
             (13 "F.Paste" user) (15 "B.Paste" user) (5 "F.SilkS" user "F.Silkscreen") (7 "B.SilkS" user "B.Silkscreen")
@@ -5018,10 +5014,23 @@ mod tests {
             (property "Reference" "J2" (at 0 -2) (layer "F.SilkS") (effects (font (size 1 1) (thickness 0.15))))
             (property "Value" "Pad" (at 0 2) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))))
             (attr smd) (pad "1" smd rect (at 0 0) (size 1 1) (layers "F.Cu" "F.Paste" "F.Mask") (net 1 "GND") (uuid "20000000-0000-4000-8000-000000000002")))
+          (footprint "Test:BackPad" (layer "B.Cu") (uuid "10000000-0000-4000-8000-000000000003") (at 7.5 8)
+            (property "Reference" "J3" (at 0 0) (layer "B.Fab") (effects (font (size 1 1) (thickness 0.15))))
+            (property "Value" "BackPad" (at 0 2) (layer "B.Fab") (effects (font (size 1 1) (thickness 0.15))))
+            (attr smd) (pad "1" smd rect (at 0 0) (size 1 1) (layers "B.Cu" "B.Paste" "B.Mask") (net 1 "GND") (uuid "20000000-0000-4000-8000-000000000003")))
+          (segment (start 7.5 5) (end 7.5 8) (width 0.25) (layer "B.Cu") (net 1) (uuid "40000000-0000-4000-8000-000000000001"))
           (gr_line (start 0 0) (end 20 0) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000001"))
           (gr_line (start 20 0) (end 20 15) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000002"))
           (gr_line (start 20 15) (end 0 15) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000003"))
-          (gr_line (start 0 15) (end 0 0) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000004")))"#).unwrap();
+          (gr_line (start 0 15) (end 0 0) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000004")))"#
+    }
+
+    #[test]
+    #[ignore = "requires one owned KiCad PCB editor and CLI"]
+    fn disposable_mixed_routing_shadow_uses_one_editor() {
+        let fixture = TempBoard::new();
+        let board_path = fixture.root.join("board.kicad_pcb");
+        std::fs::write(&board_path, routing_fixture_board()).unwrap();
         std::fs::write(board_path.with_extension("kicad_pro"), "{}").unwrap();
         let board = StableId::new("fixture-board").unwrap();
         let net = kicad_model::ObservedNetIdentity {
@@ -5123,130 +5132,278 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore = "requires installed KiCad PCB editor and CLI"]
-    async fn live_mcp_preview_rejects_unsaved_state_and_commits_saved_graphics() {
+    #[ignore = "requires exactly two owned KiCad editors and CLI; no automatic restart"]
+    async fn live_mcp_saved_routing_lifecycle_uses_two_editors() {
+        async fn call(
+            client: &rmcp::service::RunningService<rmcp::RoleClient, TestClient>,
+            name: &'static str,
+            arguments: Value,
+        ) -> Result<Value, String> {
+            let result = client
+                .call_tool(
+                    CallToolRequestParams::new(name)
+                        .with_arguments(arguments.as_object().ok_or("invalid arguments")?.clone()),
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            if result.is_error == Some(true) {
+                return Err(format!("{result:?}"));
+            }
+            let content = result
+                .structured_content
+                .ok_or("missing structured content")?;
+            if content["ok"] != true {
+                return Err(content.to_string());
+            }
+            Ok(content["data"].clone())
+        }
+
         let fixture = TempBoard::new();
         let board = fixture.root.join("board.kicad_pcb");
-        std::fs::write(
-            &board,
-            r#"(kicad_pcb (version 20260206) (generator "pcbnew")
-            (general (thickness 1.6)) (paper "A4")
-            (layers (0 "F.Cu" signal) (2 "B.Cu" signal) (17 "Dwgs.User" user) (25 "Edge.Cuts" user))
-            (setup (pad_to_mask_clearance 0)))"#,
-        )
-        .unwrap();
+        std::fs::write(&board, routing_fixture_board()).unwrap();
         std::fs::write(board.with_extension("kicad_pro"), "{}").unwrap();
+        let original = shadow_source_fingerprint(&board);
+        let evidence_path = std::env::temp_dir().join(format!(
+            "auto-kicad-mcp-evidence-{}-{}.json",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
         let mut source_editor = OwnedPcbnewLauncher::new(&fixture.root.join("source")).unwrap();
         let source_project = source_editor.create_shadow(&board).unwrap();
-        let identity = source_editor.launch(&source_project).unwrap();
-        let mut client = source_editor.connect_owned().unwrap();
-        let commit = client.begin_commit().unwrap();
-        let segment = native_graphic(&graphic("unsaved"));
-        client
-            .create_board_graphics(&identity.board_filename, &[segment])
-            .unwrap();
-        client
-            .commit_changes(&commit, "temporary unsaved source fixture")
-            .unwrap();
-        let unsaved = observe_owned_shadow(&mut source_editor).unwrap();
-        let disk_before = shadow_source_fingerprint(source_project.board_path());
-        let validation = IpcShadowValidationService::new(fixture.root.join("unsaved-validation"));
-        let operation =
-            shadow_graphics_operation(unsaved.snapshot.board.document_id.clone().unwrap());
-        let rejected = validation.validate(
-            &identity.endpoint,
-            &unsaved,
-            &[operation],
-            Duration::from_secs(30),
-        );
-        assert_eq!(
-            rejected.state,
-            ShadowValidationState::Rejected,
-            "{rejected:?}"
-        );
-        assert!(
-            rejected
-                .reason
+        let source_root = source_project.root().to_path_buf();
+        let result: Result<(), String> = async {
+            let identity = source_editor
+                .launch(&source_project)
+                .map_err(|e| e.to_string())?;
+            {
+                let mut native = source_editor.connect_owned().map_err(|e| e.to_string())?;
+                let commit = native.begin_commit().map_err(|e| e.to_string())?;
+                native
+                    .create_board_graphics(
+                        &identity.board_filename,
+                        &[native_graphic(&graphic("existing"))],
+                    )
+                    .map_err(|e| e.to_string())?;
+                native
+                    .commit_changes(&commit, "saved source fixture")
+                    .map_err(|e| e.to_string())?;
+                native
+                    .save_board(&identity.board_filename)
+                    .map_err(|e| e.to_string())?;
+            }
+            source_editor.reload_owned().map_err(|e| e.to_string())?;
+            let before = observe_owned_shadow(&mut source_editor)?;
+            let source_disk = shadow_source_fingerprint(source_project.board_path());
+            let source_bytes =
+                std::fs::read(source_project.board_path()).map_err(|e| e.to_string())?;
+            let policy = DrcPolicy {
+                allowed_root: source_root.clone(),
+                timeout: Duration::from_secs(30),
+            };
+            let CheckResult::Completed(baseline) =
+                run_pcb_drc(source_project.board_path(), &policy)
+            else {
+                return Err("source baseline DRC failed".into());
+            };
+            let shadow_root = fixture.root.join("validation");
+            let state_dir = fixture.root.join("state");
+            let server = Server::with_discovery_and_execution_and_shadow(
+                Arc::new(IpcDiscoveryService),
+                Arc::new(IpcBoardGraphicsExecutionService),
+                Arc::new(IpcShadowValidationService::new(&shadow_root)),
+            )
+            .with_state_dir(&state_dir)
+            .map_err(|e| e.to_string())?;
+            let client = connected(server).await;
+            let mut addition = graphic("planned");
+            addition.start.y = 2_000_000;
+            addition.end.y = 2_000_000;
+            let footprints = before.snapshot.native_footprints.as_ref().ok_or("missing footprints")?;
+            let endpoint = |reference: &str| -> Result<_, String> {
+                let footprint = footprints.placements.iter().find(|fp| fp.reference == reference).ok_or("missing fixture footprint")?;
+                let pad = footprint.pads.first().ok_or("missing fixture pad")?;
+                Ok((json!({"pad_id": pad.pad_id, "footprint_placement_id": footprint.placement_id}),
+                    pad.net.clone().ok_or("missing fixture net")?))
+            };
+            let (start_pad, net) = endpoint("J1")?;
+            let (end_pad, end_net) = endpoint("J2")?;
+            if net != end_net { return Err("fixture pad nets differ".into()); }
+            let plan = call(
+                &client,
+                "kicad_plan_change",
+                json!({
+                    "endpoint": identity.endpoint, "source_run_id": "two-editor-acceptance",
+                    "request_id": "live-routing", "batch": [
+                        {"segments": [addition]},
+                        {"track": {"source_uuid": "planned-track", "start_x_nm": 5_000_000, "start_y_nm": 5_000_000,
+                            "end_x_nm": 10_000_000, "end_y_nm": 5_000_000, "width_nm": 250_000,
+                            "start_pad": start_pad, "end_pad": end_pad, "net": net}},
+                        {"via": {"source_uuid": "planned-via", "x_nm": 7_500_000, "y_nm": 5_000_000,
+                            "pad_diameter_nm": 600_000, "drill_diameter_nm": 300_000, "net": net}}
+                    ]
+                }),
+            )
+            .await?;
+            let preview_request =
+                json!({"plan_id": plan["plan_id"], "plan_hash": plan["plan_hash"]});
+
+            // Reject a changed live revision before starting the one preview editor.
+            {
+                let mut native = source_editor.connect_owned().map_err(|e| e.to_string())?;
+                let commit = native.begin_commit().map_err(|e| e.to_string())?;
+                let mut unsaved = graphic("unsaved");
+                unsaved.start.y = 3_000_000;
+                unsaved.end.y = 3_000_000;
+                native
+                    .create_board_graphics(&identity.board_filename, &[native_graphic(&unsaved)])
+                    .map_err(|e| e.to_string())?;
+                native
+                    .commit_changes(&commit, "temporary unsaved fixture")
+                    .map_err(|e| e.to_string())?;
+            }
+            let unsaved = observe_owned_shadow(&mut source_editor)?;
+            let rejected = call(&client, "kicad_preview_change", preview_request.clone()).await;
+            if !rejected
                 .as_ref()
-                .unwrap()
-                .contains("save the project")
-        );
-        assert_eq!(unsaved, observe_owned_shadow(&mut source_editor).unwrap());
-        assert_eq!(
-            disk_before,
-            shadow_source_fingerprint(source_project.board_path())
-        );
-        client.save_board(&identity.board_filename).unwrap();
-        drop(client);
-        let before = observe_owned_shadow(&mut source_editor).unwrap();
-        let source_disk = shadow_source_fingerprint(source_project.board_path());
-        assert_eq!(before.snapshot.board.graphics.len(), 1);
-        let shadow_root = fixture.root.join("validation");
-        let server = Server::with_discovery_and_execution_and_shadow(
-            Arc::new(IpcDiscoveryService),
-            Arc::new(IpcBoardGraphicsExecutionService),
-            Arc::new(IpcShadowValidationService::new(&shadow_root)),
-        );
-        let mut request = plan_request(before.snapshot.clone(), "live-graphics");
-        let mut addition = graphic("planned");
-        addition.start.y = 2_000_000;
-        addition.end.y = 2_000_000;
-        request.segments = Some(serde_json::to_value(vec![addition]).unwrap());
-        request.endpoint = identity.endpoint.clone();
-        let planned = server.kicad_plan_change(Parameters(request)).await.unwrap();
-        let CallToolResponse::Complete(planned) = planned else {
-            panic!("plan incomplete")
+                .is_err_and(|error| error.contains("source changed since planning"))
+            {
+                return Err(format!("unsaved source was not rejected: {rejected:?}"));
+            }
+            if shadow_root.exists()
+                || unsaved != observe_owned_shadow(&mut source_editor)?
+                || source_disk != shadow_source_fingerprint(source_project.board_path())
+            {
+                return Err("rejected preview changed source or started shadow validation".into());
+            }
+            source_editor.reload_owned().map_err(|e| e.to_string())?;
+            if before != observe_owned_shadow(&mut source_editor)? {
+                return Err("owned source restore mismatch".into());
+            }
+            let preview = call(&client, "kicad_preview_change", preview_request).await?;
+            if preview["state"] != "awaiting_approval" {
+                return Err(format!("preview did not await approval: {preview}"));
+            }
+            for field in [
+                "reopened",
+                "normalized_snapshot_matches",
+                "source_unchanged",
+                "shadow_cleaned",
+            ] {
+                if preview["shadow_validation"][field] != true {
+                    return Err(format!("shadow verification missing {field}: {preview}"));
+                }
+            }
+            if before != observe_owned_shadow(&mut source_editor)?
+                || source_disk != shadow_source_fingerprint(source_project.board_path())
+                || std::fs::read_dir(&shadow_root)
+                    .map_err(|e| e.to_string())?
+                    .next()
+                    .is_some()
+            {
+                return Err("preview changed source or left shadow files".into());
+            }
+            let approval = json!({
+                "plan_id": plan["plan_id"], "plan_hash": plan["plan_hash"],
+                "approval_hash": preview["approval_hash"],
+                "validation_evidence_hash": preview["validation_evidence_hash"]
+            });
+            let mut wrong = approval.clone();
+            wrong["approval_hash"] = json!("wrong");
+            if call(&client, "kicad_commit_change", wrong).await.is_ok() {
+                return Err("wrong approval accepted".into());
+            }
+            let committed = call(&client, "kicad_commit_change", approval.clone()).await?;
+            if committed["state"] != "committed" {
+                return Err(format!("commit failed: {committed}"));
+            }
+            let committed_disk = shadow_source_fingerprint(source_project.board_path());
+            if call(&client, "kicad_commit_change", approval).await.is_ok()
+                || committed_disk != shadow_source_fingerprint(source_project.board_path())
+            {
+                return Err("commit replay was not rejected without mutation".into());
+            }
+            source_editor.reload_owned().map_err(|e| e.to_string())?;
+            let after = observe_owned_shadow(&mut source_editor)?;
+            let CheckResult::Completed(after_drc) =
+                run_pcb_drc(source_project.board_path(), &policy)
+            else {
+                return Err("committed source DRC failed".into());
+            };
+            let history = recovery::ExecutionStore::open(&state_dir)
+                .map_err(|e| e.to_string())?
+                .history(&source_root)
+                .map_err(|e| e.to_string())?;
+            let evidence_file = std::fs::OpenOptions::new().write(true).create_new(true)
+                .open(&evidence_path).map_err(|e| e.to_string())?;
+            serde_json::to_writer_pretty(evidence_file, &json!({
+                "before": before.snapshot, "after": after.snapshot,
+                "baseline_drc": baseline, "committed_drc": after_drc,
+                "preview": preview, "commit": committed, "history": history,
+                "source_before_digest": digest_bytes(&source_bytes),
+                "backup_checks": history.iter().flat_map(|record| &record.backups).map(|entry| {
+                    json!({"original": entry.original, "recorded_digest": entry.sha256,
+                        "actual_digest": std::fs::read(&entry.saved).ok().map(|bytes| digest_bytes(&bytes).to_string())})
+                }).collect::<Vec<_>>()
+            })).map_err(|e| e.to_string())?;
+            if after.snapshot.board.graphics.len() != before.snapshot.board.graphics.len() + 1
+                || !after
+                    .snapshot
+                    .board
+                    .graphics
+                    .contains(&before.snapshot.board.graphics[0])
+                || source_editor
+                    .current_identity()
+                    .map_err(|e| e.to_string())?
+                    .pid
+                    != identity.pid
+            {
+                return Err("saved source geometry or editor PID mismatch".into());
+            }
+            let routing = after.snapshot.native_routing.as_ref().ok_or("missing committed routing")?;
+            let original_routing = before.snapshot.native_routing.as_ref().ok_or("missing baseline routing")?;
+            if routing.tracks.len() != original_routing.tracks.len() + 1 || routing.vias.len() != 1
+                || original_routing.tracks.iter().any(|original| {
+                    let mut rebound = original.clone();
+                    rebound.observed_revision = routing.observed_revision.clone();
+                    !routing.tracks.contains(&rebound)
+                })
+                || before.snapshot.native_footprints != after.snapshot.native_footprints
+                || before.snapshot.native_stackup != after.snapshot.native_stackup {
+                return Err("saved routing or preserved board objects differ".into());
+            }
+            if !compare_drc(&baseline, &after_drc).introduced.is_empty() {
+                return Err("commit introduced DRC violations".into());
+            }
+            if history.len() != 1 || history[0].state != "committed" || history[0].domain != "pcb" {
+                return Err(format!("invalid durable PCB history: {history:?}"));
+            }
+            let backup = history[0]
+                .backups
+                .iter()
+                .find(|entry| entry.original == source_project.board_path())
+                .ok_or("missing pre-write PCB backup")?;
+            if std::fs::read(&backup.saved).map_err(|e| e.to_string())? != source_bytes {
+                return Err("pre-write PCB backup mismatch".into());
+            }
+            Ok(())
+        }
+        .await;
+        let close = match source_editor.current_identity().cloned() {
+            Ok(identity) => source_editor.close_owned(identity.pid),
+            Err(_) => Ok(()),
         };
-        let plan = planned.structured_content.unwrap();
-        assert_eq!(plan["ok"], true, "{plan}");
-        let preview = server
-            .kicad_preview_change(Parameters(PreviewChangeRequest {
-                plan_id: plan["data"]["plan_id"].as_str().unwrap().into(),
-                plan_hash: plan["data"]["plan_hash"].as_str().unwrap().into(),
-                request_id: None,
-            }))
-            .await
-            .unwrap();
-        let CallToolResponse::Complete(preview) = preview else {
-            panic!("preview incomplete")
-        };
-        let preview = preview.structured_content.unwrap();
-        assert_eq!(preview["ok"], true, "{preview}");
-        assert_eq!(before, observe_owned_shadow(&mut source_editor).unwrap());
-        assert_eq!(
-            source_disk,
-            shadow_source_fingerprint(source_project.board_path())
-        );
-        assert!(std::fs::read_dir(&shadow_root).unwrap().next().is_none());
-        let committed = server
-            .kicad_commit_change(Parameters(CommitChangeRequest {
-                plan_id: plan["data"]["plan_id"].as_str().unwrap().into(),
-                plan_hash: plan["data"]["plan_hash"].as_str().unwrap().into(),
-                approval_hash: preview["data"]["approval_hash"].as_str().unwrap().into(),
-                validation_evidence_hash: preview["data"]["validation_evidence_hash"]
-                    .as_str()
-                    .unwrap()
-                    .into(),
-                request_id: None,
-            }))
-            .await
-            .unwrap();
-        let CallToolResponse::Complete(committed) = committed else {
-            panic!("commit incomplete")
-        };
-        let committed = committed.structured_content.unwrap();
-        assert_eq!(committed["ok"], true, "{committed}");
-        source_editor.reload_owned().unwrap();
-        assert_eq!(source_editor.current_identity().unwrap().pid, identity.pid);
-        let after = observe_owned_shadow(&mut source_editor).unwrap();
-        assert_eq!(after.snapshot.board.graphics.len(), 2);
+        let cleanup = close.and_then(|()| source_editor.cleanup());
+        assert_eq!(original, shadow_source_fingerprint(&board));
         assert!(
-            after
-                .snapshot
-                .board
-                .graphics
-                .contains(&before.snapshot.board.graphics[0])
+            result.is_ok() && cleanup.is_ok(),
+            "two-editor MCP: {result:?}; cleanup: {cleanup:?}; evidence: {}",
+            evidence_path.display()
         );
+        assert!(!source_root.exists());
+        std::fs::remove_file(evidence_path).unwrap();
     }
 
     #[test]

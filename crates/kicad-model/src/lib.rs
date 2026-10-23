@@ -3673,6 +3673,33 @@ mod tests {
     }
 
     #[test]
+    fn routing_additions_rebind_existing_items_without_changing_geometry() {
+        let board = id("board");
+        let before = ObservedBoardRouting::new(
+            board.clone(),
+            vec![observed_track(&board, "existing", false)],
+            vec![],
+        )
+        .unwrap();
+        let after = ObservedBoardRouting::new(
+            board.clone(),
+            vec![
+                before.tracks[0].clone(),
+                observed_track(&board, "new", false),
+            ],
+            vec![],
+        )
+        .unwrap();
+        assert_ne!(before.observed_revision, after.observed_revision);
+        assert!(!after.tracks.contains(&before.tracks[0]));
+        let mut rebound = before.tracks[0].clone();
+        rebound.observed_revision = after.observed_revision.clone();
+        assert!(after.tracks.contains(&rebound));
+        rebound.width_nm += 1;
+        assert!(!after.tracks.contains(&rebound));
+    }
+
+    #[test]
     fn complete_via_metadata_round_trips_and_binds_content_revision() {
         let board_id = id("board");
         let observation =
