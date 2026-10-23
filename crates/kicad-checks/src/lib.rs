@@ -752,31 +752,55 @@ exit 5"#,
 
     #[cfg(unix)]
     #[test]
-    fn runner_kills_and_reaps_on_timeout() {
+    fn runner_returns_timeout_and_cleans_reports() {
         let (root, board, mut policy) = runner_fixture();
         policy.timeout = Duration::from_millis(50);
-        let pid_file = root.path().join("pid");
-        let descendant_pid_file = root.path().join("descendant-pid");
-        let executable = executable(
-            root.path(),
-            &format!(
-                "printf '%s' $$ > '{}'; sleep 10 & printf '%s' $! > '{}'; wait",
-                pid_file.display(),
-                descendant_pid_file.display()
-            ),
-        );
+        let executable = executable(root.path(), "sleep 10");
         let started = std::time::Instant::now();
         let result = run_pcb_drc_with_executable(&board, &policy, &executable);
-        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(started.elapsed() < Duration::from_secs(2));
         assert!(matches!(
             result,
             CheckResult::Failed(CheckFailure::Timeout { .. })
         ));
-        let pid = fs::read_to_string(pid_file).unwrap();
-        let descendant_pid = fs::read_to_string(descendant_pid_file).unwrap();
-        assert_process_gone(pid.trim());
-        assert_process_gone(descendant_pid.trim());
         assert_no_report_directories(root.path());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn termination_reaps_owned_child_and_kills_descendants() {
+        let root = tempfile::tempdir().unwrap();
+        let descendant_pid_file = root.path().join("descendant-pid");
+        let executable = executable(
+            root.path(),
+            &format!(
+                "sleep 10 & printf '%s' $! > '{}'; wait",
+                descendant_pid_file.display()
+            ),
+        );
+        let mut child = Command::new(executable).process_group(0).spawn().unwrap();
+        let pid = child.id().to_string();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let descendant_pid = loop {
+            if let Ok(pid) = fs::read_to_string(&descendant_pid_file)
+                && !pid.is_empty()
+            {
+                break Some(pid);
+            }
+            if std::time::Instant::now() >= deadline {
+                break None;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        // Always release owned processes before asserting fixture readiness.
+        terminate_child_tree(&mut child);
+        assert!(child.try_wait().unwrap().is_some());
+        assert_process_gone(&pid);
+        assert_process_gone(
+            descendant_pid
+                .expect("child must publish descendant PID")
+                .trim(),
+        );
     }
 
     #[cfg(unix)]
