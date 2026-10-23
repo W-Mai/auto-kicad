@@ -983,6 +983,42 @@ impl From<ModelError> for LiveBoardObservationError {
     }
 }
 
+fn map_stackup_connector_type(
+    value: kicad_ipc::StackupConnectorType,
+) -> kicad_model::StackupConnectorType {
+    match value {
+        kicad_ipc::StackupConnectorType::Unknown => kicad_model::StackupConnectorType::Unknown,
+        kicad_ipc::StackupConnectorType::None => kicad_model::StackupConnectorType::None,
+        kicad_ipc::StackupConnectorType::Plain => kicad_model::StackupConnectorType::Plain,
+        kicad_ipc::StackupConnectorType::Beveled => kicad_model::StackupConnectorType::Beveled,
+    }
+}
+
+fn map_stackup_dielectric_type(
+    value: kicad_ipc::StackupDielectricType,
+) -> kicad_model::StackupDielectricType {
+    match value {
+        kicad_ipc::StackupDielectricType::Unknown => kicad_model::StackupDielectricType::Unknown,
+        kicad_ipc::StackupDielectricType::None => kicad_model::StackupDielectricType::None,
+        kicad_ipc::StackupDielectricType::Core => kicad_model::StackupDielectricType::Core,
+        kicad_ipc::StackupDielectricType::Prepreg => kicad_model::StackupDielectricType::Prepreg,
+    }
+}
+
+fn map_stackup_dielectric_model(
+    value: kicad_ipc::StackupDielectricModel,
+) -> kicad_model::StackupDielectricModel {
+    match value {
+        kicad_ipc::StackupDielectricModel::Unknown => kicad_model::StackupDielectricModel::Unknown,
+        kicad_ipc::StackupDielectricModel::Constant => {
+            kicad_model::StackupDielectricModel::Constant
+        }
+        kicad_ipc::StackupDielectricModel::DjordjevicSarkar => {
+            kicad_model::StackupDielectricModel::DjordjevicSarkar
+        }
+    }
+}
+
 pub fn board_stackup_observation(
     board_id: StableId,
     stackup: IpcBoardStackup,
@@ -1036,6 +1072,7 @@ pub fn board_stackup_observation(
     });
     let edge = stackup.edge.map(|edge| ObservedStackupEdge {
         connector_present: edge.connector.is_some(),
+        connector_type: edge.connector.map(map_stackup_connector_type),
         castellation: edge.castellation,
         plating: edge.plating,
     });
@@ -1066,6 +1103,14 @@ pub fn board_stackup_observation(
                         .into_iter()
                         .map(|property| {
                             Ok(ObservedStackupDielectricProperties {
+                                thickness_locked: property.thickness_locked,
+                                spec_frequency: property
+                                    .spec_frequency
+                                    .map(ExactFiniteFloat::new)
+                                    .transpose()?,
+                                dielectric_model: map_stackup_dielectric_model(
+                                    property.dielectric_model,
+                                ),
                                 epsilon_r: ExactFiniteFloat::new(property.epsilon_r)?,
                                 loss_tangent: ExactFiniteFloat::new(property.loss_tangent)?,
                                 material_name: property.material_name,
@@ -1080,6 +1125,19 @@ pub fn board_stackup_observation(
                 })
                 .transpose()?;
             Ok(ObservedStackupLayer {
+                dielectric_type: layer.dielectric_type.map(map_stackup_dielectric_type),
+                soldermask: layer
+                    .soldermask
+                    .map(|mask| {
+                        Ok::<_, ModelError>(kicad_model::ObservedStackupSoldermask {
+                            epsilon_r: ExactFiniteFloat::new(mask.epsilon_r)?,
+                            loss_tangent: ExactFiniteFloat::new(mask.loss_tangent)?,
+                            material_name: mask.material_name,
+                            thickness_nm: mask.thickness_nm,
+                        })
+                    })
+                    .transpose()?,
+                silkscreen_material: layer.silkscreen_material,
                 layer: layer_identity(layer.layer),
                 enabled: layer.enabled,
                 layer_type: layer_type(layer.layer_type),
@@ -2122,16 +2180,21 @@ pub fn verify_native_pcb_batch<I: BoardGraphicsIpc>(
     board_filename: &str,
     receipt: &NativePcbBatchReceipt,
 ) -> Result<(), String> {
-    let graphic_ids = receipt
-        .graphics
-        .iter()
-        .map(|graphic| graphic.graphic_id.clone())
-        .collect::<Vec<_>>();
-    let observed_graphics = if graphic_ids.is_empty() {
-        Vec::new()
-    } else {
-        ipc.read_board_graphics_by_id(board_filename, &graphic_ids, IpcBoardGraphicLayer::EdgeCuts)?
-    };
+    let mut observed_graphics = Vec::new();
+    for layer in [
+        IpcBoardGraphicLayer::DwgsUser,
+        IpcBoardGraphicLayer::EdgeCuts,
+    ] {
+        let ids = receipt
+            .graphics
+            .iter()
+            .filter(|graphic| graphic.segment.layer == layer)
+            .map(|graphic| graphic.graphic_id.clone())
+            .collect::<Vec<_>>();
+        if !ids.is_empty() {
+            observed_graphics.extend(ipc.read_board_graphics_by_id(board_filename, &ids, layer)?);
+        }
+    }
     let routing_ids = receipt
         .tracks
         .iter()
@@ -2884,6 +2947,9 @@ mod tests {
             None,
             None,
             vec![ObservedStackupLayer {
+                dielectric_type: None,
+                soldermask: None,
+                silkscreen_material: None,
                 layer: ObservedStackupLayerIdentity::FrontCopper,
                 enabled: true,
                 layer_type: ObservedStackupLayerType::Copper,
@@ -2904,6 +2970,9 @@ mod tests {
         user_name: &str,
     ) -> kicad_ipc::ObservedStackupLayer {
         kicad_ipc::ObservedStackupLayer {
+            dielectric_type: None,
+            soldermask: None,
+            silkscreen_material: None,
             layer,
             enabled: true,
             layer_type,
@@ -2936,6 +3005,9 @@ mod tests {
             ipc_stackup_layer(Identity::Undefined, LayerType::Dielectric, 100_000, "Core");
         core.material_name = "FR4".to_owned();
         core.dielectric = Some(vec![kicad_ipc::ObservedStackupDielectricProperties {
+            thickness_locked: false,
+            spec_frequency: None,
+            dielectric_model: Default::default(),
             epsilon_r: 4.2,
             loss_tangent: 0.0,
             material_name: "FR4".to_owned(),
@@ -2954,7 +3026,7 @@ mod tests {
                 is_controlled: false,
             }),
             edge: Some(kicad_ipc::ObservedStackupEdge {
-                connector: Some(()),
+                connector: Some(kicad_ipc::StackupConnectorType::Unknown),
                 castellation: Some(false),
                 plating: None,
             }),
@@ -2998,6 +3070,7 @@ mod tests {
             observation.edge,
             Some(ObservedStackupEdge {
                 connector_present: true,
+                connector_type: Some(kicad_model::StackupConnectorType::Unknown),
                 castellation: Some(false),
                 plating: None,
             })

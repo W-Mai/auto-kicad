@@ -1863,12 +1863,52 @@ pub struct ExactFiniteRgba {
     pub alpha: ExactFiniteFloat,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum StackupConnectorType {
+    #[default]
+    Unknown,
+    None,
+    Plain,
+    Beveled,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum StackupDielectricType {
+    #[default]
+    Unknown,
+    None,
+    Core,
+    Prepreg,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum StackupDielectricModel {
+    #[default]
+    Unknown,
+    Constant,
+    DjordjevicSarkar,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ObservedStackupSoldermask {
+    pub epsilon_r: ExactFiniteFloat,
+    pub loss_tangent: ExactFiniteFloat,
+    pub material_name: String,
+    pub thickness_nm: Option<i64>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ObservedStackupDielectricProperties {
     pub epsilon_r: ExactFiniteFloat,
     pub loss_tangent: ExactFiniteFloat,
     pub material_name: String,
     pub thickness_nm: i64,
+    #[serde(default)]
+    pub thickness_locked: bool,
+    #[serde(default)]
+    pub spec_frequency: Option<ExactFiniteFloat>,
+    #[serde(default)]
+    pub dielectric_model: StackupDielectricModel,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1881,6 +1921,12 @@ pub struct ObservedStackupLayer {
     pub user_name: String,
     pub color: Option<ExactFiniteRgba>,
     pub dielectric: Option<Vec<ObservedStackupDielectricProperties>>,
+    #[serde(default)]
+    pub dielectric_type: Option<StackupDielectricType>,
+    #[serde(default)]
+    pub soldermask: Option<ObservedStackupSoldermask>,
+    #[serde(default)]
+    pub silkscreen_material: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1896,6 +1942,8 @@ pub struct ObservedStackupImpedance {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ObservedStackupEdge {
     pub connector_present: bool,
+    #[serde(default)]
+    pub connector_type: Option<StackupConnectorType>,
     pub castellation: Option<bool>,
     pub plating: Option<bool>,
 }
@@ -1948,6 +1996,20 @@ impl ObservedBoardStackup {
             {
                 return Err(ModelError::InvalidStackupObservation(
                     "concrete stackup layer identities must be unique",
+                ));
+            }
+            if (layer.dielectric_type.is_some() && layer.dielectric.is_none())
+                || (layer.soldermask.is_some()
+                    && layer.layer_type != ObservedStackupLayerType::Soldermask)
+                || (layer.silkscreen_material.is_some()
+                    && layer.layer_type != ObservedStackupLayerType::Silkscreen)
+                || layer
+                    .soldermask
+                    .as_ref()
+                    .is_some_and(|mask| mask.thickness_nm.is_some_and(|thickness| thickness < 0))
+            {
+                return Err(ModelError::InvalidStackupObservation(
+                    "stackup details do not match layer type",
                 ));
             }
             if layer.thickness_nm < 0
@@ -3772,6 +3834,9 @@ mod tests {
         thickness_nm: i64,
     ) -> ObservedStackupLayer {
         ObservedStackupLayer {
+            dielectric_type: None,
+            soldermask: None,
+            silkscreen_material: None,
             layer,
             enabled: true,
             layer_type,
@@ -3788,6 +3853,47 @@ mod tests {
         layers: Vec<ObservedStackupLayer>,
     ) -> Result<ObservedBoardStackup, ModelError> {
         ObservedBoardStackup::new(board_id, None, None, None, layers)
+    }
+
+    #[test]
+    fn stackup_metadata_is_revision_bound_and_type_checked() {
+        let mut layer = stackup_layer(
+            ObservedStackupLayerIdentity::Undefined,
+            ObservedStackupLayerType::Dielectric,
+            100,
+        );
+        layer.dielectric_type = Some(StackupDielectricType::Core);
+        layer.dielectric = Some(vec![ObservedStackupDielectricProperties {
+            epsilon_r: ExactFiniteFloat::new(4.2).unwrap(),
+            loss_tangent: ExactFiniteFloat::new(0.02).unwrap(),
+            material_name: "FR4".into(),
+            thickness_nm: 100,
+            thickness_locked: true,
+            spec_frequency: Some(ExactFiniteFloat::new(1e9).unwrap()),
+            dielectric_model: StackupDielectricModel::Constant,
+        }]);
+        let initial = observed_stackup(id("board"), vec![layer]).unwrap();
+        for field in 0..4 {
+            let mut changed = initial.clone();
+            let layer = &mut changed.layers[0];
+            match field {
+                0 => layer.dielectric_type = Some(StackupDielectricType::Prepreg),
+                1 => layer.dielectric.as_mut().unwrap()[0].thickness_locked = false,
+                2 => layer.dielectric.as_mut().unwrap()[0].spec_frequency = None,
+                _ => {
+                    layer.dielectric.as_mut().unwrap()[0].dielectric_model =
+                        StackupDielectricModel::DjordjevicSarkar
+                }
+            }
+            assert!(changed.validate().is_err());
+            assert_ne!(
+                changed.content_revision().unwrap(),
+                initial.observed_revision
+            );
+        }
+        let mut invalid = initial.layers[0].clone();
+        invalid.silkscreen_material = Some("ink".into());
+        assert!(observed_stackup(id("board"), vec![invalid]).is_err());
     }
 
     #[test]
@@ -3894,6 +4000,9 @@ mod tests {
             alpha: ExactFiniteFloat::new(1.0).unwrap(),
         });
         layer.dielectric = Some(vec![ObservedStackupDielectricProperties {
+            thickness_locked: false,
+            spec_frequency: None,
+            dielectric_model: Default::default(),
             epsilon_r: ExactFiniteFloat::new(4.2).unwrap(),
             loss_tangent: ExactFiniteFloat::new(0.01).unwrap(),
             material_name: "FR4".to_owned(),

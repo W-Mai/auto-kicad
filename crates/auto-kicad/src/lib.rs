@@ -255,7 +255,7 @@ impl<T: kicad_ipc::KiCadTransport> LiveBoardObservationSource for KiCadClient<T>
         board_filename: &str,
         footprint_source_uuid: &str,
     ) -> Result<Vec<kicad_ipc::ObservedPad>, kicad_ipc::IpcError> {
-        self.get_footprint_pads(board_filename, footprint_source_uuid)
+        self.get_footprint_definition_pads(board_filename, footprint_source_uuid)
     }
 
     fn board_routing(
@@ -483,80 +483,75 @@ fn validate_shadow_operations(
     Ok(())
 }
 
+fn shadow_graphic_segments(
+    operations: &[Operation],
+) -> Result<Vec<kicad_model::BoardGraphicSegment>, String> {
+    let mut graphics = Vec::new();
+    for operation in operations {
+        match &operation.kind {
+            OperationKind::AddBoardGraphicSegments { segments, .. } => {
+                graphics.extend(segments.iter().cloned());
+            }
+            OperationKind::AddBoardOutline {
+                top_left,
+                bottom_right,
+                width_nm,
+                ..
+            } => {
+                graphics.extend(expand_board_outline(*top_left, *bottom_right, *width_nm));
+            }
+            _ => return Err("shadow postcondition contains a non-graphics operation".into()),
+        }
+    }
+    Ok(graphics)
+}
+
+fn native_graphic(segment: &kicad_model::BoardGraphicSegment) -> IpcBoardGraphicSegment {
+    IpcBoardGraphicSegment {
+        start_x_nm: segment.start.x,
+        start_y_nm: segment.start.y,
+        end_x_nm: segment.end.x,
+        end_y_nm: segment.end.y,
+        width_nm: segment.width_nm,
+        layer: match segment.layer {
+            kicad_model::BoardGraphicLayer::DwgsUser => IpcBoardGraphicLayer::DwgsUser,
+            kicad_model::BoardGraphicLayer::EdgeCuts => IpcBoardGraphicLayer::EdgeCuts,
+        },
+    }
+}
+
 fn expected_shadow_snapshot(
     observation: &LiveBoardObservation,
     operations: &[Operation],
+    receipts: &[kicad_ipc::CreatedBoardGraphicReceipt],
 ) -> Result<ProjectSnapshot, String> {
-    let mut expected = observation.snapshot.clone();
-    for operation in operations {
-        match &operation.kind {
-            OperationKind::AddBoardGraphicSegments { segments, .. } => {
-                expected.board.graphics.extend(segments.iter().cloned());
-            }
-            OperationKind::AddBoardOutline {
-                top_left,
-                bottom_right,
-                width_nm,
-                ..
-            } => expected.board.graphics.extend(expand_board_outline(
-                *top_left,
-                *bottom_right,
-                *width_nm,
-            )),
-            _ => return Err("shadow postcondition contains a non-graphics operation".into()),
-        }
+    let mut graphics = shadow_graphic_segments(operations)?;
+    if graphics.len() != receipts.len() {
+        return Err("shadow creation receipt count does not match plan".into());
     }
+    let mut expected = observation.snapshot.clone();
+    for (index, (graphic, receipt)) in graphics.iter_mut().zip(receipts).enumerate() {
+        if receipt.request_index != index || receipt.segment != native_graphic(graphic) {
+            return Err("shadow creation receipt content does not match plan".into());
+        }
+        graphic.graphic_id =
+            StableId::new(receipt.graphic_id.clone()).map_err(|error| error.to_string())?;
+    }
+    let mut ids = expected
+        .board
+        .graphics
+        .iter()
+        .map(|graphic| graphic.graphic_id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    if graphics
+        .iter()
+        .any(|graphic| !ids.insert(graphic.graphic_id.clone()))
+    {
+        return Err("shadow creation receipt reused an existing identity".into());
+    }
+    expected.board.graphics.extend(graphics);
     expected.validate().map_err(|error| error.to_string())?;
     Ok(expected.canonical())
-}
-
-fn validate_shadow_graphics(
-    observation: &LiveBoardObservation,
-    operations: &[Operation],
-) -> Result<(), String> {
-    let mut expected = Vec::new();
-    for operation in operations {
-        match &operation.kind {
-            OperationKind::AddBoardGraphicSegments { segments, .. } => {
-                expected.extend(segments.iter().cloned());
-            }
-            OperationKind::AddBoardOutline {
-                top_left,
-                bottom_right,
-                width_nm,
-                ..
-            } => expected.extend(expand_board_outline(*top_left, *bottom_right, *width_nm)),
-            _ => return Err("shadow postcondition contains a non-graphics operation".into()),
-        }
-    }
-    let mut expected_ids = std::collections::BTreeSet::new();
-    for graphic in expected {
-        if !expected_ids.insert(graphic.graphic_id.clone()) {
-            return Err(format!(
-                "shadow postcondition expected duplicate graphic {}",
-                graphic.graphic_id
-            ));
-        }
-        let mut matches = observation
-            .snapshot
-            .board
-            .graphics
-            .iter()
-            .filter(|actual| actual.graphic_id == graphic.graphic_id);
-        let Some(actual) = matches.next() else {
-            return Err(format!(
-                "shadow postcondition graphic {} is missing",
-                graphic.graphic_id
-            ));
-        };
-        if matches.next().is_some() || actual != &graphic {
-            return Err(format!(
-                "shadow postcondition graphic {} does not match",
-                graphic.graphic_id
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn cleanup_shadow(
@@ -761,28 +756,44 @@ pub fn validate_disposable_shadow(
             );
         }
     };
-    let mutation = BoardGraphicsExecutor::default().execute_bound_batch(
+    let graphics = match shadow_graphic_segments(&bound_operations) {
+        Ok(graphics) => graphics.iter().map(native_graphic).collect::<Vec<_>>(),
+        Err(reason) => {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::rejected(reason),
+            );
+        }
+    };
+    let mutation = BoardGraphicsExecutor::default().execute_native_batch(
         &mut client,
-        &bound_operations,
-        &observation.snapshot,
-        &expected_revision,
         &observation.board_filename,
+        &graphics,
+        &[],
+        &[],
         "auto-kicad disposable shadow validation",
     );
     drop(client);
-    if !matches!(mutation, BoardGraphicsCommitOutcome::CommittedAndSaved) {
-        let outcome = match mutation {
-            BoardGraphicsCommitOutcome::Rejected { reason } => {
-                ShadowValidationOutcome::rejected(reason)
-            }
-            BoardGraphicsCommitOutcome::CommittedButNotSaved { reason }
-            | BoardGraphicsCommitOutcome::Unknown { reason } => {
-                ShadowValidationOutcome::unknown(reason)
-            }
-            BoardGraphicsCommitOutcome::CommittedAndSaved => unreachable!("matched above"),
-        };
-        return cleanup_shadow(&mut launcher, source_board, &source_before, outcome);
-    }
+    let receipt = match mutation {
+        Ok(receipt) => receipt,
+        Err(mutation) => {
+            let outcome = match mutation {
+                BoardGraphicsCommitOutcome::Rejected { reason } => {
+                    ShadowValidationOutcome::rejected(reason)
+                }
+                BoardGraphicsCommitOutcome::CommittedButNotSaved { reason }
+                | BoardGraphicsCommitOutcome::Unknown { reason } => {
+                    ShadowValidationOutcome::unknown(reason)
+                }
+                BoardGraphicsCommitOutcome::CommittedAndSaved => {
+                    ShadowValidationOutcome::unknown("missing native creation receipts")
+                }
+            };
+            return cleanup_shadow(&mut launcher, source_board, &source_before, outcome);
+        }
+    };
     let old_pid = match launcher.current_identity() {
         Ok(identity) => identity.pid,
         Err(error) => {
@@ -832,17 +843,18 @@ pub fn validate_disposable_shadow(
             );
         }
     };
-    let expected_snapshot = match expected_shadow_snapshot(&observation, &bound_operations) {
-        Ok(snapshot) => snapshot,
-        Err(error) => {
-            return cleanup_shadow(
-                &mut launcher,
-                source_board,
-                &source_before,
-                ShadowValidationOutcome::unknown(error),
-            );
-        }
-    };
+    let expected_snapshot =
+        match expected_shadow_snapshot(&observation, &bound_operations, &receipt.graphics) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                return cleanup_shadow(
+                    &mut launcher,
+                    source_board,
+                    &source_before,
+                    ShadowValidationOutcome::unknown(error),
+                );
+            }
+        };
     let normalized_snapshot_matches = reopened.snapshot.canonical() == expected_snapshot;
     if !normalized_snapshot_matches {
         return cleanup_shadow(
@@ -874,14 +886,6 @@ pub fn validate_disposable_shadow(
             source_board,
             &source_before,
             ShadowValidationOutcome::unknown("reopened shadow document identity changed"),
-        );
-    }
-    if let Err(error) = validate_shadow_graphics(&reopened, &bound_operations) {
-        return cleanup_shadow(
-            &mut launcher,
-            source_board,
-            &source_before,
-            ShadowValidationOutcome::unknown(error),
         );
     }
     let after = match run_pcb_drc(shadow.board_path(), &policy) {
@@ -3383,6 +3387,9 @@ mod tests {
             edge: None,
             layers: vec![
                 kicad_ipc::ObservedStackupLayer {
+                    dielectric_type: None,
+                    soldermask: None,
+                    silkscreen_material: None,
                     layer: Identity::FrontCopper,
                     enabled: true,
                     layer_type: LayerType::Copper,
@@ -3393,6 +3400,9 @@ mod tests {
                     dielectric: None,
                 },
                 kicad_ipc::ObservedStackupLayer {
+                    dielectric_type: None,
+                    soldermask: None,
+                    silkscreen_material: None,
                     layer: Identity::BackCopper,
                     enabled: true,
                     layer_type: LayerType::Copper,
@@ -4076,56 +4086,88 @@ mod tests {
     }
 
     #[test]
-    fn shadow_graphics_postcondition_matches_segments_and_expanded_outline() {
+    fn shadow_snapshot_binds_receipts_and_preserves_existing_state() {
         let mut observation = fresh_shadow_observation();
-        let board = observation.snapshot.board.document_id.clone().unwrap();
-        let explicit = graphic("shadow-graphic");
-        let outline = expand_board_outline(
-            Coordinate {
-                x: 2_000,
-                y: 2_000,
-                unit: Unit::Nanometres,
-                space: DocumentSpace::Board,
-            },
-            Coordinate {
-                x: 4_000,
-                y: 5_000,
-                unit: Unit::Nanometres,
-                space: DocumentSpace::Board,
-            },
-            100,
-        );
-        observation.snapshot.board.graphics.push(explicit.clone());
-        observation.snapshot.board.graphics.extend(outline.clone());
-        let explicit_operation = shadow_graphics_operation(board.clone());
-        let outline_operation = Operation {
-            operation_id: StableId::new("shadow-outline-operation").unwrap(),
-            kind: OperationKind::AddBoardOutline {
-                board: board.clone(),
-                top_left: outline[0].start,
-                bottom_right: outline[2].start,
-                width_nm: outline[0].width_nm,
-            },
-            targets: vec![board.clone()],
-            preconditions: Vec::new(),
-            expected_effects: vec!["add rectangular Edge.Cuts outline".into()],
-            risk_class: RiskClass::Medium,
-            idempotency_key: "shadow-outline-operation".into(),
-            source_run_id: "shadow-run".into(),
-        };
-        assert!(
-            validate_shadow_graphics(
-                &observation,
-                &[explicit_operation, outline_operation.clone()],
-            )
-            .is_ok()
-        );
         observation
             .snapshot
             .board
             .graphics
-            .retain(|segment| segment.graphic_id != outline[0].graphic_id);
-        assert!(validate_shadow_graphics(&observation, &[outline_operation]).is_err());
+            .push(graphic("existing-graphic"));
+        let board = observation.snapshot.board.document_id.clone().unwrap();
+        let operation = shadow_graphics_operation(board);
+        let receipts = vec![kicad_ipc::CreatedBoardGraphicReceipt {
+            request_index: 0,
+            graphic_id: "server-assigned-uuid".into(),
+            lock_state: kicad_ipc::ObservedLockState::Unlocked,
+            segment: native_graphic(&graphic("shadow-graphic")),
+        }];
+        let expected =
+            expected_shadow_snapshot(&observation, std::slice::from_ref(&operation), &receipts)
+                .unwrap();
+        assert!(
+            expected
+                .board
+                .graphics
+                .iter()
+                .any(|g| g.graphic_id.as_str() == "server-assigned-uuid")
+        );
+        assert!(
+            !expected
+                .board
+                .graphics
+                .iter()
+                .any(|g| g.graphic_id.as_str() == "shadow-graphic")
+        );
+        for original in &observation.snapshot.board.graphics {
+            assert!(expected.board.graphics.contains(original));
+        }
+        assert!(
+            expected_shadow_snapshot(&observation, std::slice::from_ref(&operation), &[]).is_err()
+        );
+        let mut wrong = receipts.clone();
+        wrong[0].segment.width_nm += 1;
+        assert!(
+            expected_shadow_snapshot(&observation, std::slice::from_ref(&operation), &wrong)
+                .is_err()
+        );
+        wrong = receipts;
+        wrong[0].graphic_id = observation.snapshot.board.graphics[0]
+            .graphic_id
+            .to_string();
+        assert!(expected_shadow_snapshot(&observation, &[operation], &wrong).is_err());
+    }
+
+    #[test]
+    #[ignore = "requires installed KiCad PCB editor and CLI"]
+    fn disposable_graphics_shadow_verifies_server_assigned_ids() {
+        let fixture = TempBoard::new();
+        let board = fixture.root.join("board.kicad_pcb");
+        std::fs::write(
+            &board,
+            r#"(kicad_pcb (version 20260206) (generator "pcbnew")
+            (general (thickness 1.6)) (paper "A4")
+            (layers (0 "F.Cu" signal) (2 "B.Cu" signal)
+                (17 "Dwgs.User" user) (25 "Edge.Cuts" user))
+            (setup (pad_to_mask_clearance 0)))"#,
+        )
+        .unwrap();
+        std::fs::write(board.with_extension("kicad_pro"), "{}").unwrap();
+        let before = shadow_source_fingerprint(&board);
+        let operation = shadow_graphics_operation(StableId::new("source-board").unwrap());
+        let outcome = validate_disposable_shadow(
+            &fixture.root.join("shadows"),
+            &board,
+            &[operation],
+            Duration::from_secs(30),
+        );
+        assert_eq!(
+            outcome.state,
+            ShadowValidationState::Committed,
+            "{outcome:?}"
+        );
+        assert!(outcome.reopened && outcome.normalized_snapshot_matches);
+        assert!(outcome.source_unchanged && outcome.shadow_cleaned);
+        assert_eq!(before, shadow_source_fingerprint(&board));
     }
 
     #[test]
