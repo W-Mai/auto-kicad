@@ -5,9 +5,13 @@ A Rust MCP server for inspecting KiCad PCB state and applying bounded, approval-
 ## Build and run
 
 ```sh
-cargo build --release -p auto-kicad
-./target/release/auto-kicad
+CARGO_INCREMENTAL=0 cargo build --release --locked -p auto-kicad
+python3 scripts/install-local.py target/release/auto-kicad
+codex mcp add auto-kicad -- "$HOME/.local/bin/auto-kicad"
+codex mcp get auto-kicad
 ```
+
+The installer copies the executable into `~/.local/lib/auto-kicad` and writes a launcher into `~/.local/bin`. `--prefix` selects another installation root. The launcher adds the macOS KiCad CLI directory to `PATH`; the embedded fixed footprint helper needs no source checkout. KiCad and its bundled Python runtime must remain installed. The build directory can be removed after installation and verification. Restart the Codex session to load the registered server. Set `tool_timeout_sec = 180` under `[mcp_servers.auto-kicad]` in the Codex configuration to allow editor startup, reload and DRC.
 
 The server uses MCP over standard input/output. Configure an MCP client to launch the built executable. KiCad 10.0.6 is the verified protocol baseline. Enable the KiCad IPC API and open the target PCB before using board tools. The endpoint identifies the editor instance; on macOS it is normally under `/tmp/kicad/`.
 
@@ -54,7 +58,7 @@ An assembly request is exclusive with `footprint`, `batch` and other top-level o
 
 Use the endpoint returned for the target editor. The matching saved schematic must already contain R1 and R2 with the specified values and footprint fields, with R1.2 and R2.1 connected. Preview evidence binds template byte digests and symbol/pin associations together with the plan, source fingerprints, saved snapshot and DRC result.
 
-`AUTO_KICAD_OFFICIAL_FOOTPRINT_ROOT` selects the installed `footprints` directory; the server resolves the corresponding `.pretty` subdirectory. `AUTO_KICAD_PROJECT_FOOTPRINT_ROOT` selects a USB-C `.pretty` directory, defaulting to `Type-C.pretty` inside its project directory. MCP requests cannot supply executable, script or library paths. The fixed template helper currently requires the source checkout and KiCad's bundled macOS Python runtime; copying only the server executable does not provide this backend.
+`AUTO_KICAD_OFFICIAL_FOOTPRINT_ROOT` selects the installed `footprints` directory; the server resolves the corresponding `.pretty` subdirectory. `AUTO_KICAD_PROJECT_FOOTPRINT_ROOT` selects a USB-C `.pretty` directory, defaulting to `Type-C.pretty` inside its project directory. MCP requests cannot supply executable, script or library paths. The fixed template helper is embedded in the executable and uses KiCad's bundled macOS Python runtime. MCP input cannot replace its program.
 
 `kicad_capabilities` reports enabled tool names directly from the MCP router. Authoring marked `live_verification_pending` has not completed live acceptance; each request still requires its normal source, shadow, DRC and approval checks.
 

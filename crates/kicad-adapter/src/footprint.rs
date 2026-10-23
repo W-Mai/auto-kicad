@@ -899,7 +899,7 @@ const MAX_HELPER_OUTPUT_BYTES: usize = 1024 * 1024;
 const HELPER_TIMEOUT: Duration = Duration::from_secs(30);
 const FIXED_PYTHON_PATH: &str =
     "/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3.9";
-const FIXED_HELPER_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/helpers/footprint_helper.py");
+const FIXED_HELPER_SOURCE: &str = include_str!("../helpers/footprint_helper.py");
 
 #[derive(Clone, Debug)]
 pub struct SourceFootprintTemplate {
@@ -1104,7 +1104,8 @@ fn run_fixed_python_helper(
     });
     let deadline = std::time::Instant::now() + HELPER_TIMEOUT;
     let mut child = Command::new(FIXED_PYTHON_PATH)
-        .arg(FIXED_HELPER_PATH)
+        .arg("-c")
+        .arg(FIXED_HELPER_SOURCE)
         .arg("--fixed-footprint-placement-v2")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
