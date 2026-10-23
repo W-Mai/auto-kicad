@@ -2425,7 +2425,7 @@ impl Server {
                     id: "pcb.source_bound_footprint",
                     domain: "pcb",
                     mode: "write",
-                    status: "live_verification_pending",
+                    status: "verified",
                 },
                 Capability {
                     id: "pcb.drc.validate",
@@ -4796,16 +4796,7 @@ mod tests {
         let fixture = TempBoard::new();
         let root = std::fs::canonicalize(&fixture.root).unwrap();
         let board_path = root.join("board.kicad_pcb");
-        std::fs::write(&board_path, r#"(kicad_pcb (version 20260206) (generator "pcbnew")
-          (general (thickness 1.6)) (paper "A4")
-          (layers (0 "F.Cu" signal) (2 "B.Cu" signal) (9 "F.Adhes" user "F.Adhesive") (11 "B.Adhes" user "B.Adhesive")
-            (13 "F.Paste" user) (15 "B.Paste" user) (5 "F.SilkS" user "F.Silkscreen") (7 "B.SilkS" user "B.Silkscreen")
-            (1 "F.Mask" user) (3 "B.Mask" user) (17 "Dwgs.User" user) (25 "Edge.Cuts" user) (31 "F.CrtYd" user "F.Courtyard") (35 "F.Fab" user))
-          (setup (pad_to_mask_clearance 0))
-          (gr_line (start 0 0) (end 20 0) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000001"))
-          (gr_line (start 20 0) (end 20 15) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000002"))
-          (gr_line (start 20 15) (end 0 15) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000003"))
-          (gr_line (start 0 15) (end 0 0) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000004")))"#).unwrap();
+        std::fs::write(&board_path, empty_fixture_board()).unwrap();
         std::fs::write(board_path.with_extension("kicad_pro"), "{}").unwrap();
         let sch = root.join("board.kicad_sch");
         let empty = b"(kicad_sch (version 20260306) (generator eeschema) (uuid 11111111-1111-4111-8111-111111111111) (paper A4) (lib_symbols))";
@@ -4999,6 +4990,19 @@ mod tests {
         assert!(!shadow.root().exists());
     }
 
+    fn empty_fixture_board() -> &'static str {
+        r#"(kicad_pcb (version 20260206) (generator "pcbnew")
+          (general (thickness 1.6)) (paper "A4")
+          (layers (0 "F.Cu" signal) (2 "B.Cu" signal) (9 "F.Adhes" user "F.Adhesive") (11 "B.Adhes" user "B.Adhesive")
+            (13 "F.Paste" user) (15 "B.Paste" user) (5 "F.SilkS" user "F.Silkscreen") (7 "B.SilkS" user "B.Silkscreen")
+            (1 "F.Mask" user) (3 "B.Mask" user) (17 "Dwgs.User" user) (25 "Edge.Cuts" user) (31 "F.CrtYd" user "F.Courtyard") (35 "F.Fab" user))
+          (setup (pad_to_mask_clearance 0))
+          (gr_line (start 0 0) (end 20 0) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000001"))
+          (gr_line (start 20 0) (end 20 15) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000002"))
+          (gr_line (start 20 15) (end 0 15) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000003"))
+          (gr_line (start 0 15) (end 0 0) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000004")))"#
+    }
+
     fn routing_fixture_board() -> &'static str {
         r#"(kicad_pcb (version 20260206) (generator "pcbnew")
           (general (thickness 1.6)) (paper "A4")
@@ -5134,6 +5138,16 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires exactly two owned KiCad editors and CLI; no automatic restart"]
     async fn live_mcp_saved_routing_lifecycle_uses_two_editors() {
+        live_mcp_authoring_lifecycle(false).await;
+    }
+
+    #[tokio::test]
+    #[ignore = "requires two owned KiCad editors, CLI and official libraries"]
+    async fn live_mcp_source_bound_footprint_lifecycle_uses_two_editors() {
+        live_mcp_authoring_lifecycle(true).await;
+    }
+
+    async fn live_mcp_authoring_lifecycle(footprint: bool) {
         async fn call(
             client: &rmcp::service::RunningService<rmcp::RoleClient, TestClient>,
             name: &'static str,
@@ -5160,7 +5174,15 @@ mod tests {
 
         let fixture = TempBoard::new();
         let board = fixture.root.join("board.kicad_pcb");
-        std::fs::write(&board, routing_fixture_board()).unwrap();
+        std::fs::write(
+            &board,
+            if footprint {
+                empty_fixture_board()
+            } else {
+                routing_fixture_board()
+            },
+        )
+        .unwrap();
         std::fs::write(board.with_extension("kicad_pro"), "{}").unwrap();
         let original = shadow_source_fingerprint(&board);
         let evidence_path = std::env::temp_dir().join(format!(
@@ -5196,9 +5218,6 @@ mod tests {
             }
             source_editor.reload_owned().map_err(|e| e.to_string())?;
             let before = observe_owned_shadow(&mut source_editor)?;
-            let source_disk = shadow_source_fingerprint(source_project.board_path());
-            let source_bytes =
-                std::fs::read(source_project.board_path()).map_err(|e| e.to_string())?;
             let policy = DrcPolicy {
                 allowed_root: source_root.clone(),
                 timeout: Duration::from_secs(30),
@@ -5218,6 +5237,38 @@ mod tests {
             .with_state_dir(&state_dir)
             .map_err(|e| e.to_string())?;
             let client = connected(server).await;
+            let schematic_source = if footprint {
+                let sch = source_project.board_path().with_extension("kicad_sch");
+                let empty = b"(kicad_sch (version 20260306) (generator eeschema) (uuid 11111111-1111-4111-8111-111111111111) (paper A4) (lib_symbols))";
+                std::fs::write(&sch, empty).map_err(|e| e.to_string())?;
+                let plan = call(&client, "kicad_plan_schematic_change", json!({
+                    "project_root": source_root, "root_schematic": sch,
+                    "source_run_id": "footprint-acceptance", "request_id": "source-circuit"
+                })).await?;
+                let preview = call(&client, "kicad_preview_schematic_change", json!({
+                    "plan_id": plan["plan_id"], "plan_hash": plan["plan_hash"]
+                })).await?;
+                if std::fs::read(&sch).map_err(|e| e.to_string())? != empty {
+                    return Err("schematic preview changed source bytes".into());
+                }
+                let committed = call(&client, "kicad_commit_schematic_change", json!({
+                    "plan_id": plan["plan_id"], "plan_hash": plan["plan_hash"],
+                    "approval_hash": preview["approval_hash"]
+                })).await?;
+                if committed["state"] != "committed" { return Err("source schematic commit failed".into()); }
+                let bytes = std::fs::read(&sch).map_err(|e| e.to_string())?;
+                Some((sch, bytes))
+            } else { None };
+            let plan = if footprint {
+                call(&client, "kicad_plan_change", json!({
+                    "endpoint": identity.endpoint, "source_run_id": "footprint-acceptance",
+                    "request_id": "live-footprint", "footprint": {
+                        "target_id": "placed-r1", "library_nickname": "Resistor_SMD",
+                        "library_entry_name": "R_0603_1608Metric", "x_nm": 5_000_000,
+                        "y_nm": 5_000_000, "reference": "R1", "value": "1k"
+                    }
+                })).await?
+            } else {
             let mut addition = graphic("planned");
             addition.start.y = 2_000_000;
             addition.end.y = 2_000_000;
@@ -5231,7 +5282,7 @@ mod tests {
             let (start_pad, net) = endpoint("J1")?;
             let (end_pad, end_net) = endpoint("J2")?;
             if net != end_net { return Err("fixture pad nets differ".into()); }
-            let plan = call(
+            call(
                 &client,
                 "kicad_plan_change",
                 json!({
@@ -5246,7 +5297,11 @@ mod tests {
                     ]
                 }),
             )
-            .await?;
+            .await?
+            };
+            let source_disk = shadow_source_fingerprint(source_project.board_path());
+            let source_bytes =
+                std::fs::read(source_project.board_path()).map_err(|e| e.to_string())?;
             let preview_request =
                 json!({"plan_id": plan["plan_id"], "plan_hash": plan["plan_hash"]});
 
@@ -5339,7 +5394,7 @@ mod tests {
             let evidence_file = std::fs::OpenOptions::new().write(true).create_new(true)
                 .open(&evidence_path).map_err(|e| e.to_string())?;
             serde_json::to_writer_pretty(evidence_file, &json!({
-                "before": before.snapshot, "after": after.snapshot,
+                "mode": if footprint { "footprint" } else { "routing" }, "before": before.snapshot, "after": after.snapshot,
                 "baseline_drc": baseline, "committed_drc": after_drc,
                 "preview": preview, "commit": committed, "history": history,
                 "source_before_digest": digest_bytes(&source_bytes),
@@ -5348,7 +5403,7 @@ mod tests {
                         "actual_digest": std::fs::read(&entry.saved).ok().map(|bytes| digest_bytes(&bytes).to_string())})
                 }).collect::<Vec<_>>()
             })).map_err(|e| e.to_string())?;
-            if after.snapshot.board.graphics.len() != before.snapshot.board.graphics.len() + 1
+            if after.snapshot.board.graphics.len() != before.snapshot.board.graphics.len() + usize::from(!footprint)
                 || !after
                     .snapshot
                     .board
@@ -5362,6 +5417,31 @@ mod tests {
             {
                 return Err("saved source geometry or editor PID mismatch".into());
             }
+            if footprint {
+                if before.snapshot.native_routing != after.snapshot.native_routing
+                    || before.snapshot.native_stackup != after.snapshot.native_stackup {
+                    return Err("footprint commit changed routing or stackup".into());
+                }
+                let placements = &after.snapshot.native_footprints.as_ref().ok_or("missing footprints")?.placements;
+                if placements.len() != 1 { return Err("expected one created footprint".into()); }
+                let operations: Vec<Operation> = serde_json::from_value(preview["operations"].clone()).map_err(|e| e.to_string())?;
+                let OperationKind::PlaceAllowlistedFootprint { placement, .. } = &operations[0].kind else {
+                    return Err("preview did not bind a footprint operation".into());
+                };
+                let source = placement.source.as_ref().ok_or("missing planned source binding")?;
+                let binding = kicad_adapter::bindings::SchematicFootprintBinding {
+                    schematic_revision: source.schematic.digest.clone(),
+                    board_revision: placements[0].observed_revision.clone(), symbol: source.symbol.clone(),
+                    symbol_path: source.symbol_path.clone(), pad_nets: source.pad_nets.clone()
+                };
+                kicad_adapter::bindings::verify_placed_pin_pad_binding(
+                    &binding, placement, &placements[0], after.snapshot.board.document_id.as_ref().ok_or("missing board")?
+                )?;
+                let (sch, bytes) = schematic_source.as_ref().ok_or("missing source schematic")?;
+                if std::fs::read(sch).map_err(|e| e.to_string())? != *bytes {
+                    return Err("PCB authoring changed schematic source".into());
+                }
+            } else {
             let routing = after.snapshot.native_routing.as_ref().ok_or("missing committed routing")?;
             let original_routing = before.snapshot.native_routing.as_ref().ok_or("missing baseline routing")?;
             if routing.tracks.len() != original_routing.tracks.len() + 1 || routing.vias.len() != 1
@@ -5374,13 +5454,15 @@ mod tests {
                 || before.snapshot.native_stackup != after.snapshot.native_stackup {
                 return Err("saved routing or preserved board objects differ".into());
             }
+            }
             if !compare_drc(&baseline, &after_drc).introduced.is_empty() {
                 return Err("commit introduced DRC violations".into());
             }
-            if history.len() != 1 || history[0].state != "committed" || history[0].domain != "pcb" {
-                return Err(format!("invalid durable PCB history: {history:?}"));
+            let pcb_records = history.iter().filter(|record| record.domain == "pcb").collect::<Vec<_>>();
+            if history.len() != 1 + usize::from(footprint) || pcb_records.len() != 1 || history.iter().any(|record| record.state != "committed") {
+                return Err(format!("invalid durable authoring history: {history:?}"));
             }
-            let backup = history[0]
+            let backup = pcb_records[0]
                 .backups
                 .iter()
                 .find(|entry| entry.original == source_project.board_path())
