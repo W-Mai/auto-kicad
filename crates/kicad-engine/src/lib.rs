@@ -18,6 +18,93 @@ pub const MAX_GRAPHIC_SPAN_NM: i128 = 10_000_000;
 pub const MAX_GRAPHIC_BOUNDING_AREA_NM2: i128 = 100_000_000_000_000;
 pub const MAX_BOARD_POSITION_NM: i64 = 2_000_000_000;
 
+/// A logical pad in an assembly, resolved to a native pad only after creation.
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
+pub struct PlannedPadRef {
+    pub target_id: StableId,
+    pub pad_number: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct PlannedPadConnection {
+    pub track_id: StableId,
+    pub start: PlannedPadRef,
+    pub end: PlannedPadRef,
+    pub width_nm: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ConnectedFootprintAssembly {
+    pub placements: Vec<AllowlistedFootprintPlacement>,
+    pub connections: Vec<PlannedPadConnection>,
+}
+
+impl ConnectedFootprintAssembly {
+    pub fn validate(&self) -> Result<(), EngineError> {
+        let invalid = EngineError::InvalidPlan;
+        if self.placements.is_empty()
+            || self.connections.is_empty()
+            || self.placements.len() + self.connections.len() > MAX_OPERATIONS
+        {
+            return Err(invalid("assembly is empty or oversized"));
+        }
+        let mut targets = BTreeMap::new();
+        let mut references = BTreeSet::new();
+        let mut symbols = BTreeSet::new();
+        let mut revision = None;
+        for placement in &self.placements {
+            placement
+                .validate()
+                .map_err(|_| invalid("invalid assembly placement"))?;
+            validate_routing_position(placement.position)?;
+            let source = placement
+                .source
+                .as_ref()
+                .ok_or(invalid("assembly source is missing"))?;
+            if targets.insert(&placement.target_id, placement).is_some()
+                || !references.insert(&placement.reference)
+                || !symbols.insert(&source.symbol_path)
+            {
+                return Err(invalid("assembly placement identity is duplicated"));
+            }
+            if revision
+                .replace(&source.schematic)
+                .is_some_and(|previous| previous != &source.schematic)
+            {
+                return Err(invalid("assembly schematic sources differ"));
+            }
+        }
+        let net = |endpoint: &PlannedPadRef| -> Result<&str, EngineError> {
+            targets
+                .get(&endpoint.target_id)
+                .and_then(|p| p.source.as_ref())
+                .and_then(|source| source.pad_nets.get(&endpoint.pad_number))
+                .and_then(|net| net.as_deref())
+                .filter(|net| !net.is_empty())
+                .ok_or(invalid("assembly endpoint is missing or has no net"))
+        };
+        let mut tracks = BTreeSet::new();
+        let mut connections = BTreeSet::new();
+        for connection in &self.connections {
+            let mut endpoints = [&connection.start, &connection.end];
+            endpoints.sort();
+            if connection.start == connection.end
+                || connection.width_nm <= 0
+                || connection.width_nm > MAX_BOARD_POSITION_NM
+                || targets.contains_key(&connection.track_id)
+                || !tracks.insert(&connection.track_id)
+                || !connections.insert(endpoints)
+                || net(&connection.start)? != net(&connection.end)?
+            {
+                return Err(invalid(
+                    "assembly connection identity, width or net is invalid",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", content = "arguments")]
 pub enum OperationKind {
@@ -45,6 +132,10 @@ pub enum OperationKind {
         board: StableId,
         placement: AllowlistedFootprintPlacement,
     },
+    PlaceConnectedFootprints {
+        board: StableId,
+        assembly: ConnectedFootprintAssembly,
+    },
     AddBoardGraphicSegments {
         board: StableId,
         segments: Vec<BoardGraphicSegment>,
@@ -63,6 +154,16 @@ pub enum OperationKind {
         board: StableId,
         intent: ThroughViaIntent,
     },
+}
+
+impl OperationKind {
+    pub fn footprint_placements(&self) -> &[AllowlistedFootprintPlacement] {
+        match self {
+            Self::PlaceAllowlistedFootprint { placement, .. } => std::slice::from_ref(placement),
+            Self::PlaceConnectedFootprints { assembly, .. } => &assembly.placements,
+            _ => &[],
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -102,6 +203,9 @@ impl Operation {
             OperationKind::PlaceAllowlistedFootprint { board, placement } => {
                 vec![board, &placement.target_id]
             }
+            OperationKind::PlaceConnectedFootprints { board, assembly } => std::iter::once(board)
+                .chain(assembly.placements.iter().map(|p| &p.target_id))
+                .collect(),
             OperationKind::AddBoardGraphicSegments { board, .. }
             | OperationKind::AddBoardOutline { board, .. }
             | OperationKind::AddStraightTrack { board, .. }
@@ -196,12 +300,12 @@ impl ChangePlan {
             }));
         }
         for operation in &self.operations {
-            if let OperationKind::PlaceAllowlistedFootprint { placement, .. } = &operation.kind
-                && !footprint_targets.insert(placement.target_id.clone())
-            {
-                return Err(EngineError::TargetAlreadyExists(
-                    placement.target_id.clone(),
-                ));
+            for placement in operation.kind.footprint_placements() {
+                if !footprint_targets.insert(placement.target_id.clone()) {
+                    return Err(EngineError::TargetAlreadyExists(
+                        placement.target_id.clone(),
+                    ));
+                }
             }
         }
         let mut planned_adds = BTreeMap::new();
@@ -246,6 +350,7 @@ impl ChangePlan {
             } else if !matches!(
                 op.kind,
                 OperationKind::PlaceAllowlistedFootprint { .. }
+                    | OperationKind::PlaceConnectedFootprints { .. }
                     | OperationKind::AddBoardGraphicSegments { .. }
                     | OperationKind::AddBoardOutline { .. }
                     | OperationKind::AddStraightTrack { .. }
@@ -302,6 +407,41 @@ impl ChangePlan {
                         return Err(EngineError::InvalidPlan(
                             "footprint position bounds exceeded",
                         ));
+                    }
+                }
+                OperationKind::PlaceConnectedFootprints { board, assembly } => {
+                    if snapshot.board.document_id.as_ref() != Some(board) {
+                        return Err(EngineError::ScopeMismatch);
+                    }
+                    assembly.validate()?;
+                    for placement in &assembly.placements {
+                        if snapshot
+                            .board
+                            .footprints
+                            .iter()
+                            .any(|p| p.reference.as_ref() == Some(&placement.reference))
+                            || snapshot
+                                .native_footprints
+                                .iter()
+                                .flat_map(|f| &f.placements)
+                                .any(|p| {
+                                    p.reference == placement.reference
+                                        || placement.source.as_ref().is_some_and(|source| {
+                                            p.symbol_sheet_path == source.symbol_path
+                                        })
+                                })
+                        {
+                            return Err(EngineError::TargetAlreadyExists(
+                                placement.target_id.clone(),
+                            ));
+                        }
+                    }
+                    for connection in &assembly.connections {
+                        if !routing_ids.insert(connection.track_id.clone()) {
+                            return Err(EngineError::TargetAlreadyExists(
+                                connection.track_id.clone(),
+                            ));
+                        }
                     }
                 }
                 OperationKind::AddBoardGraphicSegments { board, segments } => {
@@ -670,6 +810,19 @@ fn apply_operations(
                     position: placement.position,
                     library_identifier: Some(placement.library_identifier.clone()),
                 });
+            }
+            OperationKind::PlaceConnectedFootprints { assembly, .. } => {
+                // Native pad geometry is bound by disposable validation, not invented here.
+                for placement in &assembly.placements {
+                    snapshot.board.footprints.push(Footprint {
+                        source_uuid: placement.target_id.clone(),
+                        observed_revision: base_revision.clone(),
+                        reference: Some(placement.reference.clone()),
+                        value: Some(placement.value.clone()),
+                        position: placement.position,
+                        library_identifier: Some(placement.library_identifier.clone()),
+                    });
+                }
             }
             OperationKind::AddBoardGraphicSegments { segments, .. } => {
                 snapshot.board.graphics.extend(segments.clone());
@@ -1743,6 +1896,144 @@ mod tests {
         assert_eq!(engine.snapshot().board.footprints.len(), 1);
         engine.rollback(&mut session).unwrap();
         assert!(engine.snapshot().board.footprints.is_empty());
+    }
+
+    fn sourced_assembly() -> ConnectedFootprintAssembly {
+        use kicad_model::{
+            FootprintSourceBinding, ObservedSchematicPin, ObservedSchematicSymbol,
+            ReferenceResolution, SchematicArtifactFile, SchematicArtifactRevision,
+        };
+        let schematic = SchematicArtifactRevision::new(
+            vec![
+                SchematicArtifactFile::new(
+                    "board.kicad_sch",
+                    42,
+                    RevisionDigest::new("a".repeat(64)).unwrap(),
+                )
+                .unwrap(),
+            ],
+            "10.0.6",
+            1,
+            false,
+        )
+        .unwrap();
+        let placements = ["R1", "R2"]
+            .into_iter()
+            .map(|reference| {
+                let OperationKind::PlaceAllowlistedFootprint { mut placement, .. } =
+                    allowlisted_footprint_op(reference, 5_000_000, 5_000_000, reference).kind
+                else {
+                    unreachable!()
+                };
+                placement.source = Some(Box::new(FootprintSourceBinding {
+                    schematic: schematic.clone(),
+                    symbol: ObservedSchematicSymbol {
+                        symbol_id: id(reference),
+                        source_uuid: id(reference),
+                        sheet_instance_path: "/root".into(),
+                        reference: reference.into(),
+                        value: placement.value.clone(),
+                        lib_identifier: "Device:R".into(),
+                        footprint_field: Some("Connector_USB:USB_C_Receptacle".into()),
+                        unit: 1,
+                        pins: vec![ObservedSchematicPin {
+                            pin_id: id("pin"),
+                            source_uuid: id("pin"),
+                            number: "1".into(),
+                            name: None,
+                            electrical_type: None,
+                            net: ReferenceResolution::Resolved(id("GND")),
+                        }],
+                        observed_revision: schematic.digest.clone(),
+                    },
+                    symbol_path: vec![id("root"), id(reference)],
+                    pad_nets: BTreeMap::from([("1".into(), Some("GND".into()))]),
+                    library_digest: RevisionDigest::new("b".repeat(64)).unwrap(),
+                    library_size: 100,
+                }));
+                placement
+            })
+            .collect();
+        ConnectedFootprintAssembly {
+            placements,
+            connections: vec![PlannedPadConnection {
+                track_id: id("connection"),
+                start: PlannedPadRef {
+                    target_id: id("R1"),
+                    pad_number: "1".into(),
+                },
+                end: PlannedPadRef {
+                    target_id: id("R2"),
+                    pad_number: "1".into(),
+                },
+                width_nm: 250_000,
+            }],
+        }
+    }
+
+    #[test]
+    fn assembly_contract_rejects_ambiguous_identity_and_unbound_pins() {
+        let assembly = sourced_assembly();
+        assembly.validate().unwrap();
+        let mut invalid = Vec::new();
+        let mut case = assembly.clone();
+        case.placements.push(case.placements[0].clone());
+        invalid.push(case);
+        let mut case = assembly.clone();
+        case.placements[0].source = None;
+        invalid.push(case);
+        let mut case = assembly.clone();
+        case.connections[0].end.pad_number = "missing".into();
+        invalid.push(case);
+        let mut case = assembly.clone();
+        case.connections[0].end.target_id = id("external");
+        invalid.push(case);
+        let mut case = assembly.clone();
+        case.connections[0].width_nm = 0;
+        invalid.push(case);
+        let mut case = assembly.clone();
+        case.connections[0].track_id = id("R1");
+        invalid.push(case);
+        let mut case = assembly.clone();
+        case.connections.push(case.connections[0].clone());
+        invalid.push(case);
+        let mut case = assembly.clone();
+        case.placements[0]
+            .source
+            .as_mut()
+            .unwrap()
+            .pad_nets
+            .insert("1".into(), Some("OTHER".into()));
+        invalid.push(case);
+        for case in invalid {
+            assert!(case.validate().is_err(), "{case:?}");
+        }
+
+        let engine = Engine::new(snapshot(), "token");
+        let mut operation = op(
+            OperationKind::PlaceConnectedFootprints {
+                board: id("board"),
+                assembly,
+            },
+            "board",
+            "assembly",
+        );
+        operation.targets.extend([id("R1"), id("R2")]);
+        let planned = plan(&engine, vec![operation.clone()]);
+        engine.preview(&planned).unwrap();
+        let mut changed = planned.clone();
+        let OperationKind::PlaceConnectedFootprints { assembly, .. } =
+            &mut changed.operations[0].kind
+        else {
+            unreachable!()
+        };
+        assembly.connections[0].width_nm += 1;
+        assert_ne!(planned.hash().unwrap(), changed.hash().unwrap());
+        operation.targets.pop();
+        assert_eq!(
+            engine.preview(&plan(&engine, vec![operation])),
+            Err(EngineError::ScopeMismatch)
+        );
     }
 
     #[test]
