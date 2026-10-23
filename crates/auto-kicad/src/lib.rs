@@ -2419,7 +2419,7 @@ impl Server {
                     id: "pcb.native_authoring",
                     domain: "pcb",
                     mode: "write",
-                    status: "live_verification_pending",
+                    status: "verified",
                 },
                 Capability {
                     id: "pcb.source_bound_footprint",
