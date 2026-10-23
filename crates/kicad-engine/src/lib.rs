@@ -952,7 +952,7 @@ pub fn pad_board_position(
         y = -y;
     }
     let angle = (placement.orientation_mdeg.rem_euclid(360_000)) as f64 / 1_000.0;
-    let radians = angle.to_radians();
+    let radians = -angle.to_radians();
     let rotated_x = (x as f64 * radians.cos() - y as f64 * radians.sin()).round() as i128;
     let rotated_y = (x as f64 * radians.sin() + y as f64 * radians.cos()).round() as i128;
     let x = i64::try_from(i128::from(placement.position.x) + rotated_x)

@@ -461,11 +461,6 @@ pub fn board_footprint_observation(
         }
         let source_uuid = StableId::new(footprint_source.clone())?;
         let placement_id = footprint_placement_id(&board_id, &source_uuid);
-        let library_identifier = FootprintLibraryIdentifier {
-            nickname: group.footprint.library_identifier.nickname,
-            entry_name: group.footprint.library_identifier.entry_name,
-        };
-        let definition_id = footprint_definition_id(&library_identifier);
         let mut pad_ids = BTreeSet::new();
         let mut pads = Vec::with_capacity(group.pads.len());
         for pad in group.pads {
@@ -486,9 +481,15 @@ pub fn board_footprint_observation(
                 &board_id,
                 &placement_id,
                 pad,
+                &group.footprint,
                 &unbound_revision,
             )?);
         }
+        let library_identifier = FootprintLibraryIdentifier {
+            nickname: group.footprint.library_identifier.nickname,
+            entry_name: group.footprint.library_identifier.entry_name,
+        };
+        let definition_id = footprint_definition_id(&library_identifier);
         placements.push(ObservedFootprintPlacement {
             placement_id,
             source_uuid,
@@ -519,10 +520,36 @@ pub fn board_footprint_observation(
     ObservedBoardFootprints::new(board_id, placements).map_err(Into::into)
 }
 
+// KiCad 10 serializes PAD::GetPosition(), including inside footprint definitions.
+fn observed_pad_local_position(
+    footprint: &IpcFootprintInstance,
+    x_nm: i64,
+    y_nm: i64,
+) -> Result<LocalCoordinateNm, ModelError> {
+    let invalid = || ModelError::InvalidFootprintObservation("pad coordinate transform overflows");
+    let dx = x_nm
+        .checked_sub(footprint.position_x_nm)
+        .ok_or_else(invalid)?;
+    let dy = y_nm
+        .checked_sub(footprint.position_y_nm)
+        .ok_or_else(invalid)?;
+    if dx.unsigned_abs() > (1_u64 << 52) || dy.unsigned_abs() > (1_u64 << 52) {
+        return Err(invalid());
+    }
+    let angle = (footprint.orientation_mdeg.rem_euclid(360_000) as f64 / 1_000.0).to_radians();
+    let x = (dx as f64 * angle.cos() - dy as f64 * angle.sin()).round() as i64;
+    let mut y = (dx as f64 * angle.sin() + dy as f64 * angle.cos()).round() as i64;
+    if footprint.side == IpcFootprintSide::Back {
+        y = -y;
+    }
+    Ok(LocalCoordinateNm { x_nm: x, y_nm: y })
+}
+
 fn map_observed_pad(
     board_id: &StableId,
     placement_id: &StableId,
     pad: IpcPad,
+    footprint: &IpcFootprintInstance,
     observed_revision: &RevisionDigest,
 ) -> Result<ObservedPad, ModelError> {
     let source_uuid = StableId::new(pad.source_uuid)?;
@@ -573,10 +600,7 @@ fn map_observed_pad(
         number: pad.number,
         kind: map_pad_kind(pad.kind),
         lock_state: map_lock_state(pad.lock_state),
-        position: LocalCoordinateNm {
-            x_nm: pad.position_x_nm,
-            y_nm: pad.position_y_nm,
-        },
+        position: observed_pad_local_position(footprint, pad.position_x_nm, pad.position_y_nm)?,
         stack_type: map_pad_stack_type(pad.stack_type),
         orientation_mdeg: pad.orientation_mdeg,
         layers: pad.layers.into_iter().map(map_board_layer).collect(),
@@ -2662,6 +2686,36 @@ mod tests {
     }
 
     #[test]
+    fn pad_board_coordinates_round_trip_through_local_observation() {
+        for side in [IpcFootprintSide::Front, IpcFootprintSide::Back] {
+            for angle in [0, 90_000, 180_000, 270_000, 37_500] {
+                let mut group = observed_footprint("fp", "pad");
+                group.footprint.side = side;
+                group.footprint.orientation_mdeg = angle;
+                group.pads[0].position_x_nm = 12_825_000;
+                group.pads[0].position_y_nm = 34_250_000;
+                let observation =
+                    board_footprint_observation(StableId::new("board").unwrap(), vec![group])
+                        .unwrap();
+                let placement = &observation.placements[0];
+                let actual =
+                    kicad_engine::pad_board_position(placement, &placement.pads[0]).unwrap();
+                assert!((actual.x - 12_825_000).abs() <= 1);
+                assert!((actual.y - 34_250_000).abs() <= 1);
+                if side == IpcFootprintSide::Front && angle == 90_000 {
+                    assert_eq!(
+                        placement.pads[0].position,
+                        LocalCoordinateNm {
+                            x_nm: -250_000,
+                            y_nm: 825_000
+                        }
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn schematic_footprint_binding_rejects_conflicting_sources_and_pad_networks() {
         let (project, netlist) = schematic_fixture(false);
         let board_id = StableId::new("board").unwrap();
@@ -2840,8 +2894,8 @@ mod tests {
                 number: "1".to_owned(),
                 kind: IpcPadKind::PlatedThroughHole,
                 lock_state: IpcLockState::Unlocked,
-                position_x_nm: -750_000,
-                position_y_nm: 250_000,
+                position_x_nm: 11_750_000,
+                position_y_nm: 34_750_000,
                 stack_type: IpcPadStackType::FrontInnerBack,
                 orientation_mdeg: 45_000,
                 layers: vec![

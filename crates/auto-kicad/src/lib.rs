@@ -4898,12 +4898,8 @@ mod tests {
                         pad_id: pad.pad_id.clone(),
                         footprint_placement_id: footprint.placement_id.clone(),
                     },
-                    Coordinate {
-                        x: footprint.position.x + pad.position.x_nm,
-                        y: footprint.position.y + pad.position.y_nm,
-                        unit: Unit::Nanometres,
-                        space: DocumentSpace::Board,
-                    },
+                    kicad_engine::pad_board_position(footprint, pad)
+                        .map_err(|error| error.to_string())?,
                     pad.net.clone().ok_or("missing pad net")?,
                 ))
             };
@@ -4942,7 +4938,7 @@ mod tests {
                 )
                 .map_err(|e| e.to_string())?,
             };
-            let operations = [shadow_graphics_operation(board), track, via];
+            let operations = [shadow_graphics_operation(board), track];
             let (expected, _) =
                 apply_shadow_operations(&mut launcher, &observation, &operations, &root)
                     .map_err(|e| format!("routing execution: {e:?}"))?;
@@ -4960,6 +4956,32 @@ mod tests {
             let delta = compare_drc(&baseline, &after);
             if !delta.introduced.is_empty() {
                 return Err(format!("introduced DRC: {:?}", delta.introduced));
+            }
+            let (expected, _) = apply_shadow_operations(&mut launcher, &actual, &[via], &root)
+                .map_err(|error| format!("via execution: {error:?}"))?;
+            launcher.reload_owned().map_err(|error| error.to_string())?;
+            let with_via = observe_owned_shadow(&mut launcher)?;
+            if with_via.snapshot.canonical() != expected {
+                return Err("via reload mismatch".into());
+            }
+            let CheckResult::Completed(via_report) = run_pcb_drc(shadow.board_path(), &policy)
+            else {
+                return Err("via DRC failed".into());
+            };
+            let via_delta = compare_drc(&after, &via_report);
+            if via_delta.introduced.is_empty()
+                || via_delta
+                    .introduced
+                    .iter()
+                    .any(|violation| violation.rule_type != "via_dangling")
+            {
+                return Err(format!(
+                    "expected only dangling-via rejection: {:?}",
+                    via_delta.introduced
+                ));
+            }
+            if launcher.current_identity().map_err(|e| e.to_string())?.pid != pid {
+                return Err("editor was restarted".into());
             }
             Ok(())
         })();

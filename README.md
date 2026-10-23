@@ -15,7 +15,7 @@ The server uses MCP over standard input/output. Configure an MCP client to launc
 
 1. Save the PCB and project settings in KiCad.
 2. Call `kicad_inspect_project` for the target editor endpoint.
-3. Call `kicad_plan_change` to prepare board graphics, a rectangular Edge.Cuts outline, pad-bound front-copper tracks net-bound through vias or one source-bound footprint.
+3. Call `kicad_plan_change` to prepare board graphics, a rectangular Edge.Cuts outline, pad-bound front-copper tracks, net-bound through vias or one source-bound footprint.
 4. Call `kicad_preview_change` to validate a disposable copy. Review its result before approving.
 5. Call `kicad_commit_change` with the exact plan, validation evidence and approval hashes returned by the preview.
 
@@ -54,4 +54,4 @@ cargo test -p auto-kicad tests::disposable_graphics_shadow_verifies_server_assig
 cargo test -p auto-kicad tests::live_mcp_preview_rejects_unsaved_state_and_commits_saved_graphics -- --ignored --exact
 ```
 
-The CLI-only source-binding test passed with installed KiCad. The open-editor MCP workflow and same-process reload have offline regression coverage; live end-to-end acceptance remains pending. A single-editor circuit trial verified both resistor placements and their saved/reloaded schematic bindings, then exposed a through-via observation error after routing reload. Cleanup and source isolation passed. The model accepts the serialized inner-layer representative without adding a physical copper layer, and shadow routing reads its saved defaults after reloading the owned editor. Full circuit DRC and MCP live acceptance remain pending.
+The CLI-only source-binding test passed with installed KiCad. Single-editor checks verified both resistor placements, schematic bindings and native routing save/reload; DRC rejected displaced track endpoints and a via connected on only one layer. KiCad board pad coordinates are normalized to footprint-local coordinates before endpoint resolution, including rotation and back-side transforms. Offline contracts cover coordinate round trips and serialized through-via inner shapes. The combined fixture checks connected tracks separately from expected dangling-via rejection. Full circuit DRC and PCB MCP live acceptance remain pending. Owned-editor cleanup and source isolation passed.
