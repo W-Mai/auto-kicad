@@ -397,17 +397,19 @@ fn validate_shadow_operation_kinds(operations: &[Operation]) -> Result<(), Strin
     if operations.is_empty() {
         return Err("shadow operation batch is empty".into());
     }
-    if let [
-        Operation {
-            kind: OperationKind::PlaceAllowlistedFootprint { placement, .. },
-            ..
-        },
-    ] = operations
+    if let [operation] = operations
+        && !operation.kind.footprint_placements().is_empty()
     {
-        if placement.source.is_none() {
-            return Err("footprint source evidence is required".into());
+        for placement in operation.kind.footprint_placements() {
+            if placement.source.is_none() {
+                return Err("footprint source evidence is required".into());
+            }
+            placement.validate().map_err(|e| e.to_string())?;
         }
-        return placement.validate().map_err(|e| e.to_string());
+        if let OperationKind::PlaceConnectedFootprints { assembly, .. } = &operation.kind {
+            assembly.validate().map_err(|e| e.to_string())?;
+        }
+        return Ok(());
     }
     if operations.iter().any(|operation| {
         !matches!(
@@ -428,6 +430,13 @@ fn operation_matches_board(operation: &Operation, observed: &StableId) -> bool {
         OperationKind::PlaceAllowlistedFootprint { board, placement } => {
             board == observed
                 && operation.targets == vec![board.clone(), placement.target_id.clone()]
+        }
+        OperationKind::PlaceConnectedFootprints { board, assembly } => {
+            board == observed
+                && operation.targets
+                    == std::iter::once(board.clone())
+                        .chain(assembly.placements.iter().map(|p| p.target_id.clone()))
+                        .collect::<Vec<_>>()
         }
         OperationKind::AddBoardGraphicSegments { board, .. }
         | OperationKind::AddBoardOutline { board, .. }
@@ -456,10 +465,7 @@ fn bind_shadow_operations(
     let source = shadow
         .in_board_scope(shadow.project_id.clone(), template_board.clone())
         .map_err(|e| e.to_string())?;
-    if !matches!(
-        operations[0].kind,
-        OperationKind::PlaceAllowlistedFootprint { .. }
-    ) {
+    if operations[0].kind.footprint_placements().is_empty() {
         kicad_adapter::prepare_bound_native_batch(
             operations,
             &source,
@@ -486,6 +492,7 @@ fn bind_shadow_operations(
         }
         let operation_board = match &operation.kind {
             OperationKind::PlaceAllowlistedFootprint { board, .. }
+            | OperationKind::PlaceConnectedFootprints { board, .. }
             | OperationKind::AddBoardGraphicSegments { board, .. }
             | OperationKind::AddBoardOutline { board, .. }
             | OperationKind::AddStraightTrack { board, .. }
@@ -501,6 +508,12 @@ fn bind_shadow_operations(
                 OperationKind::PlaceAllowlistedFootprint {
                     board: shadow_board.clone(),
                     placement: placement.clone(),
+                }
+            }
+            OperationKind::PlaceConnectedFootprints { assembly, .. } => {
+                OperationKind::PlaceConnectedFootprints {
+                    board: shadow_board.clone(),
+                    assembly: assembly.clone(),
                 }
             }
             OperationKind::AddStraightTrack { intent, .. } => {
@@ -737,49 +750,47 @@ fn apply_shadow_operations(
     BoardGraphicsCommitOutcome,
 > {
     let unknown = |reason: String| BoardGraphicsCommitOutcome::Unknown { reason };
-    if let [
-        Operation {
-            kind: OperationKind::PlaceAllowlistedFootprint { placement, .. },
-            ..
-        },
-    ] = operations
+    if let [operation] = operations
+        && !operation.kind.footprint_placements().is_empty()
     {
-        let registry = footprint_authoring::verify_sources(source_project, placement)
-            .map_err(|reason| BoardGraphicsCommitOutcome::Rejected { reason })?;
-        let prepared = kicad_adapter::footprint::capture_source_footprint_template(
-            launcher,
-            &registry,
-            placement.clone(),
-        )
-        .map_err(|e| unknown(e.to_string()))?;
-        let prepared = footprint_authoring::bind_template(prepared).map_err(unknown)?;
-        let restored = observe_owned_shadow(launcher).map_err(unknown)?;
-        if restored.snapshot.canonical() != observation.snapshot.canonical() {
-            return Err(unknown(
-                "source template capture changed the shadow baseline".into(),
-            ));
+        let placements = operation.kind.footprint_placements();
+        let mut prepared = Vec::with_capacity(placements.len());
+        for placement in placements {
+            let registry = footprint_authoring::verify_sources(source_project, placement)
+                .map_err(|reason| BoardGraphicsCommitOutcome::Rejected { reason })?;
+            let template = kicad_adapter::footprint::capture_source_footprint_template(
+                launcher,
+                &registry,
+                placement.clone(),
+            )
+            .map_err(|e| unknown(e.to_string()))?;
+            prepared.push(footprint_authoring::bind_template(template).map_err(unknown)?);
+            if observe_owned_shadow(launcher)
+                .map_err(unknown)?
+                .snapshot
+                .canonical()
+                != observation.snapshot.canonical()
+            {
+                return Err(unknown(
+                    "source template capture changed the shadow baseline".into(),
+                ));
+            }
         }
-        let board = observation
-            .snapshot
-            .board
-            .document_id
-            .as_ref()
-            .ok_or_else(|| unknown("missing board identity".into()))?;
+        let connections = match &operation.kind {
+            OperationKind::PlaceConnectedFootprints { assembly, .. } => {
+                assembly.connections.as_slice()
+            }
+            _ => &[],
+        };
         let mut client = launcher
             .connect_owned()
             .map_err(|e| unknown(e.to_string()))?;
-        let added = footprint_authoring::execute(
-            &mut client,
-            &observation.board_filename,
-            board,
-            &prepared,
-        )?;
-        footprint_authoring::verify_sources(source_project, placement).map_err(unknown)?;
-        return Ok((
-            footprint_authoring::expected_snapshot(&observation.snapshot, added)
-                .map_err(unknown)?,
-            vec![prepared],
-        ));
+        let expected =
+            footprint_authoring::execute(&mut client, observation, &prepared, connections)?;
+        for placement in placements {
+            footprint_authoring::verify_sources(source_project, placement).map_err(unknown)?;
+        }
+        return Ok((expected, prepared));
     }
     let revision = observation
         .snapshot
@@ -1256,6 +1267,7 @@ pub struct PlanBoardGraphicsRequest {
     pub segments: Option<Value>,
     pub outline: Option<BoardOutlineRequest>,
     pub footprint: Option<BoardFootprintRequest>,
+    pub assembly: Option<BoardAssemblyRequest>,
     pub track: Option<BoardTrackRequest>,
     pub via: Option<BoardViaRequest>,
     pub batch: Option<Vec<BoardBatchItemRequest>>,
@@ -1365,6 +1377,72 @@ pub struct BoardFootprintRequest {
     pub y_nm: i64,
     pub reference: String,
     pub value: String,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardAssemblyRequest {
+    pub placements: Vec<BoardFootprintRequest>,
+    pub connections: Vec<BoardAssemblyConnectionRequest>,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardAssemblyPadRequest {
+    pub target_id: String,
+    pub pad_number: String,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardAssemblyConnectionRequest {
+    pub track_id: String,
+    pub start: BoardAssemblyPadRequest,
+    pub end: BoardAssemblyPadRequest,
+    pub width_nm: i64,
+}
+
+impl BoardAssemblyRequest {
+    fn prepare(
+        &self,
+        observation: &LiveBoardObservation,
+    ) -> Result<kicad_engine::ConnectedFootprintAssembly, String> {
+        if self.placements.is_empty()
+            || self.connections.is_empty()
+            || self.placements.len() + self.connections.len() > kicad_engine::MAX_OPERATIONS
+        {
+            return Err("assembly is empty or oversized".into());
+        }
+        let endpoint = |pin: &BoardAssemblyPadRequest| -> Result<_, String> {
+            Ok(kicad_engine::PlannedPadRef {
+                target_id: StableId::new(&pin.target_id).map_err(|e| e.to_string())?,
+                pad_number: pin.pad_number.clone(),
+            })
+        };
+        let connections = self
+            .connections
+            .iter()
+            .map(|connection| -> Result<_, String> {
+                Ok(kicad_engine::PlannedPadConnection {
+                    track_id: StableId::new(&connection.track_id).map_err(|e| e.to_string())?,
+                    start: endpoint(&connection.start)?,
+                    end: endpoint(&connection.end)?,
+                    width_nm: connection.width_nm,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let placements = self
+            .placements
+            .iter()
+            .map(|p| footprint_authoring::prepare(p, observation))
+            .collect::<Result<Vec<_>, _>>()?;
+        let assembly = kicad_engine::ConnectedFootprintAssembly {
+            placements,
+            connections,
+        };
+        assembly.validate().map_err(|e| e.to_string())?;
+        Ok(assembly)
+    }
 }
 
 impl BoardGraphicSegmentRequest {
@@ -1583,6 +1661,9 @@ fn expected_board_effect(kind: &OperationKind) -> &'static str {
         OperationKind::AddBoardGraphicSegments { .. } => "add board graphic segments",
         OperationKind::AddBoardOutline { .. } => "add rectangular Edge.Cuts outline",
         OperationKind::PlaceAllowlistedFootprint { .. } => "place allowlisted native footprint",
+        OperationKind::PlaceConnectedFootprints { .. } => {
+            "place source-bound footprints and connect their pads atomically"
+        }
         OperationKind::AddStraightTrack { .. } => "add straight copper track",
         OperationKind::AddThroughVia { .. } => "add through via",
         _ => "apply bounded board change",
@@ -1597,6 +1678,17 @@ fn shadow_validation_state(state: &ShadowValidationState) -> &'static str {
     }
 }
 
+fn footprint_template_evidence(outcome: &ShadowValidationOutcome) -> Vec<Value> {
+    outcome.prepared_footprints.iter().map(|prepared| {
+        let (bytes, association) = prepared.template.evidence();
+        json!({
+            "target_id": prepared.placement.target_id,
+            "template_digest": digest_bytes(bytes),
+            "association": association.map(|a| json!({"symbol_path": a.symbol_path, "pad_nets": a.pad_nets})),
+        })
+    }).collect()
+}
+
 fn validation_evidence_hash(
     plan_hash: &str,
     outcome: &ShadowValidationOutcome,
@@ -1606,6 +1698,7 @@ fn validation_evidence_hash(
         "schema_version": CONTRACT_SCHEMA_VERSION,
         "plan_hash": plan_hash,
         "source_files": source_files,
+        "footprint_templates": footprint_template_evidence(outcome),
         "shadow_validation": {
             "state": shadow_validation_state(&outcome.state),
             "fresh_revision": outcome.fresh_revision,
@@ -1852,11 +1945,12 @@ impl ShadowValidationService for IpcShadowValidationService {
             return ShadowValidationOutcome::rejected(reason);
         }
         for operation in operations {
-            if let OperationKind::PlaceAllowlistedFootprint { placement, .. } = &operation.kind
-                && let Err(reason) =
+            for placement in operation.kind.footprint_placements() {
+                if let Err(reason) =
                     footprint_authoring::verify_sources(&source.project_dir, placement)
-            {
-                return ShadowValidationOutcome::rejected(reason);
+                {
+                    return ShadowValidationOutcome::rejected(reason);
+                }
             }
         }
         let fingerprint = shadow_source_fingerprint(&source.board_path);
@@ -1896,6 +1990,7 @@ impl ShadowValidationService for IpcShadowValidationService {
 
 fn shadow_validation_data(outcome: &ShadowValidationOutcome) -> Value {
     json!({
+        "footprint_templates": footprint_template_evidence(outcome),
         "state": match outcome.state {
             ShadowValidationState::Committed => "committed",
             ShadowValidationState::Rejected => "rejected",
@@ -2016,6 +2111,7 @@ impl IpcBoardGraphicsExecutionService {
             !matches!(
                 &operation.kind,
                 OperationKind::PlaceAllowlistedFootprint { .. }
+                    | OperationKind::PlaceConnectedFootprints { .. }
                     | OperationKind::AddBoardGraphicSegments { .. }
                     | OperationKind::AddBoardOutline { .. }
                     | OperationKind::AddStraightTrack { .. }
@@ -2157,37 +2253,34 @@ impl IpcBoardGraphicsExecutionService {
                 reason: "live identity or revision is stale".into(),
             };
         }
-        if let [
-            Operation {
-                kind: OperationKind::PlaceAllowlistedFootprint { placement, .. },
-                ..
-            },
-        ] = operations
+        if let [operation] = operations
+            && !operation.kind.footprint_placements().is_empty()
         {
             let result = (|| -> Result<(), BoardGraphicsCommitOutcome> {
-                footprint_authoring::verify_sources(project_dir, placement)
-                    .map_err(|reason| BoardGraphicsCommitOutcome::Rejected { reason })?;
-                let [template] = prepared else {
+                let placements = operation.kind.footprint_placements();
+                if prepared.len() != placements.len()
+                    || prepared
+                        .iter()
+                        .zip(placements)
+                        .any(|(template, placement)| template.placement != *placement)
+                {
                     return Err(BoardGraphicsCommitOutcome::Rejected {
-                        reason: "validated footprint template is missing".into(),
-                    });
-                };
-                if template.placement != *placement {
-                    return Err(BoardGraphicsCommitOutcome::Rejected {
-                        reason: "validated footprint template differs from plan".into(),
+                        reason: "validated footprint templates differ from plan".into(),
                     });
                 }
+                for placement in placements {
+                    footprint_authoring::verify_sources(project_dir, placement)
+                        .map_err(|reason| BoardGraphicsCommitOutcome::Rejected { reason })?;
+                }
                 let unknown = |reason: String| BoardGraphicsCommitOutcome::Unknown { reason };
-                let board = observation
-                    .snapshot
-                    .board
-                    .document_id
-                    .as_ref()
-                    .ok_or_else(|| unknown("missing board identity".into()))?;
-                let added =
-                    footprint_authoring::execute(&mut client, board_filename, board, template)?;
-                let expected = footprint_authoring::expected_snapshot(&observation.snapshot, added)
-                    .map_err(unknown)?;
+                let connections = match &operation.kind {
+                    OperationKind::PlaceConnectedFootprints { assembly, .. } => {
+                        assembly.connections.as_slice()
+                    }
+                    _ => &[],
+                };
+                let expected =
+                    footprint_authoring::execute(&mut client, &observation, prepared, connections)?;
                 let document = client
                     .get_open_documents(DocumentQuery::Pcb)
                     .map_err(|e| unknown(e.to_string()))?;
@@ -2206,7 +2299,9 @@ impl IpcBoardGraphicsExecutionService {
                         "placed board does not match approved footprint postcondition".into(),
                     ));
                 }
-                footprint_authoring::verify_sources(project_dir, placement).map_err(unknown)?;
+                for placement in placements {
+                    footprint_authoring::verify_sources(project_dir, placement).map_err(unknown)?;
+                }
                 Ok(())
             })();
             return result
@@ -2423,6 +2518,12 @@ impl Server {
                 },
                 Capability {
                     id: "pcb.source_bound_footprint",
+                    domain: "pcb",
+                    mode: "write",
+                    status: "verified",
+                },
+                Capability {
+                    id: "pcb.source_bound_assembly",
                     domain: "pcb",
                     mode: "write",
                     status: "verified",
@@ -2784,7 +2885,7 @@ impl Server {
 
     #[tool(
         name = "kicad_plan_change",
-        description = "Plan bounded board graphics, an outline, pad-bound routing, or one source-bound allowlisted footprint without mutating KiCad."
+        description = "Plan bounded PCB graphics, pad-bound routing, a source-bound footprint, or an atomic connected footprint assembly without mutating KiCad."
     )]
     pub async fn kicad_plan_change(
         &self,
@@ -2798,6 +2899,32 @@ impl Server {
             .live_board_observation(&arguments.endpoint, None)
             .map_err(|error| ErrorData::internal_error(error, None))?;
         let observed_token = observation.instance_token.as_str();
+        let assembly = if let Some(request) = &arguments.assembly {
+            if arguments.footprint.is_some()
+                || arguments.batch.is_some()
+                || arguments.segments.is_some()
+                || arguments.outline.is_some()
+                || arguments.track.is_some()
+                || arguments.via.is_some()
+            {
+                return Err(ErrorData::invalid_params(
+                    "assembly requires its own plan",
+                    None,
+                ));
+            }
+            match request.prepare(&observation) {
+                Ok(assembly) => Some(assembly),
+                Err(reason) => {
+                    return Ok(self.envelope_sync(
+                        arguments.request_id,
+                        None,
+                        json!({"reason": "assembly_source_unavailable", "detail": reason}),
+                    ));
+                }
+            }
+        } else {
+            None
+        };
         let footprint = if let Some(request) = &arguments.footprint {
             if arguments.batch.is_some()
                 || arguments.segments.is_some()
@@ -2836,7 +2963,15 @@ impl Server {
             .document_id
             .clone()
             .ok_or_else(|| ErrorData::internal_error("board identity is unavailable", None))?;
-        let (kinds, is_batch) = if let Some(placement) = footprint {
+        let (kinds, is_batch) = if let Some(assembly) = assembly {
+            (
+                vec![OperationKind::PlaceConnectedFootprints {
+                    board: board.clone(),
+                    assembly,
+                }],
+                false,
+            )
+        } else if let Some(placement) = footprint {
             (
                 vec![OperationKind::PlaceAllowlistedFootprint {
                     board: board.clone(),
@@ -2864,12 +2999,13 @@ impl Server {
                 let operation_id =
                     StableId::new(operation_id).expect("deterministic operation id is valid");
                 let expected_effect = expected_board_effect(&kind);
-                let targets = match &kind {
-                    OperationKind::PlaceAllowlistedFootprint { placement, .. } => {
-                        vec![board.clone(), placement.target_id.clone()]
-                    }
-                    _ => vec![board.clone()],
-                };
+                let targets = std::iter::once(board.clone())
+                    .chain(
+                        kind.footprint_placements()
+                            .iter()
+                            .map(|p| p.target_id.clone()),
+                    )
+                    .collect();
                 Operation {
                     operation_id,
                     kind,
@@ -3094,6 +3230,18 @@ impl Server {
         }) {
             return Err(ErrorData::invalid_params(
                 "shadow validation is required before commit",
+                None,
+            ));
+        }
+        let current_evidence = validation_evidence_hash(
+            &stored.session.plan_hash,
+            stored.shadow_validation.as_ref().expect("validated above"),
+            &stored.source_files,
+        )
+        .map_err(|error| ErrorData::internal_error(error, None))?;
+        if stored.validation_evidence_hash.as_deref() != Some(current_evidence.as_str()) {
+            return Err(ErrorData::invalid_params(
+                "validation evidence changed since approval",
                 None,
             ));
         }
@@ -5138,16 +5286,31 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires exactly two owned KiCad editors and CLI; no automatic restart"]
     async fn live_mcp_saved_routing_lifecycle_uses_two_editors() {
-        live_mcp_authoring_lifecycle(false).await;
+        live_mcp_authoring_lifecycle(LiveAuthoringMode::Routing).await;
     }
 
     #[tokio::test]
     #[ignore = "requires two owned KiCad editors, CLI and official libraries"]
     async fn live_mcp_source_bound_footprint_lifecycle_uses_two_editors() {
-        live_mcp_authoring_lifecycle(true).await;
+        live_mcp_authoring_lifecycle(LiveAuthoringMode::Footprint).await;
     }
 
-    async fn live_mcp_authoring_lifecycle(footprint: bool) {
+    #[tokio::test]
+    #[ignore = "requires two owned KiCad editors, CLI and official libraries"]
+    async fn live_mcp_connected_assembly_lifecycle_uses_two_editors() {
+        live_mcp_authoring_lifecycle(LiveAuthoringMode::Assembly).await;
+    }
+
+    #[derive(Clone, Copy)]
+    enum LiveAuthoringMode {
+        Routing,
+        Footprint,
+        Assembly,
+    }
+
+    async fn live_mcp_authoring_lifecycle(mode: LiveAuthoringMode) {
+        let footprint = !matches!(mode, LiveAuthoringMode::Routing);
+        let assembly = matches!(mode, LiveAuthoringMode::Assembly);
         async fn call(
             client: &rmcp::service::RunningService<rmcp::RoleClient, TestClient>,
             name: &'static str,
@@ -5236,7 +5399,7 @@ mod tests {
             )
             .with_state_dir(&state_dir)
             .map_err(|e| e.to_string())?;
-            let client = connected(server).await;
+            let client = connected(server.clone()).await;
             let schematic_source = if footprint {
                 let sch = source_project.board_path().with_extension("kicad_sch");
                 let empty = b"(kicad_sch (version 20260306) (generator eeschema) (uuid 11111111-1111-4111-8111-111111111111) (paper A4) (lib_symbols))";
@@ -5259,7 +5422,21 @@ mod tests {
                 let bytes = std::fs::read(&sch).map_err(|e| e.to_string())?;
                 Some((sch, bytes))
             } else { None };
-            let plan = if footprint {
+            let plan = if assembly {
+                call(&client, "kicad_plan_change", json!({
+                    "endpoint": identity.endpoint, "source_run_id": "assembly-acceptance",
+                    "request_id": "live-assembly", "assembly": {
+                        "placements": [
+                            {"target_id": "placed-r1", "library_nickname": "Resistor_SMD", "library_entry_name": "R_0603_1608Metric",
+                             "x_nm": 5_000_000, "y_nm": 5_000_000, "reference": "R1", "value": "1k"},
+                            {"target_id": "placed-r2", "library_nickname": "Resistor_SMD", "library_entry_name": "R_0603_1608Metric",
+                             "x_nm": 10_000_000, "y_nm": 5_000_000, "reference": "R2", "value": "1k"}
+                        ],
+                        "connections": [{"track_id": "r1-r2", "start": {"target_id": "placed-r1", "pad_number": "2"},
+                            "end": {"target_id": "placed-r2", "pad_number": "1"}, "width_nm": 250_000}]
+                    }
+                })).await?
+            } else if footprint {
                 call(&client, "kicad_plan_change", json!({
                     "endpoint": identity.endpoint, "source_run_id": "footprint-acceptance",
                     "request_id": "live-footprint", "footprint": {
@@ -5360,6 +5537,29 @@ mod tests {
             {
                 return Err("preview changed source or left shadow files".into());
             }
+            if assembly {
+                // A second-placement verification failure must discard the first placement too.
+                let (mut templates, connections) = {
+                    let sessions = server.sessions.lock().map_err(|e| e.to_string())?;
+                    let stored = sessions.get(plan["plan_id"].as_str().ok_or("missing plan ID")?).ok_or("missing session")?;
+                    let OperationKind::PlaceConnectedFootprints { assembly, .. } = &stored.session.plan.operations[0].kind else { return Err("missing assembly plan".into()); };
+                    (stored.shadow_validation.as_ref().ok_or("missing shadow evidence")?.prepared_footprints.clone(), assembly.connections.clone())
+                };
+                let second = templates.get_mut(1).ok_or("missing second template")?;
+                second.template = second.template.with_association(kicad_ipc::FootprintAssociation {
+                    symbol_path: vec!["wrong-sheet".into(), "wrong-symbol".into()],
+                    pad_nets: second.placement.source.as_ref().ok_or("missing source")?.pad_nets.clone(),
+                }).map_err(|e| e.to_string())?;
+                let mut native = source_editor.connect_owned().map_err(|e| e.to_string())?;
+                let rejected = footprint_authoring::execute(&mut native, &before, &templates, &connections);
+                if !matches!(rejected, Err(BoardGraphicsCommitOutcome::Rejected { .. })) {
+                    return Err(format!("partial assembly was not rolled back: {rejected:?}"));
+                }
+                drop(native);
+                if before != observe_owned_shadow(&mut source_editor)? || source_disk != shadow_source_fingerprint(source_project.board_path()) {
+                    return Err("failed assembly changed source memory or files".into());
+                }
+            }
             let approval = json!({
                 "plan_id": plan["plan_id"], "plan_hash": plan["plan_hash"],
                 "approval_hash": preview["approval_hash"],
@@ -5394,7 +5594,7 @@ mod tests {
             let evidence_file = std::fs::OpenOptions::new().write(true).create_new(true)
                 .open(&evidence_path).map_err(|e| e.to_string())?;
             serde_json::to_writer_pretty(evidence_file, &json!({
-                "mode": if footprint { "footprint" } else { "routing" }, "before": before.snapshot, "after": after.snapshot,
+                "mode": if assembly { "assembly" } else if footprint { "footprint" } else { "routing" }, "before": before.snapshot, "after": after.snapshot,
                 "baseline_drc": baseline, "committed_drc": after_drc,
                 "preview": preview, "commit": committed, "history": history,
                 "source_before_digest": digest_bytes(&source_bytes),
@@ -5418,25 +5618,53 @@ mod tests {
                 return Err("saved source geometry or editor PID mismatch".into());
             }
             if footprint {
-                if before.snapshot.native_routing != after.snapshot.native_routing
+                if (!assembly && before.snapshot.native_routing != after.snapshot.native_routing)
                     || before.snapshot.native_stackup != after.snapshot.native_stackup {
                     return Err("footprint commit changed routing or stackup".into());
                 }
                 let placements = &after.snapshot.native_footprints.as_ref().ok_or("missing footprints")?.placements;
-                if placements.len() != 1 { return Err("expected one created footprint".into()); }
+                if placements.len() != 1 + usize::from(assembly) { return Err("created footprint count differs".into()); }
                 let operations: Vec<Operation> = serde_json::from_value(preview["operations"].clone()).map_err(|e| e.to_string())?;
-                let OperationKind::PlaceAllowlistedFootprint { placement, .. } = &operations[0].kind else {
-                    return Err("preview did not bind a footprint operation".into());
-                };
-                let source = placement.source.as_ref().ok_or("missing planned source binding")?;
-                let binding = kicad_adapter::bindings::SchematicFootprintBinding {
-                    schematic_revision: source.schematic.digest.clone(),
-                    board_revision: placements[0].observed_revision.clone(), symbol: source.symbol.clone(),
-                    symbol_path: source.symbol_path.clone(), pad_nets: source.pad_nets.clone()
-                };
-                kicad_adapter::bindings::verify_placed_pin_pad_binding(
-                    &binding, placement, &placements[0], after.snapshot.board.document_id.as_ref().ok_or("missing board")?
-                )?;
+                let planned = operations[0].kind.footprint_placements();
+                if planned.len() != placements.len() { return Err("missing planned placements".into()); }
+                for placement in planned {
+                    let actual = placements.iter().find(|p| p.reference == placement.reference).ok_or("missing placed reference")?;
+                    let source = placement.source.as_ref().ok_or("missing planned source binding")?;
+                    let binding = kicad_adapter::bindings::SchematicFootprintBinding {
+                        schematic_revision: source.schematic.digest.clone(),
+                        board_revision: actual.observed_revision.clone(), symbol: source.symbol.clone(),
+                        symbol_path: source.symbol_path.clone(), pad_nets: source.pad_nets.clone()
+                    };
+                    kicad_adapter::bindings::verify_placed_pin_pad_binding(
+                        &binding, placement, actual, after.snapshot.board.document_id.as_ref().ok_or("missing board")?
+                    )?;
+                }
+                if assembly {
+                    let routing = after.snapshot.native_routing.as_ref().ok_or("missing assembly routing")?;
+                    if routing.tracks.len() != 1 || !routing.vias.is_empty() || after_drc.unconnected_items != 0 {
+                        return Err("assembly is not completely connected".into());
+                    }
+                    let endpoint = |reference: &str, number: &str| -> Result<_, String> {
+                        let p = placements.iter().find(|p| p.reference == reference).ok_or("missing resistor")?;
+                        let pad = p.pads.iter().find(|p| p.number == number).ok_or("missing resistor pin")?;
+                        Ok((kicad_model::RoutingEndpointRef { pad_id: pad.pad_id.clone(), footprint_placement_id: p.placement_id.clone() },
+                            kicad_engine::pad_board_position(p, pad).map_err(|e| e.to_string())?, pad.net.clone().ok_or("missing net")?))
+                    };
+                    let (start_pad, start, net) = endpoint("R1", "2")?;
+                    let (end_pad, end, _) = endpoint("R2", "1")?;
+                    let track = &routing.tracks[0];
+                    let expected = kicad_model::ObservedTrackGeometry::Segment { start, end };
+                    let reversed = kicad_model::ObservedTrackGeometry::Segment { start: end, end: start };
+                    if (track.geometry != expected && track.geometry != reversed) || track.width_nm != 250_000
+                        || track.layer != kicad_model::BoardLayer::FrontCopper
+                        || track.net.as_ref().map(|n| &n.name) != Some(&net.name) {
+                        return Err("saved assembly track differs from planned pin connection".into());
+                    }
+                    let intent = StraightTrackIntent::new_endpoint_bound(track.source_uuid.clone(), start, end,
+                        track.width_nm, start_pad, end_pad, net).map_err(|e| e.to_string())?;
+                    kicad_engine::validate_routing_track_binding(&after.snapshot, after.snapshot.board.document_id.as_ref().ok_or("missing board")?, &intent)
+                        .map_err(|e| e.to_string())?;
+                }
                 let (sch, bytes) = schematic_source.as_ref().ok_or("missing source schematic")?;
                 if std::fs::read(sch).map_err(|e| e.to_string())? != *bytes {
                     return Err("PCB authoring changed schematic source".into());
@@ -5695,6 +5923,7 @@ mod tests {
             segments: Some(serde_json::to_value(vec![graphic("g1")]).unwrap()),
             outline: None,
             footprint: None,
+            assembly: None,
             track: None,
             via: None,
             batch: None,
@@ -6811,7 +7040,7 @@ mod tests {
     #[tokio::test]
     async fn durable_writer_blocks_execution_and_records_approved_outcomes() {
         let calls = Arc::new(Mutex::new(0));
-        let (server, plan_id, plan_hash, approval_hash, validation_evidence_hash) = planned_server(
+        let (server, plan_id, plan_hash, _, _) = planned_server(
             BoardGraphicsCommitOutcome::CommittedAndSaved,
             calls.clone(),
             "durable-execution",
@@ -6821,13 +7050,23 @@ mod tests {
         let board = fixture.root.join("board.kicad_pcb");
         std::fs::write(board.with_extension("kicad_pro"), "{}").unwrap();
         let server = server.with_state_dir(&fixture.root.join("state")).unwrap();
-        {
+        let (approval_hash, validation_evidence_hash) = {
             let mut sessions = server.sessions.lock().unwrap();
             let stored = sessions.get_mut(&plan_id).unwrap();
             stored.board_path = board.clone();
             stored.project_dir = fixture.root.clone();
             stored.source_files = shadow_source_fingerprint(&board);
-        }
+            let evidence = validation_evidence_hash(
+                &plan_hash,
+                stored.shadow_validation.as_ref().unwrap(),
+                &stored.source_files,
+            )
+            .unwrap();
+            let approval = approval_hash(&plan_hash, &evidence);
+            stored.validation_evidence_hash = Some(evidence.clone());
+            stored.approval_hash = Some(approval.clone());
+            (approval, evidence)
+        };
         let writer = server
             .execution_store
             .as_ref()
@@ -6869,7 +7108,7 @@ mod tests {
     #[tokio::test]
     async fn changed_project_rules_invalidate_approval_before_execution() {
         let calls = Arc::new(Mutex::new(0));
-        let (server, plan_id, plan_hash, approval_hash, validation_evidence_hash) = planned_server(
+        let (server, plan_id, plan_hash, _, _) = planned_server(
             BoardGraphicsCommitOutcome::CommittedAndSaved,
             calls.clone(),
             "rules-change",
@@ -6877,12 +7116,22 @@ mod tests {
         .await;
         let fixture = TempBoard::new();
         let board = fixture.root.join("board.kicad_pcb");
-        {
+        let (approval_hash, validation_evidence_hash) = {
             let mut sessions = server.sessions.lock().unwrap();
             let stored = sessions.get_mut(&plan_id).unwrap();
             stored.board_path = board.clone();
             stored.source_files = shadow_source_fingerprint(&board);
-        }
+            let evidence = validation_evidence_hash(
+                &plan_hash,
+                stored.shadow_validation.as_ref().unwrap(),
+                &stored.source_files,
+            )
+            .unwrap();
+            let approval = approval_hash(&plan_hash, &evidence);
+            stored.validation_evidence_hash = Some(evidence.clone());
+            stored.approval_hash = Some(approval.clone());
+            (approval, evidence)
+        };
         std::fs::write(board.with_extension("kicad_dru"), "(version 1)").unwrap();
         let result = server
             .kicad_commit_change(Parameters(CommitChangeRequest {
@@ -6893,7 +7142,10 @@ mod tests {
                 request_id: None,
             }))
             .await;
-        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().message,
+            "source files changed since planning"
+        );
         assert_eq!(*calls.lock().unwrap(), 0);
     }
 
@@ -7017,6 +7269,41 @@ mod tests {
                 .unwrap()
                 .to_owned(),
         )
+    }
+
+    #[tokio::test]
+    async fn changed_validation_evidence_cannot_reuse_approval() {
+        let calls = Arc::new(Mutex::new(0));
+        let (server, plan_id, plan_hash, approval_hash, validation_evidence_hash) = planned_server(
+            BoardGraphicsCommitOutcome::CommittedAndSaved,
+            calls.clone(),
+            "evidence-change",
+        )
+        .await;
+        {
+            let mut sessions = server.sessions.lock().unwrap();
+            sessions
+                .get_mut(&plan_id)
+                .unwrap()
+                .shadow_validation
+                .as_mut()
+                .unwrap()
+                .reopened_revision = Some(RevisionDigest::new("f".repeat(64)).unwrap());
+        }
+        let result = server
+            .kicad_commit_change(Parameters(CommitChangeRequest {
+                plan_id,
+                plan_hash,
+                approval_hash,
+                validation_evidence_hash,
+                request_id: None,
+            }))
+            .await;
+        assert_eq!(
+            result.unwrap_err().message,
+            "validation evidence changed since approval"
+        );
+        assert_eq!(*calls.lock().unwrap(), 0);
     }
 
     #[tokio::test]

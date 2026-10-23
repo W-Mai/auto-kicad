@@ -298,6 +298,11 @@ impl FootprintInstanceTemplate {
         &self.metadata
     }
 
+    /// Immutable source bytes and association bound into authoring approval evidence.
+    pub fn evidence(&self) -> (&[u8], Option<&FootprintAssociation>) {
+        (&self.bytes, self.association.as_ref())
+    }
+
     pub fn with_association(&self, association: FootprintAssociation) -> Result<Self, IpcError> {
         let mut instance = board_types::FootprintInstance::parse_from_bytes(&self.bytes)
             .map_err(|_| IpcError::MalformedEnvelope)?;
@@ -308,8 +313,10 @@ impl FootprintInstanceTemplate {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct CreatedFootprintInstanceReceipt {
+    pub footprint: ObservedFootprintInstance,
+    pub pads: Vec<ObservedPad>,
     pub source_uuid: String,
     pub position_x_nm: i64,
     pub position_y_nm: i64,
@@ -2642,6 +2649,8 @@ fn parsed_footprint_instance_receipt(
     let definition = instance.definition.as_ref().unwrap();
     let library = definition.id.as_ref().unwrap();
     Ok(CreatedFootprintInstanceReceipt {
+        footprint: footprint_instance_from_any(item)?,
+        pads: footprint_definition_pads_from_any(item, &id)?,
         source_uuid: id,
         position_x_nm: position.x_nm,
         position_y_nm: position.y_nm,
@@ -2713,6 +2722,8 @@ fn created_footprint_instance_receipt(
     let definition = instance.definition.as_ref().unwrap();
     let library = definition.id.as_ref().unwrap();
     Ok(CreatedFootprintInstanceReceipt {
+        footprint: footprint_instance_from_any(item)?,
+        pads: footprint_definition_pads_from_any(item, &id)?,
         source_uuid: id,
         position_x_nm,
         position_y_nm,
@@ -2962,7 +2973,13 @@ fn footprint_definition_pads_from_response(
             "footprint lookup must return exactly one item",
         ));
     }
-    let item = &response.items[0];
+    footprint_definition_pads_from_any(&response.items[0], footprint_source_uuid)
+}
+
+fn footprint_definition_pads_from_any(
+    item: &Any,
+    footprint_source_uuid: &str,
+) -> Result<Vec<ObservedPad>, IpcError> {
     if item.type_url != FOOTPRINT_INSTANCE_TYPE_URL {
         return Err(IpcError::UnexpectedMessageType {
             expected: FOOTPRINT_INSTANCE_TYPE_URL,
@@ -5785,6 +5802,54 @@ mod tests {
     }
 
     #[test]
+    fn footprint_creation_receipts_preserve_native_pad_identity_and_reject_conflicting_parents() {
+        let mut item = footprint_item("created-footprint");
+        let mut instance = board_types::FootprintInstance::parse_from_bytes(&item.value).unwrap();
+        instance
+            .definition
+            .as_mut()
+            .unwrap()
+            .items
+            .push(pad_item("created-pad", "1"));
+        item.value = instance.write_to_bytes().unwrap();
+        let response = editor_commands::CreateItemsResponse {
+            status: protobuf::EnumOrUnknown::new(base_types::ItemRequestStatus::IRS_OK),
+            created_items: vec![create_item_result(item.clone())],
+            ..Default::default()
+        };
+        let receipt = parsed_footprint_instance_receipt(&response).unwrap();
+        assert_eq!(receipt.footprint.source_uuid, "created-footprint");
+        assert_eq!(receipt.pads.len(), 1);
+        assert_eq!(receipt.pads[0].source_uuid, "created-pad");
+        assert_eq!(receipt.pads[0].footprint_source_uuid, "created-footprint");
+        let readback = editor_commands::GetItemsResponse {
+            status: protobuf::EnumOrUnknown::new(base_types::ItemRequestStatus::IRS_OK),
+            items: vec![item],
+            ..Default::default()
+        };
+        assert_eq!(
+            receipt.pads,
+            footprint_definition_pads_from_response(&readback, "created-footprint").unwrap()
+        );
+        let pads = &mut instance.definition.as_mut().unwrap().items;
+        update_pad(&mut pads[0], |pad| {
+            pad.parent = MessageField::some(base_types::KIID {
+                value: "other-footprint".into(),
+                ..Default::default()
+            })
+        });
+        let corrupt = editor_commands::CreateItemsResponse {
+            created_items: vec![create_item_result(Any {
+                type_url: FOOTPRINT_INSTANCE_TYPE_URL.into(),
+                value: instance.write_to_bytes().unwrap(),
+                ..Default::default()
+            })],
+            ..response
+        };
+        assert!(parsed_footprint_instance_receipt(&corrupt).is_err());
+    }
+
+    #[test]
     fn footprint_association_requires_complete_pad_mapping_and_replaces_source_nets() {
         let mut item = footprint_item("source");
         let mut instance = board_types::FootprintInstance::parse_from_bytes(&item.value).unwrap();
@@ -5808,6 +5873,9 @@ mod tests {
             ]),
         };
         let bound = template.with_association(association.clone()).unwrap();
+        assert_eq!(template.evidence().0, bound.evidence().0);
+        assert_ne!(template.evidence(), bound.evidence());
+        assert_eq!(bound.evidence().1, Some(&association));
         let created = footprint_instance_from_template(&bound, 10, 20, "R1", "10k").unwrap();
         assert_eq!(
             created.symbol_path.as_ref().unwrap().path[1].value,

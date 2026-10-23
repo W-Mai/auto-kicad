@@ -15,7 +15,7 @@ The server uses MCP over standard input/output. Configure an MCP client to launc
 
 1. Save the PCB and project settings in KiCad.
 2. Call `kicad_inspect_project` for the target editor endpoint.
-3. Call `kicad_plan_change` to prepare board graphics, a rectangular Edge.Cuts outline, pad-bound front-copper tracks, net-bound through vias or one source-bound footprint.
+3. Call `kicad_plan_change` to prepare board graphics, a rectangular Edge.Cuts outline, pad-bound front-copper tracks, net-bound through vias, source-bound footprints or an atomic connected footprint assembly.
 4. Call `kicad_preview_change` to validate a disposable copy. Review its result before approving.
 5. Call `kicad_commit_change` with the exact plan, validation evidence and approval hashes returned by the preview.
 
@@ -23,7 +23,7 @@ Preview copies the saved PCB, project and optional custom design rules. It verif
 
 ## Scope
 
-PCB observation covers supported graphics, footprint placements and pads, routing and stackup metadata. The public authoring path supports board graphics, rectangular outlines, pad-bound straight tracks on F.Cu and net-bound through vias, including mixed batches. Routing previews remap pad identities into the disposable board and verify server-assigned creation IDs, geometry and networks. Graphics, pad-bound straight tracks and through vias have passed native and production MCP plan/preview/commit acceptance. Source-bound single-footprint placement has passed production MCP planning, disposable preview and approved IPC commit with the official R0603 library. It binds a closed saved schematic, its CLI netlist and the allowlisted library file to the plan hash, verifies symbol paths and pin-to-pad network assignments, and rejects source changes. Template preparation reloads a confined staging copy in the existing owned editor. Each footprint requires a separate plan. Unsupported objects or lossy observations can reject inspection.
+PCB observation covers supported graphics, footprint placements and pads, routing and stackup metadata. The public authoring path supports board graphics, rectangular outlines, pad-bound straight tracks on F.Cu and net-bound through vias, including mixed batches. Routing previews remap pad identities into the disposable board and verify server-assigned creation IDs, geometry and networks. Graphics, pad-bound straight tracks and through vias have passed native and production MCP plan/preview/commit acceptance. Source-bound single-footprint placement has passed production MCP planning, disposable preview and approved IPC commit with the official R0603 library. It binds a closed saved schematic, its CLI netlist and the allowlisted library file to the plan hash, verifies symbol paths and pin-to-pad network assignments, and rejects source changes. Template preparation reloads a confined staging copy in the existing owned editor. An `assembly` plan places multiple source-bound footprints and connects their pins in one native transaction. Connections use placement target IDs and pad numbers; native pad IDs and coordinates are resolved from validated creation receipts. All placements must share one saved schematic revision. Separate `footprint` requests remain supported. Unsupported objects or lossy observations can reject inspection.
 
 Schematic authoring is restricted to the fixed two-resistor operation exposed by the schematic tools when its backend is available. Both resistor instances specify `Resistor_SMD:R_0603_1608Metric`. General schematic editing, schematic-to-PCB synchronization, zone authoring, automatic placement/routing and manufacturing release are not implemented. Sessions and approvals expire on restart. The stdio server persists execution evidence, outcomes and pre-write source backups under `$HOME/.local/state/auto-kicad`; `AUTO_KICAD_STATE_DIR` selects a different private directory. `kicad_inspect_project` returns recent execution records and backup paths. An interrupted commit remains uncertain until its board/files are inspected; recovery requires a fresh plan, validation and approval. Source files are never restored automatically. Keep backups until the corresponding changes have been reviewed.
 
@@ -32,6 +32,27 @@ PCB and schematic commits acquire an OS writer lock in `.auto-kicad-writer.lock`
 ## Footprint sources
 
 The placement allowlist contains `Resistor_SMD:R_0603_1608Metric`, `LED_SMD:LED_1210_3225Metric_Pad1.42x2.65mm_HandSolder` and `Type-C:USB_C_GCT_USB4085`. Save and close the same-named `.kicad_sch` before planning. Its reference, value and footprint field must match the request. The preview returns the source-bound operations for review.
+
+An assembly request is exclusive with `footprint`, `batch` and other top-level operation fields. Placements plus connections are limited to 100 items. Each connection requires two unambiguous front-copper pads on the same nonempty schematic net. A failed operation before commit drops the complete native transaction; uncertain commit/save results require inspection and a fresh approval.
+
+```json
+{
+  "endpoint": "ipc:///tmp/kicad/api.sock",
+  "source_run_id": "resistor-circuit",
+  "request_id": "place-connected-resistors",
+  "assembly": {
+    "placements": [
+      {"target_id": "r1", "library_nickname": "Resistor_SMD", "library_entry_name": "R_0603_1608Metric", "x_nm": 5000000, "y_nm": 5000000, "reference": "R1", "value": "1k"},
+      {"target_id": "r2", "library_nickname": "Resistor_SMD", "library_entry_name": "R_0603_1608Metric", "x_nm": 10000000, "y_nm": 5000000, "reference": "R2", "value": "1k"}
+    ],
+    "connections": [
+      {"track_id": "r1-r2", "start": {"target_id": "r1", "pad_number": "2"}, "end": {"target_id": "r2", "pad_number": "1"}, "width_nm": 250000}
+    ]
+  }
+}
+```
+
+Use the endpoint returned for the target editor. The matching saved schematic must already contain R1 and R2 with the specified values and footprint fields, with R1.2 and R2.1 connected. Preview evidence binds template byte digests and symbol/pin associations together with the plan, source fingerprints, saved snapshot and DRC result.
 
 `AUTO_KICAD_OFFICIAL_FOOTPRINT_ROOT` selects the installed `footprints` directory; the server resolves the corresponding `.pretty` subdirectory. `AUTO_KICAD_PROJECT_FOOTPRINT_ROOT` selects a USB-C `.pretty` directory, defaulting to `Type-C.pretty` inside its project directory. MCP requests cannot supply executable, script or library paths. The fixed template helper currently requires the source checkout and KiCad's bundled macOS Python runtime; copying only the server executable does not provide this backend.
 
@@ -53,6 +74,7 @@ cargo test -p auto-kicad tests::source_bound_circuit_and_routing_reuse_one_owned
 cargo test -p auto-kicad tests::disposable_graphics_shadow_verifies_server_assigned_ids -- --ignored --exact
 cargo test -p auto-kicad tests::live_mcp_saved_routing_lifecycle_uses_two_editors -- --ignored --exact
 cargo test -p auto-kicad tests::live_mcp_source_bound_footprint_lifecycle_uses_two_editors -- --ignored --exact
+cargo test -p auto-kicad tests::live_mcp_connected_assembly_lifecycle_uses_two_editors -- --ignored --exact
 ```
 
-The CLI-only MCP schematic lifecycle and source-binding test passed with installed KiCad, including unchanged source bytes during preview, exact candidate bytes after commit, idempotent replay, durable execution history and pre-write backups. Single-editor circuit acceptance passed with KiCad 10.0.6: both resistor placements and schematic pin/pad/net bindings, native graphics and connected-track creation, complete snapshot comparison after save/reload, and no introduced DRC violations. A separately added one-layer-connected via survived save/reload and produced only the expected dangling-via violation. The same editor PID was retained throughout; owned-editor cleanup and source board/project/schematic isolation passed. Offline contracts cover pad-coordinate transforms and serialized through-via inner shapes. Production MCP mixed graphics/track/via acceptance passed with one source editor and one preview editor: changed-source rejection, isolated save/reload and DRC, exact approval commit, replay rejection, committed-source DRC, preservation of existing objects, durable history and pre-write backups. Both owned editors and their disposable files were cleaned. The source-bound footprint MCP test also passed: it creates the fixed two-resistor schematic through MCP, places R1 through the PCB tools, and verifies saved symbol paths, pin/pad/net assignments, unchanged schematic bytes, DRC and both execution records. This covers single-footprint authoring; the two-resistor connected PCB was validated separately through the native adapter, not as one atomic multi-footprint MCP plan.
+The CLI-only MCP schematic lifecycle and source-binding test passed with installed KiCad, including unchanged source bytes during preview, exact candidate bytes after commit, idempotent replay, durable execution history and pre-write backups. Single-editor circuit acceptance passed with KiCad 10.0.6: both resistor placements and schematic pin/pad/net bindings, native graphics and connected-track creation, complete snapshot comparison after save/reload, and no introduced DRC violations. A separately added one-layer-connected via survived save/reload and produced only the expected dangling-via violation. The same editor PID was retained throughout; owned-editor cleanup and source board/project/schematic isolation passed. Offline contracts cover pad-coordinate transforms and serialized through-via inner shapes. Production MCP mixed graphics/track/via acceptance passed with one source editor and one preview editor: changed-source rejection, isolated save/reload and DRC, exact approval commit, replay rejection, committed-source DRC, preservation of existing objects, durable history and pre-write backups. Both owned editors and their disposable files were cleaned. The source-bound footprint MCP test also passed: it creates the fixed two-resistor schematic through MCP, places R1 through the PCB tools, and verifies saved symbol paths, pin/pad/net assignments, unchanged schematic bytes, DRC and both execution records. Atomic assembly MCP acceptance also passed from an empty PCB: both resistors and their connecting track were created through one approved plan, with zero unconnected items after save/reload and no introduced DRC violations. Injecting a verification failure into the second placement discarded the complete transaction and preserved the source board. Source isolation, exact approval, replay rejection, durable backups and owned-editor cleanup passed.

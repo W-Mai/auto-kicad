@@ -236,60 +236,207 @@ fn verify_created(
     Ok(actual)
 }
 
-pub(crate) fn execute<T: KiCadTransport>(
+fn create_verified<T: KiCadTransport>(
     client: &mut KiCadClient<T>,
     filename: &str,
     board: &StableId,
     prepared: &SourceFootprintTemplate,
-) -> Result<ObservedFootprintPlacement, kicad_adapter::BoardGraphicsCommitOutcome> {
-    use kicad_adapter::BoardGraphicsCommitOutcome as Outcome;
-    let unknown = |e: String| Outcome::Unknown { reason: e };
-    let commit = client.begin_commit().map_err(|e| unknown(e.to_string()))?;
+) -> Result<ObservedFootprintPlacement, String> {
     let p = &prepared.placement;
-    let receipt = match client.create_footprint_instance(
-        filename,
-        &prepared.template,
-        p.position.x,
-        p.position.y,
-        &p.reference,
-        &p.value,
-    ) {
-        Ok(receipt) => receipt,
-        Err(error) => {
-            return Err(match client.drop_commit(&commit) {
-                Ok(()) => Outcome::Rejected {
-                    reason: error.to_string(),
+    let receipt = client
+        .create_footprint_instance(
+            filename,
+            &prepared.template,
+            p.position.x,
+            p.position.y,
+            &p.reference,
+            &p.value,
+        )
+        .map_err(|e| e.to_string())?;
+    verify_created(
+        prepared,
+        ObservedFootprintWithPads {
+            footprint: receipt.footprint,
+            pads: receipt.pads,
+        },
+        board,
+    )
+}
+
+fn resolve_connections(
+    snapshot: &kicad_model::ProjectSnapshot,
+    targets: &std::collections::BTreeMap<StableId, StableId>,
+    connections: &[kicad_engine::PlannedPadConnection],
+) -> Result<Vec<kicad_engine::Operation>, String> {
+    use kicad_engine::{Operation, OperationKind, Precondition, RiskClass};
+    use kicad_model::{RoutingEndpointRef, StraightTrackIntent};
+    let board = snapshot
+        .board
+        .document_id
+        .as_ref()
+        .ok_or("missing board identity")?;
+    let footprints = snapshot
+        .native_footprints
+        .as_ref()
+        .ok_or("missing footprint observation")?;
+    let endpoint = |pin: &kicad_engine::PlannedPadRef| -> Result<_, String> {
+        let uuid = targets
+            .get(&pin.target_id)
+            .ok_or("assembly target is missing")?;
+        let placement = footprints
+            .placements
+            .iter()
+            .find(|p| &p.source_uuid == uuid)
+            .ok_or("created assembly placement is missing")?;
+        let mut pads = placement
+            .pads
+            .iter()
+            .filter(|pad| pad.number == pin.pad_number);
+        let pad = pads.next().ok_or("assembly pad is missing")?;
+        if pads.next().is_some() {
+            return Err("assembly pad number is ambiguous".into());
+        }
+        if !pad.layers.contains(&kicad_model::BoardLayer::FrontCopper) {
+            return Err("assembly connection requires front copper pads".into());
+        }
+        Ok((
+            RoutingEndpointRef {
+                pad_id: pad.pad_id.clone(),
+                footprint_placement_id: placement.placement_id.clone(),
+            },
+            kicad_engine::pad_board_position(placement, pad).map_err(|e| e.to_string())?,
+            pad.net.clone().ok_or("assembly pad has no net")?,
+        ))
+    };
+    connections
+        .iter()
+        .map(|connection| {
+            let (start_pad, start, net) = endpoint(&connection.start)?;
+            let (end_pad, end, end_net) = endpoint(&connection.end)?;
+            if net != end_net {
+                return Err("created assembly pad nets differ".into());
+            }
+            let intent = StraightTrackIntent::new_endpoint_bound(
+                connection.track_id.clone(),
+                start,
+                end,
+                connection.width_nm,
+                start_pad,
+                end_pad,
+                net,
+            )
+            .map_err(|e| e.to_string())?;
+            kicad_engine::validate_routing_track_binding(snapshot, board, &intent)
+                .map_err(|e| e.to_string())?;
+            Ok(Operation {
+                operation_id: connection.track_id.clone(),
+                kind: OperationKind::AddStraightTrack {
+                    board: board.clone(),
+                    intent,
                 },
-                Err(drop_error) => unknown(format!("{error}; rollback failed: {drop_error}")),
+                targets: vec![board.clone()],
+                preconditions: vec![Precondition::Revision(
+                    snapshot.revision().map_err(|e| e.to_string())?,
+                )],
+                expected_effects: vec!["connect verified assembly pads".into()],
+                risk_class: RiskClass::Medium,
+                idempotency_key: connection.track_id.to_string(),
+                source_run_id: "assembly-receipt-resolution".into(),
+            })
+        })
+        .collect()
+}
+
+pub(crate) fn execute<T: KiCadTransport>(
+    client: &mut KiCadClient<T>,
+    observation: &LiveBoardObservation,
+    prepared: &[SourceFootprintTemplate],
+    connections: &[kicad_engine::PlannedPadConnection],
+) -> Result<kicad_model::ProjectSnapshot, kicad_adapter::BoardGraphicsCommitOutcome> {
+    use kicad_adapter::BoardGraphicsCommitOutcome as Outcome;
+    let unknown = |reason: String| Outcome::Unknown { reason };
+    let board = observation
+        .snapshot
+        .board
+        .document_id
+        .as_ref()
+        .ok_or_else(|| Outcome::Rejected {
+            reason: "missing board identity".into(),
+        })?;
+    let filename = &observation.board_filename;
+    let commit = client.begin_commit().map_err(|e| unknown(e.to_string()))?;
+    let result = (|| -> Result<_, String> {
+        let mut expected = observation.clone();
+        let mut targets = std::collections::BTreeMap::new();
+        for template in prepared {
+            let added = create_verified(client, filename, board, template)?;
+            if targets
+                .insert(
+                    template.placement.target_id.clone(),
+                    added.source_uuid.clone(),
+                )
+                .is_some()
+            {
+                return Err("assembly target is duplicated".into());
+            }
+            expected.snapshot = expected_snapshot(&expected.snapshot, added)?;
+        }
+        if connections.is_empty() {
+            return Ok((
+                expected,
+                Vec::new(),
+                kicad_adapter::NativePcbBatchReceipt {
+                    graphics: vec![],
+                    tracks: vec![],
+                    vias: vec![],
+                },
+            ));
+        }
+        let operations = resolve_connections(&expected.snapshot, &targets, connections)?;
+        let batch = kicad_adapter::prepare_bound_native_batch(
+            &operations,
+            &expected.snapshot,
+            &expected.snapshot.revision().map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| format!("assembly routing is invalid: {e:?}"))?;
+        let mut receipts = kicad_adapter::NativePcbBatchReceipt {
+            graphics: vec![],
+            tracks: vec![],
+            vias: vec![],
+        };
+        for track in &batch.tracks {
+            let receipt = client
+                .create_track(filename, track)
+                .map_err(|e| e.to_string())?;
+            if receipt.request_index != 0 || receipt.track != *track {
+                return Err("assembly track receipt differs from resolved connection".into());
+            }
+            receipts.tracks.push(receipt);
+        }
+        Ok((expected, operations, receipts))
+    })();
+    let (expected, operations, receipts) = match result {
+        Ok(expected) => expected,
+        Err(reason) => {
+            return Err(match client.drop_commit(&commit) {
+                Ok(()) => Outcome::Rejected { reason },
+                Err(error) => unknown(format!("{reason}; rollback failed: {error}")),
             });
         }
     };
     client
-        .commit_changes(&commit, "auto-kicad source-bound footprint placement")
+        .commit_changes(&commit, "auto-kicad source-bound PCB authoring")
         .map_err(|e| unknown(e.to_string()))?;
     client
         .save_board(filename)
         .map_err(|e| unknown(e.to_string()))?;
-    let mut items = client
-        .get_footprint_instances(filename)
-        .map_err(|e| unknown(e.to_string()))?
-        .into_iter()
-        .filter(|item| item.source_uuid == receipt.source_uuid);
-    let footprint = items
-        .next()
-        .ok_or_else(|| unknown("created footprint is missing".into()))?;
-    if items.next().is_some() {
-        return Err(unknown("created footprint identity is ambiguous".into()));
+    if operations.is_empty() {
+        return Ok(expected.snapshot);
     }
-    let pads = client
-        .get_footprint_definition_pads(filename, &receipt.source_uuid)
-        .map_err(|e| unknown(e.to_string()))?;
-    verify_created(
-        prepared,
-        ObservedFootprintWithPads { footprint, pads },
-        board,
-    )
-    .map_err(unknown)
+    let routing = kicad_adapter::read_verified_native_routing(client, filename, &receipts)
+        .map_err(unknown)?;
+    crate::expected_native_shadow_snapshot(&expected, &operations, &receipts, routing)
+        .map_err(unknown)
 }
 
 pub(crate) fn expected_snapshot(
