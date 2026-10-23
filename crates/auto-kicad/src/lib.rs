@@ -1,3 +1,5 @@
+pub mod recovery;
+
 use kicad_adapter::{
     BoardGraphicsCommitOutcome, BoardGraphicsExecutor, DiscoveryInput, DisposablePcbLifecycle,
     DocumentObservation, FootprintObservationError, LiveBoardObservation,
@@ -2043,6 +2045,7 @@ struct StoredDrcBaseline {
 
 #[derive(Clone)]
 pub struct Server {
+    execution_store: Option<Arc<recovery::ExecutionStore>>,
     sessions: Arc<Mutex<BTreeMap<String, StoredChangeSession>>>,
     schematic_sessions: Arc<Mutex<BTreeMap<String, StoredSchematicChange>>>,
     schematic_audit: Arc<Mutex<Vec<SchematicAuditEvent>>>,
@@ -2111,6 +2114,22 @@ impl Default for Server {
 }
 
 impl Server {
+    pub fn with_state_dir(mut self, directory: &std::path::Path) -> std::io::Result<Self> {
+        self.execution_store = Some(Arc::new(recovery::ExecutionStore::open(directory)?));
+        Ok(self)
+    }
+
+    fn acquire_project_writer(
+        &self,
+        project: &std::path::Path,
+    ) -> Result<Option<recovery::ProjectWriter>, ErrorData> {
+        self.execution_store
+            .as_ref()
+            .map(|store| store.acquire(project))
+            .transpose()
+            .map_err(|e| ErrorData::internal_error(format!("project write unavailable: {e}"), None))
+    }
+
     pub fn with_discovery(discovery: Arc<dyn DiscoveryService>) -> Self {
         Self::with_discovery_and_execution(discovery, Arc::new(IpcBoardGraphicsExecutionService))
     }
@@ -2177,6 +2196,7 @@ impl Server {
             }
         }
         Self {
+            execution_store: None,
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             schematic_sessions: Arc::new(Mutex::new(BTreeMap::new())),
             schematic_audit: Arc::new(Mutex::new(Vec::new())),
@@ -2513,8 +2533,31 @@ impl Server {
         let revision = snapshot
             .revision()
             .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
-        let data = serde_json::to_value(snapshot)
+        let mut execution_history = Vec::new();
+        if let Some(store) = &self.execution_store {
+            let mut projects = snapshot
+                .documents
+                .iter()
+                .filter_map(|document| document.project_path.as_deref())
+                .map(std::path::PathBuf::from)
+                .collect::<std::collections::BTreeSet<_>>();
+            if let Some(project) = project_dir {
+                projects.insert(project.to_path_buf());
+            }
+            for project in projects {
+                execution_history.extend(store.history(&project).map_err(|e| {
+                    ErrorData::internal_error(format!("recovery history unavailable: {e}"), None)
+                })?);
+            }
+        }
+        let mut data = serde_json::to_value(snapshot)
             .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
+        if self.execution_store.is_some() {
+            data["execution_history"] = json!(execution_history);
+            data["recovery_policy"] = json!(
+                "Inspect uncertain outcomes and backups; restart requires a fresh plan, validation and approval. No automatic replay or rollback."
+            );
+        }
         let envelope = Envelope {
             ok: true,
             request_id,
@@ -2770,7 +2813,7 @@ impl Server {
 
     #[tool(
         name = "kicad_commit_change",
-        description = "Commit an approved KiCad board graphics change."
+        description = "Commit an exactly approved and validated KiCad board change."
     )]
     pub async fn kicad_commit_change(
         &self,
@@ -2811,6 +2854,7 @@ impl Server {
                 None,
             ));
         }
+        let writer = self.acquire_project_writer(&stored.project_dir)?;
         if shadow_source_fingerprint(&stored.board_path) != stored.source_files {
             return Err(ErrorData::invalid_params(
                 "source files changed since planning",
@@ -2837,6 +2881,14 @@ impl Server {
         engine
             .approve(&mut stored.session, &arguments.plan_hash)
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+
+        let attempt = writer.as_ref().map(|writer| {
+            let mut sources = vec![stored.board_path.clone(), stored.board_path.with_extension("kicad_pro")];
+            let rules = stored.board_path.with_extension("kicad_dru");
+            if rules.exists() { sources.push(rules); }
+            writer.begin("pcb", &arguments.plan_hash, &arguments.approval_hash,
+                json!({"plan": stored.session.plan, "validation_evidence_hash": stored.validation_evidence_hash, "source_files": stored.source_files}), &sources)
+        }).transpose().map_err(|e| ErrorData::internal_error(format!("execution record unavailable: {e}"), None))?;
 
         let mut sessions = self.sessions.lock().expect("session lock");
         let current = sessions
@@ -2902,6 +2954,21 @@ impl Server {
                 )
             }
         };
+        if let Some(attempt) = attempt
+            && let Err(error) = attempt.finish(state, outcome_data.clone())
+        {
+            stored.execution_state = StoredExecutionState::Unknown;
+            self.sessions
+                .lock()
+                .expect("session lock")
+                .insert(arguments.plan_id.clone(), stored);
+            return Err(ErrorData::internal_error(
+                format!(
+                    "execution outcome is uncertain because its durable record failed: {error}"
+                ),
+                None,
+            ));
+        }
         self.sessions
             .lock()
             .expect("session lock")
@@ -3198,6 +3265,11 @@ impl Server {
                 None,
             ));
         }
+        let writer = self.acquire_project_writer(&stored.project_root)?;
+        let attempt = writer.as_ref().map(|writer| {
+            writer.begin("schematic", &arguments.plan_hash, &arguments.approval_hash,
+                json!({"source_artifact": stored.source_artifact, "operation_identity": TWO_RESISTOR_OPERATION_IDENTITY}), std::slice::from_ref(&stored.root_schematic))
+        }).transpose().map_err(|e| ErrorData::internal_error(format!("execution record unavailable: {e}"), None))?;
         let mut sessions = self
             .schematic_sessions
             .lock()
@@ -3221,6 +3293,22 @@ impl Server {
         let outcome = self
             .schematic
             .commit(&stored.project_root, &stored.root_schematic, receipt);
+        if let Some(attempt) = attempt
+            && let Err(error) =
+                attempt.finish(schematic_state(&outcome), schematic_outcome_data(&outcome))
+        {
+            stored.state = SchematicExecutionState::Unknown;
+            self.schematic_sessions
+                .lock()
+                .expect("schematic session lock")
+                .insert(arguments.plan_id.clone(), stored);
+            return Err(ErrorData::internal_error(
+                format!(
+                    "schematic outcome is uncertain because its durable record failed: {error}"
+                ),
+                None,
+            ));
+        }
         let state = match &outcome {
             SchematicPatchOutcome::Committed { .. } => SchematicExecutionState::Committed,
             SchematicPatchOutcome::Rejected { .. } => SchematicExecutionState::Planned,
@@ -5766,6 +5854,64 @@ mod tests {
         let stored = &sessions[&plan_id];
         assert_eq!(stored.execution_state, StoredExecutionState::Committed);
         assert_eq!(stored.session.committed_idempotency.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn durable_writer_blocks_execution_and_records_approved_outcomes() {
+        let calls = Arc::new(Mutex::new(0));
+        let (server, plan_id, plan_hash, approval_hash, validation_evidence_hash) = planned_server(
+            BoardGraphicsCommitOutcome::CommittedAndSaved,
+            calls.clone(),
+            "durable-execution",
+        )
+        .await;
+        let fixture = TempBoard::new();
+        let board = fixture.root.join("board.kicad_pcb");
+        std::fs::write(board.with_extension("kicad_pro"), "{}").unwrap();
+        let server = server.with_state_dir(&fixture.root.join("state")).unwrap();
+        {
+            let mut sessions = server.sessions.lock().unwrap();
+            let stored = sessions.get_mut(&plan_id).unwrap();
+            stored.board_path = board.clone();
+            stored.project_dir = fixture.root.clone();
+            stored.source_files = shadow_source_fingerprint(&board);
+        }
+        let writer = server
+            .execution_store
+            .as_ref()
+            .unwrap()
+            .acquire(&fixture.root)
+            .unwrap();
+        let request = || CommitChangeRequest {
+            plan_id: plan_id.clone(),
+            plan_hash: plan_hash.clone(),
+            approval_hash: approval_hash.clone(),
+            validation_evidence_hash: validation_evidence_hash.clone(),
+            request_id: None,
+        };
+        assert!(
+            server
+                .kicad_commit_change(Parameters(request()))
+                .await
+                .is_err()
+        );
+        assert_eq!(*calls.lock().unwrap(), 0);
+        drop(writer);
+        server
+            .kicad_commit_change(Parameters(request()))
+            .await
+            .unwrap();
+        assert_eq!(*calls.lock().unwrap(), 1);
+        let reopened = recovery::ExecutionStore::open(&fixture.root.join("state")).unwrap();
+        let history = reopened.history(&fixture.root).unwrap();
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].state, "committed");
+        assert_eq!(history[0].approval_hash, approval_hash);
+        assert_eq!(history[0].backups.len(), 2);
+        assert_eq!(
+            std::fs::read(&history[0].backups[0].saved).unwrap(),
+            std::fs::read(board).unwrap()
+        );
     }
 
     #[tokio::test]
