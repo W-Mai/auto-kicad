@@ -54,4 +54,4 @@ cargo test -p auto-kicad tests::disposable_graphics_shadow_verifies_server_assig
 cargo test -p auto-kicad tests::live_mcp_preview_rejects_unsaved_state_and_commits_saved_graphics -- --ignored --exact
 ```
 
-The open-editor MCP workflow and same-process reload have offline regression coverage; their live end-to-end verification is pending.
+The CLI-only source-binding test passed with installed KiCad. The open-editor MCP workflow and same-process reload have offline regression coverage; live end-to-end acceptance remains pending. A single-editor circuit trial failed in its test cleanup sequence and did not produce a usable operation result. The test now closes its owned process before directory cleanup and reports both operation and cleanup outcomes.

@@ -4955,12 +4955,18 @@ mod tests {
             }
             Ok(())
         })();
-        let cleanup = launcher.cleanup();
+        let close = match launcher.current_identity().cloned() {
+            Ok(identity) => launcher.close_owned(identity.pid),
+            Err(_) => Ok(()),
+        };
+        let cleanup = close.and_then(|()| launcher.cleanup());
         assert_eq!(source, shadow_source_fingerprint(&board_path));
         assert_eq!(schematic_source, std::fs::read(&sch).unwrap());
-        assert!(cleanup.is_ok(), "cleanup: {cleanup:?}");
+        assert!(
+            result.is_ok() && cleanup.is_ok(),
+            "single-editor circuit: {result:?}; cleanup: {cleanup:?}"
+        );
         assert!(!shadow.root().exists());
-        assert!(result.is_ok(), "single-editor circuit: {result:?}");
     }
 
     #[test]
