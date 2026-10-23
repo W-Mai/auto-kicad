@@ -5299,18 +5299,86 @@ mod tests {
         let sch = root.join("board.kicad_sch");
         let empty = b"(kicad_sch (version 20260306) (generator eeschema) (uuid 11111111-1111-4111-8111-111111111111) (paper A4) (lib_symbols))";
         std::fs::write(&sch, empty).unwrap();
-        let source = kicad_model::SchematicArtifactFile::new(
-            "board.kicad_sch",
-            empty.len() as u64,
-            digest_bytes(empty),
+        async fn call(
+            client: &rmcp::service::RunningService<rmcp::RoleClient, TestClient>,
+            name: &'static str,
+            arguments: Value,
+        ) -> Value {
+            let result = client
+                .call_tool(
+                    CallToolRequestParams::new(name)
+                        .with_arguments(arguments.as_object().unwrap().clone()),
+                )
+                .await
+                .unwrap();
+            assert_ne!(result.is_error, Some(true), "{result:?}");
+            let result = result.structured_content.unwrap();
+            assert_eq!(result["ok"], true, "{result}");
+            result["data"].clone()
+        }
+
+        let state_dir = root.join("state");
+        let schematic_server = Server::default().with_state_dir(&state_dir).unwrap();
+        let client = connected(schematic_server.clone()).await;
+        let planned = call(
+            &client,
+            "kicad_plan_schematic_change",
+            json!({
+                "project_root": root,
+                "root_schematic": sch,
+                "source_run_id": "cli-acceptance",
+                "request_id": "cli-schematic-plan"
+            }),
         )
-        .unwrap();
-        let receipt = kicad_schematic::preview_two_resistor_circuit(&root, &sch, &source).unwrap();
+        .await;
+        assert_eq!(planned["state"], "planned");
+        let preview = call(
+            &client,
+            "kicad_preview_schematic_change",
+            json!({
+                "plan_id": planned["plan_id"],
+                "plan_hash": planned["plan_hash"]
+            }),
+        )
+        .await;
+        assert_eq!(preview["state"], "awaiting_approval");
         assert_eq!(std::fs::read(&sch).unwrap(), empty);
-        assert!(matches!(
-            kicad_schematic::commit_two_resistor_circuit(&root, &sch, &receipt),
-            kicad_schematic::SchematicPatchOutcome::Committed { .. }
-        ));
+        let approval = json!({
+            "plan_id": planned["plan_id"],
+            "plan_hash": planned["plan_hash"],
+            "approval_hash": preview["approval_hash"]
+        });
+        let committed = call(&client, "kicad_commit_schematic_change", approval.clone()).await;
+        assert_eq!(committed["state"], "committed");
+        let saved = std::fs::read(&sch).unwrap();
+        assert_eq!(
+            preview["candidate_artifact"]["content_digest"],
+            digest_bytes(&saved).as_str()
+        );
+        let modified = std::fs::metadata(&sch).unwrap().modified().unwrap();
+        let replay = call(&client, "kicad_commit_schematic_change", approval).await;
+        assert_eq!(replay["state"], "committed");
+        assert_eq!(std::fs::read(&sch).unwrap(), saved);
+        assert_eq!(
+            std::fs::metadata(&sch).unwrap().modified().unwrap(),
+            modified
+        );
+
+        // Reopening the store proves that evidence and pre-write bytes are durable.
+        let history = recovery::ExecutionStore::open(&state_dir)
+            .unwrap()
+            .history(&root)
+            .unwrap();
+        assert_eq!(history.len(), 1);
+        let record = &history[0];
+        assert_eq!(record.domain, "schematic");
+        assert_eq!(record.state, "committed");
+        assert_eq!(record.plan_hash, planned["plan_hash"]);
+        assert_eq!(record.approval_hash, preview["approval_hash"]);
+        assert_eq!(record.backups.len(), 1);
+        assert_eq!(record.backups[0].original, sch);
+        assert_eq!(std::fs::read(&record.backups[0].saved).unwrap(), empty);
+        assert_eq!(record.backups[0].sha256, digest_bytes(empty).to_string());
         let snapshot = project_snapshot(true);
         let observation = LiveBoardObservation {
             snapshot: snapshot.clone(),

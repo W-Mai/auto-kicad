@@ -45,7 +45,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-Environment-dependent tests are ignored by default. The CLI-only source-binding test requires KiCad CLI and official libraries and opens no editor. PCB live tests require the installed editor and CLI. Run each explicitly; they create disposable projects and close only their owned editor processes. Preview requests are serialized to avoid concurrent preview windows.
+Environment-dependent tests are ignored by default. The CLI-only source-binding test exercises schematic plan, preview and commit through the MCP router with the production CLI, then verifies footprint source binding; it requires official libraries and opens no editor. PCB live tests require the installed editor and CLI. Run each explicitly; they create disposable projects and close only their owned editor processes. Preview requests are serialized to avoid concurrent preview windows.
 
 ```sh
 cargo test -p auto-kicad tests::production_cli_binds_fixed_circuit_footprints_without_editor -- --ignored --exact
@@ -54,4 +54,4 @@ cargo test -p auto-kicad tests::disposable_graphics_shadow_verifies_server_assig
 cargo test -p auto-kicad tests::live_mcp_preview_rejects_unsaved_state_and_commits_saved_graphics -- --ignored --exact
 ```
 
-The CLI-only source-binding test passed with installed KiCad. Single-editor checks verified both resistor placements, schematic bindings and native routing save/reload; DRC rejected displaced track endpoints and a via connected on only one layer. KiCad board pad coordinates are normalized to footprint-local coordinates before endpoint resolution, including rotation and back-side transforms. Offline contracts cover coordinate round trips and serialized through-via inner shapes. The combined fixture checks connected tracks separately from expected dangling-via rejection. Full circuit DRC and PCB MCP live acceptance remain pending. Owned-editor cleanup and source isolation passed.
+The CLI-only MCP schematic lifecycle and source-binding test passed with installed KiCad, including unchanged source bytes during preview, exact candidate bytes after commit, idempotent replay, durable execution history and pre-write backups. Single-editor checks verified both resistor placements, schematic bindings and native routing save/reload; DRC rejected displaced track endpoints and a via connected on only one layer. KiCad board pad coordinates are normalized to footprint-local coordinates before endpoint resolution, including rotation and back-side transforms. Offline contracts cover coordinate round trips and serialized through-via inner shapes. The combined fixture checks connected tracks separately from expected dangling-via rejection. Full circuit DRC and PCB MCP live acceptance remain pending. Owned-editor cleanup and source isolation passed.
