@@ -35,6 +35,7 @@ pub const PARSE_AND_CREATE_ITEMS_FROM_STRING_TYPE_URL: &str =
 pub const FOOTPRINT_INSTANCE_TYPE_URL: &str =
     "type.googleapis.com/kiapi.board.types.FootprintInstance";
 pub const TRACK_TYPE_URL: &str = "type.googleapis.com/kiapi.board.types.Track";
+pub const PAD_TYPE_URL: &str = "type.googleapis.com/kiapi.board.types.Pad";
 pub const VIA_TYPE_URL: &str = "type.googleapis.com/kiapi.board.types.Via";
 pub const END_COMMIT_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.EndCommit";
 pub const END_COMMIT_RESPONSE_TYPE_URL: &str =
@@ -275,6 +276,13 @@ pub struct CreatedThroughViaReceipt {
 pub struct FootprintInstanceTemplate {
     bytes: Vec<u8>,
     metadata: FootprintInstanceTemplateMetadata,
+    association: Option<FootprintAssociation>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FootprintAssociation {
+    pub symbol_path: Vec<String>,
+    pub pad_nets: std::collections::BTreeMap<String, Option<String>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -287,6 +295,15 @@ pub struct FootprintInstanceTemplateMetadata {
 impl FootprintInstanceTemplate {
     pub fn metadata(&self) -> &FootprintInstanceTemplateMetadata {
         &self.metadata
+    }
+
+    pub fn with_association(&self, association: FootprintAssociation) -> Result<Self, IpcError> {
+        let mut instance = board_types::FootprintInstance::parse_from_bytes(&self.bytes)
+            .map_err(|_| IpcError::MalformedEnvelope)?;
+        apply_footprint_association(&mut instance, &association)?;
+        let mut template = self.clone();
+        template.association = Some(association);
+        Ok(template)
     }
 }
 
@@ -1344,6 +1361,60 @@ impl<T: KiCadTransport> KiCadClient<T> {
             reference,
             value,
         )?;
+        if let Some(association) = &template.association {
+            let item = response
+                .0
+                .created_items
+                .first()
+                .and_then(|item| item.item.as_ref())
+                .ok_or(IpcError::InvalidObservedFootprint(
+                    "created footprint item is missing",
+                ))?;
+            let actual = board_types::FootprintInstance::parse_from_bytes(&item.value)
+                .map_err(|_| IpcError::MalformedEnvelope)?;
+            let mut expected = actual.clone();
+            apply_footprint_association(&mut expected, association)?;
+            if actual.symbol_path.as_ref().map(|path| &path.path)
+                != expected.symbol_path.as_ref().map(|path| &path.path)
+            {
+                return Err(IpcError::InvalidObservedFootprint(
+                    "created footprint symbol association differs",
+                ));
+            }
+            let actual_items = &actual
+                .definition
+                .as_ref()
+                .ok_or(IpcError::InvalidObservedFootprint(
+                    "created footprint definition is missing",
+                ))?
+                .items;
+            for (actual_item, expected_item) in actual_items
+                .iter()
+                .zip(&expected.definition.as_ref().unwrap().items)
+            {
+                if actual_item.type_url == PAD_TYPE_URL {
+                    let actual_pad = board_types::Pad::parse_from_bytes(&actual_item.value)
+                        .map_err(|_| IpcError::MalformedEnvelope)?;
+                    let expected_pad = board_types::Pad::parse_from_bytes(&expected_item.value)
+                        .map_err(|_| IpcError::MalformedEnvelope)?;
+                    if actual_pad
+                        .net
+                        .as_ref()
+                        .map(|net| net.name.as_str())
+                        .unwrap_or_default()
+                        != expected_pad
+                            .net
+                            .as_ref()
+                            .map(|net| net.name.as_str())
+                            .unwrap_or_default()
+                    {
+                        return Err(IpcError::InvalidObservedFootprint(
+                            "created footprint pad net differs",
+                        ));
+                    }
+                }
+            }
+        }
         self.token = Some(response.1);
         Ok(receipt)
     }
@@ -2279,6 +2350,7 @@ fn footprint_templates_from_response(
             validate_footprint_instance(&instance)?;
             let observed = footprint_instance_from_any(item)?;
             Ok(FootprintInstanceTemplate {
+                association: None,
                 bytes: item.value.clone(),
                 metadata: FootprintInstanceTemplateMetadata {
                     library_identifier: observed.library_identifier,
@@ -2313,7 +2385,78 @@ fn footprint_instance_from_template(
     instance.symbol_sheet_name.clear();
     instance.symbol_sheet_filename.clear();
     instance.symbol_footprint_filters.clear();
+    if let Some(association) = &template.association {
+        apply_footprint_association(&mut instance, association)?;
+    }
     Ok(instance)
+}
+
+fn apply_footprint_association(
+    instance: &mut board_types::FootprintInstance,
+    association: &FootprintAssociation,
+) -> Result<(), IpcError> {
+    let invalid =
+        || IpcError::InvalidObservedFootprint("schematic association is incomplete or mismatched");
+    if association.symbol_path.len() < 2
+        || association.symbol_path.len() > 64
+        || association
+            .symbol_path
+            .iter()
+            .any(|part| part.is_empty() || part.len() > 128 || part.contains('/'))
+        || association.pad_nets.is_empty()
+        || association.pad_nets.len() > 512
+        || association.pad_nets.iter().any(|(number, net)| {
+            number.is_empty()
+                || number.len() > 128
+                || net
+                    .as_ref()
+                    .is_some_and(|name| name.is_empty() || name.len() > 1024)
+        })
+    {
+        return Err(invalid());
+    }
+    let definition = instance.definition.as_mut().ok_or_else(invalid)?;
+    let mut seen = std::collections::BTreeSet::new();
+    for item in &mut definition.items {
+        if item.type_url != PAD_TYPE_URL {
+            continue;
+        }
+        let mut pad = board_types::Pad::parse_from_bytes(&item.value)
+            .map_err(|_| IpcError::MalformedEnvelope)?;
+        let name = if pad.number.is_empty() {
+            None
+        } else {
+            seen.insert(pad.number.clone());
+            association
+                .pad_nets
+                .get(&pad.number)
+                .ok_or_else(invalid)?
+                .as_deref()
+        };
+        pad.net = MessageField::some(board_types::Net {
+            name: name.unwrap_or_default().into(),
+            ..Default::default()
+        });
+        pad.symbol_pin = MessageField::none();
+        item.value = pad
+            .write_to_bytes()
+            .map_err(|_| IpcError::MalformedEnvelope)?;
+    }
+    if seen != association.pad_nets.keys().cloned().collect() {
+        return Err(invalid());
+    }
+    instance.symbol_path = MessageField::some(base_types::SheetPath {
+        path: association
+            .symbol_path
+            .iter()
+            .map(|part| base_types::KIID {
+                value: part.clone(),
+                ..Default::default()
+            })
+            .collect(),
+        ..Default::default()
+    });
+    Ok(())
 }
 
 fn rewrite_field(
@@ -5640,6 +5783,58 @@ mod tests {
     }
 
     #[test]
+    fn footprint_association_requires_complete_pad_mapping_and_replaces_source_nets() {
+        let mut item = footprint_item("source");
+        let mut instance = board_types::FootprintInstance::parse_from_bytes(&item.value).unwrap();
+        instance.definition.as_mut().unwrap().items =
+            vec![pad_item("pad-1", "1"), pad_item("pad-2", "2")];
+        item.value = instance.write_to_bytes().unwrap();
+        let mut client = footprint_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![item],
+        ));
+        let template = client
+            .capture_footprint_instance_templates("board.kicad_pcb")
+            .unwrap()
+            .remove(0);
+        let association = FootprintAssociation {
+            symbol_path: vec!["root-sheet".into(), "symbol".into()],
+            pad_nets: std::collections::BTreeMap::from([
+                ("1".into(), Some("VCC".into())),
+                ("2".into(), None),
+            ]),
+        };
+        let bound = template.with_association(association.clone()).unwrap();
+        let created = footprint_instance_from_template(&bound, 10, 20, "R1", "10k").unwrap();
+        assert_eq!(
+            created.symbol_path.as_ref().unwrap().path[1].value,
+            "symbol"
+        );
+        let pads = &created.definition.as_ref().unwrap().items;
+        assert_eq!(
+            board_types::Pad::parse_from_bytes(&pads[0].value)
+                .unwrap()
+                .net
+                .unwrap()
+                .name,
+            "VCC"
+        );
+        assert_eq!(
+            board_types::Pad::parse_from_bytes(&pads[1].value)
+                .unwrap()
+                .net
+                .unwrap()
+                .name,
+            ""
+        );
+        let mut incomplete = association;
+        incomplete.pad_nets.remove("2");
+        assert!(template.with_association(incomplete).is_err());
+        assert!(template.association.is_none());
+    }
+
+    #[test]
     fn footprint_template_capture_rejects_unknown_instance_fields_without_adopting_token() {
         let mut item = footprint_item("source");
         let mut footprint = board_types::FootprintInstance::parse_from_bytes(&item.value).unwrap();
@@ -5676,6 +5871,7 @@ mod tests {
             board_types::FootprintInstance::parse_from_bytes(&footprint_item("source").value)
                 .unwrap();
         let template = FootprintInstanceTemplate {
+            association: None,
             bytes: source.write_to_bytes().unwrap(),
             metadata: FootprintInstanceTemplateMetadata {
                 library_identifier: ObservedFootprintLibraryIdentifier {

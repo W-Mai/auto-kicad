@@ -42,6 +42,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+pub mod bindings;
 pub mod footprint;
 pub mod lifecycle;
 pub use footprint::{
@@ -2658,6 +2659,80 @@ mod tests {
             }],
         };
         (project, netlist)
+    }
+
+    #[test]
+    fn schematic_footprint_binding_rejects_conflicting_sources_and_pad_networks() {
+        let (project, netlist) = schematic_fixture(false);
+        let board_id = StableId::new("board").unwrap();
+        let board = ProjectSnapshot {
+            project_id: StableId::new("project").unwrap(),
+            kicad_version: "10.0.6".into(),
+            capabilities: vec![],
+            schematic: Schematic::default(),
+            board: Board {
+                document_id: Some(board_id.clone()),
+                ..Board::default()
+            },
+            native_footprints: Some(
+                ObservedBoardFootprints::new(board_id.clone(), vec![]).unwrap(),
+            ),
+            native_routing: None,
+            native_stackup: None,
+        };
+        let placement = kicad_model::AllowlistedFootprintPlacement::new(
+            StableId::new("planned-footprint").unwrap(),
+            FootprintLibraryIdentifier {
+                nickname: "Resistor_SMD".into(),
+                entry_name: "R_0603".into(),
+            },
+            board_coordinate(1_000_000, 2_000_000),
+            "R1",
+            "10k",
+        )
+        .unwrap();
+        let binding =
+            bindings::bind_schematic_footprint(&project, &netlist, &board, &placement).unwrap();
+        assert_eq!(binding.pad_nets["1"].as_deref(), Some("GND"));
+        assert_eq!(
+            binding.symbol_path.last(),
+            Some(&binding.symbol.source_uuid)
+        );
+        assert_eq!(binding.schematic_revision, project.revision.digest);
+        let mut stale = netlist.clone();
+        stale.components[0].footprint = Some("Other:Wrong".into());
+        assert!(bindings::bind_schematic_footprint(&project, &stale, &board, &placement).is_err());
+        let (locked, _) = schematic_fixture(true);
+        assert!(bindings::bind_schematic_footprint(&locked, &netlist, &board, &placement).is_err());
+        let mut actual = board_footprint_observation(
+            board_id.clone(),
+            vec![observed_footprint("new-footprint", "new-pad")],
+        )
+        .unwrap()
+        .placements
+        .remove(0);
+        actual.reference = placement.reference.clone();
+        actual.value = placement.value.clone();
+        actual.position = placement.position;
+        actual.library_identifier = placement.library_identifier.clone();
+        actual.definition_id = footprint_definition_id(&actual.library_identifier);
+        actual.symbol_sheet_path = binding.symbol_path.clone();
+        let joined =
+            bindings::verify_placed_pin_pad_binding(&binding, &placement, &actual, &board_id)
+                .unwrap();
+        assert_eq!(joined.len(), 1);
+        assert_eq!(joined[0].pad_id, actual.pads[0].pad_id);
+        actual.pads[0].net.as_mut().unwrap().name = "VCC".into();
+        assert!(
+            bindings::verify_placed_pin_pad_binding(&binding, &placement, &actual, &board_id)
+                .is_err()
+        );
+        actual.pads[0].net.as_mut().unwrap().name = "GND".into();
+        actual.pads[0].number = "2".into();
+        assert!(
+            bindings::verify_placed_pin_pad_binding(&binding, &placement, &actual, &board_id)
+                .is_err()
+        );
     }
 
     #[test]

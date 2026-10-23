@@ -4543,6 +4543,96 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires one owned KiCad PCB editor and CLI"]
+    fn disposable_mixed_routing_shadow_uses_one_editor() {
+        let fixture = TempBoard::new();
+        let board_path = fixture.root.join("board.kicad_pcb");
+        std::fs::write(&board_path, r#"(kicad_pcb (version 20260206) (generator "pcbnew")
+          (general (thickness 1.6)) (paper "A4")
+          (layers (0 "F.Cu" signal) (2 "B.Cu" signal) (9 "F.Adhes" user "F.Adhesive") (11 "B.Adhes" user "B.Adhesive")
+            (13 "F.Paste" user) (15 "B.Paste" user) (5 "F.SilkS" user "F.Silkscreen") (7 "B.SilkS" user "B.Silkscreen")
+            (1 "F.Mask" user) (3 "B.Mask" user) (17 "Dwgs.User" user) (25 "Edge.Cuts" user) (31 "F.CrtYd" user "F.Courtyard") (35 "F.Fab" user))
+          (setup (pad_to_mask_clearance 0)) (net 1 "GND")
+          (footprint "Test:Pad" (layer "F.Cu") (uuid "10000000-0000-4000-8000-000000000001") (at 5 5)
+            (property "Reference" "J1" (at 0 -2) (layer "F.SilkS") (effects (font (size 1 1) (thickness 0.15))))
+            (property "Value" "Pad" (at 0 2) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))))
+            (attr smd) (pad "1" smd rect (at 0 0) (size 1 1) (layers "F.Cu" "F.Paste" "F.Mask") (net 1 "GND") (uuid "20000000-0000-4000-8000-000000000001")))
+          (footprint "Test:Pad" (layer "F.Cu") (uuid "10000000-0000-4000-8000-000000000002") (at 10 5)
+            (property "Reference" "J2" (at 0 -2) (layer "F.SilkS") (effects (font (size 1 1) (thickness 0.15))))
+            (property "Value" "Pad" (at 0 2) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))))
+            (attr smd) (pad "1" smd rect (at 0 0) (size 1 1) (layers "F.Cu" "F.Paste" "F.Mask") (net 1 "GND") (uuid "20000000-0000-4000-8000-000000000002")))
+          (gr_line (start 0 0) (end 20 0) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000001"))
+          (gr_line (start 20 0) (end 20 15) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000002"))
+          (gr_line (start 20 15) (end 0 15) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000003"))
+          (gr_line (start 0 15) (end 0 0) (stroke (width 0.05) (type default)) (layer "Edge.Cuts") (uuid "30000000-0000-4000-8000-000000000004")))"#).unwrap();
+        std::fs::write(board_path.with_extension("kicad_pro"), "{}").unwrap();
+        let board = StableId::new("fixture-board").unwrap();
+        let net = kicad_model::ObservedNetIdentity {
+            net_id: kicad_model::board_net_id(&board, "GND"),
+            name: "GND".into(),
+        };
+        let endpoint = |index: u8| {
+            let footprint = StableId::new(format!("10000000-0000-4000-8000-{index:012}")).unwrap();
+            let pad = StableId::new(format!("20000000-0000-4000-8000-{index:012}")).unwrap();
+            let placement = kicad_model::footprint_placement_id(&board, &footprint);
+            kicad_model::RoutingEndpointRef {
+                pad_id: kicad_model::footprint_pad_id(&placement, &pad),
+                footprint_placement_id: placement,
+            }
+        };
+        let coordinate = |x, y| Coordinate {
+            x,
+            y,
+            unit: Unit::Nanometres,
+            space: DocumentSpace::Board,
+        };
+        let mut track = shadow_graphics_operation(board.clone());
+        track.kind = OperationKind::AddStraightTrack {
+            board: board.clone(),
+            intent: StraightTrackIntent::new_endpoint_bound(
+                StableId::new("planned-track").unwrap(),
+                coordinate(5_000_000, 5_000_000),
+                coordinate(10_000_000, 5_000_000),
+                250_000,
+                endpoint(1),
+                endpoint(2),
+                net.clone(),
+            )
+            .unwrap(),
+        };
+        let mut via = shadow_graphics_operation(board.clone());
+        via.kind = OperationKind::AddThroughVia {
+            board: board.clone(),
+            intent: ThroughViaIntent::new_net_bound(
+                StableId::new("planned-via").unwrap(),
+                coordinate(7_500_000, 5_000_000),
+                600_000,
+                300_000,
+                net,
+            )
+            .unwrap(),
+        };
+        let operations = [shadow_graphics_operation(board), track, via];
+        let outcome = validate_disposable_shadow(
+            &fixture.root.join("preview"),
+            &board_path,
+            &operations,
+            Duration::from_secs(30),
+        );
+        assert_eq!(
+            outcome.state,
+            ShadowValidationState::Committed,
+            "{outcome:?}"
+        );
+        assert!(
+            outcome.reopened
+                && outcome.normalized_snapshot_matches
+                && outcome.source_unchanged
+                && outcome.shadow_cleaned
+        );
+    }
+
+    #[test]
     #[ignore = "requires installed KiCad PCB editor and CLI"]
     fn disposable_graphics_shadow_verifies_server_assigned_ids() {
         let fixture = TempBoard::new();
