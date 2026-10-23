@@ -36,8 +36,7 @@ def main():
     script = (
         "#!/bin/sh\n"
         'PATH="/Applications/KiCad/KiCad.app/Contents/MacOS:${PATH:-/usr/bin:/bin}"\n'
-        "export PATH\n"
-        + "exec " + shlex.quote(str(installed)) + ' "$@"\n'
+        "export PATH\n" + "exec " + shlex.quote(str(installed)) + ' "$@"\n'
     )
     atomic_install(launcher, lambda path: path.write_text(script))
     print(launcher)
