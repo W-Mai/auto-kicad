@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PawChrona · PCB 回放</title>
+<style>
+:root{color-scheme:dark;font:15px system-ui,-apple-system,sans-serif;background:#10151b;color:#e7eef5}*{box-sizing:border-box}body{margin:0}header{padding:24px 32px 16px;border-bottom:1px solid #293440;display:flex;justify-content:space-between;gap:24px;align-items:center}h1{font-size:24px;margin:0 0 7px;letter-spacing:-.4px}.sub{color:#9aafbd;font-size:13px}.tag{color:#68e0ba;border:1px solid #30634e;padding:6px 10px;border-radius:6px;font-size:12px}main{display:grid;grid-template-columns:minmax(400px,1fr) 300px;max-width:1500px;margin:auto;padding:22px 30px;gap:24px}section{min-width:0}.board{position:relative;border:1px solid #30404f;border-radius:12px;background:#111f2a;overflow:hidden}canvas{display:block;width:100%;height:auto;aspect-ratio:1.1}#hover{position:absolute;left:16px;bottom:14px;font:12px ui-monospace,monospace;color:#cee3ed;pointer-events:none}.controls{display:flex;align-items:center;gap:10px;padding:16px 0}button,select{font:inherit;background:#253341;color:#e7eef5;border:1px solid #46596a;border-radius:7px;padding:8px 14px;cursor:pointer}button.primary{background:#1e8d80;border-color:#3aab9a}input[type=range]{width:100%;accent-color:#50cbbb}#status{font:13px ui-monospace,monospace;color:#91d8cc;min-height:36px;margin:12px 0}.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}.stat{background:#1b2530;border:1px solid #2b3b4a;border-radius:9px;padding:14px}.stat strong{font-size:26px;display:block;margin:5px 0}.stat span{color:#9eafbd;font-size:12px}h2{font-size:14px;font-weight:600;margin:26px 0 10px}.legend{display:flex;flex-wrap:wrap;gap:14px;color:#aebdc9;font-size:12px;margin:14px 0}.dot{width:9px;height:9px;display:inline-block;border-radius:50%;margin-right:5px}ol{padding:0;list-style:none;margin:0;max-height:360px;overflow:auto}li{border-bottom:1px solid #293543;padding:9px 0;font-size:12px;line-height:1.55;color:#aebdc9}li.active{color:#56e1c6}li button{border:0;background:transparent;padding:0;text-align:left;font-size:12px}.note{color:#a8b5c1;font-size:12px;line-height:1.7}a{color:#72caba}@media(max-width:850px){header{padding:18px}main{grid-template-columns:1fr;padding:16px}.stats{grid-template-columns:repeat(4,1fr)}aside ol{max-height:200px}}
+</style>
+<header><div><h1>PawChrona · PCB 回放</h1><div class="sub">宠物项圈 · 真实 KiCad 放置与连线步骤</div></div><div class="tag">实机保存重载与网络核对通过</div></header>
+<main><section><div class="board"><canvas id="board" width="1400" height="1272" aria-label="PCB 元件放置及走线回放"></canvas><div id="hover">悬停焊盘查看编号与网络</div></div><div class="controls"><button class="primary" id="play">播放</button><button id="reset">从头开始</button><button id="finish">查看最终结果</button><select id="speed" aria-label="播放速度"><option value="450">慢速</option><option value="180" selected>正常</option><option value="50">快速</option></select></div><input id="position" type="range" min="0" value="0" aria-label="回放步骤"><div id="status"></div><div class="legend"><span><i class="dot" style="background:#c2a775"></i>焊盘</span><span><i class="dot" style="background:#e77e60"></i>已创建铜线</span><span><i class="dot" style="background:#4be1c1"></i>当前步骤</span></div></section><aside><div class="stats"><div class="stat"><span>已放置器件</span><strong id="placed">0</strong><span id="total-components"></span></div><div class="stat"><span>已完成连接</span><strong id="routed">0</strong><span id="total-routes"></span></div><div class="stat"><span>未连接项</span><strong id="remaining"></strong><span id="before"></span></div><div class="stat"><span>新增 DRC 违规</span><strong id="drc"></strong><span>最终原生 PCB 验证</span></div></div><h2>步骤记录</h2><ol id="events"></ol><h2>结果范围</h2><p class="note">逐个放置真实器件，再按同网络距离尝试直线和折线，避开异网焊盘与铜线。页面重放已执行的步骤；原生 PCB 由 IPC 实际创建。</p><p class="note" id="limits"></p><p class="note"><a href="result/board.kicad_pcb" download>下载原生 PCB</a> · <a href="route-plan.json">连线记录</a> · <a href="final-drc.json">DRC 报告</a></p></aside></main>
+<script id="data" type="application/json">__REPLAY_DATA__</script>
+<script>
+const data=JSON.parse(document.getElementById('data').textContent);
+const events=data.events.filter(e=>e.kind==='place'||e.kind==='route');
+const canvas=document.getElementById('board'),ctx=canvas.getContext('2d'),slider=document.getElementById('position');
+const placements=events.filter(e=>e.kind==='place'),routes=events.filter(e=>e.kind==='route');
+const b=data.bounds,margin=52,scale=Math.min((canvas.width-margin*2)/(b[2]-b[0]),(canvas.height-margin*2)/(b[3]-b[1]));
+const x=v=>margin+(v-b[0])*scale,y=v=>margin+(v-b[1])*scale;
+let step=0,playing=false,last=0;
+slider.max=events.length;
+document.getElementById('total-components').textContent=`共 ${data.summary.components} 个 / ${data.summary.pads} 个焊盘`;
+document.getElementById('total-routes').textContent=`共 ${routes.length} 组 / ${data.summary.tracks} 段铜线`;
+document.getElementById('remaining').textContent=data.summary.unconnected_after;
+document.getElementById('before').textContent=`最终值，初始 ${data.summary.unconnected_before}`;
+document.getElementById('drc').textContent=data.summary.introduced_violations;
+document.getElementById('limits').textContent=`仍有 ${data.summary.unconnected_after} 个未连接项。尚未完成整板布线、铜皮、过孔、差分与阻抗设计；结果用于演示简单算法。`;
+function title(e){return e.kind==='place'?`放置 ${e.reference} · ${e.value}`:`${e.net}：${e.from.join('.')} → ${e.to.join('.')}`}
+const rows=events.map((e,i)=>{const li=document.createElement('li'),button=document.createElement('button');button.textContent=`${String(i+1).padStart(2,'0')}  ${title(e)}`;button.onclick=()=>{stop();step=i+1;render()};li.append(button);document.getElementById('events').append(li);return li});
+function stop(){playing=false;document.getElementById('play').textContent='播放'}
+function render(){
+ ctx.clearRect(0,0,canvas.width,canvas.height);ctx.strokeStyle='#203440';ctx.lineWidth=1;
+ for(let gx=Math.ceil(b[0]);gx<b[2];gx++){ctx.beginPath();ctx.moveTo(x(gx),y(b[1]));ctx.lineTo(x(gx),y(b[3]));ctx.stroke()}
+ for(let gy=Math.ceil(b[1]);gy<b[3];gy++){ctx.beginPath();ctx.moveTo(x(b[0]),y(gy));ctx.lineTo(x(b[2]),y(gy));ctx.stroke()}
+ ctx.strokeStyle='#849ca7';ctx.lineWidth=2;ctx.strokeRect(x(b[0]),y(b[1]),(b[2]-b[0])*scale,(b[3]-b[1])*scale);
+ const active=events.slice(0,step),placed=new Set(active.filter(e=>e.kind==='place').map(e=>e.reference)),lastEvent=active.at(-1);
+ for(const p of data.pads){if(!placed.has(p.reference))continue;ctx.save();ctx.translate(x(p.x),y(p.y));ctx.rotate(-p.angle*Math.PI/180);ctx.fillStyle=lastEvent?.kind==='place'&&lastEvent.reference===p.reference?'#4be1c1':'#c2a775';const w=p.size[0]/1e6*scale,h=p.size[1]/1e6*scale;if(p.round){ctx.beginPath();ctx.ellipse(0,0,w/2,h/2,0,0,Math.PI*2);ctx.fill()}else{ctx.fillRect(-w/2,-h/2,w,h)}ctx.restore()}
+ for(const e of active.filter(e=>e.kind==='route')){ctx.beginPath();e.points_nm.forEach((p,i)=>i?ctx.lineTo(x(p[0]/1e6),y(p[1]/1e6)):ctx.moveTo(x(p[0]/1e6),y(p[1]/1e6)));ctx.strokeStyle=e===lastEvent?'#4be1c1':'#e77e60';ctx.lineWidth=Math.max(2,e.width_nm/1e6*scale);ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke()}
+ ctx.font='16px ui-monospace,monospace';ctx.textAlign='center';ctx.fillStyle='#eef4f3';
+ for(const e of placements){if(!placed.has(e.reference))continue;const pads=data.pads.filter(p=>p.reference===e.reference);const top=Math.min(...pads.map(p=>p.box[1]));ctx.fillText(e.reference,x(e.position_nm[0]/1e6),y(top)-8)}
+ slider.value=step;document.getElementById('placed').textContent=placed.size;document.getElementById('routed').textContent=active.filter(e=>e.kind==='route').length;
+ document.getElementById('status').textContent=step?`${step}/${events.length} · ${title(events[step-1])}`:'0/'+events.length+' · 空板，点击播放开始';
+ rows.forEach((row,i)=>row.classList.toggle('active',i===step-1));
+ if(step>0){const row=rows[step-1],list=document.getElementById('events');list.scrollTop=row.offsetTop-list.offsetTop-list.clientHeight/2}
+}
+document.getElementById('play').onclick=()=>{if(playing){stop();return}if(step===events.length)step=0;playing=true;last=performance.now();document.getElementById('play').textContent='暂停';render()};
+document.getElementById('reset').onclick=()=>{stop();step=0;render()};
+document.getElementById('finish').onclick=()=>{stop();step=events.length;render()};
+slider.oninput=()=>{stop();step=Number(slider.value);render()};
+canvas.onmousemove=e=>{const rect=canvas.getBoundingClientRect(),px=(e.clientX-rect.left)*canvas.width/rect.width,py=(e.clientY-rect.top)*canvas.height/rect.height;const placed=new Set(events.slice(0,step).filter(e=>e.kind==='place').map(e=>e.reference));const pad=data.pads.filter(p=>placed.has(p.reference)).find(p=>Math.abs(x(p.x)-px)<Math.max(8,p.size[0]/1e6*scale/2)&&Math.abs(y(p.y)-py)<Math.max(8,p.size[1]/1e6*scale/2));document.getElementById('hover').textContent=pad?`${pad.reference}.${pad.number} · ${pad.net||'未分配网络'}`:'悬停焊盘查看编号与网络'};
+function tick(now){if(playing&&now-last>=Number(document.getElementById('speed').value)){step++;last=now;render();if(step>=events.length)stop()}requestAnimationFrame(tick)}
+render();requestAnimationFrame(tick);
+</script>
+</html>

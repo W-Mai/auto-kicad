@@ -37,6 +37,7 @@ dependencies = [
  "kicad-ipc",
  "kicad-model",
  "kicad-schematic",
+ "libc",
  "rmcp",
  "runtime",
  "schemars",

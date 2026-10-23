@@ -24,22 +24,30 @@ def atomic_install(destination, write):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("binary", type=Path)
+    parser.add_argument("--replay-binary", type=Path)
     parser.add_argument("--prefix", type=Path, default=Path.home() / ".local")
     args = parser.parse_args()
     binary = args.binary.resolve(strict=True)
     if not binary.is_file() or not os.access(binary, os.X_OK):
         parser.error("binary must be an executable file")
     prefix = args.prefix.expanduser().resolve()
-    installed = prefix / "lib/auto-kicad/auto-kicad"
-    launcher = prefix / "bin/auto-kicad"
-    atomic_install(installed, lambda path: shutil.copyfile(binary, path))
-    script = (
-        "#!/bin/sh\n"
-        'PATH="/Applications/KiCad/KiCad.app/Contents/MacOS:${PATH:-/usr/bin:/bin}"\n'
-        "export PATH\n" + "exec " + shlex.quote(str(installed)) + ' "$@"\n'
-    )
-    atomic_install(launcher, lambda path: path.write_text(script))
-    print(launcher)
+    binaries = [("auto-kicad", binary)]
+    if args.replay_binary:
+        replay = args.replay_binary.resolve(strict=True)
+        if not replay.is_file() or not os.access(replay, os.X_OK):
+            parser.error("replay binary must be an executable file")
+        binaries.append(("auto-kicad-replay", replay))
+    for name, source in binaries:
+        installed = prefix / "lib/auto-kicad" / name
+        launcher = prefix / "bin" / name
+        atomic_install(installed, lambda path: shutil.copyfile(source, path))
+        script = (
+            "#!/bin/sh\n"
+            'PATH="/Applications/KiCad/KiCad.app/Contents/MacOS:${PATH:-/usr/bin:/bin}"\n'
+            "export PATH\n" + "exec " + shlex.quote(str(installed)) + ' "$@"\n'
+        )
+        atomic_install(launcher, lambda path: path.write_text(script))
+        print(launcher)
 
 
 if __name__ == "__main__":
