@@ -1,0 +1,167 @@
+{
+  "schema_version": "1",
+  "product": "auto-kicad",
+  "source_revision": "e2492b4",
+  "supported_kicad_family": "10.x",
+  "advertised_tools": {
+    "always": [
+      "kicad_capabilities",
+      "kicad_schematic_audit",
+      "kicad_validate_project",
+      "kicad_inspect_project",
+      "kicad_plan_change",
+      "kicad_preview_change",
+      "kicad_commit_change"
+    ],
+    "conditional": [
+      "kicad_plan_schematic_change",
+      "kicad_preview_schematic_change",
+      "kicad_commit_schematic_change"
+    ]
+  },
+  "capabilities": [
+    {
+      "id": "base.get_version",
+      "domain": "base",
+      "mode": "read",
+      "status": "verified",
+      "mcp_tools": ["kicad_capabilities"],
+      "constraints": ["local KiCad IPC endpoint", "token-bound session"],
+      "evidence": {
+        "fixture": "live-kicad",
+        "tested_versions": ["10.0.4", "10.0.6"],
+        "command": "cargo test -p kicad-ipc",
+        "record": "crates/kicad-ipc/PROTO-PROVENANCE.md"
+      }
+    },
+    {
+      "id": "project.inspect",
+      "domain": "project",
+      "mode": "read",
+      "status": "verified",
+      "mcp_tools": ["kicad_inspect_project"],
+      "constraints": ["open KiCad document", "supported PCB observation forms"],
+      "evidence": {
+        "fixture": "live-kicad-xlock",
+        "tested_versions": ["10.0.6"],
+        "command": "cargo test -p auto-kicad --lib",
+        "record": "crates/auto-kicad/src/lib.rs"
+      }
+    },
+    {
+      "id": "pcb.native_authoring",
+      "domain": "pcb",
+      "mode": "write",
+      "status": "verified",
+      "mcp_tools": ["kicad_plan_change", "kicad_preview_change", "kicad_commit_change"],
+      "constraints": ["approval-bound plan", "disposable shadow preview", "bounded graphics/routing primitives"],
+      "evidence": {
+        "fixture": "disposable-pcb-copy",
+        "tested_versions": ["10.0.5", "10.0.6"],
+        "command": "cargo test -p auto-kicad --lib",
+        "record": "crates/auto-kicad/src/lib.rs"
+      }
+    },
+    {
+      "id": "pcb.source_bound_footprint",
+      "domain": "pcb",
+      "mode": "write",
+      "status": "verified",
+      "mcp_tools": ["kicad_plan_change", "kicad_preview_change", "kicad_commit_change"],
+      "constraints": ["closed server-owned footprint registry", "matching saved schematic", "source digest binding"],
+      "evidence": {
+        "fixture": "source-bound-r0603",
+        "tested_versions": ["10.0.6"],
+        "command": "cargo test -p auto-kicad --lib",
+        "record": "crates/auto-kicad/src/footprint_authoring.rs"
+      }
+    },
+    {
+      "id": "pcb.source_bound_assembly",
+      "domain": "pcb",
+      "mode": "write",
+      "status": "verified",
+      "mcp_tools": ["kicad_plan_change", "kicad_preview_change", "kicad_commit_change"],
+      "constraints": ["same schematic revision", "allowlisted sources", "same-net pad connections"],
+      "evidence": {
+        "fixture": "connected-r0603-assembly",
+        "tested_versions": ["10.0.6"],
+        "command": "cargo test -p auto-kicad --lib",
+        "record": "crates/kicad-engine/src/lib.rs"
+      }
+    },
+    {
+      "id": "pcb.drc.validate",
+      "domain": "pcb",
+      "mode": "read",
+      "status": "verified",
+      "mcp_tools": ["kicad_validate_project"],
+      "constraints": ["installed kicad-cli", "baseline is captured before mutation"],
+      "evidence": {
+        "fixture": "disposable-pcb-copy",
+        "tested_versions": ["10.0.6"],
+        "command": "cargo test -p kicad-checks",
+        "record": "crates/kicad-checks/src/lib.rs"
+      }
+    },
+    {
+      "id": "schematic.fixed_two_resistor_change",
+      "domain": "schematic",
+      "mode": "write",
+      "status": "verified",
+      "mcp_tools": ["kicad_plan_schematic_change", "kicad_preview_schematic_change", "kicad_commit_schematic_change"],
+      "constraints": ["fixed two-resistor operation", "CLI netlist/ERC backend", "saved schematic artifact"],
+      "evidence": {
+        "fixture": "empty-two-resistor-schematic",
+        "tested_versions": ["10.0.6"],
+        "command": "cargo test -p auto-kicad --lib",
+        "record": "crates/kicad-schematic/src/patch.rs"
+      }
+    },
+    {
+      "id": "pcb.edit_existing",
+      "domain": "pcb",
+      "mode": "write",
+      "status": "deferred",
+      "mcp_tools": [],
+      "constraints": ["requires stable native update identity", "connected-track policy not implemented"],
+      "evidence": null
+    },
+    {
+      "id": "schematic.general_edit",
+      "domain": "schematic",
+      "mode": "write",
+      "status": "deferred",
+      "mcp_tools": [],
+      "constraints": ["requires a verified general schematic backend"],
+      "evidence": null
+    },
+    {
+      "id": "schematic.pcb_sync",
+      "domain": "integration",
+      "mode": "write",
+      "status": "deferred",
+      "mcp_tools": [],
+      "constraints": ["requires conflict-aware synchronization policy"],
+      "evidence": null
+    },
+    {
+      "id": "pcb.zones",
+      "domain": "pcb",
+      "mode": "write",
+      "status": "deferred",
+      "mcp_tools": [],
+      "constraints": ["requires refill and saved readback evidence"],
+      "evidence": null
+    },
+    {
+      "id": "release.exports",
+      "domain": "release",
+      "mode": "write",
+      "status": "deferred",
+      "mcp_tools": [],
+      "constraints": ["requires output collision policy and distribution decision"],
+      "evidence": null
+    }
+  ]
+}

@@ -64,6 +64,8 @@ Use the endpoint returned for the target editor. The matching saved schematic mu
 
 ## Verification
 
+The checked-in [capability matrix](schemas/capability-matrix.json) records each advertised capability's status, constraints, tested KiCad family, evidence command and record. `scripts/check-capability-matrix.py` fails if router tool names drift from the matrix, verified entries lose evidence, or deferred entries are accidentally advertised. The same check runs in the repository quality workflow.
+
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings

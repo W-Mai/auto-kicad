@@ -1,0 +1,19 @@
+name: quality
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  offline-contracts:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run Rust quality gates
+        run: python3 scripts/quality.py
