@@ -66,6 +66,8 @@ Use the endpoint returned for the target editor. The matching saved schematic mu
 
 The checked-in [capability matrix](schemas/capability-matrix.json) records each advertised capability's status, constraints, tested KiCad family, evidence command and record. `kicad_capabilities` returns this matrix together with the current runtime status, so an unavailable backend is not reported as verified. `scripts/check-capability-matrix.py` fails if router tool names drift from the matrix, verified entries lose evidence, or deferred entries are accidentally advertised. The same check runs in the repository quality workflow.
 
+The repository quality workflow and `scripts/quality.py` are the offline gate: they run the matrix validator, format check, warnings-denied Clippy and default workspace tests without starting KiCad or using a user project. Environment-dependent live tests remain ignored unless explicitly selected; their commands and disposable-fixture requirements are listed below.
+
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
