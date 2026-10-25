@@ -41,6 +41,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 pub const CONTRACT_SCHEMA_VERSION: &str = "1";
+const CAPABILITY_MATRIX_JSON: &str = include_str!("../../../schemas/capability-matrix.json");
 const MAX_BOARD_BATCH_ITEMS: usize = 100;
 
 fn digest_bytes(bytes: &[u8]) -> RevisionDigest {
@@ -2569,6 +2570,26 @@ impl Server {
     pub fn capabilities(&self) -> &[Capability] {
         &self.capabilities
     }
+
+    fn capability_matrix(&self) -> Value {
+        let mut matrix: Value = serde_json::from_str(CAPABILITY_MATRIX_JSON)
+            .expect("embedded capability matrix must be valid JSON");
+        let statuses = self
+            .capabilities
+            .iter()
+            .map(|capability| (capability.id, capability.status))
+            .collect::<BTreeMap<_, _>>();
+        if let Some(entries) = matrix["capabilities"].as_array_mut() {
+            for entry in entries {
+                if let Some(id) = entry["id"].as_str()
+                    && let Some(status) = statuses.get(id)
+                {
+                    entry["status"] = Value::String((*status).to_owned());
+                }
+            }
+        }
+        matrix
+    }
 }
 
 #[tool_router]
@@ -2603,6 +2624,7 @@ impl Server {
                     "mode": capability.mode,
                     "status": capability.status
                 })).collect::<Vec<_>>(),
+                "capability_matrix": self.capability_matrix(),
                 "advertised_tools": advertised_tools
             }),
             diagnostics: Vec::new(),
@@ -6456,6 +6478,49 @@ mod tests {
         assert_eq!(
             structured["data"]["advertised_tools"][0],
             "kicad_capabilities"
+        );
+    }
+
+    #[tokio::test]
+    async fn sdk_capabilities_exposes_embedded_matrix_with_runtime_statuses() {
+        let client = connected(Server::with_all_services(
+            Arc::new(FakeDiscovery {
+                write_capability: true,
+            }),
+            Arc::new(IpcBoardGraphicsExecutionService),
+            Arc::new(IpcBoardValidationService),
+            Arc::new(UnavailableSchematic),
+        ))
+        .await;
+        let result = client
+            .call_tool(
+                CallToolRequestParams::new("kicad_capabilities")
+                    .with_arguments(json!({}).as_object().unwrap().clone()),
+            )
+            .await
+            .expect("capability call");
+        let structured = result.structured_content.unwrap();
+        let matrix = &structured["data"]["capability_matrix"];
+        assert_eq!(matrix["schema_version"], "1");
+        assert_eq!(matrix["product"], "auto-kicad");
+        assert_eq!(matrix["capabilities"].as_array().unwrap().len(), 12);
+        assert_eq!(
+            matrix["capabilities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["id"] == "schematic.fixed_two_resistor_change")
+                .unwrap()["status"],
+            "unavailable"
+        );
+        assert_eq!(
+            matrix["capabilities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["id"] == "pcb.edit_existing")
+                .unwrap()["status"],
+            "deferred"
         );
     }
 
