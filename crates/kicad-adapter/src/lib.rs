@@ -1,6 +1,6 @@
 use kicad_engine::{
     MAX_BOARD_POSITION_NM, MAX_GRAPHIC_BOUNDING_AREA_NM2, MAX_GRAPHIC_SPAN_NM, Operation,
-    OperationKind, expand_board_outline, validate_observed_routing_net,
+    OperationKind, expand_board_outline, pad_board_position, validate_observed_routing_net,
     validate_routing_track_binding,
 };
 use kicad_ipc::{
@@ -14,7 +14,7 @@ use kicad_ipc::{
     ObservedPad as IpcPad, ObservedPadKind as IpcPadKind, ObservedPadShape as IpcPadShape,
     ObservedPadStackType as IpcPadStackType, ObservedTrack as IpcTrack,
     ObservedTrackGeometry as IpcTrackGeometry, ObservedVia as IpcVia, OpenDocument,
-    OpenDocumentKind, VersionInfo,
+    OpenDocumentKind, PcbItemDiagnostic, PcbItemKind, UpdatedFootprintInstanceReceipt, VersionInfo,
 };
 use kicad_model::{
     Board, BoardGraphicLayer, BoardGraphicSegment, BoardLayer, BoardSide, CapabilityObservation,
@@ -1437,6 +1437,46 @@ pub trait BoardGraphicsIpc {
         board_filename: &str,
         routing_ids: &[String],
     ) -> Result<IpcBoardRoutingItems, String>;
+    fn update_footprint_instance(
+        &mut self,
+        board_filename: &str,
+        source_uuid: &str,
+        position_x_nm: i64,
+        position_y_nm: i64,
+        orientation_mdeg: i64,
+    ) -> Result<UpdatedFootprintInstanceReceipt, String> {
+        let _ = (
+            board_filename,
+            source_uuid,
+            position_x_nm,
+            position_y_nm,
+            orientation_mdeg,
+        );
+        Err("existing footprint updates are unsupported by this IPC adapter".into())
+    }
+    fn read_footprints(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<Vec<IpcFootprintInstance>, String> {
+        let _ = board_filename;
+        Err("footprint observation is unsupported by this IPC adapter".into())
+    }
+    fn read_footprint_pads(
+        &mut self,
+        board_filename: &str,
+        source_uuid: &str,
+    ) -> Result<Vec<IpcPad>, String> {
+        let _ = (board_filename, source_uuid);
+        Err("pad observation is unsupported by this IPC adapter".into())
+    }
+    fn read_pcb_item_diagnostics(
+        &mut self,
+        board_filename: &str,
+        kinds: &[PcbItemKind],
+    ) -> Result<Vec<PcbItemDiagnostic>, String> {
+        let _ = (board_filename, kinds);
+        Err("PCB item diagnostics are unsupported by this IPC adapter".into())
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1451,6 +1491,133 @@ pub struct NativePcbBatch {
     pub graphics: Vec<IpcBoardGraphicSegment>,
     pub tracks: Vec<CreateTrack>,
     pub vias: Vec<CreateThroughVia>,
+}
+
+const FOOTPRINT_COPPER_TOLERANCE_NM: f64 = 250_000.0;
+
+fn point_segment_distance_sq(px: f64, py: f64, ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
+    let dx = bx - ax;
+    let dy = by - ay;
+    let length_sq = dx * dx + dy * dy;
+    let t = if length_sq == 0.0 {
+        0.0
+    } else {
+        (((px - ax) * dx + (py - ay) * dy) / length_sq).clamp(0.0, 1.0)
+    };
+    let qx = ax + t * dx;
+    let qy = ay + t * dy;
+    (px - qx) * (px - qx) + (py - qy) * (py - qy)
+}
+
+fn connected_copper_ids(
+    snapshot: &kicad_model::ProjectSnapshot,
+    placement_id: &StableId,
+) -> Result<Vec<String>, String> {
+    let footprints = snapshot
+        .native_footprints
+        .as_ref()
+        .ok_or_else(|| "native footprint observation is missing".to_owned())?;
+    let placement = footprints
+        .placements
+        .iter()
+        .find(|placement| &placement.placement_id == placement_id)
+        .ok_or_else(|| "target footprint is missing from the observation".to_owned())?;
+    if placement.lock_state == LockState::Locked {
+        return Err("target_locked".into());
+    }
+    let routing = snapshot
+        .native_routing
+        .as_ref()
+        .ok_or_else(|| "native routing observation is missing".to_owned())?;
+    let mut affected = BTreeSet::new();
+    for pad in &placement.pads {
+        let board_position =
+            pad_board_position(placement, pad).map_err(|error| error.to_string())?;
+        let radius = pad
+            .copper_shapes
+            .iter()
+            .map(|shape| (shape.size.x_nm.max(shape.size.y_nm) as f64) / 2.0)
+            .fold(0.0, f64::max)
+            + FOOTPRINT_COPPER_TOLERANCE_NM;
+        let px = board_position.x as f64;
+        let py = board_position.y as f64;
+        for track in &routing.tracks {
+            if let Some(net) = &pad.net
+                && track
+                    .net
+                    .as_ref()
+                    .and_then(|track_net| track_net.net_id.as_ref())
+                    != Some(&net.net_id)
+            {
+                continue;
+            }
+            let layer_matches = pad.layers.contains(&track.layer);
+            if !layer_matches {
+                continue;
+            }
+            let width = track.width_nm as f64 / 2.0;
+            let hit = match track.geometry {
+                kicad_model::ObservedTrackGeometry::Segment { start, end } => {
+                    point_segment_distance_sq(
+                        px,
+                        py,
+                        start.x as f64,
+                        start.y as f64,
+                        end.x as f64,
+                        end.y as f64,
+                    ) <= (radius + width) * (radius + width)
+                }
+                kicad_model::ObservedTrackGeometry::Arc { start, mid, end } => {
+                    point_segment_distance_sq(
+                        px,
+                        py,
+                        start.x as f64,
+                        start.y as f64,
+                        mid.x as f64,
+                        mid.y as f64,
+                    ) <= (radius + width) * (radius + width)
+                        || point_segment_distance_sq(
+                            px,
+                            py,
+                            mid.x as f64,
+                            mid.y as f64,
+                            end.x as f64,
+                            end.y as f64,
+                        ) <= (radius + width) * (radius + width)
+                }
+            };
+            if hit {
+                affected.insert(track.source_uuid.to_string());
+            }
+        }
+        for via in &routing.vias {
+            if let Some(net) = &pad.net
+                && via.net.as_ref().and_then(|via_net| via_net.net_id.as_ref()) != Some(&net.net_id)
+            {
+                continue;
+            }
+            let layer_matches = via
+                .pad_stack
+                .layers
+                .iter()
+                .any(|layer| pad.layers.contains(layer));
+            if !layer_matches {
+                continue;
+            }
+            let dx = via.position.x as f64 - px;
+            let dy = via.position.y as f64 - py;
+            let via_radius = via
+                .pad_stack
+                .copper_shapes
+                .iter()
+                .map(|shape| (shape.size.x_nm.max(shape.size.y_nm) as f64) / 2.0)
+                .fold(0.0, f64::max);
+            if dx * dx + dy * dy <= (radius + via_radius) * (radius + via_radius) {
+                affected.insert(via.source_uuid.to_string());
+            }
+        }
+    }
+    Ok(affected.into_iter().collect())
 }
 
 pub fn prepare_bound_native_batch(
@@ -1657,9 +1824,196 @@ impl<T: KiCadTransport> BoardGraphicsIpc for KiCadClient<T> {
         KiCadClient::get_board_routing_by_id(self, board_filename, routing_ids)
             .map_err(|error| error.to_string())
     }
+
+    fn update_footprint_instance(
+        &mut self,
+        board_filename: &str,
+        source_uuid: &str,
+        position_x_nm: i64,
+        position_y_nm: i64,
+        orientation_mdeg: i64,
+    ) -> Result<UpdatedFootprintInstanceReceipt, String> {
+        KiCadClient::update_footprint_instance(
+            self,
+            board_filename,
+            source_uuid,
+            position_x_nm,
+            position_y_nm,
+            orientation_mdeg,
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    fn read_footprints(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<Vec<IpcFootprintInstance>, String> {
+        KiCadClient::get_footprint_instances(self, board_filename)
+            .map_err(|error| error.to_string())
+    }
+
+    fn read_footprint_pads(
+        &mut self,
+        board_filename: &str,
+        source_uuid: &str,
+    ) -> Result<Vec<IpcPad>, String> {
+        KiCadClient::get_footprint_definition_pads(self, board_filename, source_uuid)
+            .map_err(|error| error.to_string())
+    }
+
+    fn read_pcb_item_diagnostics(
+        &mut self,
+        board_filename: &str,
+        kinds: &[PcbItemKind],
+    ) -> Result<Vec<PcbItemDiagnostic>, String> {
+        KiCadClient::get_pcb_item_diagnostics(self, board_filename, kinds)
+            .map_err(|error| error.to_string())
+    }
 }
 
 impl BoardGraphicsExecutor {
+    fn execute_move_existing_footprint<I: BoardGraphicsIpc>(
+        &self,
+        ipc: &mut I,
+        operation: &Operation,
+        snapshot: &kicad_model::ProjectSnapshot,
+        expected_revision: &RevisionDigest,
+        board_filename: &str,
+        message: &str,
+    ) -> BoardGraphicsCommitOutcome {
+        let OperationKind::MoveExistingFootprint {
+            board,
+            placement_id,
+            source_uuid,
+            position,
+            orientation_mdeg,
+        } = &operation.kind
+        else {
+            return BoardGraphicsCommitOutcome::Rejected {
+                reason: "operation is not an existing footprint transform".into(),
+            };
+        };
+        if snapshot.revision().ok().as_ref() != Some(expected_revision)
+            || snapshot.board.document_id.as_ref() != Some(board)
+            || operation.targets.as_slice()
+                != [board.clone(), placement_id.clone(), source_uuid.clone()]
+        {
+            return BoardGraphicsCommitOutcome::Rejected {
+                reason: "footprint transform observation identity is stale".into(),
+            };
+        }
+        let affected = match connected_copper_ids(snapshot, placement_id) {
+            Ok(ids) => ids,
+            Err(reason) => {
+                return BoardGraphicsCommitOutcome::Rejected { reason };
+            }
+        };
+        if !affected.is_empty() {
+            return BoardGraphicsCommitOutcome::Rejected {
+                reason: format!(
+                    "connected_copper_requires_separate_edit: {}",
+                    affected.join(",")
+                ),
+            };
+        }
+        let zones = match ipc.read_pcb_item_diagnostics(board_filename, &[PcbItemKind::Zone]) {
+            Ok(items) => items,
+            Err(reason) => {
+                return BoardGraphicsCommitOutcome::Rejected {
+                    reason: format!("unsupported_copper_interaction: {reason}"),
+                };
+            }
+        };
+        if !zones.is_empty() {
+            return BoardGraphicsCommitOutcome::Rejected {
+                reason: "unsupported_copper_interaction: board contains zones".into(),
+            };
+        }
+        let before_footprints = match ipc.read_footprints(board_filename) {
+            Ok(items) => items,
+            Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
+        };
+        let before_pads = match ipc.read_footprint_pads(board_filename, &source_uuid.to_string()) {
+            Ok(items) => items,
+            Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
+        };
+        let before_routing = match ipc.read_board_routing(board_filename) {
+            Ok(items) => items,
+            Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
+        };
+        let commit = match ipc.begin_commit() {
+            Ok(commit) => commit,
+            Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
+        };
+        let receipt = match ipc.update_footprint_instance(
+            board_filename,
+            &source_uuid.to_string(),
+            position.x,
+            position.y,
+            *orientation_mdeg,
+        ) {
+            Ok(receipt) => receipt,
+            Err(reason) => return drop_native_pcb_commit(ipc, &commit, reason),
+        };
+        if receipt.source_uuid != source_uuid.to_string()
+            || receipt.position_x_nm != position.x
+            || receipt.position_y_nm != position.y
+            || receipt.orientation_mdeg != *orientation_mdeg
+        {
+            return drop_native_pcb_commit(
+                ipc,
+                &commit,
+                "updated footprint receipt did not match the approved transform".into(),
+            );
+        }
+        if let Err(reason) = ipc.commit_changes(&commit, message) {
+            return BoardGraphicsCommitOutcome::Unknown { reason };
+        }
+        if let Err(reason) = ipc.save_board(board_filename) {
+            return BoardGraphicsCommitOutcome::Unknown { reason };
+        }
+        let after_footprints = match ipc.read_footprints(board_filename) {
+            Ok(items) => items,
+            Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
+        };
+        let after_routing = match ipc.read_board_routing(board_filename) {
+            Ok(items) => items,
+            Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
+        };
+        let after_pads = match ipc.read_footprint_pads(board_filename, &source_uuid.to_string()) {
+            Ok(items) => items,
+            Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
+        };
+        if before_routing != after_routing {
+            return BoardGraphicsCommitOutcome::Unknown {
+                reason: "moving a footprint changed unrelated routing".into(),
+            };
+        }
+        if before_pads != after_pads {
+            return BoardGraphicsCommitOutcome::Unknown {
+                reason: "moving a footprint changed its pad definitions".into(),
+            };
+        }
+        let mut expected_footprints = before_footprints.clone();
+        let Some(expected_target) = expected_footprints
+            .iter_mut()
+            .find(|item| item.source_uuid == source_uuid.to_string())
+        else {
+            return BoardGraphicsCommitOutcome::Unknown {
+                reason: "target footprint disappeared after save".into(),
+            };
+        };
+        expected_target.position_x_nm = position.x;
+        expected_target.position_y_nm = position.y;
+        expected_target.orientation_mdeg = *orientation_mdeg;
+        if expected_footprints != after_footprints {
+            return BoardGraphicsCommitOutcome::Unknown {
+                reason: "saved footprint set differs outside the approved transform".into(),
+            };
+        }
+        BoardGraphicsCommitOutcome::CommittedAndSaved
+    }
+
     pub fn execute_native_batch<I: BoardGraphicsIpc>(
         &self,
         ipc: &mut I,
@@ -1816,18 +2170,28 @@ impl BoardGraphicsExecutor {
     pub fn execute_bound<I: BoardGraphicsIpc>(
         &self,
         ipc: &mut I,
-        operation: &OperationKind,
+        operation: &Operation,
         snapshot: &kicad_model::ProjectSnapshot,
         expected_revision: &RevisionDigest,
         board_filename: &str,
         message: &str,
     ) -> BoardGraphicsCommitOutcome {
+        if matches!(operation.kind, OperationKind::MoveExistingFootprint { .. }) {
+            return self.execute_move_existing_footprint(
+                ipc,
+                operation,
+                snapshot,
+                expected_revision,
+                board_filename,
+                message,
+            );
+        }
         if snapshot.revision().ok().as_ref() != Some(expected_revision) {
             return BoardGraphicsCommitOutcome::Rejected {
                 reason: "routing observation revision is stale".into(),
             };
         }
-        let board = match operation {
+        let board = match &operation.kind {
             OperationKind::AddStraightTrack { board, intent } => {
                 if validate_routing_track_binding(snapshot, board, intent).is_err() {
                     return BoardGraphicsCommitOutcome::Rejected {
@@ -1845,7 +2209,7 @@ impl BoardGraphicsExecutor {
                 board
             }
             _ => {
-                return self.execute(ipc, operation, board_filename, message);
+                return self.execute(ipc, &operation.kind, board_filename, message);
             }
         };
         if snapshot.board.document_id.as_ref() != Some(board) {
@@ -1853,7 +2217,7 @@ impl BoardGraphicsExecutor {
                 reason: "routing board identity does not match observation".into(),
             };
         }
-        self.execute(ipc, operation, board_filename, message)
+        self.execute(ipc, &operation.kind, board_filename, message)
     }
 
     pub fn execute_bound_batch<I: BoardGraphicsIpc>(

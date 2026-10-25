@@ -37,6 +37,8 @@ PCB and schematic commits acquire an OS writer lock in `.auto-kicad-writer.lock`
 
 The placement allowlist contains `Resistor_SMD:R_0603_1608Metric`, `LED_SMD:LED_1210_3225Metric_Pad1.42x2.65mm_HandSolder` and `Type-C:USB_C_GCT_USB4085`. Save and close the same-named `.kicad_sch` before planning. Its reference, value and footprint field must match the request. The preview returns the source-bound operations for review.
 
+Existing footprint movement and rotation use `move_footprint` in `kicad_plan_change` with an observed `placement_id`, native `source_uuid`, absolute board coordinates in nanometres and an absolute orientation in millidegrees. KiCad 10.0.6 connected tracks and vias are rejected before `UpdateItems`; zones and other unobservable copper are rejected as unsafe. Safe moves preserve native identities, pad definitions and routing, then pass the existing disposable save/reload and DRC lifecycle.
+
 An assembly request is exclusive with `footprint`, `batch` and other top-level operation fields. Placements plus connections are limited to 100 items. Each connection requires two unambiguous front-copper pads on the same nonempty schematic net. A failed operation before commit drops the complete native transaction; uncertain commit/save results require inspection and a fresh approval.
 
 ```json

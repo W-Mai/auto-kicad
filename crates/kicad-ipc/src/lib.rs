@@ -30,6 +30,9 @@ pub const BEGIN_COMMIT_RESPONSE_TYPE_URL: &str =
 pub const CREATE_ITEMS_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.CreateItems";
 pub const CREATE_ITEMS_RESPONSE_TYPE_URL: &str =
     "type.googleapis.com/kiapi.common.commands.CreateItemsResponse";
+pub const UPDATE_ITEMS_TYPE_URL: &str = "type.googleapis.com/kiapi.common.commands.UpdateItems";
+pub const UPDATE_ITEMS_RESPONSE_TYPE_URL: &str =
+    "type.googleapis.com/kiapi.common.commands.UpdateItemsResponse";
 pub const PARSE_AND_CREATE_ITEMS_FROM_STRING_TYPE_URL: &str =
     "type.googleapis.com/kiapi.common.commands.ParseAndCreateItemsFromString";
 pub const FOOTPRINT_INSTANCE_TYPE_URL: &str =
@@ -325,6 +328,15 @@ pub struct CreatedFootprintInstanceReceipt {
     pub library_identifier: ObservedFootprintLibraryIdentifier,
     pub reference: String,
     pub value: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct UpdatedFootprintInstanceReceipt {
+    pub footprint: ObservedFootprintInstance,
+    pub source_uuid: String,
+    pub position_x_nm: i64,
+    pub position_y_nm: i64,
+    pub orientation_mdeg: i64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1454,6 +1466,117 @@ impl<T: KiCadTransport> KiCadClient<T> {
         let footprints = footprint_instances_from_response(&response)?;
         self.token = Some(token);
         Ok(footprints)
+    }
+
+    pub fn update_footprint_instance(
+        &mut self,
+        board_filename: &str,
+        source_uuid: &str,
+        position_x_nm: i64,
+        position_y_nm: i64,
+        orientation_mdeg: i64,
+    ) -> Result<UpdatedFootprintInstanceReceipt, IpcError> {
+        if board_filename.trim().is_empty() || source_uuid.trim().is_empty() {
+            return Err(IpcError::InvalidObservedFootprint(
+                "board filename and footprint identity must not be empty",
+            ));
+        }
+        let template = self
+            .capture_footprint_instance_templates(board_filename)?
+            .into_iter()
+            .find(|template| template.metadata.source_uuid == source_uuid)
+            .ok_or(IpcError::InvalidObservedFootprint(
+                "footprint identity was not found",
+            ))?;
+        let (bytes, _) = template.evidence();
+        let mut instance = board_types::FootprintInstance::parse_from_bytes(bytes)
+            .map_err(|_| IpcError::MalformedEnvelope)?;
+        instance.position = MessageField::some(base_types::Vector2 {
+            x_nm: position_x_nm,
+            y_nm: position_y_nm,
+            ..base_types::Vector2::default()
+        });
+        instance.orientation = MessageField::some(base_types::Angle {
+            value_degrees: orientation_mdeg as f64 / 1_000.0,
+            ..base_types::Angle::default()
+        });
+        let command = editor_commands::UpdateItems {
+            header: MessageField::some(board_item_header(board_filename)),
+            items: vec![Any {
+                type_url: FOOTPRINT_INSTANCE_TYPE_URL.to_owned(),
+                value: instance
+                    .write_to_bytes()
+                    .map_err(|_| IpcError::MalformedEnvelope)?,
+                ..Any::default()
+            }],
+            ..editor_commands::UpdateItems::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            UPDATE_ITEMS_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let decoded = decode_any::<editor_commands::UpdateItemsResponse>(
+            &response,
+            UPDATE_ITEMS_RESPONSE_TYPE_URL,
+        )?;
+        if decoded.status.enum_value_or_default() != base_types::ItemRequestStatus::IRS_OK {
+            return Err(IpcError::Status(
+                ApiStatusCode::AS_BAD_REQUEST,
+                format!(
+                    "update items status: {:?}",
+                    decoded.status.enum_value_or_default()
+                ),
+            ));
+        }
+        if decoded.updated_items.len() != 1 {
+            return Err(IpcError::CreateItemsCountMismatch {
+                expected: 1,
+                actual: decoded.updated_items.len(),
+            });
+        }
+        let result = &decoded.updated_items[0];
+        let status = result.status.as_ref();
+        let code = status.map_or(0, |status| status.code.value());
+        if code != editor_commands::ItemStatusCode::ISC_OK as i32 {
+            return Err(IpcError::CreateItemFailed {
+                index: 0,
+                status: code,
+                message: status.map_or_else(String::new, |status| status.error_message.clone()),
+            });
+        }
+        let item = result
+            .item
+            .as_ref()
+            .ok_or(IpcError::MissingResponseMessage)?;
+        if item.type_url != FOOTPRINT_INSTANCE_TYPE_URL {
+            return Err(IpcError::UnexpectedMessageType {
+                expected: FOOTPRINT_INSTANCE_TYPE_URL,
+                actual: item.type_url.clone(),
+            });
+        }
+        let footprint = footprint_instance_from_any(item)?;
+        if footprint.source_uuid != source_uuid
+            || footprint.position_x_nm != position_x_nm
+            || footprint.position_y_nm != position_y_nm
+            || footprint.orientation_mdeg != orientation_mdeg
+        {
+            return Err(IpcError::InvalidObservedFootprint(
+                "updated footprint does not match the requested transform",
+            ));
+        }
+        self.token = Some(token);
+        Ok(UpdatedFootprintInstanceReceipt {
+            footprint,
+            source_uuid: source_uuid.to_owned(),
+            position_x_nm,
+            position_y_nm,
+            orientation_mdeg,
+        })
     }
 
     pub fn get_footprint_definition_pads(

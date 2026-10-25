@@ -122,10 +122,15 @@
       "id": "pcb.edit_existing",
       "domain": "pcb",
       "mode": "write",
-      "status": "deferred",
-      "mcp_tools": [],
-      "constraints": ["requires stable native update identity", "connected-track policy not implemented"],
-      "evidence": null
+      "status": "verified",
+      "mcp_tools": ["kicad_plan_change", "kicad_preview_change", "kicad_commit_change"],
+      "constraints": ["one existing footprint per operation", "connected tracks and vias are rejected", "zones and unobservable copper are rejected"],
+      "evidence": {
+        "fixture": "m1-minimal-pcb-single-editor",
+        "tested_versions": ["10.0.6"],
+        "command": "cargo run -p auto-kicad --example m1_live",
+        "record": ".local/specs/auto-kicad/m1-existing-footprint-edit/research.md"
+      }
     },
     {
       "id": "schematic.general_edit",

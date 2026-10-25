@@ -419,6 +419,7 @@ fn validate_shadow_operation_kinds(operations: &[Operation]) -> Result<(), Strin
                 | OperationKind::AddBoardOutline { .. }
                 | OperationKind::AddStraightTrack { .. }
                 | OperationKind::AddThroughVia { .. }
+                | OperationKind::MoveExistingFootprint { .. }
         )
     }) {
         return Err("shadow validation only accepts supported board operations".into());
@@ -445,6 +446,16 @@ fn operation_matches_board(operation: &Operation, observed: &StableId) -> bool {
         | OperationKind::AddThroughVia { board, .. } => {
             board == observed && operation.targets == vec![board.clone()]
         }
+        OperationKind::MoveExistingFootprint {
+            board,
+            placement_id,
+            source_uuid,
+            ..
+        } => {
+            board == observed
+                && operation.targets
+                    == vec![board.clone(), placement_id.clone(), source_uuid.clone()]
+        }
         _ => false,
     }
 }
@@ -466,7 +477,12 @@ fn bind_shadow_operations(
     let source = shadow
         .in_board_scope(shadow.project_id.clone(), template_board.clone())
         .map_err(|e| e.to_string())?;
-    if operations[0].kind.footprint_placements().is_empty() {
+    if operations[0].kind.footprint_placements().is_empty()
+        && !matches!(
+            operations[0].kind,
+            OperationKind::MoveExistingFootprint { .. }
+        )
+    {
         kicad_adapter::prepare_bound_native_batch(
             operations,
             &source,
@@ -497,7 +513,8 @@ fn bind_shadow_operations(
             | OperationKind::AddBoardGraphicSegments { board, .. }
             | OperationKind::AddBoardOutline { board, .. }
             | OperationKind::AddStraightTrack { board, .. }
-            | OperationKind::AddThroughVia { board, .. } => board,
+            | OperationKind::AddThroughVia { board, .. }
+            | OperationKind::MoveExistingFootprint { board, .. } => board,
             _ => return Err("shadow validation only accepts supported board operations".into()),
         };
         if operation_board != template_board {
@@ -556,11 +573,26 @@ fn bind_shadow_operations(
                 bottom_right: *bottom_right,
                 width_nm: *width_nm,
             },
+            OperationKind::MoveExistingFootprint {
+                source_uuid,
+                position,
+                orientation_mdeg,
+                ..
+            } => OperationKind::MoveExistingFootprint {
+                board: shadow_board.clone(),
+                placement_id: kicad_model::footprint_placement_id(shadow_board, source_uuid),
+                source_uuid: source_uuid.clone(),
+                position: *position,
+                orientation_mdeg: *orientation_mdeg,
+            },
             _ => {
                 return Err("shadow validation only accepts supported board operations".into());
             }
         };
         operation.targets[0] = shadow_board.clone();
+        if let OperationKind::MoveExistingFootprint { placement_id, .. } = &operation.kind {
+            operation.targets[1] = placement_id.clone();
+        }
         bound.push(operation);
     }
     Ok(bound)
@@ -603,6 +635,7 @@ fn shadow_graphic_segments(
                 graphics.extend(expand_board_outline(*top_left, *bottom_right, *width_nm));
             }
             OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. } => {}
+            OperationKind::MoveExistingFootprint { .. } => {}
             _ => return Err("shadow postcondition contains an unsupported operation".into()),
         }
     }
@@ -797,6 +830,37 @@ fn apply_shadow_operations(
         .snapshot
         .revision()
         .map_err(|e| unknown(e.to_string()))?;
+    if let [operation] = operations
+        && matches!(operation.kind, OperationKind::MoveExistingFootprint { .. })
+    {
+        let mut client = launcher
+            .connect_owned()
+            .map_err(|e| unknown(e.to_string()))?;
+        let outcome = kicad_adapter::BoardGraphicsExecutor::default().execute_bound(
+            &mut client,
+            operation,
+            &observation.snapshot,
+            &revision,
+            &observation.board_filename,
+            "auto-kicad disposable shadow validation",
+        );
+        return match outcome {
+            kicad_adapter::BoardGraphicsCommitOutcome::CommittedAndSaved => {
+                drop(client);
+                let shadow = observe_owned_shadow(launcher).map_err(unknown)?;
+                Ok((shadow.snapshot, Vec::new()))
+            }
+            kicad_adapter::BoardGraphicsCommitOutcome::Rejected { reason } => {
+                Err(BoardGraphicsCommitOutcome::Rejected { reason })
+            }
+            kicad_adapter::BoardGraphicsCommitOutcome::Unknown { reason } => {
+                Err(BoardGraphicsCommitOutcome::Unknown { reason })
+            }
+            kicad_adapter::BoardGraphicsCommitOutcome::CommittedButNotSaved { reason } => {
+                Err(BoardGraphicsCommitOutcome::Unknown { reason })
+            }
+        };
+    }
     let batch =
         kicad_adapter::prepare_bound_native_batch(operations, &observation.snapshot, &revision)?;
     let mut client = launcher
@@ -1268,11 +1332,22 @@ pub struct PlanBoardGraphicsRequest {
     pub segments: Option<Value>,
     pub outline: Option<BoardOutlineRequest>,
     pub footprint: Option<BoardFootprintRequest>,
+    pub move_footprint: Option<BoardMoveExistingFootprintRequest>,
     pub assembly: Option<BoardAssemblyRequest>,
     pub track: Option<BoardTrackRequest>,
     pub via: Option<BoardViaRequest>,
     pub batch: Option<Vec<BoardBatchItemRequest>>,
     pub request_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardMoveExistingFootprintRequest {
+    pub placement_id: String,
+    pub source_uuid: String,
+    pub x_nm: i64,
+    pub y_nm: i64,
+    pub orientation_mdeg: i64,
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -1667,6 +1742,7 @@ fn expected_board_effect(kind: &OperationKind) -> &'static str {
         }
         OperationKind::AddStraightTrack { .. } => "add straight copper track",
         OperationKind::AddThroughVia { .. } => "add through via",
+        OperationKind::MoveExistingFootprint { .. } => "move or rotate existing footprint",
         _ => "apply bounded board change",
     }
 }
@@ -2117,6 +2193,7 @@ impl IpcBoardGraphicsExecutionService {
                     | OperationKind::AddBoardOutline { .. }
                     | OperationKind::AddStraightTrack { .. }
                     | OperationKind::AddThroughVia { .. }
+                    | OperationKind::MoveExistingFootprint { .. }
             )
         }) {
             return BoardGraphicsCommitOutcome::Rejected {
@@ -2923,6 +3000,7 @@ impl Server {
         let observed_token = observation.instance_token.as_str();
         let assembly = if let Some(request) = &arguments.assembly {
             if arguments.footprint.is_some()
+                || arguments.move_footprint.is_some()
                 || arguments.batch.is_some()
                 || arguments.segments.is_some()
                 || arguments.outline.is_some()
@@ -2949,6 +3027,7 @@ impl Server {
         };
         let footprint = if let Some(request) = &arguments.footprint {
             if arguments.batch.is_some()
+                || arguments.move_footprint.is_some()
                 || arguments.segments.is_some()
                 || arguments.outline.is_some()
                 || arguments.track.is_some()
@@ -2972,6 +3051,20 @@ impl Server {
         } else {
             None
         };
+        if arguments.move_footprint.is_some()
+            && (arguments.footprint.is_some()
+                || arguments.assembly.is_some()
+                || arguments.batch.is_some()
+                || arguments.segments.is_some()
+                || arguments.outline.is_some()
+                || arguments.track.is_some()
+                || arguments.via.is_some())
+        {
+            return Err(ErrorData::invalid_params(
+                "existing footprint movement requires its own plan",
+                None,
+            ));
+        }
         let snapshot = observation.snapshot;
         if !snapshot
             .capabilities
@@ -3001,6 +3094,33 @@ impl Server {
                 }],
                 false,
             )
+        } else if let Some(move_request) = &arguments.move_footprint {
+            let placement_id = StableId::new(move_request.placement_id.clone())
+                .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+            let source_uuid = StableId::new(move_request.source_uuid.clone())
+                .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+            let position = kicad_model::Coordinate {
+                x: move_request.x_nm,
+                y: move_request.y_nm,
+                unit: kicad_model::Unit::Nanometres,
+                space: kicad_model::DocumentSpace::Board,
+            };
+            if move_request.orientation_mdeg < 0 || move_request.orientation_mdeg >= 360_000 {
+                return Err(ErrorData::invalid_params(
+                    "orientation_mdeg must be in [0, 360000)",
+                    None,
+                ));
+            }
+            (
+                vec![OperationKind::MoveExistingFootprint {
+                    board: board.clone(),
+                    placement_id,
+                    source_uuid,
+                    position,
+                    orientation_mdeg: move_request.orientation_mdeg,
+                }],
+                false,
+            )
         } else {
             board_operation_kinds(&arguments, &board)?
         };
@@ -3021,13 +3141,20 @@ impl Server {
                 let operation_id =
                     StableId::new(operation_id).expect("deterministic operation id is valid");
                 let expected_effect = expected_board_effect(&kind);
-                let targets = std::iter::once(board.clone())
-                    .chain(
-                        kind.footprint_placements()
-                            .iter()
-                            .map(|p| p.target_id.clone()),
-                    )
-                    .collect();
+                let targets = match &kind {
+                    OperationKind::MoveExistingFootprint {
+                        placement_id,
+                        source_uuid,
+                        ..
+                    } => vec![board.clone(), placement_id.clone(), source_uuid.clone()],
+                    _ => std::iter::once(board.clone())
+                        .chain(
+                            kind.footprint_placements()
+                                .iter()
+                                .map(|p| p.target_id.clone()),
+                        )
+                        .collect(),
+                };
                 Operation {
                     operation_id,
                     kind,
@@ -5946,6 +6073,7 @@ mod tests {
             outline: None,
             footprint: None,
             assembly: None,
+            move_footprint: None,
             track: None,
             via: None,
             batch: None,

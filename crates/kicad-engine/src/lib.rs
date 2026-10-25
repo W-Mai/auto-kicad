@@ -17,6 +17,7 @@ pub const MAX_OPERATIONS: usize = 100;
 pub const MAX_GRAPHIC_SPAN_NM: i128 = 10_000_000;
 pub const MAX_GRAPHIC_BOUNDING_AREA_NM2: i128 = 100_000_000_000_000;
 pub const MAX_BOARD_POSITION_NM: i64 = 2_000_000_000;
+pub const MAX_FOOTPRINT_ORIENTATION_MDEG: i64 = 360_000;
 
 /// A logical pad in an assembly, resolved to a native pad only after creation.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
@@ -154,6 +155,13 @@ pub enum OperationKind {
         board: StableId,
         intent: ThroughViaIntent,
     },
+    MoveExistingFootprint {
+        board: StableId,
+        placement_id: StableId,
+        source_uuid: StableId,
+        position: Coordinate,
+        orientation_mdeg: i64,
+    },
 }
 
 impl OperationKind {
@@ -210,6 +218,12 @@ impl Operation {
             | OperationKind::AddBoardOutline { board, .. }
             | OperationKind::AddStraightTrack { board, .. }
             | OperationKind::AddThroughVia { board, .. } => vec![board],
+            OperationKind::MoveExistingFootprint {
+                board,
+                placement_id,
+                source_uuid,
+                ..
+            } => vec![board, placement_id, source_uuid],
         }
     }
 }
@@ -355,6 +369,7 @@ impl ChangePlan {
                     | OperationKind::AddBoardOutline { .. }
                     | OperationKind::AddStraightTrack { .. }
                     | OperationKind::AddThroughVia { .. }
+                    | OperationKind::MoveExistingFootprint { .. }
             ) {
                 for target in op.refs() {
                     if !known.contains(target) {
@@ -517,6 +532,43 @@ impl ChangePlan {
                     validate_routing_position(intent.position)?;
                     if !routing_ids.insert(intent.source_uuid.clone()) {
                         return Err(EngineError::TargetAlreadyExists(intent.source_uuid.clone()));
+                    }
+                }
+                OperationKind::MoveExistingFootprint {
+                    board,
+                    placement_id,
+                    source_uuid,
+                    position,
+                    orientation_mdeg,
+                } => {
+                    if snapshot.board.document_id.as_ref() != Some(board) {
+                        return Err(EngineError::ScopeMismatch);
+                    }
+                    let footprints =
+                        snapshot
+                            .native_footprints
+                            .as_ref()
+                            .ok_or(EngineError::InvalidPlan(
+                                "native footprint observation is required",
+                            ))?;
+                    let target = footprints
+                        .placements
+                        .iter()
+                        .find(|placement| placement.placement_id == *placement_id)
+                        .ok_or_else(|| EngineError::TargetNotFound(placement_id.clone()))?;
+                    if target.source_uuid != *source_uuid {
+                        return Err(EngineError::ScopeMismatch);
+                    }
+                    if target.lock_state == LockState::Locked {
+                        return Err(EngineError::InvalidPlan("target footprint is locked"));
+                    }
+                    validate_routing_position(*position)?;
+                    if orientation_mdeg.is_negative()
+                        || *orientation_mdeg >= MAX_FOOTPRINT_ORIENTATION_MDEG
+                    {
+                        return Err(EngineError::InvalidPlan(
+                            "footprint orientation is out of bounds",
+                        ));
                     }
                 }
             }
@@ -960,6 +1012,27 @@ fn apply_operations(
                     ObservedBoardRouting::new(board.clone(), routing.tracks, routing.vias)
                         .map_err(|error| EngineError::Serialization(error.to_string()))?,
                 );
+            }
+            OperationKind::MoveExistingFootprint {
+                placement_id,
+                position,
+                orientation_mdeg,
+                ..
+            } => {
+                let footprints =
+                    snapshot
+                        .native_footprints
+                        .as_mut()
+                        .ok_or(EngineError::InvalidPlan(
+                            "native footprint observation is required",
+                        ))?;
+                let placement = footprints
+                    .placements
+                    .iter_mut()
+                    .find(|placement| placement.placement_id == *placement_id)
+                    .ok_or_else(|| EngineError::TargetNotFound(placement_id.clone()))?;
+                placement.position = *position;
+                placement.orientation_mdeg = *orientation_mdeg;
             }
             _ => return Err(EngineError::UnsupportedOperation),
         }
@@ -1863,6 +1936,56 @@ mod tests {
         .unwrap();
         assert_eq!(legacy["kind"], "PlaceFootprint");
         assert!(legacy["arguments"].get("placement").is_none());
+    }
+
+    #[test]
+    fn existing_footprint_move_validates_identity_and_updates_only_transform() {
+        let (mut snapshot, _, _, _) = observed_routing_snapshot(BoardSide::Front);
+        let board = snapshot.board.document_id.clone().unwrap();
+        let target = snapshot
+            .native_footprints
+            .as_ref()
+            .unwrap()
+            .placements
+            .first()
+            .unwrap()
+            .clone();
+        let original = snapshot.clone();
+        let operation = Operation {
+            operation_id: id("move-existing"),
+            kind: OperationKind::MoveExistingFootprint {
+                board: board.clone(),
+                placement_id: target.placement_id.clone(),
+                source_uuid: target.source_uuid.clone(),
+                position: board_coordinate(500, 600),
+                orientation_mdeg: 90_000,
+            },
+            targets: vec![
+                board,
+                target.placement_id.clone(),
+                target.source_uuid.clone(),
+            ],
+            preconditions: Vec::new(),
+            expected_effects: vec!["move or rotate existing footprint".into()],
+            risk_class: RiskClass::Medium,
+            idempotency_key: "move-existing".into(),
+            source_run_id: "m1".into(),
+        };
+        let plan = ChangePlan {
+            plan_id: id("move-plan"),
+            base_revision: original.revision().unwrap(),
+            source_run_id: "m1".into(),
+            operations: vec![operation],
+            instance_token: "token".into(),
+        };
+        plan.validate(&original).unwrap();
+        let expected = apply_operations(original.clone(), &plan.operations).unwrap();
+        let moved = expected.native_footprints.unwrap().placements[0].clone();
+        assert_eq!(moved.position, board_coordinate(500, 600));
+        assert_eq!(moved.orientation_mdeg, 90_000);
+        assert_eq!(moved.source_uuid, target.source_uuid);
+        snapshot = original;
+        assert_eq!(snapshot.native_footprints.unwrap().placements[0], target);
     }
 
     #[test]
