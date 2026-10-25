@@ -1815,6 +1815,31 @@ pub struct CommitChangeRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+pub struct PlanRecoveryRequest {
+    pub project_dir: String,
+    pub attempt_id: String,
+    pub action: String,
+    pub request_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+pub struct PreviewRecoveryRequest {
+    pub project_dir: String,
+    pub recovery_id: String,
+    pub recovery_plan_hash: String,
+    pub request_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+pub struct CommitRecoveryRequest {
+    pub project_dir: String,
+    pub recovery_id: String,
+    pub recovery_plan_hash: String,
+    pub approval_hash: String,
+    pub request_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 pub struct PlanSchematicChangeRequest {
     pub project_root: String,
     pub root_schematic: String,
@@ -2960,12 +2985,36 @@ impl Server {
                 })?);
             }
         }
-        let mut data = serde_json::to_value(snapshot)
+        let mut data = serde_json::to_value(&snapshot)
             .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
         if self.execution_store.is_some() {
             data["execution_history"] = json!(execution_history);
+            let recovery_history = if let Some(store) = &self.execution_store {
+                let mut records = Vec::new();
+                let mut projects = snapshot
+                    .documents
+                    .iter()
+                    .filter_map(|document| document.project_path.as_deref())
+                    .map(std::path::PathBuf::from)
+                    .collect::<std::collections::BTreeSet<_>>();
+                if let Some(project) = project_dir {
+                    projects.insert(project.to_path_buf());
+                }
+                for project in projects {
+                    records.extend(store.recovery_history(&project).map_err(|e| {
+                        ErrorData::internal_error(
+                            format!("recovery history unavailable: {e}"),
+                            None,
+                        )
+                    })?);
+                }
+                records
+            } else {
+                Vec::new()
+            };
+            data["recovery_history"] = json!(recovery_history);
             data["recovery_policy"] = json!(
-                "Inspect uncertain outcomes and backups; restart requires a fresh plan, validation and approval. No automatic replay or rollback."
+                "Uncertain outcomes require a guarded recovery plan, fresh source and backup checks, exact approval and atomic restore. No automatic replay or rollback."
             );
         }
         let envelope = Envelope {
@@ -2980,6 +3029,134 @@ impl Server {
         let value = serde_json::to_value(envelope)
             .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
         Ok(rmcp::model::CallToolResult::structured(value).into())
+    }
+
+    #[tool(
+        name = "kicad_plan_recovery",
+        description = "Prepare a guarded recovery plan for one uncertain recorded execution without mutating source files."
+    )]
+    pub async fn kicad_plan_recovery(
+        &self,
+        Parameters(arguments): Parameters<PlanRecoveryRequest>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let request_id = arguments
+            .request_id
+            .unwrap_or_else(|| "req_plan_recovery".into());
+        if arguments.action != "restore_backups" {
+            return Ok(self.rejected(request_id, "recovery_action_unsupported"));
+        }
+        let Some(store) = &self.execution_store else {
+            return Ok(self.rejected(request_id, "recovery_unavailable"));
+        };
+        let record = match store.plan_recovery(
+            std::path::Path::new(&arguments.project_dir),
+            &arguments.attempt_id,
+        ) {
+            Ok(record) => record,
+            Err(error) => return Ok(self.rejected(request_id, &error.to_string())),
+        };
+        self.envelope(
+            request_id,
+            Some(record.plan_hash.clone()),
+            json!({
+                "recovery_id": record.recovery_id,
+                "attempt_id": record.attempt_id,
+                "action": record.action,
+                "plan_hash": record.plan_hash,
+                "files": record.files,
+                "state": record.state
+            }),
+        )
+    }
+
+    #[tool(
+        name = "kicad_preview_recovery",
+        description = "Recheck a guarded recovery plan against current files and return exact approval evidence."
+    )]
+    pub async fn kicad_preview_recovery(
+        &self,
+        Parameters(arguments): Parameters<PreviewRecoveryRequest>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let request_id = arguments
+            .request_id
+            .unwrap_or_else(|| "req_preview_recovery".into());
+        let Some(store) = &self.execution_store else {
+            return Ok(self.rejected(request_id, "recovery_unavailable"));
+        };
+        let approval_hash = match store.preview_recovery(
+            std::path::Path::new(&arguments.project_dir),
+            &arguments.recovery_id,
+            &arguments.recovery_plan_hash,
+        ) {
+            Ok(hash) => hash,
+            Err(error) => return Ok(self.rejected(request_id, &error.to_string())),
+        };
+        self.envelope(
+            request_id,
+            Some(arguments.recovery_plan_hash.clone()),
+            json!({
+                "recovery_id": arguments.recovery_id,
+                "recovery_plan_hash": arguments.recovery_plan_hash,
+                "approval_hash": approval_hash,
+                "state": "awaiting_approval"
+            }),
+        )
+    }
+
+    #[tool(
+        name = "kicad_commit_recovery",
+        description = "Atomically restore an exactly approved recovery plan after a final source and backup check."
+    )]
+    pub async fn kicad_commit_recovery(
+        &self,
+        Parameters(arguments): Parameters<CommitRecoveryRequest>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        let request_id = arguments
+            .request_id
+            .unwrap_or_else(|| "req_commit_recovery".into());
+        let Some(store) = &self.execution_store else {
+            return Ok(self.rejected(request_id, "recovery_unavailable"));
+        };
+        let project = std::path::Path::new(&arguments.project_dir);
+        let _writer = self.acquire_project_writer(project)?;
+        let result = store.commit_recovery(
+            project,
+            &arguments.recovery_id,
+            &arguments.recovery_plan_hash,
+            &arguments.approval_hash,
+        );
+        match result {
+            Ok(record) => self.envelope(
+                request_id,
+                None,
+                json!({
+                    "recovery_id": record.recovery_id,
+                    "state": record.state,
+                    "outcome": record.outcome
+                }),
+            ),
+            Err(error) => {
+                let state = store
+                    .recovery_history(project)
+                    .ok()
+                    .and_then(|records| {
+                        records
+                            .into_iter()
+                            .find(|record| record.recovery_id == arguments.recovery_id)
+                            .map(|record| record.state)
+                    })
+                    .unwrap_or_else(|| "rejected".into());
+                Ok(self.envelope_sync(
+                    request_id,
+                    None,
+                    json!({
+                        "recovery_id": arguments.recovery_id,
+                        "state": state,
+                        "outcome": {"kind": if state == "unknown" { "unknown" } else { "rejected" }, "reason": error.to_string()}
+                    }),
+                ))
+            }
+        }
     }
 
     #[tool(
@@ -6631,7 +6808,7 @@ mod tests {
         let matrix = &structured["data"]["capability_matrix"];
         assert_eq!(matrix["schema_version"], "1");
         assert_eq!(matrix["product"], "auto-kicad");
-        assert_eq!(matrix["capabilities"].as_array().unwrap().len(), 12);
+        assert_eq!(matrix["capabilities"].as_array().unwrap().len(), 13);
         assert_eq!(
             matrix["capabilities"]
                 .as_array()
@@ -6648,7 +6825,7 @@ mod tests {
                 .iter()
                 .find(|entry| entry["id"] == "pcb.edit_existing")
                 .unwrap()["status"],
-            "deferred"
+            "verified"
         );
     }
 

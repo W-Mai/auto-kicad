@@ -11,7 +11,10 @@
       "kicad_inspect_project",
       "kicad_plan_change",
       "kicad_preview_change",
-      "kicad_commit_change"
+      "kicad_commit_change",
+      "kicad_plan_recovery",
+      "kicad_preview_recovery",
+      "kicad_commit_recovery"
     ],
     "conditional": [
       "kicad_plan_schematic_change",
@@ -46,6 +49,20 @@
         "tested_versions": ["10.0.6"],
         "command": "cargo test -p auto-kicad --lib",
         "record": "crates/auto-kicad/src/lib.rs"
+      }
+    },
+    {
+      "id": "project.guarded_recovery",
+      "domain": "project",
+      "mode": "write",
+      "status": "verified",
+      "mcp_tools": ["kicad_plan_recovery", "kicad_preview_recovery", "kicad_commit_recovery"],
+      "constraints": ["durable state directory", "complete byte backups", "source and backup fingerprints must remain unchanged", "explicit approval required"],
+      "evidence": {
+        "fixture": "offline-recovery-fault-injection",
+        "tested_versions": ["10.0.6"],
+        "command": "cargo test -p auto-kicad recovery",
+        "record": ".local/specs/auto-kicad/m2-guarded-recovery/IMPLEMENTATION.md"
       }
     },
     {
