@@ -1,0 +1,116 @@
+{
+  "baseline_zones": 3,
+  "complete_unedited_live_fields_preserved": true,
+  "create_with_concavity_and_two_holes": true,
+  "created_uuid": "a87d5da0-a564-463b-b633-79bfbc96bf8b",
+  "delete_restored_exact_saved_board": true,
+  "excess_rejected": 33,
+  "kicad_version": "10.0.7",
+  "locked_and_hatched_definitions_retained": true,
+  "maximum_creations_cancelled": 32,
+  "maximum_zone_holes": 16,
+  "maximum_zone_vertices": 512,
+  "mixed_create_update_delete": true,
+  "net_and_layers_changed": true,
+  "pid": 94475,
+  "same_process_reload": true,
+  "scope": "native definition editing only; refill, electrical effects, production MCP and approval remain unaccepted",
+  "source_and_project_preserved": true,
+  "unknown_net_and_disabled_layer_rejected": true,
+  "updates": 2,
+  "cleanup": {
+    "closed": true,
+    "owned_pid": 94475,
+    "source_unchanged": true
+  },
+  "independent_saved_intent": {
+    "records": [
+      {
+        "file": "created.kicad_pcb",
+        "sha256": "adb206f27f72dfa5d4a93a9af055875f67cdb733123d1b6ac54d5adb60ac68e3",
+        "exact_intent": true,
+        "exterior_vertices": 8,
+        "hole_vertices": [
+          4,
+          4
+        ],
+        "properties": {
+          "name": "created concave with holes",
+          "priority": 3,
+          "net": "GND",
+          "layers": [
+            0,
+            4
+          ],
+          "clearance": 200000,
+          "minimum": 200000,
+          "connection": 1,
+          "gap": 500000,
+          "spoke": 500000,
+          "island": 1
+        }
+      },
+      {
+        "file": "updated-0.kicad_pcb",
+        "sha256": "e19ab58c499a0abdfff3a1f6d631215a8386512815086695640f495c82502557",
+        "exact_intent": true,
+        "exterior_vertices": 8,
+        "hole_vertices": [
+          4,
+          4
+        ],
+        "properties": {
+          "name": "patched exact zone",
+          "priority": 7,
+          "net": "GND",
+          "layers": [
+            0,
+            4
+          ],
+          "clearance": 300000,
+          "minimum": 200000,
+          "connection": 1,
+          "gap": 500000,
+          "spoke": 500000,
+          "island": 1
+        }
+      },
+      {
+        "file": "updated-1.kicad_pcb",
+        "sha256": "6ae41328277e81fb4c7eb9dee2bd6d0b5072c5f479034d4cc8f8a5088be0399f",
+        "exact_intent": true,
+        "exterior_vertices": 8,
+        "hole_vertices": [
+          4,
+          4
+        ],
+        "properties": {
+          "name": "patched exact zone",
+          "priority": 7,
+          "net": "VCC",
+          "layers": [
+            0,
+            2
+          ],
+          "clearance": 300000,
+          "minimum": 150000,
+          "connection": 3,
+          "gap": 350000,
+          "spoke": 400000,
+          "island": 2,
+          "area": 2000000000000
+        }
+      }
+    ],
+    "read_only": true
+  },
+  "quality": {
+    "passed": 432,
+    "ignored": 15,
+    "failed": 0,
+    "format": true,
+    "clippy_warnings_denied": true,
+    "capability_matrix": true
+  },
+  "evidence_directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-native-zones-boundaries"
+}

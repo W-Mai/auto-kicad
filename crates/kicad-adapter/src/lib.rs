@@ -1,3 +1,4 @@
+pub mod zone_edits;
 use kicad_engine::{
     MAX_BOARD_POSITION_NM, MAX_GRAPHIC_BOUNDING_AREA_NM2, MAX_GRAPHIC_SPAN_NM, Operation,
     OperationKind, expand_board_outline, validate_observed_routing_net,

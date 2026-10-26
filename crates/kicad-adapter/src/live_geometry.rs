@@ -249,6 +249,125 @@ fn feed_zone_definition(
     Ok(())
 }
 
+fn feed_patched_zone(
+    hash: &mut Sha256,
+    text: &str,
+    zone: &Node,
+    patch: &kicad_ipc::SolidZonePatch,
+) -> Result<(), String> {
+    fn feed_fields(
+        hash: &mut Sha256,
+        text: &str,
+        node: &Node,
+        skip: &[&str],
+        skip_bare: bool,
+        fill: bool,
+    ) -> Result<(), String> {
+        let fields = items(node)?;
+        let mut kept = vec![&fields[0]];
+        let mut seen = std::collections::BTreeSet::new();
+        for (index, field) in fields[1..].iter().enumerate() {
+            if matches!(field, Node::Atom { .. }) {
+                if index != 0 || (fill && atom(field)? != "yes") {
+                    return Err("ambiguous zone scalar".into());
+                }
+                if skip_bare {
+                    continue;
+                }
+            } else if skip.contains(&tag(field)?) {
+                if !seen.insert(tag(field)?) {
+                    return Err("duplicate edited zone field".into());
+                }
+                continue;
+            }
+            kept.push(field);
+        }
+        hash.update([0]);
+        hash.update((kept.len() as u64).to_be_bytes());
+        for field in kept {
+            feed_structure(hash, text, field);
+        }
+        Ok(())
+    }
+    let mut direct = Vec::new();
+    if patch.name.is_some() {
+        direct.push("name");
+    }
+    if patch.net.is_some() {
+        direct.push("net");
+    }
+    if patch.layers.is_some() {
+        direct.extend(["layer", "layers"]);
+    }
+    if patch.polygon.is_some() {
+        direct.push("polygon");
+    }
+    if patch.priority.is_some() {
+        direct.push("priority");
+    }
+    if patch.min_thickness_nm.is_some() {
+        direct.push("min_thickness");
+    }
+    let mut fill_fields = Vec::new();
+    if patch.thermal_gap_nm.is_some() {
+        fill_fields.push("thermal_gap");
+    }
+    if patch.thermal_spoke_width_nm.is_some() {
+        fill_fields.push("thermal_bridge_width");
+    }
+    if patch.island_removal.is_some() {
+        fill_fields.push("island_removal_mode");
+    }
+    if patch.min_island_area_nm2.is_some() {
+        fill_fields.push("island_area_min");
+    }
+    let fields = items(zone)?;
+    let mut kept = vec![&fields[0]];
+    let mut points = 0;
+    let mut seen = std::collections::BTreeSet::new();
+    for field in &fields[1..] {
+        let name = tag(field)?;
+        if name == "filled_polygon" {
+            filled_polygon(field, &mut points)?;
+            continue;
+        }
+        if name != "polygon"
+            && !seen.insert(name)
+            && (direct.contains(&name) || ["fill", "connect_pads"].contains(&name))
+        {
+            return Err("duplicate edited zone definition".into());
+        }
+        if !direct.contains(&name) {
+            kept.push(field);
+        }
+    }
+    hash.update([0]);
+    hash.update((kept.len() as u64).to_be_bytes());
+    for field in kept {
+        if matches!(field, Node::Atom { .. }) {
+            feed_structure(hash, text, field);
+            continue;
+        }
+        match tag(field)? {
+            "fill" => feed_fields(hash, text, field, &fill_fields, true, true)?,
+            "connect_pads" => feed_fields(
+                hash,
+                text,
+                field,
+                if patch.clearance_nm.is_some() {
+                    &["clearance"]
+                } else {
+                    &[]
+                },
+                patch.connection.is_some(),
+                false,
+            )?,
+            _ => feed_structure(hash, text, field),
+        }
+    }
+    Ok(())
+}
+
 // Closed-file comparison has a separate type and never weakens source live equality.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ClosedRefillDefinitionEvidence {
@@ -456,6 +575,44 @@ impl LiveBoardText {
             definition_digest: hex::encode(hash.finalize()),
             automatic_dimension_ids: ids,
         })
+    }
+
+    /// Hash all unedited live fields, including unknown fields of explicitly patched zones.
+    pub(crate) fn zone_edit_digest(
+        &self,
+        excluded: &std::collections::BTreeSet<String>,
+        patches: &BTreeMap<String, kicad_ipc::SolidZonePatch>,
+    ) -> Result<String, String> {
+        let root = self.cst.nodes.first().ok_or("missing board root")?;
+        let fields = items(root)?;
+        let mut kept = Vec::new();
+        for field in fields {
+            let zone_id = if matches!(field, Node::List { .. }) && tag(field)? == "zone" {
+                self.zones.iter().find_map(|(id, e)| {
+                    let Node::List { span, .. } = field else {
+                        unreachable!()
+                    };
+                    (*span == e.span).then_some(id)
+                })
+            } else {
+                None
+            };
+            if zone_id.is_some_and(|id| excluded.contains(id)) {
+                continue;
+            }
+            kept.push((field, zone_id.and_then(|id| patches.get(id))));
+        }
+        let mut hash = Sha256::new();
+        hash.update([0]);
+        hash.update((kept.len() as u64).to_be_bytes());
+        for (field, patch) in kept {
+            if let Some(patch) = patch {
+                feed_patched_zone(&mut hash, self.raw_text(), field, patch)?;
+            } else {
+                feed_structure(&mut hash, self.raw_text(), field);
+            }
+        }
+        Ok(hex::encode(hash.finalize()))
     }
 
     pub fn raw_text(&self) -> &str {
@@ -745,5 +902,70 @@ mod tests {
         assert!(preflight("(x \"escaped\\\" tail\")").is_ok());
         assert!(preflight("(x foo\"bar)").is_ok());
         assert!(preflight("(x)\0").is_err());
+    }
+}
+
+#[cfg(test)]
+mod zone_edit_tests {
+    use super::*;
+    use kicad_ipc::SolidZonePatch;
+    fn board(extra: &str) -> LiveBoardText {
+        LiveBoardText::parse(&format!(
+            "(kicad_pcb (version 20260206) (generator pcbnew) {extra})"
+        ))
+        .unwrap()
+    }
+    #[test]
+    fn patch_projection_keeps_unknown_fields_and_unedited_nested_values() {
+        let original = r#"(zone (uuid "zone") (name "before") (future_metadata 7) (connect_pads (clearance 0.2) (future_connection 8)) (fill yes (thermal_gap 0.5) (thermal_bridge_width 0.5) (future_fill 9)) (filled_polygon (layer "F.Cu") (pts (xy 0 0) (xy 1 0) (xy 0 1))))"#;
+        let changed = original
+            .replace("before", "after")
+            .replace("clearance 0.2", "clearance 0.3")
+            .replace("fill yes", "fill");
+        let patches = BTreeMap::from([(
+            "zone".into(),
+            SolidZonePatch {
+                name: Some("after".into()),
+                clearance_nm: Some(300_000),
+                ..Default::default()
+            },
+        )]);
+        let excluded = std::collections::BTreeSet::new();
+        let expected = board(original)
+            .zone_edit_digest(&excluded, &patches)
+            .unwrap();
+        assert_eq!(
+            expected,
+            board(&changed)
+                .zone_edit_digest(&excluded, &patches)
+                .unwrap()
+        );
+        for (a, b) in [
+            ("future_metadata 7", "future_metadata 8"),
+            ("future_connection 8", "future_connection 9"),
+            ("future_fill 9", "future_fill 10"),
+            ("thermal_gap 0.5", "thermal_gap 0.6"),
+        ] {
+            assert_ne!(
+                expected,
+                board(&changed.replace(a, b))
+                    .zone_edit_digest(&excluded, &patches)
+                    .unwrap()
+            );
+        }
+        let nested = format!("{original} (footprint (zone (uuid nested) (future_nested 1)))");
+        assert_ne!(
+            board(&nested)
+                .zone_edit_digest(&excluded, &patches)
+                .unwrap(),
+            board(&nested.replace("future_nested 1", "future_nested 2"))
+                .zone_edit_digest(&excluded, &patches)
+                .unwrap()
+        );
+        assert!(
+            board(&changed.replace("clearance 0.3", "clearance 0.3) (clearance 0.4"))
+                .zone_edit_digest(&excluded, &patches)
+                .is_err()
+        );
     }
 }

@@ -1,7 +1,9 @@
-//! Exact integer envelopes for bounded board segments and circular arcs.
+//! Exact bounded board geometry.
+mod polygon;
 use num_bigint::{BigInt, Sign};
 use num_integer::Integer;
 use num_traits::{ToPrimitive, Zero};
+pub use polygon::{MAX_POLYGON_HOLES, MAX_POLYGON_VERTICES, polygon_bounds};
 use std::fmt::{Display, Formatter};
 
 pub const MAX_COORDINATE_NM: i64 = 2_000_000_000;
@@ -14,6 +16,8 @@ pub enum GeometryError {
     Degenerate,
     EnvelopeBounds,
     SpanBounds,
+    PolygonCounts,
+    PolygonTopology,
 }
 impl GeometryError {
     pub fn message(self) -> &'static str {
@@ -21,6 +25,10 @@ impl GeometryError {
             Self::CoordinateBounds => "outline control coordinates exceed bounds",
             Self::Degenerate => "outline primitive is degenerate",
             Self::EnvelopeBounds => "complete outline curve exceeds coordinate bounds",
+            Self::PolygonCounts => "polygon ring or vertex count exceeds bounds",
+            Self::PolygonTopology => {
+                "polygon boundaries intersect, touch or have invalid hole containment"
+            }
             Self::SpanBounds => "complete outline span exceeds bound",
         }
     }

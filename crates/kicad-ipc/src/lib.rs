@@ -1,3 +1,5 @@
+mod native_zones;
+pub use native_zones::{MAX_ZONE_MUTATIONS, SolidZonePatch, SolidZonePayload, SolidZoneReceipt};
 mod native_outline;
 pub use native_outline::{CreatedOutlineReceipt, OutlineGeometry, OutlinePrimitive};
 mod native_geometry;
