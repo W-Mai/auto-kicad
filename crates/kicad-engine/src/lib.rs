@@ -400,6 +400,12 @@ impl ChangePlan {
             .graphics
             .iter()
             .map(|graphic| graphic.graphic_id.clone())
+            .chain(
+                snapshot
+                    .opaque_graphics
+                    .iter()
+                    .map(|g| g.source_uuid.clone()),
+            )
             .collect();
         let mut routing_ids: BTreeSet<StableId> = snapshot
             .native_routing
@@ -1681,6 +1687,7 @@ mod tests {
     }
     fn snapshot() -> ProjectSnapshot {
         ProjectSnapshot {
+            opaque_graphics: Vec::new(),
             project_id: id("project"),
             kicad_version: "10.0.5".into(),
             capabilities: vec!["schematic.write".into()],

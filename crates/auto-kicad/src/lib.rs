@@ -3,6 +3,7 @@ pub use copper_route::BoardRouteRequest;
 mod existing_footprint;
 mod existing_item_edit;
 mod footprint_authoring;
+mod geometry;
 mod library_settings;
 pub mod recovery;
 pub mod routing_rules;
@@ -99,6 +100,14 @@ pub struct Capability {
 }
 
 pub trait DiscoveryService: Send + Sync {
+    fn geometry_inspection(
+        &self,
+        _endpoint: &str,
+        _source: &LiveBoardObservation,
+    ) -> Result<Value, String> {
+        Err("complete native geometry inspection is unavailable".into())
+    }
+
     fn copper_route_evidence(
         &self,
         _endpoint: &str,
@@ -179,6 +188,14 @@ pub trait DiscoveryService: Send + Sync {
 pub struct IpcDiscoveryService;
 
 impl DiscoveryService for IpcDiscoveryService {
+    fn geometry_inspection(
+        &self,
+        endpoint: &str,
+        source: &LiveBoardObservation,
+    ) -> Result<Value, String> {
+        geometry::inspect(endpoint, source)
+    }
+
     fn copper_route_evidence(
         &self,
         endpoint: &str,
@@ -339,6 +356,17 @@ impl std::fmt::Display for ObserveLiveBoardError {
 }
 
 trait LiveBoardObservationSource {
+    fn graphics_observation(
+        &mut self,
+        filename: &str,
+        layer: kicad_ipc::BoardGraphicLayer,
+    ) -> Result<kicad_ipc::ObservedBoardGraphics, kicad_ipc::IpcError> {
+        Ok(kicad_ipc::ObservedBoardGraphics {
+            segments: self.board_graphics(filename, layer)?,
+            opaque: Vec::new(),
+        })
+    }
+
     fn board_graphics(
         &mut self,
         board_filename: &str,
@@ -370,6 +398,14 @@ trait LiveBoardObservationSource {
 }
 
 impl<T: kicad_ipc::KiCadTransport> LiveBoardObservationSource for KiCadClient<T> {
+    fn graphics_observation(
+        &mut self,
+        filename: &str,
+        layer: kicad_ipc::BoardGraphicLayer,
+    ) -> Result<kicad_ipc::ObservedBoardGraphics, kicad_ipc::IpcError> {
+        self.get_board_graphics_observation(filename, layer)
+    }
+
     fn board_graphics(
         &mut self,
         board_filename: &str,
@@ -1696,14 +1732,37 @@ fn observe_live_board<S: LiveBoardObservationSource>(
     document: kicad_ipc::OpenDocument,
     board_filename: &str,
 ) -> Result<LiveBoardObservation, ObserveLiveBoardError> {
-    let mut graphics = source
-        .board_graphics(board_filename, kicad_ipc::BoardGraphicLayer::DwgsUser)
-        .map_err(ObserveLiveBoardError::Ipc)?;
-    graphics.extend(
-        source
-            .board_graphics(board_filename, kicad_ipc::BoardGraphicLayer::EdgeCuts)
-            .map_err(ObserveLiveBoardError::Ipc)?,
-    );
+    let mut graphics = Vec::new();
+    let mut opaque_graphics = Vec::new();
+    for layer in [
+        kicad_ipc::BoardGraphicLayer::DwgsUser,
+        kicad_ipc::BoardGraphicLayer::EdgeCuts,
+    ] {
+        let observed = source
+            .graphics_observation(board_filename, layer)
+            .map_err(ObserveLiveBoardError::Ipc)?;
+        graphics.extend(observed.segments);
+        for record in observed.opaque {
+            opaque_graphics.push(kicad_model::OpaqueBoardGraphic {
+                source_uuid: StableId::new(record.graphic_id)
+                    .map_err(|e| ObserveLiveBoardError::LiveBoard(e.into()))?,
+                layer: match record.layer {
+                    kicad_ipc::BoardGraphicLayer::DwgsUser => {
+                        kicad_model::BoardGraphicLayer::DwgsUser
+                    }
+                    kicad_ipc::BoardGraphicLayer::EdgeCuts => {
+                        kicad_model::BoardGraphicLayer::EdgeCuts
+                    }
+                    _ => {
+                        return Err(ObserveLiveBoardError::LiveBoard(
+                            LiveBoardObservationError::UnsupportedGraphicLayer,
+                        ));
+                    }
+                },
+                native_digest: digest_bytes(&record.persistent_payload),
+            });
+        }
+    }
     let footprints = source
         .footprint_instances(board_filename)
         .map_err(ObserveLiveBoardError::Ipc)?;
@@ -1730,7 +1789,7 @@ fn observe_live_board<S: LiveBoardObservationSource>(
     let instance_token = source
         .latest_instance_token()
         .ok_or(ObserveLiveBoardError::MissingInstanceToken)?;
-    live_board_observation(
+    let mut result = live_board_observation(
         version,
         document,
         graphics,
@@ -1739,7 +1798,14 @@ fn observe_live_board<S: LiveBoardObservationSource>(
         native_stackup,
         instance_token,
     )
-    .map_err(ObserveLiveBoardError::LiveBoard)
+    .map_err(ObserveLiveBoardError::LiveBoard)?;
+    result.snapshot.opaque_graphics = opaque_graphics;
+    result
+        .snapshot
+        .validate()
+        .map_err(|e| ObserveLiveBoardError::LiveBoard(e.into()))?;
+    result.snapshot = result.snapshot.canonical();
+    Ok(result)
 }
 
 fn is_unsupported(observation: &DocumentObservation) -> bool {
@@ -3136,6 +3202,8 @@ pub struct SchematicAuditRequest {
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 pub struct InspectProjectRequest {
+    /// Include complete bounded native zone and board-level outline summaries.
+    pub geometry: Option<bool>,
     pub routing_rules: Option<routing_rules::RoutingRulesRequest>,
     pub endpoint: String,
     pub footprint_source: Option<FootprintSourceRequest>,
@@ -3399,6 +3467,12 @@ impl Server {
                 },
                 Capability {
                     id: "pcb.routing_rules.inspect",
+                    domain: "pcb",
+                    mode: "read",
+                    status: "verified",
+                },
+                Capability {
+                    id: "pcb.geometry.inspect",
                     domain: "pcb",
                     mode: "read",
                     status: "verified",
@@ -3734,6 +3808,12 @@ impl Server {
                 ));
             }
         }
+        if arguments.geometry == Some(true) && arguments.endpoint.is_empty() {
+            return Err(ErrorData::invalid_params(
+                "geometry inspection requires a live board endpoint",
+                None,
+            ));
+        }
         if arguments.footprint_source.is_some() && arguments.endpoint.is_empty() {
             return Err(ErrorData::invalid_params(
                 "footprint source lookup requires a live board endpoint",
@@ -3790,6 +3870,15 @@ impl Server {
                     .snapshot
                     .revision()
                     .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+                if arguments.geometry == Some(true) {
+                    data["geometry"] = match self
+                        .discovery
+                        .geometry_inspection(&arguments.endpoint, &pcb)
+                    {
+                        Ok(observation) => json!({"status":"observed","observation":observation}),
+                        Err(reason) => json!({"status":"unavailable","reason":reason}),
+                    };
+                }
                 if let Some(query) = &arguments.routing_rules {
                     data["routing_rules"] = match self.discovery.routing_rule_inspection(
                         &arguments.endpoint,
@@ -3823,6 +3912,9 @@ impl Server {
             Err(reason) => {
                 data["pcb"] = Value::Null;
                 data["pcb_observation_error"] = json!(reason);
+                if arguments.geometry == Some(true) {
+                    data["geometry"] = json!({"status":"unavailable","reason":reason});
+                }
                 if arguments.routing_rules.is_some() {
                     data["routing_rules"] = json!({"status":"unavailable", "reason":reason});
                 }
@@ -6118,6 +6210,7 @@ mod tests {
 
     fn project_snapshot(write_capability: bool) -> ProjectSnapshot {
         ProjectSnapshot {
+            opaque_graphics: Vec::new(),
             project_id: StableId::new("project").unwrap(),
             kicad_version: "10.0.5".into(),
             capabilities: if write_capability {
@@ -8009,7 +8102,15 @@ mod tests {
         let matrix = &structured["data"]["capability_matrix"];
         assert_eq!(matrix["schema_version"], "1");
         assert_eq!(matrix["product"], "auto-kicad");
-        assert_eq!(matrix["capabilities"].as_array().unwrap().len(), 15);
+        assert!(
+            matrix["capabilities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|c| c["id"] == "pcb.geometry.inspect"
+                    && c["mode"] == "read"
+                    && c["status"] == "verified")
+        );
         assert_eq!(
             matrix["capabilities"]
                 .as_array()
@@ -8027,6 +8128,47 @@ mod tests {
                 .find(|entry| entry["id"] == "pcb.edit_existing")
                 .unwrap()["status"],
             "verified"
+        );
+    }
+
+    #[tokio::test]
+    async fn sdk_geometry_inspection_is_opt_in_and_unavailable_without_native_evidence() {
+        let client = connected(Server::with_discovery(Arc::new(FakeDiscovery::default()))).await;
+        for requested in [false, true] {
+            let result = client
+                .call_tool(
+                    CallToolRequestParams::new("kicad_inspect_project").with_arguments(
+                        json!({"endpoint":"ipc:///tmp/kicad/api.sock","geometry":requested})
+                            .as_object()
+                            .unwrap()
+                            .clone(),
+                    ),
+                )
+                .await
+                .unwrap();
+            let data = &result.structured_content.as_ref().unwrap()["data"];
+            if requested {
+                assert_eq!(data["geometry"]["status"], "unavailable");
+                assert!(data["geometry"].get("observation").is_none());
+            } else {
+                assert!(data.get("geometry").is_none());
+            }
+        }
+        assert!(
+            serde_json::from_value::<InspectProjectRequest>(
+                json!({"endpoint":"x","geometry":{"write":true}})
+            )
+            .is_err()
+        );
+        let request =
+            serde_json::from_value::<InspectProjectRequest>(json!({"endpoint":"","geometry":true}))
+                .unwrap();
+        let server = Server::with_discovery(Arc::new(FakeDiscovery::default()));
+        assert!(
+            server
+                .kicad_inspect_project(Parameters(request))
+                .await
+                .is_err()
         );
     }
 

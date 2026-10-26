@@ -1,0 +1,113 @@
+{
+  "kicad_version": "10.0.7",
+  "profiles": {
+    "cm5": {
+      "directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-mcp-geometry-inspection-cm5-full",
+      "result": {
+        "production_stdio": true,
+        "zone_count": 14,
+        "outline_count": 30,
+        "source_unchanged": true,
+        "repeat_equal": true,
+        "saved_rule_drift_bound": true,
+        "independent_native_intent": true
+      },
+      "native": {
+        "pid": 18738,
+        "read_only": true,
+        "source": "/Library/Application Support/kicad/demos/cm5_minima/CM5_MINIMA_3.kicad_pcb"
+      },
+      "cleanup": {
+        "closed": true,
+        "pid": 18738,
+        "source_unchanged": true
+      },
+      "independent": {
+        "opaque_graphics": 14,
+        "read_only": true,
+        "sha256": "123e209e6245cbcc344c1c70b425dcb44a12cd0a2d05f00a39d3f2e7ff307ffa",
+        "zones": 14,
+        "outlines": 30,
+        "complete_editable_definitions": 13,
+        "locked_zones": 1
+      },
+      "geometry_revision": "sha256:948181a85206952f6a063adfd0548f8b3e2329fb5aa2054a06788a3a98ce258e",
+      "pcb_revision": "sha256:dcb13c346ed47178738f8478d922962eb16f945f1877afd0d7eafb565a321be6",
+      "evidence_digest": "sha256:0d5d20ced6c2c9165eb9793c79fd6596418c8e989651ff9bfbd97f0d81828f76",
+      "definitions": {
+        "board_definition_digest": "3b18b80b411ac0a9e0cb8da25bd9190b03e97da93c8166d485f6f0cad53f65f8",
+        "native_zone_definition_digest": "1b4334382a449a595d4bbe18fa779dceeadc2d0e8cf45649207e937004cf8bf0",
+        "zone_count": 14
+      },
+      "copper": {
+        "digest": "cd2aed0d624feb9c5e3f70fd65f97cbe8026591b687c23b48bf209d6871d599f",
+        "point_count": 73665,
+        "polygon_count": 31,
+        "zone_count": 14
+      }
+    },
+    "fixture": {
+      "directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-mcp-geometry-inspection-fixture",
+      "result": {
+        "production_stdio": true,
+        "zone_count": 3,
+        "outline_count": 4,
+        "source_unchanged": true,
+        "repeat_equal": true,
+        "saved_rule_drift_bound": true,
+        "independent_native_intent": true
+      },
+      "native": {
+        "pid": 20311,
+        "read_only": true,
+        "source": "/Users/w-mai/Projects/auto-kicad/scripts/fixtures/geometry-zones.kicad_pcb"
+      },
+      "cleanup": {
+        "closed": true,
+        "pid": 20311,
+        "source_unchanged": true
+      },
+      "independent": {
+        "opaque_graphics": 0,
+        "read_only": true,
+        "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156",
+        "zones": 3,
+        "outlines": 4,
+        "complete_editable_definitions": 2,
+        "locked_zones": 1
+      },
+      "geometry_revision": "sha256:91d40f5cc179690b141c8cd28c093a8b360ef81f604f53d8199bf1bd420b648e",
+      "pcb_revision": "sha256:aadd3328964867c1a54547b53552e17b62520ab0d3970c68f58007285c11b029",
+      "evidence_digest": "sha256:7add5ec798379211e1e6d3c18bf71a47e6d4871047ae99a3919bfd7c8feed1d4",
+      "definitions": {
+        "board_definition_digest": "94f6d0a3c16f6bb83c0d6000f1c0a73f8801cc8afe3b30abcd8fc1e5bfdc5e54",
+        "native_zone_definition_digest": "905f332c21c85ec72157484b2bf77e09869cd2c97b503fa8da613c27c68a8477",
+        "zone_count": 3
+      },
+      "copper": {
+        "digest": "1e422bf0aa90b811bcf4198c385afe6caec22592edc989c82ae52473d089a8d5",
+        "point_count": 0,
+        "polygon_count": 0,
+        "zone_count": 3
+      }
+    }
+  },
+  "quality": {
+    "passed": 446,
+    "failed": 0,
+    "ignored": 15,
+    "format": true,
+    "clippy_warnings_denied": true,
+    "capability_matrix": true
+  },
+  "scope": "Production stdio geometry inspection and complete non-segment snapshot evidence; excludes geometry mutation plans, approvals, recovery and final product acceptance.",
+  "rejected_entry": {
+    "directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-mcp-geometry-inspection-cm5",
+    "reason": "Legacy standard PCB observation rejected a non-segment graphic before geometry inspection.",
+    "cleanup": {
+      "closed": true,
+      "pid": 9967,
+      "source_unchanged": true
+    }
+  }
+}

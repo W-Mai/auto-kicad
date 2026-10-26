@@ -248,6 +248,19 @@ pub struct ObservedBoardGraphicSegment {
     pub segment: BoardGraphicSegment,
 }
 
+/// Explicit native records that cannot be represented as normalized straight segments.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ObservedOpaqueBoardGraphic {
+    pub graphic_id: String,
+    pub layer: BoardGraphicLayer,
+    pub persistent_payload: Vec<u8>,
+}
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ObservedBoardGraphics {
+    pub segments: Vec<ObservedBoardGraphicSegment>,
+    pub opaque: Vec<ObservedOpaqueBoardGraphic>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CreatedBoardGraphicReceipt {
     pub request_index: usize,
@@ -1910,6 +1923,28 @@ impl<T: KiCadTransport> KiCadClient<T> {
         board_filename: &str,
         layer: BoardGraphicLayer,
     ) -> Result<Vec<ObservedBoardGraphicSegment>, IpcError> {
+        let (response, token) = self.get_board_graphic_items(board_filename)?;
+        let graphics = board_graphics_from_response(&response, board_filename, layer)?;
+        self.token = Some(token);
+        Ok(graphics)
+    }
+
+    /// Read segments plus explicit complete opaque records; this grants no mutation support.
+    pub fn get_board_graphics_observation(
+        &mut self,
+        board_filename: &str,
+        layer: BoardGraphicLayer,
+    ) -> Result<ObservedBoardGraphics, IpcError> {
+        let (response, token) = self.get_board_graphic_items(board_filename)?;
+        let graphics = board_graphics_observation_from_response(&response, board_filename, layer)?;
+        self.token = Some(token);
+        Ok(graphics)
+    }
+
+    fn get_board_graphic_items(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<(editor_commands::GetItemsResponse, InstanceToken), IpcError> {
         let command = editor_commands::GetItems {
             header: MessageField::some(board_item_header(board_filename)),
             types: vec![protobuf::EnumOrUnknown::new(
@@ -1935,9 +1970,7 @@ impl<T: KiCadTransport> KiCadClient<T> {
         {
             self.bind_headerless_board_items(&mut response, &token, board_filename)?;
         }
-        let graphics = board_graphics_from_response(&response, board_filename, layer)?;
-        self.token = Some(token);
-        Ok(graphics)
+        Ok((response, token))
     }
 
     // KiCad 10 omits GetItemsResponse.header. Bind that omission to a fresh
@@ -4271,6 +4304,82 @@ fn routing_point(
         x_nm: point.x_nm,
         y_nm: point.y_nm,
     })
+}
+
+fn board_graphics_observation_from_response(
+    response: &editor_commands::GetItemsResponse,
+    filename: &str,
+    layer: BoardGraphicLayer,
+) -> Result<ObservedBoardGraphics, IpcError> {
+    if response.items.len() > 4096 || response.compute_size() > MAX_NATIVE_GEOMETRY_BYTES as u64 {
+        return Err(IpcError::InvalidObservedBoardGraphic(
+            "graphic observation exceeds bounds",
+        ));
+    }
+    let expected = match layer {
+        BoardGraphicLayer::DwgsUser => board_types::BoardLayer::BL_Dwgs_User,
+        BoardGraphicLayer::FSilkS => board_types::BoardLayer::BL_F_SilkS,
+        BoardGraphicLayer::EdgeCuts => board_types::BoardLayer::BL_Edge_Cuts,
+    };
+    let mut projected = response.clone();
+    projected.items.clear();
+    let mut opaque = Vec::new();
+    for item in &response.items {
+        if item.type_url != "type.googleapis.com/kiapi.board.types.BoardGraphicShape" {
+            return Err(IpcError::InvalidObservedBoardGraphic(
+                "unexpected graphic type",
+            ));
+        }
+        let mut shape = board_types::BoardGraphicShape::parse_from_bytes(&item.value)
+            .map_err(|_| IpcError::MalformedEnvelope)?;
+        if shape.layer.enum_value() != Ok(expected) {
+            continue;
+        }
+        let native = shape
+            .shape
+            .as_ref()
+            .ok_or(IpcError::InvalidObservedBoardGraphic(
+                "missing graphic shape",
+            ))?;
+        if matches!(
+            native.geometry,
+            Some(base_types::graphic_shape::Geometry::Segment(_))
+        ) {
+            projected.items.push(item.clone());
+        } else {
+            let id = shape
+                .id
+                .as_ref()
+                .map(|i| i.value.clone())
+                .filter(|i| !i.trim().is_empty() && i.len() <= 128 && !i.contains('\0'))
+                .ok_or(IpcError::InvalidObservedBoardGraphic(
+                    "opaque graphic identity missing or invalid",
+                ))?;
+            shape.parent = None.into();
+            opaque.push(ObservedOpaqueBoardGraphic {
+                graphic_id: id,
+                layer,
+                persistent_payload: shape
+                    .write_to_bytes()
+                    .map_err(|_| IpcError::MalformedEnvelope)?,
+            });
+        }
+    }
+    let segments = board_graphics_from_response(&projected, filename, layer)?;
+    let mut ids = std::collections::BTreeSet::new();
+    for id in segments
+        .iter()
+        .map(|s| &s.graphic_id)
+        .chain(opaque.iter().map(|s| &s.graphic_id))
+    {
+        if !ids.insert(id) {
+            return Err(IpcError::InvalidObservedBoardGraphic(
+                "graphic observation identities repeat",
+            ));
+        }
+    }
+    opaque.sort_by(|a, b| a.graphic_id.cmp(&b.graphic_id));
+    Ok(ObservedBoardGraphics { segments, opaque })
 }
 
 fn board_graphics_from_response(
@@ -6678,6 +6787,57 @@ mod tests {
                 .get_board_graphics("main.kicad_pcb")
                 .unwrap()
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn broad_graphics_observation_retains_opaque_payload_and_strict_write_boundary() {
+        let mut item = observed_segment_item(board_types::BoardLayer::BL_Dwgs_User);
+        let mut native = board_types::BoardGraphicShape::parse_from_bytes(&item.value).unwrap();
+        native.shape.as_mut().unwrap().geometry =
+            Some(base_types::graphic_shape::Geometry::Circle(
+                base_types::GraphicCircleAttributes::default(),
+            ));
+        native.parent = MessageField::some(base_types::KIID {
+            value: "transient".into(),
+            ..Default::default()
+        });
+        native
+            .special_fields
+            .mut_unknown_fields()
+            .add_varint(800, 42);
+        item.value = native.write_to_bytes().unwrap();
+        let response = get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![item.clone()],
+        );
+        let mut client = graphics_client(response.clone());
+        let observed = client
+            .get_board_graphics_observation("main.kicad_pcb", BoardGraphicLayer::DwgsUser)
+            .unwrap();
+        assert!(observed.segments.is_empty());
+        assert_eq!(observed.opaque.len(), 1);
+        let saved = board_types::BoardGraphicShape::parse_from_bytes(
+            &observed.opaque[0].persistent_payload,
+        )
+        .unwrap();
+        native.parent = None.into();
+        assert_eq!(saved, native);
+        assert!(
+            graphics_client(response)
+                .get_board_graphics("main.kicad_pcb")
+                .is_err()
+        );
+        let mut duplicate = graphics_client(get_items_response(
+            "token",
+            base_types::ItemRequestStatus::IRS_OK,
+            vec![item.clone(), item],
+        ));
+        assert!(
+            duplicate
+                .get_board_graphics_observation("main.kicad_pcb", BoardGraphicLayer::DwgsUser)
+                .is_err()
         );
     }
 

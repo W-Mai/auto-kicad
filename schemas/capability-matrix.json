@@ -1,7 +1,7 @@
 {
   "schema_version": "1",
   "product": "auto-kicad",
-  "source_revision": "3ccf8d0",
+  "source_revision": "b83438c",
   "supported_kicad_family": "10.x",
   "advertised_tools": {
     "always": [
@@ -334,6 +334,29 @@
         ],
         "command": "cargo run -p auto-kicad --example check-route-copy -- SOURCE.kicad_pcb SERVER NEW_OUTPUT_DIR STACKUP_PROBE ROUTE_PROFILE.json",
         "record": "docs/acceptance/populated-copper-route.md"
+      }
+    },
+    {
+      "id": "pcb.geometry.inspect",
+      "domain": "pcb",
+      "mode": "read",
+      "status": "verified",
+      "mcp_tools": [
+        "kicad_inspect_project"
+      ],
+      "constraints": [
+        "exact KiCad 10.0.7 and a stable open PCB",
+        "opt-in geometry selector; complete summary bounded to 2 MiB",
+        "unsupported shapes and zones retain identity and complete native evidence",
+        "read-only inspection does not approve native geometry mutations"
+      ],
+      "evidence": {
+        "fixture": "cm5-minima-and-locked-hatched-zones",
+        "tested_versions": [
+          "10.0.7"
+        ],
+        "command": "cargo run -p auto-kicad --example check-geometry-inspection -- SERVER SOURCE NEW_OUTPUT",
+        "record": "docs/acceptance/geometry-inspection.md"
       }
     }
   ]

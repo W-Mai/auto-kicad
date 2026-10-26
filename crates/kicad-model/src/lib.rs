@@ -2297,8 +2297,19 @@ impl DiscoverySnapshot {
     }
 }
 
+/// Complete persistent evidence for a native graphic outside the straight-segment model.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpaqueBoardGraphic {
+    pub source_uuid: StableId,
+    pub layer: BoardGraphicLayer,
+    pub native_digest: RevisionDigest,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ProjectSnapshot {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub opaque_graphics: Vec<OpaqueBoardGraphic>,
     pub project_id: StableId,
     pub kicad_version: String,
     pub capabilities: Vec<String>,
@@ -2403,6 +2414,9 @@ impl ProjectSnapshot {
                 graphic.graphic_id.clone(),
             )
         });
+        snapshot
+            .opaque_graphics
+            .sort_by(|a, b| a.source_uuid.cmp(&b.source_uuid));
         snapshot.native_footprints = snapshot
             .native_footprints
             .as_ref()
@@ -2419,6 +2433,31 @@ impl ProjectSnapshot {
     }
 
     pub fn validate(&self) -> Result<(), ModelError> {
+        if self.opaque_graphics.len() > 4096 {
+            return Err(ModelError::InvalidBoardGraphic(
+                "opaque graphics exceed observation bound",
+            ));
+        }
+        let mut graphic_ids = self
+            .board
+            .graphics
+            .iter()
+            .map(|g| &g.graphic_id)
+            .collect::<std::collections::BTreeSet<_>>();
+        for graphic in &self.opaque_graphics {
+            let id = graphic.source_uuid.as_str();
+            if self.board.document_id.is_none()
+                || id.trim().is_empty()
+                || id.len() > 128
+                || id.contains('\0')
+                || !graphic_ids.insert(&graphic.source_uuid)
+            {
+                return Err(ModelError::InvalidBoardGraphic(
+                    "opaque graphic identity is missing, duplicated or unbound",
+                ));
+            }
+        }
+
         if let Some(native_footprints) = &self.native_footprints {
             native_footprints.canonical().validate()?;
             if self.board.document_id.as_ref() != Some(&native_footprints.board_id) {
@@ -2628,8 +2667,34 @@ mod tests {
         assert!(definition.validate().is_err());
     }
 
+    #[test]
+    fn opaque_graphics_participate_in_revision_without_changing_legacy_encoding() {
+        let mut value = snapshot(vec![]);
+        value.board.document_id = Some(StableId::new("board").unwrap());
+        let encoded = serde_json::to_value(&value).unwrap();
+        assert!(encoded.get("opaque_graphics").is_none());
+        assert_eq!(
+            serde_json::from_value::<ProjectSnapshot>(encoded).unwrap(),
+            value
+        );
+        let before = value.revision().unwrap();
+        let opaque = OpaqueBoardGraphic {
+            source_uuid: StableId::new("arc").unwrap(),
+            layer: BoardGraphicLayer::EdgeCuts,
+            native_digest: RevisionDigest::new("1".repeat(64)).unwrap(),
+        };
+        value.opaque_graphics.push(opaque.clone());
+        assert_ne!(value.revision().unwrap(), before);
+        let first = value.revision().unwrap();
+        value.opaque_graphics[0].native_digest = RevisionDigest::new("2".repeat(64)).unwrap();
+        assert_ne!(value.revision().unwrap(), first);
+        value.opaque_graphics.push(opaque);
+        assert!(value.validate().is_err());
+    }
+
     fn snapshot(symbols: Vec<Symbol>) -> ProjectSnapshot {
         ProjectSnapshot {
+            opaque_graphics: Vec::new(),
             project_id: id("project"),
             kicad_version: "10.0.5".to_owned(),
             capabilities: vec!["board.read".to_owned(), "schematic.read".to_owned()],

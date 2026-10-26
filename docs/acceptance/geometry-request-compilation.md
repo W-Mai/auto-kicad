@@ -30,3 +30,5 @@ env CARGO_TARGET_DIR=/private/tmp/auto-kicad-m4-target CARGO_INCREMENTAL=0 CARGO
 The example's `${revision}`, `${net:NAME}` and `${created:ID}` placeholders bind fixture inputs to actual observations and creation receipts. They are acceptance-template syntax, not public API fields. The typed request digest serializes as 64 hexadecimal characters. Saved requests retain exact values for independent verification.
 
 This evidence covers typed compilation and zone-only native mutation/refill. General outline requests reuse the separately accepted outline compiler; mixed outline/zone execution is not established here. Public MCP geometry inspection, plan/preview/approval/recovery, teardrop regeneration, GUI cancellation and committed maximum combined acceptance are not implemented or accepted by this record. No complete milestone or product-delivery claim is made.
+
+[Production MCP geometry inspection](geometry-inspection.md) provides the observed zone identities, locks, definitions and geometry revision for authoring requests. Mutation planning and approval require separate acceptance.

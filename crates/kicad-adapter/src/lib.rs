@@ -1,5 +1,6 @@
 pub mod geometry;
 mod geometry_native;
+mod geometry_summary;
 pub mod refill_verification;
 pub mod zone_edits;
 use kicad_engine::{
@@ -1304,6 +1305,7 @@ pub fn live_board_observation(
         .into());
     }
     let snapshot = ProjectSnapshot {
+        opaque_graphics: Vec::new(),
         project_id,
         kicad_version: version.full_version,
         capabilities: vec![
@@ -3144,6 +3146,7 @@ mod tests {
         let (project, netlist) = schematic_fixture(false);
         let board_id = StableId::new("board").unwrap();
         let board = ProjectSnapshot {
+            opaque_graphics: Vec::new(),
             project_id: StableId::new("project").unwrap(),
             kicad_version: "10.0.6".into(),
             capabilities: vec![],
@@ -5589,6 +5592,7 @@ mod tests {
     fn bound_batch_preserves_graphics_only_execution_path() {
         let board_id = StableId::new("board").unwrap();
         let snapshot = ProjectSnapshot {
+            opaque_graphics: Vec::new(),
             project_id: StableId::new("project").unwrap(),
             kicad_version: "10.0.5".into(),
             capabilities: Vec::new(),
@@ -5641,6 +5645,7 @@ mod tests {
     fn bound_batch_rejects_partial_binding_before_begin_commit() {
         let board_id = StableId::new("board").unwrap();
         let snapshot = ProjectSnapshot {
+            opaque_graphics: Vec::new(),
             project_id: StableId::new("project").unwrap(),
             kicad_version: "10.0.5".into(),
             capabilities: Vec::new(),
@@ -5694,6 +5699,7 @@ mod tests {
             name: "GND".into(),
         };
         let snapshot = ProjectSnapshot {
+            opaque_graphics: Vec::new(),
             project_id: StableId::new("project").unwrap(),
             kicad_version: "10.0.5".into(),
             capabilities: Vec::new(),
@@ -5763,6 +5769,7 @@ mod tests {
     #[test]
     fn bound_batch_rejects_stale_revision_before_begin_commit() {
         let snapshot = ProjectSnapshot {
+            opaque_graphics: Vec::new(),
             project_id: StableId::new("project").unwrap(),
             kicad_version: "10.0.5".into(),
             capabilities: Vec::new(),
@@ -5808,6 +5815,7 @@ mod tests {
     fn bound_batch_rejects_unobserved_net_before_begin_commit() {
         let board_id = StableId::new("board-a").unwrap();
         let snapshot = ProjectSnapshot {
+            opaque_graphics: Vec::new(),
             project_id: StableId::new("project").unwrap(),
             kicad_version: "10.0.5".into(),
             capabilities: Vec::new(),
