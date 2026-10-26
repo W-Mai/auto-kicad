@@ -1,5 +1,6 @@
 //! Complete live board text and independently observed zone locks.
 mod filled_copper;
+mod geometry_identity;
 pub use filled_copper::FilledCopperEvidence;
 use kicad_ipc::{
     DocumentQuery, KiCadClient, KiCadTransport, MAX_NATIVE_GEOMETRY_BYTES, NativeBoardGeometry,

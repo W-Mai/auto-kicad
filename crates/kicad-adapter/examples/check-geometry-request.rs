@@ -1,6 +1,7 @@
 //! Exercise JSON geometry requests, native definition edits and independent refill in one editor.
 use kicad_adapter::{
     geometry::{GeometryObservation, observe_context},
+    geometry_candidate::GeometryCandidateEvidence,
     lifecycle::{DisposablePcbLifecycle, OwnedPcbnewLauncher},
     live_geometry::{RefillDefinitionEvidence, observe_live_geometry},
     refill_verification::VerifiedRefillContent,
@@ -102,9 +103,52 @@ fn drc(board: &Path, policy: &DrcPolicy) -> Result<kicad_checks::DrcReport, Erro
 }
 fn main() -> Result<(), Error> {
     let args = env::args().skip(1).collect::<Vec<_>>();
-    if args.len() != 3 {
-        return Err("usage: check-geometry-request SOURCE SCENARIOS_JSON NEW_OUTPUT".into());
+    if args.len() == 3 {
+        run(&args)?;
+        return Ok(());
     }
+    if args.len() != 4 || args[3] != "--compare-candidates" {
+        return Err(
+            "usage: check-geometry-request SOURCE SCENARIOS_JSON NEW_OUTPUT [--compare-candidates]"
+                .into(),
+        );
+    }
+    let scenarios: Vec<Value> = serde_json::from_slice(&fs::read(&args[1])?)?;
+    if scenarios.len() != 1 {
+        return Err(
+            "candidate pair requires exactly one request on the same original board".into(),
+        );
+    }
+    let root = PathBuf::from(&args[2]);
+    fs::create_dir(&root)?;
+    let execute = |name: &str| {
+        run(&[
+            args[0].clone(),
+            args[1].clone(),
+            root.join(name).to_string_lossy().into_owned(),
+        ])
+    };
+    let preview = execute("preview")?;
+    let source = execute("source")?;
+    let map = preview[0].equivalent_to(&source[0])?;
+    let expected_creations = scenarios[0]["zones"]
+        .as_array()
+        .is_some_and(|z| z.iter().any(|z| z["kind"] == "create"))
+        || scenarios[0].get("outline").is_some_and(|o| !o.is_null());
+    if (expected_creations && map.is_empty()) || map.iter().any(|(a, b)| a == b) {
+        return Err("acceptance requires independently assigned creation UUIDs".into());
+    }
+    fs::write(
+        root.join("candidate-comparison.json"),
+        serde_json::to_vec_pretty(&json!({
+            "preview":preview[0],"source":source[0],"native_creation_correspondence":map,
+            "complete_content_matches":true,"independent_creation_uuids":!map.is_empty()
+        }))?,
+    )?;
+    Ok(())
+}
+
+fn run(args: &[String]) -> Result<Vec<GeometryCandidateEvidence>, Error> {
     let source = fs::canonicalize(&args[0])?;
     let output = PathBuf::from(&args[2]);
     fs::create_dir(&output)?;
@@ -130,7 +174,7 @@ fn main() -> Result<(), Error> {
         return Err("fixture preparation failed".into());
     }
     let identity = editor.launch(&copy)?;
-    let result: Result<(), Error> = (|| {
+    let result: Result<Vec<GeometryCandidateEvidence>, Error> = (|| {
         let mut config = ClientConfig::new(&identity.endpoint, "owned-json-geometry-acceptance")?;
         config.timeout = Duration::from_secs(60);
         let mut client = KiCadClient::new(NngTransport::connect(config.clone())?, config);
@@ -150,7 +194,7 @@ fn main() -> Result<(), Error> {
         }
         client.save_board(&identity.board_filename)?;
         editor.reload_owned()?;
-        let board_id = StableId::new("json-geometry-acceptance")?;
+        let board_id = StableId::new(format!("json-geometry:{}", copy.board_path().display()))?;
         let baseline = observe_context(&mut client, &identity.board_filename, &board_id)?;
         let policy = DrcPolicy {
             allowed_root: copy.board_path().parent().ok_or("missing parent")?.into(),
@@ -164,6 +208,7 @@ fn main() -> Result<(), Error> {
         fs::copy(copy.board_path(), output.join("baseline.kicad_pcb"))?;
         let mut created = BTreeMap::new();
         let mut records = Vec::new();
+        let mut candidates = Vec::new();
         for (index, mut value) in stages.into_iter().enumerate() {
             let observed = observe_context(&mut client, &identity.board_filename, &board_id)?;
             bind(&mut value, &observed, &created)?;
@@ -241,6 +286,49 @@ fn main() -> Result<(), Error> {
             let independent = refill_closed_copy(copy.board_path(), &policy)
                 .map_err(|e| format!("independent fill: {e:?}"))?;
             let verified = VerifiedRefillContent::verify(&before_fill, &reloaded, &independent)?;
+            let candidate = GeometryCandidateEvidence::capture(
+                &prepared,
+                &receipts,
+                &before_fill,
+                &reloaded,
+                &independent,
+            )?;
+            let mut tampered = reloaded.clone();
+            let mut text = tampered.text.raw_text().to_owned();
+            text.insert_str(
+                text.rfind(')').ok_or("missing board close")?,
+                " (candidate_unrequested 1)",
+            );
+            tampered.text = kicad_adapter::live_geometry::LiveBoardText::parse(&text)?;
+            if GeometryCandidateEvidence::capture(
+                &prepared,
+                &receipts,
+                &before_fill,
+                &tampered,
+                &independent,
+            )
+            .is_ok()
+            {
+                return Err("candidate accepted unrequested board field".into());
+            }
+            if let Some(outline) = &request.outline {
+                let mut wrong = request.clone();
+                wrong.outline.as_mut().ok_or("outline missing")?.loops[0].width_nm =
+                    outline.loops[0].width_nm + 1;
+                let wrong = observed.prepare(&wrong)?;
+                if GeometryCandidateEvidence::capture(
+                    &wrong,
+                    &receipts,
+                    &before_fill,
+                    &reloaded,
+                    &independent,
+                )
+                .is_ok()
+                {
+                    return Err("candidate accepted receipts from another intent".into());
+                }
+            }
+            candidates.push(candidate.clone());
             let removed = prepared
                 .compiled()
                 .outline()
@@ -308,7 +396,7 @@ fn main() -> Result<(), Error> {
             for (intent, receipt) in intents.zip(&receipts.zones().created) {
                 created.insert(intent.to_string(), receipt.source_uuid().to_owned());
             }
-            let record = json!({"stage":index,"native_creation_ids":created,"outline_creation_ids":added,"native_topology":topology,"mixed_cancellation_verified":index==0 && request.outline.is_some(),"refill_zone_ids":prepared.compiled().refill_zone_ids(),"affected_nets":prepared.compiled().affected_nets(),"verified":verified,"drc_delta":delta,"unconnected":after_drc.unconnected_items,"pad_count":pads.len(),"pad_clusters_preserved":true,"stale_request_refused":true});
+            let record = json!({"stage":index,"candidate":candidate,"candidate_unknown_field_refused":true,"native_creation_ids":created,"outline_creation_ids":added,"native_topology":topology,"mixed_cancellation_verified":index==0 && request.outline.is_some(),"refill_zone_ids":prepared.compiled().refill_zone_ids(),"affected_nets":prepared.compiled().affected_nets(),"verified":verified,"drc_delta":delta,"unconnected":after_drc.unconnected_items,"pad_count":pads.len(),"pad_clusters_preserved":true,"stale_request_refused":true});
             fs::copy(
                 copy.board_path(),
                 output.join(format!("stage-{index}.kicad_pcb")),
@@ -331,7 +419,7 @@ fn main() -> Result<(), Error> {
                 &json!({"kicad_version":"10.0.7","pid":identity.pid,"stages":records,"restored_baseline":restored,"complete_intent_definitions_and_copper":true,"scope":"typed JSON compilation and combined native geometry execution; MCP approval/recovery is separate"}),
             )?,
         )?;
-        Ok(())
+        Ok(candidates)
     })();
     editor.close_owned(identity.pid)?;
     editor.cleanup()?;

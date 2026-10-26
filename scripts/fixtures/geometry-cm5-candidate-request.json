@@ -1,0 +1,16 @@
+[
+  {
+    "observed_revision": "${revision}",
+    "outline": null,
+    "zones": [
+      {
+        "kind": "update",
+        "source_uuid": "2a1e1815-500f-4664-a2ef-ed3623186aa5",
+        "patch": {
+          "clearance_nm": 160000
+        }
+      }
+    ],
+    "refill": "all"
+  }
+]

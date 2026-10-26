@@ -166,6 +166,9 @@ pub fn observe_context<T: KiCadTransport>(
 }
 
 impl PreparedGeometryChange {
+    pub(crate) fn before(&self) -> &LiveGeometryEvidence {
+        &self.observation.live
+    }
     pub fn compiled(&self) -> &CompiledGeometryChange {
         &self.compiled
     }

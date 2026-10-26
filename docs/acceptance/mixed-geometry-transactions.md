@@ -28,3 +28,5 @@ env CARGO_TARGET_DIR=/private/tmp/auto-kicad-m4-target CARGO_INCREMENTAL=0 CARGO
 `${outline_ids}` is an acceptance-template placeholder for actual observed outline identities. The saved request files contain exact UUID arrays. Request binding and creation identity placeholders remain confined to the runner.
 
 This record establishes combined backend definition execution. Geometry mutation through MCP, preview approval and source reconciliation, durable uncertain-state recovery, GUI fill cancellation, derived teardrop regeneration, zoned additive routing and committed maximum combined batches require separate acceptance. The cancelled definition transaction is not evidence of GUI fill cancellation. CM5 is a zone-only regression here; populated mixed MCP acceptance is not claimed.
+
+[Geometry candidate correspondence](geometry-candidate-correspondence.md) compares complete baseline and resulting definitions and copper across independently assigned creation UUIDs.

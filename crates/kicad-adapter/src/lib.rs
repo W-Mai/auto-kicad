@@ -1,4 +1,5 @@
 pub mod geometry;
+pub mod geometry_candidate;
 mod geometry_native;
 mod geometry_summary;
 pub mod refill_verification;

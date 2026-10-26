@@ -1,0 +1,34 @@
+# Geometry candidate correspondence
+
+`GeometryCandidateEvidence` compares complete results from separate native executions of the same geometry request. Construction verifies the prepared definition receipts and complete live/saved/independently refilled copper. Evidence includes canonical authored intent, complete baseline and resulting native definitions, complete board definition trees, full filled copper and actual creation identities. Its fields are private and the type has no deserializer; callers cannot construct a trusted result from arbitrary JSON.
+
+New zone identities come from requested zone IDs and validated native creation receipts. New outline identities come from compiled edge IDs and their receipts. Comparison maps only these explicitly created direct board objects. Every original UUID, unknown definition field, unrelated board field, nested footprint field, net name and authored parameter remains significant. Canonicalization sorts direct zone/shape records by canonical identity, removes only transient native parents and previously verified derived-fill representations, and uses the complete copper comparison's exact polygon-order normalization. Strings that happen to contain a created UUID are not rewritten. Missing, duplicate, colliding or wrong-kind correspondence rejects.
+
+The canonical intent excludes the editor-specific observation revision and rebinds board-scoped net IDs by their already validated names. All other requested values remain exact, including removed source UUIDs and creation IDs. Complete baseline and result content must agree before `equivalent_to` returns the actual preview-UUID to source-UUID map. Content equality does not independently grant topology, connectivity, DRC or source approval.
+
+## Actual acceptance
+
+Two sequential owned KiCad 10.0.7 editors executed the same mixed request on separate copies of the connected fixture. Each created a concave two-hole multilayer zone and replaced the rectangular boundary with 4 native primitives, including 2 arcs. All 5 creation UUIDs differed between executions. Canonical intent, complete original content and complete final content matched; the comparison returned 5 exact UUID pairs. Both runs passed cancellation, native saved topology, definition preservation, complete independent copper comparison, unchanged pad partitions and zero introduced DRC. The fixture retains 5 baseline warnings and 2 unconnected items. Independent native Python readers compared every requested saved zone field and outline coordinate.
+
+Two CM5 Minima copies of one GUI-saved baseline separately applied the same existing-zone clearance update. No object identity was remapped. Complete baseline and resulting definitions and copper matched across executions. Both retained 633 pad identities and connection partitions, all 14 zones, 31 filled polygons and 90,184 points, with 171 unchanged DRC items and zero unconnected items. An independent native reader checked both saved requests. All original source and protected project files remained unchanged; every owned editor closed.
+
+Negative controls applied to actual live-result evidence rejected an unrequested whole-board field and, on mixed requests, receipts from a different authored outline intent. Architecture tests cover original UUID and unknown-field significance, nested fields, exact copper coordinates, missing/duplicate/colliding mappings, baseline/result/intent differences and board-scoped net rebinding. Full quality passed 450 tests with 15 environment-dependent tests ignored, formatting, warnings-denied Clippy and the capability matrix. See [compact evidence](geometry-candidate-correspondence.json).
+
+The original distributed CM5 demo contains 4 repeated pad identities with 8 extra occurrences. Separate GUI loads repair them differently; the initial candidate pair correctly rejected mismatched original identities. A closed Python load/save did not repair these IDs. Acceptance reuses an already GUI-saved pre-edit baseline with 633 unique pad IDs and its original library context. This preparation does not change the distributed demo or permit production source repair. The repeated dimension/text UUID is a separate native representation and remains unchanged.
+
+## Reproduction
+
+Run from the repository with KiCad 10.0.7 on macOS and new output directories. Each pair runs its editors sequentially and closes each before opening the next.
+
+```sh
+env CARGO_TARGET_DIR=/private/tmp/auto-kicad-m4-target CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 cargo run -p kicad-adapter --example check-geometry-request -- scripts/fixtures/geometry-zones.kicad_pcb scripts/fixtures/geometry-candidate-request.json /absolute/new-pair-output --compare-candidates
+env CARGO_TARGET_DIR=/private/tmp/auto-kicad-m4-target CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 cargo run -p kicad-adapter --example check-geometry-request -- '/Library/Application Support/kicad/demos/cm5_minima/CM5_MINIMA_3.kicad_pcb' scripts/fixtures/geometry-cm5-requests.json /absolute/new-cm5-baseline-output
+/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3.9 scripts/prepare-geometry-candidate.py '/Library/Application Support/kicad/demos/cm5_minima/CM5_MINIMA_3.kicad_pcb' /absolute/new-cm5-baseline-output/baseline.kicad_pcb /absolute/new-cm5-baseline-output/result.kicad_pro /absolute/new-cm5-input
+env CARGO_TARGET_DIR=/private/tmp/auto-kicad-m4-target CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 cargo run -p kicad-adapter --example check-geometry-request -- /absolute/new-cm5-input/CM5_MINIMA_3.kicad_pcb scripts/fixtures/geometry-cm5-candidate-request.json /absolute/new-cm5-pair-output --compare-candidates
+/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3.9 scripts/check-geometry-request.py /absolute/new-pair-output/preview
+/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3.9 scripts/check-geometry-request.py /absolute/new-pair-output/source
+```
+
+Run the same independent reader on the CM5 pair's `preview` and `source` directories. `candidate-comparison.json` retains both complete evidence values and their actual UUID correspondence. Each subdirectory retains the original bound request, native saved result, independent field check, DRC and cleanup records.
+
+This is backend candidate comparison. The pair runner does not invoke MCP or grant production approval. MCP geometry authoring, preview/source reconciliation, durable uncertainty recovery, GUI fill cancellation, teardrop correspondence, zoned routing and committed maximum/populated MCP acceptance remain separate requirements. Generated teardrop identities are not treated as explicitly created zone identities and remain subject to strict preservation rejection.
