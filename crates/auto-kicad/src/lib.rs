@@ -4,6 +4,7 @@ mod existing_footprint;
 mod existing_item_edit;
 mod footprint_authoring;
 mod geometry;
+pub use geometry::{GeometryExecution, GeometryPlanningEvidence};
 mod library_settings;
 pub mod recovery;
 pub mod routing_rules;
@@ -100,6 +101,15 @@ pub struct Capability {
 }
 
 pub trait DiscoveryService: Send + Sync {
+    fn geometry_planning(
+        &self,
+        _endpoint: &str,
+        _source: &LiveBoardObservation,
+        _request: &kicad_model::geometry::GeometryRequest,
+    ) -> Result<geometry::GeometryPlanningEvidence, String> {
+        Err("complete geometry planning evidence unavailable".into())
+    }
+
     fn geometry_inspection(
         &self,
         _endpoint: &str,
@@ -188,6 +198,15 @@ pub trait DiscoveryService: Send + Sync {
 pub struct IpcDiscoveryService;
 
 impl DiscoveryService for IpcDiscoveryService {
+    fn geometry_planning(
+        &self,
+        endpoint: &str,
+        source: &LiveBoardObservation,
+        request: &kicad_model::geometry::GeometryRequest,
+    ) -> Result<geometry::GeometryPlanningEvidence, String> {
+        geometry::prepare(endpoint, source, request)
+    }
+
     fn geometry_inspection(
         &self,
         endpoint: &str,
@@ -521,6 +540,7 @@ pub struct ShadowValidationOutcome {
     pub delta: Option<BaselineDelta>,
     pub source_unchanged: bool,
     pub shadow_cleaned: bool,
+    pub geometry: Option<geometry::GeometryExecution>,
     pub prepared_footprints: Vec<kicad_adapter::footprint::SourceFootprintTemplate>,
     pub reason: Option<String>,
 }
@@ -538,6 +558,7 @@ impl ShadowValidationOutcome {
             delta: None,
             source_unchanged: true,
             shadow_cleaned: false,
+            geometry: None,
             prepared_footprints: Vec::new(),
             reason: Some(reason.into()),
         }
@@ -555,6 +576,7 @@ impl ShadowValidationOutcome {
             delta: None,
             source_unchanged: true,
             shadow_cleaned: false,
+            geometry: None,
             prepared_footprints: Vec::new(),
             reason: Some(reason.into()),
         }
@@ -562,6 +584,10 @@ impl ShadowValidationOutcome {
 }
 
 fn validate_shadow_operation_kinds(operations: &[Operation]) -> Result<(), String> {
+    if geometry::contains(operations) {
+        return geometry::request(operations).map(|_| ());
+    }
+
     if operations.is_empty() {
         return Err("shadow operation batch is empty".into());
     }
@@ -1283,6 +1309,8 @@ fn cleanup_shadow(
     outcome
 }
 
+static PREVIEW_EDITOR: Mutex<()> = Mutex::new(());
+
 pub fn validate_disposable_shadow(
     server_root: &std::path::Path,
     source_board: &std::path::Path,
@@ -1312,7 +1340,6 @@ fn validate_disposable_shadow_bound(
     library_settings: &library_settings::SharedLibrarySettings,
     routing_rules: Option<&kicad_adapter::routing_rules::RoutingRuleEvidence>,
 ) -> ShadowValidationOutcome {
-    static PREVIEW_EDITOR: Mutex<()> = Mutex::new(());
     let Ok(_preview_guard) = PREVIEW_EDITOR.try_lock() else {
         return ShadowValidationOutcome::rejected(
             "preview editor is busy; retry after the active preview finishes",
@@ -1670,6 +1697,7 @@ fn validate_disposable_shadow_bound(
                 delta: None,
                 source_unchanged: true,
                 shadow_cleaned: false,
+                geometry: None,
                 prepared_footprints: Vec::new(),
                 reason: Some(
                     "reopened shadow normalized snapshot does not match expected snapshot".into(),
@@ -1718,6 +1746,7 @@ fn validate_disposable_shadow_bound(
         normalized_snapshot_matches,
         source_unchanged: true,
         shadow_cleaned: false,
+        geometry: None,
         prepared_footprints,
         reason: (introduced != 0 || disconnected)
             .then(|| format!("shadow DRC introduced {introduced} violation(s); connectivity regressed: {disconnected}")),
@@ -1830,6 +1859,7 @@ fn observe_documents<T: kicad_ipc::KiCadTransport>(
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 pub struct PlanBoardGraphicsRequest {
+    pub geometry: Option<kicad_model::geometry::GeometryRequest>,
     pub endpoint: String,
     pub source_run_id: String,
     pub segments: Option<Value>,
@@ -2360,6 +2390,9 @@ fn expected_board_effect(kind: &OperationKind) -> &'static str {
         OperationKind::PlaceConnectedFootprints { .. } => {
             "place source-bound footprints and connect their pads atomically"
         }
+        OperationKind::EditGeometry { .. } => {
+            "edit explicit outline and zone definitions with verified copper"
+        }
         OperationKind::AddCopperRoute { .. } => "add explicit copper route",
         OperationKind::AddStraightTrack { .. } => "add straight copper track",
         OperationKind::AddThroughVia { .. } => "add through via",
@@ -2400,6 +2433,7 @@ fn validation_evidence_hash(
         "plan_hash": plan_hash,
         "source_files": source_files,
         "footprint_templates": footprint_template_evidence(outcome),
+        "geometry": outcome.geometry,
         "shadow_validation": {
             "state": shadow_validation_state(&outcome.state),
             "fresh_revision": outcome.fresh_revision,
@@ -2587,6 +2621,7 @@ struct StoredChangeSession {
     project_dir: std::path::PathBuf,
     source_files: ShadowSourceFingerprint,
     routing_evidence: Option<copper_route::RouteEvidence>,
+    geometry_evidence: Option<geometry::GeometryPlanningEvidence>,
     execution_state: StoredExecutionState,
     shadow_validation: Option<ShadowValidationOutcome>,
     validation_evidence_hash: Option<String>,
@@ -2673,6 +2708,16 @@ impl ShadowValidationService for IpcShadowValidationService {
         if let Err(reason) = validate_shadow_operation_kinds(operations) {
             return ShadowValidationOutcome::rejected(reason);
         }
+        if geometry::contains(operations) {
+            return geometry::preview(
+                &self.server_root,
+                &self.library_settings,
+                endpoint,
+                source,
+                operations,
+                timeout,
+            );
+        }
         for operation in operations {
             for placement in operation.kind.footprint_placements() {
                 if let Err(reason) = footprint_authoring::verify_sources(
@@ -2755,6 +2800,7 @@ impl ShadowValidationService for IpcShadowValidationService {
 fn shadow_validation_data(outcome: &ShadowValidationOutcome) -> Value {
     json!({
         "footprint_templates": footprint_template_evidence(outcome),
+        "geometry": outcome.geometry,
         "state": match outcome.state {
             ShadowValidationState::Committed => "committed",
             ShadowValidationState::Rejected => "rejected",
@@ -2774,6 +2820,19 @@ fn shadow_validation_data(outcome: &ShadowValidationOutcome) -> Value {
 }
 
 pub trait BoardGraphicsExecutionService: Send + Sync {
+    fn execute_geometry(
+        &self,
+        _endpoint: &str,
+        _source: &LiveBoardObservation,
+        _request: &kicad_model::geometry::GeometryRequest,
+        _expected: &geometry::GeometryPlanningEvidence,
+        _approved: &geometry::GeometryExecution,
+    ) -> Result<geometry::GeometryExecution, BoardGraphicsCommitOutcome> {
+        Err(BoardGraphicsCommitOutcome::Rejected {
+            reason: "native geometry execution unavailable".into(),
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn execute(
         &self,
@@ -2823,6 +2882,24 @@ impl Default for IpcBoardGraphicsExecutionService {
 }
 
 impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
+    fn execute_geometry(
+        &self,
+        endpoint: &str,
+        source: &LiveBoardObservation,
+        request: &kicad_model::geometry::GeometryRequest,
+        expected: &geometry::GeometryPlanningEvidence,
+        approved: &geometry::GeometryExecution,
+    ) -> Result<geometry::GeometryExecution, BoardGraphicsCommitOutcome> {
+        geometry::execute(
+            endpoint,
+            source,
+            request,
+            expected,
+            Some(approved),
+            Duration::from_secs(60),
+        )
+    }
+
     fn execute(
         &self,
         endpoint: &str,
@@ -3255,9 +3332,10 @@ const RECOVERY_TOOLS: [&str; 3] = [
 ];
 
 impl Server {
-    fn invalidate_route_approval(&self, plan_id: &str) {
+    fn invalidate_native_approval(&self, plan_id: &str) {
         if let Some(stored) = self.sessions.lock().expect("session lock").get_mut(plan_id)
-            && copper_route::contains_route(&stored.session.plan.operations)
+            && (copper_route::contains_route(&stored.session.plan.operations)
+                || geometry::contains(&stored.session.plan.operations))
         {
             stored.approval_hash = None;
             stored.validation_evidence_hash = None;
@@ -3266,11 +3344,29 @@ impl Server {
         }
     }
 
-    fn verify_route_source(
+    fn verify_native_source(
         &self,
         stored: &StoredChangeSession,
         source: &LiveBoardObservation,
     ) -> Result<(), String> {
+        if geometry::contains(&stored.session.plan.operations) {
+            if source.snapshot != stored.session.snapshot
+                || source.instance_token.as_str() != stored.session.plan.instance_token
+                || source.board_path != stored.board_path
+                || source.project_dir != stored.project_dir
+            {
+                return Err("geometry source identity changed since planning".into());
+            }
+            let request = geometry::request(&stored.session.plan.operations)?;
+            let current = self
+                .discovery
+                .geometry_planning(&stored.endpoint, source, request)?;
+            geometry::matches(&stored.session.plan.operations, &current)?;
+            if stored.geometry_evidence.as_ref() != Some(&current) {
+                return Err("stored geometry evidence changed".into());
+            }
+            return Ok(());
+        }
         if !copper_route::contains_route(&stored.session.plan.operations) {
             return Ok(());
         }
@@ -3304,6 +3400,13 @@ impl Server {
         }
         self.capabilities
             .retain(|c| c.id != "project.guarded_recovery");
+        self.capabilities.retain(|c| c.id != "pcb.geometry.write");
+        self.capabilities.push(Capability {
+            id: "pcb.geometry.write",
+            domain: "pcb",
+            mode: "write",
+            status: "verified",
+        });
         self.capabilities.push(Capability {
             id: "project.guarded_recovery",
             domain: "project",
@@ -3470,6 +3573,12 @@ impl Server {
                     domain: "pcb",
                     mode: "read",
                     status: "verified",
+                },
+                Capability {
+                    id: "pcb.geometry.write",
+                    domain: "pcb",
+                    mode: "write",
+                    status: "unavailable",
                 },
                 Capability {
                     id: "pcb.geometry.inspect",
@@ -4084,7 +4193,7 @@ impl Server {
 
     #[tool(
         name = "kicad_plan_change",
-        description = "Plan bounded PCB graphics, pad-bound routing, existing item fields, footprint transforms or source-bound placements without mutating KiCad."
+        description = "Plan bounded PCB geometry, graphics, pad-bound routing, existing item fields, footprint transforms or source-bound placements without mutating KiCad."
     )]
     pub async fn kicad_plan_change(
         &self,
@@ -4092,6 +4201,25 @@ impl Server {
     ) -> Result<CallToolResponse, ErrorData> {
         if arguments.endpoint.is_empty() {
             return Ok(self.rejected(arguments.request_id, "identity_is_required"));
+        }
+        if arguments.geometry.is_some()
+            && (arguments.delete_items.is_some()
+                || arguments.flip_footprint.is_some()
+                || arguments.edit_existing.is_some()
+                || arguments.move_footprint.is_some()
+                || arguments.assembly.is_some()
+                || arguments.footprint.is_some()
+                || arguments.batch.is_some()
+                || arguments.segments.is_some()
+                || arguments.outline.is_some()
+                || arguments.track.is_some()
+                || arguments.via.is_some()
+                || arguments.route.is_some())
+        {
+            return Err(ErrorData::invalid_params(
+                "geometry requires its own plan",
+                None,
+            ));
         }
         if arguments.delete_items.is_some()
             && (arguments.flip_footprint.is_some()
@@ -4232,7 +4360,29 @@ impl Server {
             .document_id
             .clone()
             .ok_or_else(|| ErrorData::internal_error("board identity is unavailable", None))?;
-        let (mut kinds, is_batch) = if let Some(assembly) = assembly {
+        let geometry_evidence = arguments
+            .geometry
+            .as_ref()
+            .map(|request| {
+                self.discovery
+                    .geometry_planning(&arguments.endpoint, &observation, request)
+            })
+            .transpose()
+            .map_err(|e| ErrorData::invalid_params(e, None))?;
+        let (mut kinds, is_batch) = if let Some(request) = &arguments.geometry {
+            let evidence = geometry_evidence
+                .as_ref()
+                .expect("prepared geometry evidence");
+            (
+                vec![OperationKind::EditGeometry {
+                    board: board.clone(),
+                    request: request.clone(),
+                    context: evidence.context.clone(),
+                    source_evidence: evidence.source_evidence.clone(),
+                }],
+                false,
+            )
+        } else if let Some(assembly) = assembly {
             (
                 vec![OperationKind::PlaceConnectedFootprints {
                     board: board.clone(),
@@ -4539,7 +4689,10 @@ impl Server {
                         )
                         .collect(),
                 };
-                let risk_class = if matches!(kind, OperationKind::DeleteExistingItems { .. }) {
+                let risk_class = if matches!(
+                    kind,
+                    OperationKind::DeleteExistingItems { .. } | OperationKind::EditGeometry { .. }
+                ) {
                     RiskClass::High
                 } else {
                     RiskClass::Medium
@@ -4593,6 +4746,7 @@ impl Server {
             StoredChangeSession {
                 session,
                 routing_evidence: routing_evidence.clone(),
+                geometry_evidence: geometry_evidence.clone(),
                 endpoint: arguments.endpoint,
                 board_filename: observation.board_filename,
                 source_files: shadow_source_fingerprint(&observation.board_path),
@@ -4612,6 +4766,7 @@ impl Server {
                 "plan_hash": plan_hash,
                 "footprint_sources": footprint_sources,
                 "routing_evidence": routing_evidence,
+                "geometry_evidence": geometry_evidence,
                 "state": "planned"
             }),
         )
@@ -4635,17 +4790,29 @@ impl Server {
         if stored.session.plan_hash != arguments.plan_hash {
             return Err(ErrorData::invalid_params("plan hash mismatch", None));
         }
+        if stored.execution_state != StoredExecutionState::Ready
+            || stored.session.state != kicad_engine::SessionState::Planned
+        {
+            return Err(ErrorData::invalid_params(
+                "preview requires an unexecuted planned session",
+                None,
+            ));
+        }
         let engine = Engine::new(
             stored.session.snapshot.clone(),
             stored.session.plan.instance_token.clone(),
         );
-        let preview = engine
-            .preview_session(&mut stored.session)
-            .and_then(|preview| {
-                engine.validate(&mut stored.session)?;
-                Ok(preview)
-            })
-            .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+        let predicted = if geometry::contains(&stored.session.plan.operations) {
+            None
+        } else {
+            let preview = engine
+                .preview_session(&mut stored.session)
+                .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+            engine
+                .validate(&mut stored.session)
+                .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+            Some(preview)
+        };
         let shadow_validation = self.shadow_validation.as_ref().ok_or_else(|| {
             ErrorData::invalid_params("shadow validation is required before approval", None)
         })?;
@@ -4659,14 +4826,14 @@ impl Server {
             || source.project_dir != stored.project_dir
             || shadow_source_fingerprint(&stored.board_path) != stored.source_files
         {
-            self.invalidate_route_approval(&arguments.plan_id);
+            self.invalidate_native_approval(&arguments.plan_id);
             return Err(ErrorData::invalid_params(
                 "source changed since planning",
                 None,
             ));
         }
-        if let Err(reason) = self.verify_route_source(&stored, &source) {
-            self.invalidate_route_approval(&arguments.plan_id);
+        if let Err(reason) = self.verify_native_source(&stored, &source) {
+            self.invalidate_native_approval(&arguments.plan_id);
             return Err(ErrorData::invalid_params(reason, None));
         }
         let outcome = shadow_validation.validate(
@@ -4675,17 +4842,51 @@ impl Server {
             &stored.session.plan.operations,
             Duration::from_secs(30),
         );
-        if let Err(reason) = self.verify_route_source(&stored, &source) {
-            self.invalidate_route_approval(&arguments.plan_id);
+        if let Err(reason) = self.verify_native_source(&stored, &source) {
+            self.invalidate_native_approval(&arguments.plan_id);
             return Err(ErrorData::invalid_params(reason, None));
         }
         let shadow_ok = matches!(outcome.state, ShadowValidationState::Committed);
+        let preview = if geometry::contains(&stored.session.plan.operations) {
+            if shadow_ok {
+                let actual = outcome.geometry.as_ref().ok_or_else(|| {
+                    ErrorData::internal_error("missing verified geometry candidate", None)
+                })?;
+                let board = stored
+                    .session
+                    .snapshot
+                    .board
+                    .document_id
+                    .clone()
+                    .ok_or_else(|| ErrorData::internal_error("missing source board", None))?;
+                let after = actual
+                    .observation
+                    .snapshot
+                    .in_board_scope(stored.session.snapshot.project_id.clone(), board)
+                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+                Some(
+                    engine
+                        .preview_observed_session(&mut stored.session, after)
+                        .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?,
+                )
+            } else {
+                None
+            }
+        } else {
+            predicted
+        };
+        if geometry::contains(&stored.session.plan.operations) && preview.is_some() {
+            engine
+                .validate(&mut stored.session)
+                .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+        }
+
         stored.shadow_validation = Some(outcome.clone());
         if shadow_ok {
             let evidence_hash =
-                validation_evidence_hash(&preview.plan_hash, &outcome, &stored.source_files)
+                validation_evidence_hash(&stored.session.plan_hash, &outcome, &stored.source_files)
                     .map_err(|error| ErrorData::internal_error(error, None))?;
-            stored.approval_hash = Some(approval_hash(&preview.plan_hash, &evidence_hash));
+            stored.approval_hash = Some(approval_hash(&stored.session.plan_hash, &evidence_hash));
             stored.validation_evidence_hash = Some(evidence_hash);
         } else {
             stored.approval_hash = None;
@@ -4705,7 +4906,7 @@ impl Server {
                 None,
                 json!({
                     "plan_id": arguments.plan_id,
-                    "plan_hash": preview.plan_hash,
+                    "plan_hash": arguments.plan_hash,
                     "validation_evidence_hash": validation_evidence_hash,
                     "approval_hash": approval_hash,
                     "state": match outcome.state {
@@ -4717,6 +4918,7 @@ impl Server {
                 }),
             ));
         }
+        let preview = preview.expect("successful preview was verified");
         engine
             .request_approval(&mut stored.session)
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
@@ -4810,8 +5012,15 @@ impl Server {
             ));
         }
         let writer = self.acquire_project_writer(&stored.project_dir)?;
+        if geometry::contains(&stored.session.plan.operations) && writer.is_none() {
+            return Err(ErrorData::invalid_params(
+                "geometry commit requires a durable execution store",
+                None,
+            ));
+        }
+
         if shadow_source_fingerprint(&stored.board_path) != stored.source_files {
-            self.invalidate_route_approval(&arguments.plan_id);
+            self.invalidate_native_approval(&arguments.plan_id);
             return Err(ErrorData::invalid_params(
                 "source files changed since planning",
                 None,
@@ -4830,13 +5039,15 @@ impl Server {
                 None,
             ));
         }
-        if copper_route::contains_route(&stored.session.plan.operations) {
+        if copper_route::contains_route(&stored.session.plan.operations)
+            || geometry::contains(&stored.session.plan.operations)
+        {
             let current = self
                 .discovery
                 .live_board_observation(&stored.endpoint, None)
-                .and_then(|source| self.verify_route_source(&stored, &source));
+                .and_then(|source| self.verify_native_source(&stored, &source));
             if let Err(reason) = current {
-                self.invalidate_route_approval(&arguments.plan_id);
+                self.invalidate_native_approval(&arguments.plan_id);
                 return Err(ErrorData::invalid_params(reason, None));
             }
         }
@@ -4853,7 +5064,7 @@ impl Server {
             let rules = stored.board_path.with_extension("kicad_dru");
             if rules.exists() { sources.push(rules); }
             writer.begin("pcb", &arguments.plan_hash, &arguments.approval_hash,
-                json!({"plan": stored.session.plan, "validation_evidence_hash": stored.validation_evidence_hash, "source_files": stored.source_files, "routing_evidence": stored.routing_evidence}), &sources)
+                json!({"plan": stored.session.plan, "validation_evidence_hash": stored.validation_evidence_hash, "source_files": stored.source_files, "routing_evidence": stored.routing_evidence, "geometry_evidence":stored.geometry_evidence, "geometry_candidate":stored.shadow_validation.as_ref().and_then(|s|s.geometry.as_ref())}), &sources)
         }).transpose().map_err(|e| ErrorData::internal_error(format!("execution record unavailable: {e}"), None))?;
 
         let mut sessions = self.sessions.lock().expect("session lock");
@@ -4869,27 +5080,70 @@ impl Server {
         current.execution_state = StoredExecutionState::InFlight;
         drop(sessions);
 
-        let outcome = self.execution.execute_prepared(
-            &stored.endpoint,
-            &stored.board_filename,
-            &stored.board_path,
-            &stored.project_dir,
-            &stored.session.plan.instance_token,
-            &stored.session.plan.base_revision,
-            &stored.session.plan.operations,
-            &stored
-                .shadow_validation
-                .as_ref()
-                .expect("shadow validated above")
-                .prepared_footprints,
-        );
+        let mut geometry_result = None;
+        let outcome = if geometry::contains(&stored.session.plan.operations) {
+            let result = (|| {
+                let reject = |reason: String| BoardGraphicsCommitOutcome::Rejected { reason };
+                let source = self
+                    .discovery
+                    .live_board_observation(&stored.endpoint, None)
+                    .map_err(reject)?;
+                self.verify_native_source(&stored, &source)
+                    .map_err(reject)?;
+                let request = geometry::request(&stored.session.plan.operations).map_err(reject)?;
+                let evidence = stored
+                    .geometry_evidence
+                    .as_ref()
+                    .ok_or_else(|| reject("missing geometry evidence".into()))?;
+                let approved = stored
+                    .shadow_validation
+                    .as_ref()
+                    .and_then(|s| s.geometry.as_ref())
+                    .ok_or_else(|| reject("missing approved geometry".into()))?;
+                self.execution.execute_geometry(
+                    &stored.endpoint,
+                    &source,
+                    request,
+                    evidence,
+                    approved,
+                )
+            })();
+            match result {
+                Ok(result) => {
+                    geometry_result = Some(result);
+                    BoardGraphicsCommitOutcome::CommittedAndSaved
+                }
+                Err(outcome) => outcome,
+            }
+        } else {
+            self.execution.execute_prepared(
+                &stored.endpoint,
+                &stored.board_filename,
+                &stored.board_path,
+                &stored.project_dir,
+                &stored.session.plan.instance_token,
+                &stored.session.plan.base_revision,
+                &stored.session.plan.operations,
+                &stored
+                    .shadow_validation
+                    .as_ref()
+                    .expect("shadow validated above")
+                    .prepared_footprints,
+            )
+        };
         let (ok, state, outcome_data) = match &outcome {
             BoardGraphicsCommitOutcome::CommittedAndSaved => {
                 let mut commit_engine = Engine::new(
                     stored.session.snapshot.clone(),
                     stored.session.plan.instance_token.clone(),
                 );
-                if let Err(error) = commit_engine.commit(&mut stored.session) {
+                let committed = if let Some(result) = &geometry_result {
+                    commit_engine
+                        .commit_observed(&mut stored.session, result.observation.snapshot.clone())
+                } else {
+                    commit_engine.commit(&mut stored.session)
+                };
+                if let Err(error) = committed {
                     stored.execution_state = StoredExecutionState::Unknown;
                     self.sessions
                         .lock()
@@ -4898,7 +5152,11 @@ impl Server {
                     return Err(ErrorData::internal_error(error.to_string(), None));
                 }
                 stored.execution_state = StoredExecutionState::Committed;
-                (true, "committed", json!({"kind": "committed_and_saved"}))
+                (
+                    true,
+                    "committed",
+                    json!({"kind": "committed_and_saved", "geometry":geometry_result}),
+                )
             }
             BoardGraphicsCommitOutcome::CommittedButNotSaved { reason } => {
                 stored.execution_state = StoredExecutionState::Unknown;
@@ -4916,6 +5174,7 @@ impl Server {
                     .operations
                     .iter()
                     .any(|op| !op.kind.footprint_placements().is_empty())
+                    || geometry::contains(&stored.session.plan.operations)
                 {
                     stored.approval_hash = None;
                     stored.validation_evidence_hash = None;
@@ -7530,6 +7789,7 @@ mod tests {
 
     fn plan_request(_snapshot: ProjectSnapshot, request_id: &str) -> PlanBoardGraphicsRequest {
         PlanBoardGraphicsRequest {
+            geometry: None,
             route: None,
             endpoint: "ipc:///tmp/kicad/api.sock".into(),
             source_run_id: "run".into(),
@@ -8128,6 +8388,31 @@ mod tests {
                 .find(|entry| entry["id"] == "pcb.edit_existing")
                 .unwrap()["status"],
             "verified"
+        );
+    }
+
+    #[test]
+    fn geometry_write_capability_requires_durable_storage() {
+        let fixture = TempBoard::new();
+        let server = Server::default();
+        let status = |server: &Server| {
+            server
+                .capabilities()
+                .iter()
+                .find(|capability| capability.id == "pcb.geometry.write")
+                .expect("geometry capability")
+                .status
+        };
+        assert_eq!(status(&server), "unavailable");
+        let server = server.with_state_dir(&fixture.root.join("state")).unwrap();
+        assert_eq!(status(&server), "verified");
+        assert_eq!(
+            server
+                .capabilities()
+                .iter()
+                .filter(|capability| capability.id == "pcb.geometry.write")
+                .count(),
+            1
         );
     }
 
@@ -9208,6 +9493,7 @@ mod tests {
             delta: None,
             source_unchanged: true,
             shadow_cleaned: true,
+            geometry: None,
             prepared_footprints: Vec::new(),
             reason: None,
         }

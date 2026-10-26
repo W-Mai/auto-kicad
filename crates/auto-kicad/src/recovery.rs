@@ -9,6 +9,47 @@ use std::sync::{Arc, Mutex};
 
 const MAX_FILE_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_RECORD_BYTES: u64 = 4 * 1024 * 1024;
+const GEOMETRY_PENDING: &str = ".auto-kicad-geometry-pending";
+
+#[derive(Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct PendingGeometry {
+    attempt_id: String,
+    record_path: PathBuf,
+}
+
+fn pending_geometry(project: &Path) -> io::Result<Option<PendingGeometry>> {
+    let path = project.join(GEOMETRY_PENDING);
+    match fs::symlink_metadata(&path) {
+        Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+        Ok(_) => Ok(Some(serde_json::from_slice(&read_bounded(&path, 4096)?)?)),
+    }
+}
+
+fn matching_pending_geometry(
+    project: &Path,
+    record_path: &Path,
+    attempt_id: &str,
+) -> io::Result<bool> {
+    let Some(pending) = pending_geometry(project)? else {
+        return Ok(false);
+    };
+    if pending.record_path != record_path || pending.attempt_id != attempt_id {
+        return Err(invalid(
+            "another geometry attempt requires recovery before project writes",
+        ));
+    }
+    Ok(true)
+}
+
+fn clear_pending_geometry(project: &Path, record_path: &Path, attempt_id: &str) -> io::Result<()> {
+    if matching_pending_geometry(project, record_path, attempt_id)? {
+        fs::remove_file(project.join(GEOMETRY_PENDING))?;
+        sync_directory(project)?;
+    }
+    Ok(())
+}
 
 #[derive(Clone, Debug)]
 pub struct ExecutionStore {
@@ -257,6 +298,11 @@ impl ProjectWriter {
         evidence: Value,
         sources: &[PathBuf],
     ) -> io::Result<ExecutionAttempt> {
+        if pending_geometry(&self.project)?.is_some() {
+            return Err(invalid(
+                "geometry outcome requires guarded recovery before further project writes",
+            ));
+        }
         if read_records(&self.records, &self.project, usize::MAX)?
             .iter()
             .any(|record| record.approval_hash == approval_hash && record.state != "rejected")
@@ -316,6 +362,21 @@ impl ProjectWriter {
         write_new(&path, &bytes)?;
         sync_directory(&directory)?;
         sync_directory(&self.records)?;
+        if record
+            .evidence
+            .get("geometry_evidence")
+            .is_some_and(|value| !value.is_null())
+        {
+            let pending = PendingGeometry {
+                attempt_id: record.attempt_id.clone(),
+                record_path: path.clone(),
+            };
+            write_new(
+                &self.project.join(GEOMETRY_PENDING),
+                &serde_json::to_vec(&pending)?,
+            )?;
+            sync_directory(&self.project)?;
+        }
         Ok(ExecutionAttempt { path, record })
     }
 }
@@ -410,7 +471,13 @@ impl ExecutionStore {
         project: &Path,
         record: &ExecutionRecord,
     ) -> io::Result<Vec<RecoveryFile>> {
-        if !matches!(record.state.as_str(), "unknown" | "in_flight")
+        let record_path = self
+            .records_dir(project)
+            .join(&record.attempt_id)
+            .join("record.json");
+        let pending = matching_pending_geometry(project, &record_path, &record.attempt_id)?;
+        if !(matches!(record.state.as_str(), "unknown" | "in_flight")
+            || pending && matches!(record.state.as_str(), "committed" | "rejected"))
             || !matches!(record.domain.as_str(), "pcb" | "schematic")
             || record.backups.is_empty()
         {
@@ -699,7 +766,12 @@ impl ExecutionStore {
             checkpoint(usize::MAX)?;
             attempt.record.state = "restored".into();
             attempt.record.outcome = Some(serde_json::json!({"kind": "restored"}));
-            Self::persist_recovery(&attempt)
+            Self::persist_recovery(&attempt)?;
+            let record_path = self
+                .records_dir(&writer.project)
+                .join(&attempt.record.attempt_id)
+                .join("record.json");
+            clear_pending_geometry(&writer.project, &record_path, &attempt.record.attempt_id)
         })();
         match result {
             Ok(()) => Ok(attempt.record),
@@ -801,7 +873,15 @@ impl ExecutionAttempt {
         let temporary = self.path.with_extension("pending");
         write_new(&temporary, &bytes)?;
         fs::rename(&temporary, &self.path)?;
-        sync_directory(self.path.parent().expect("record has parent"))
+        sync_directory(self.path.parent().expect("record has parent"))?;
+        if matches!(state, "committed" | "rejected") {
+            clear_pending_geometry(
+                &self.record.project_dir,
+                &self.path,
+                &self.record.attempt_id,
+            )?;
+        }
+        Ok(())
     }
 }
 
@@ -883,6 +963,105 @@ mod tests {
     impl Drop for Fixture {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+
+    #[test]
+    fn uncertain_geometry_blocks_all_writers_across_state_directories_until_matching_recovery() {
+        for interrupted in [false, true] {
+            let f = Fixture::new(false);
+            let writer = f.store.acquire(&f.project).unwrap();
+            let attempt = writer
+                .begin(
+                    "pcb",
+                    "geometry-plan",
+                    "geometry-approval",
+                    serde_json::json!({"geometry_evidence":{"bound":true}}),
+                    std::slice::from_ref(&f.source),
+                )
+                .unwrap();
+            let id = attempt.attempt_id().to_owned();
+            if interrupted {
+                drop(attempt);
+            } else {
+                attempt.finish("unknown", Value::Null).unwrap();
+            }
+            drop(writer);
+            let other = ExecutionStore::open(&f.root.join("other-state")).unwrap();
+            for store in [&f.store, &other] {
+                let writer = store.acquire(&f.project).unwrap();
+                for domain in ["pcb", "schematic"] {
+                    assert!(
+                        writer
+                            .begin(
+                                domain,
+                                "different-plan",
+                                "different-approval",
+                                Value::Null,
+                                &[]
+                            )
+                            .is_err()
+                    );
+                }
+            }
+            assert!(f.store.plan_recovery(&f.project, &f.id).is_err());
+            let plan = f.store.plan_recovery(&f.project, &id).unwrap();
+            let approval = f
+                .store
+                .preview_recovery(&f.project, &plan.recovery_id, &plan.plan_hash)
+                .unwrap();
+            assert!(
+                f.store
+                    .commit_recovery(&f.project, &plan.recovery_id, &plan.plan_hash, "wrong")
+                    .is_err()
+            );
+            assert!(pending_geometry(&f.project).unwrap().is_some());
+            f.store
+                .commit_recovery(&f.project, &plan.recovery_id, &plan.plan_hash, &approval)
+                .unwrap();
+            assert!(pending_geometry(&f.project).unwrap().is_none());
+            other
+                .acquire(&f.project)
+                .unwrap()
+                .begin("pcb", "new-plan", "new-approval", Value::Null, &[])
+                .unwrap()
+                .finish("committed", Value::Null)
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn verified_geometry_releases_only_its_own_marker_and_terminal_marker_is_recoverable() {
+        for state in ["committed", "rejected"] {
+            let f = Fixture::new(false);
+            let writer = f.store.acquire(&f.project).unwrap();
+            let attempt = writer
+                .begin(
+                    "pcb",
+                    "geometry-plan",
+                    "geometry-approval",
+                    serde_json::json!({"geometry_evidence":{"bound":true}}),
+                    std::slice::from_ref(&f.source),
+                )
+                .unwrap();
+            let id = attempt.attempt_id().to_owned();
+            let marker = fs::read(f.project.join(GEOMETRY_PENDING)).unwrap();
+            assert!(clear_pending_geometry(&f.project, &attempt.path, "foreign-attempt").is_err());
+            assert_eq!(fs::read(f.project.join(GEOMETRY_PENDING)).unwrap(), marker);
+            attempt.finish(state, Value::Null).unwrap();
+            assert!(pending_geometry(&f.project).unwrap().is_none());
+            // Emulate interruption after terminal journal persistence but before marker cleanup.
+            write_new(&f.project.join(GEOMETRY_PENDING), &marker).unwrap();
+            drop(writer);
+            let plan = f.store.plan_recovery(&f.project, &id).unwrap();
+            let approval = f
+                .store
+                .preview_recovery(&f.project, &plan.recovery_id, &plan.plan_hash)
+                .unwrap();
+            f.store
+                .commit_recovery(&f.project, &plan.recovery_id, &plan.plan_hash, &approval)
+                .unwrap();
+            assert!(pending_geometry(&f.project).unwrap().is_none());
         }
     }
 

@@ -1,7 +1,7 @@
 {
   "schema_version": "1",
   "product": "auto-kicad",
-  "source_revision": "b83438c",
+  "source_revision": "11b2550",
   "supported_kicad_family": "10.x",
   "advertised_tools": {
     "always": [
@@ -272,7 +272,7 @@
       "status": "deferred",
       "mcp_tools": [],
       "constraints": [
-        "requires refill and saved readback evidence"
+        "General zone authoring beyond the bounded solid-zone geometry family; hatched-zone editing and teardrop regeneration remain unverified"
       ],
       "evidence": null
     },
@@ -357,6 +357,33 @@
         ],
         "command": "cargo run -p auto-kicad --example check-geometry-inspection -- SERVER SOURCE NEW_OUTPUT",
         "record": "docs/acceptance/geometry-inspection.md"
+      }
+    },
+    {
+      "id": "pcb.geometry.write",
+      "domain": "pcb",
+      "mode": "write",
+      "status": "verified",
+      "mcp_tools": [
+        "kicad_plan_change",
+        "kicad_preview_change",
+        "kicad_commit_change"
+      ],
+      "constraints": [
+        "exact KiCad 10.0.7 and a durable execution store",
+        "exclusive bounded segment/arc outlines and ordinary solid-zone edits",
+        "saved source/shadow baseline and complete native/text/copper correspondence",
+        "no introduced DRC or split original pad connectivity; complete candidate DRC correspondence",
+        "uncertain execution blocks project writes until matching guarded recovery",
+        "teardrop regeneration, GUI cancellation and combined maximum-size MCP qualification remain unverified"
+      ],
+      "evidence": {
+        "fixture": "mixed-geometry-and-settled-cm5-copy",
+        "tested_versions": [
+          "10.0.7"
+        ],
+        "command": "cargo run --release -p auto-kicad --example check-geometry-mcp -- SERVER SOURCE REQUEST_JSON NEW_OUTPUT",
+        "record": "docs/acceptance/geometry-mcp.md"
       }
     }
   ]

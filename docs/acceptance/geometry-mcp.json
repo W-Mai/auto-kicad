@@ -1,0 +1,384 @@
+{
+  "kicad_version": "10.0.7",
+  "build_profile": "release",
+  "scope": "Exclusive geometry MCP approval, source execution and durable evidence",
+  "profiles": [
+    {
+      "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-mcp-geometry-release-mixed",
+      "source_pid": 62057,
+      "preview_pids": [
+        62161,
+        62347,
+        62712,
+        63026,
+        63489
+      ],
+      "stages": [
+        {
+          "candidate": {
+            "after": {
+              "board_definitions": "8bb214061e4ba6a19176c76ca3c4de9ebfcf7df5d102d950fcb8228eaadcbfce",
+              "copper": {
+                "digest": "af755b159e5758c76c3c90a00346f069b7fc9f9946e674c165b547d0b46aca39",
+                "point_count": 1334,
+                "polygon_count": 5,
+                "zone_count": 4
+              },
+              "native_definitions": "4cd004eea97cac8a3109c52ccea82ec1d5703a3ac73f48e0ae0ba179e147becc"
+            },
+            "before": {
+              "board_definitions": "f7a1a7271a3adef1ffd4b7eeed6e3507d6caa89def30a9ff93981a0738a1940f",
+              "copper": {
+                "digest": "ae670083f17b49a83ae634e348412d81850aa5fc681ee6c706e7acdfabb43502",
+                "point_count": 924,
+                "polygon_count": 3,
+                "zone_count": 3
+              },
+              "native_definitions": "fbcf82134d9904515b752439b7598e4dafb2334bd7c1c85b9f0630960f6479f9"
+            },
+            "creations": [
+              {
+                "kind": "zone",
+                "logical_id": "created",
+                "native_uuid": "84109b27-836d-432c-8824-acc7db94b5ab"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "curved-outer:edge:0",
+                "native_uuid": "7747c6be-b9a8-4749-801f-8e4d0e800800"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "curved-outer:edge:1",
+                "native_uuid": "d2499a88-9a66-4af3-a058-85c0fffb70ad"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "curved-outer:edge:2",
+                "native_uuid": "dd3f1d41-c3b4-49bc-9de3-ef59f652abef"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "curved-outer:edge:3",
+                "native_uuid": "dec82b5e-e49a-4680-a7da-3adf83450fc2"
+              }
+            ],
+            "intent_digest": "807d7a7d42d396f628e7bfe5d649fd19ff988d3af267b0b8ba357e9e1d98bccc"
+          },
+          "creation_map": {
+            "56994382-ec98-4006-8e34-3218c7e577b4": "d2499a88-9a66-4af3-a058-85c0fffb70ad",
+            "7df29cb9-05ca-4350-8f3e-b220c15c0a82": "84109b27-836d-432c-8824-acc7db94b5ab",
+            "a414190d-1836-48eb-9351-04a4f20753ee": "dec82b5e-e49a-4680-a7da-3adf83450fc2",
+            "a6d9f68b-ba95-4a2b-9498-b7bc0cac0ebe": "7747c6be-b9a8-4749-801f-8e4d0e800800",
+            "f494ce06-4d9b-44f4-a578-4b89e7b7fac9": "dd3f1d41-c3b4-49bc-9de3-ef59f652abef"
+          },
+          "drc_baseline": 5,
+          "drc_after": 5,
+          "drc_unchanged": 5,
+          "drc_resolved": 0,
+          "unconnected_before": 2,
+          "unconnected_after": 2
+        },
+        {
+          "candidate": {
+            "after": {
+              "board_definitions": "8aaff159e207ef131ca9ff3da3934e4d3b9343f2ce74f7a1ac098daad1daa2af",
+              "copper": {
+                "digest": "bca3236d923b3a51fed36cec5766c59367a2a2379366991e22eb6a92f85a3e5b",
+                "point_count": 1312,
+                "polygon_count": 5,
+                "zone_count": 4
+              },
+              "native_definitions": "b30b8e6fb1e044092b08057acad784f3e6660412e08fe3719bf1d8b4d040f35d"
+            },
+            "before": {
+              "board_definitions": "6eec24d8c6aeac515d6c4e8a0b0d3426c5c8ff82acf6435d179ce62d369601ca",
+              "copper": {
+                "digest": "3c70290adf5123e1a46ece2450d1a05b82c937e7ff5ad3538c47ce336ac7b62b",
+                "point_count": 1334,
+                "polygon_count": 5,
+                "zone_count": 4
+              },
+              "native_definitions": "466eebc2fc00f765e2af76458a510a542fd11d09a594a961437da481d311af17"
+            },
+            "creations": [
+              {
+                "kind": "outline",
+                "logical_id": "rectangle:edge:0",
+                "native_uuid": "08fbc8fa-1377-4994-88c6-fd2b08cf6417"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "rectangle:edge:1",
+                "native_uuid": "9aab048a-fcb3-4aaa-be24-02aa1fee04b8"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "rectangle:edge:2",
+                "native_uuid": "5d31ee80-e017-4893-b66e-6065a9636d7f"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "rectangle:edge:3",
+                "native_uuid": "831c59d5-8a7c-4a31-b6ad-e758069c3c82"
+              }
+            ],
+            "intent_digest": "dff1b8c66ca9424eb6bd5053c15b304a02144c18582a9035c1cb698db76a3497"
+          },
+          "creation_map": {
+            "19ff1fe8-a5c8-4877-8726-7fb2530fc6a5": "9aab048a-fcb3-4aaa-be24-02aa1fee04b8",
+            "56541281-afa0-4756-bc21-78f7263be004": "5d31ee80-e017-4893-b66e-6065a9636d7f",
+            "a2744b1c-f6d0-4e3b-bdc3-deb443ac805a": "08fbc8fa-1377-4994-88c6-fd2b08cf6417",
+            "cad34527-6b84-4888-8be2-e15e064595a3": "831c59d5-8a7c-4a31-b6ad-e758069c3c82"
+          },
+          "drc_baseline": 5,
+          "drc_after": 5,
+          "drc_unchanged": 5,
+          "drc_resolved": 0,
+          "unconnected_before": 2,
+          "unconnected_after": 2
+        },
+        {
+          "candidate": {
+            "after": {
+              "board_definitions": "f852bad5ebc5418329e21b0b8adc2718ffcb6aba7f91473103d5c8aa9d870047",
+              "copper": {
+                "digest": "ae670083f17b49a83ae634e348412d81850aa5fc681ee6c706e7acdfabb43502",
+                "point_count": 924,
+                "polygon_count": 3,
+                "zone_count": 3
+              },
+              "native_definitions": "ca20f354db84225efbac31a2f9111376eff7c8ce1e01aa184db2575f22b99fa5"
+            },
+            "before": {
+              "board_definitions": "08c38b021098ab0b16751369a9c024a2090a7373e5187243acc21e180e9f806f",
+              "copper": {
+                "digest": "bca3236d923b3a51fed36cec5766c59367a2a2379366991e22eb6a92f85a3e5b",
+                "point_count": 1312,
+                "polygon_count": 5,
+                "zone_count": 4
+              },
+              "native_definitions": "ea3f2e459662d6bceaba22971ad7a1b494a1bfdad90105391baf7b1fd8acf1eb"
+            },
+            "creations": [
+              {
+                "kind": "outline",
+                "logical_id": "curved-outer:edge:0",
+                "native_uuid": "86381c49-c20d-4e00-a7d9-9a9709b369b5"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "curved-outer:edge:1",
+                "native_uuid": "3342ea8a-d167-4698-8728-1a7738c2bf45"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "curved-outer:edge:2",
+                "native_uuid": "7941d6aa-c006-4a94-a7ce-12da8fb16e98"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "curved-outer:edge:3",
+                "native_uuid": "df638a0e-160e-40bf-a7f7-9859a0bdc931"
+              }
+            ],
+            "intent_digest": "bd6292115bcd8d017da236d1ef1e9eaffaf0d6b78524534c477c9eb1477a384c"
+          },
+          "creation_map": {
+            "074a162f-06ef-4e87-883c-ac87cc267db9": "3342ea8a-d167-4698-8728-1a7738c2bf45",
+            "8e2b22c3-b18d-4ba2-a207-b7eb2ab5b7b2": "df638a0e-160e-40bf-a7f7-9859a0bdc931",
+            "c191f751-3119-4774-94f3-a7c3fa0235a2": "86381c49-c20d-4e00-a7d9-9a9709b369b5",
+            "f4a38bf6-1525-4d22-b01b-c381b70aaa11": "7941d6aa-c006-4a94-a7ce-12da8fb16e98"
+          },
+          "drc_baseline": 5,
+          "drc_after": 5,
+          "drc_unchanged": 5,
+          "drc_resolved": 0,
+          "unconnected_before": 2,
+          "unconnected_after": 2
+        },
+        {
+          "candidate": {
+            "after": {
+              "board_definitions": "be650a899ec8896add48b8ed83e065886fb8a26316475862284a8fdc3d010285",
+              "copper": {
+                "digest": "ae670083f17b49a83ae634e348412d81850aa5fc681ee6c706e7acdfabb43502",
+                "point_count": 924,
+                "polygon_count": 3,
+                "zone_count": 3
+              },
+              "native_definitions": "42cb0ce6a86015eeac36abc033685e00e5da3129466235acd843d2d862a8ff7c"
+            },
+            "before": {
+              "board_definitions": "c01d15ac253ffc8921ef4f4be64bdb4a8918321e841af1c2395081bdaac7136a",
+              "copper": {
+                "digest": "ae670083f17b49a83ae634e348412d81850aa5fc681ee6c706e7acdfabb43502",
+                "point_count": 924,
+                "polygon_count": 3,
+                "zone_count": 3
+              },
+              "native_definitions": "ff98a564853fcc36ab7e4676c59eca15810bef0e1f6789f4042e5384d3e8e881"
+            },
+            "creations": [
+              {
+                "kind": "outline",
+                "logical_id": "rectangle:edge:0",
+                "native_uuid": "61360733-6158-49c0-a881-d80414068eb7"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "rectangle:edge:1",
+                "native_uuid": "0d292a4f-8956-4edb-9670-c0bdf3c6e41c"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "rectangle:edge:2",
+                "native_uuid": "08221c66-2c7e-4b77-9a93-814d4e1916ce"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "rectangle:edge:3",
+                "native_uuid": "92d05ddf-5cb9-4565-b033-2acf16a51c0b"
+              }
+            ],
+            "intent_digest": "1c56bbb9c5516a8c5b62b55bdb5b67e36364a12e46d4951ac11a132bb4fe6604"
+          },
+          "creation_map": {
+            "08ce6a6d-5e63-4882-b283-a7dcac5b37d0": "08221c66-2c7e-4b77-9a93-814d4e1916ce",
+            "4bc152e3-1462-4e78-9e6a-0155bde7fb44": "61360733-6158-49c0-a881-d80414068eb7",
+            "aa1c2c19-3bcf-41e3-a9d2-2c4e233f393f": "92d05ddf-5cb9-4565-b033-2acf16a51c0b",
+            "c404e981-6bc6-4b03-a1c8-21b43ccfc088": "0d292a4f-8956-4edb-9670-c0bdf3c6e41c"
+          },
+          "drc_baseline": 5,
+          "drc_after": 5,
+          "drc_unchanged": 5,
+          "drc_resolved": 0,
+          "unconnected_before": 2,
+          "unconnected_after": 2
+        }
+      ],
+      "pad_count": 2,
+      "footprint_count": 2,
+      "max_preview_seconds": 10.477322583086789,
+      "max_commit_seconds": 7.610296125058085,
+      "max_record_bytes": 81614,
+      "independent_saved_fields": true,
+      "rule_drift_revokes_approval": true,
+      "cleanup": {
+        "closed": true,
+        "pid": 62057,
+        "same_process_reload_verified": true,
+        "source_unchanged": true
+      },
+      "files": {
+        "result.json": "9bfcb96039b9e23749ae30f25380a28150e4829f810cbb88bd12eb3d0f0b421e",
+        "mcp.json": "8816ea1abcbc3580257209a2beba1bb86b66a064a58c881a1d041d90854ccf34",
+        "independent-saved-intent.json": "433e1f5ddb0555ff39be2ee74c75ca94b9ceb31ff4109665e0814d018eec3cca",
+        "cleanup.json": "d9d59f66dbd9eec5b19fb0370ad0dd6dd05683406d284c317e1acd413f3f0351"
+      }
+    },
+    {
+      "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-mcp-geometry-release-cm5",
+      "source_pid": 64756,
+      "preview_pids": [
+        65032,
+        68275
+      ],
+      "stages": [
+        {
+          "candidate": {
+            "after": {
+              "board_definitions": "85db0366330a0150138443a057f20e42115b50f9fd39b719da6e72bc0e58943a",
+              "copper": {
+                "digest": "9b68b4ce25a25ac8b1a33777048c402c31c58e4f563c44664a985b40e7518292",
+                "point_count": 90184,
+                "polygon_count": 31,
+                "zone_count": 14
+              },
+              "native_definitions": "59ba270ae5ca61d1115ca5271d52f2edf15f5612b769c399196f544ac4fd9554"
+            },
+            "before": {
+              "board_definitions": "97af2b1d197759d1166262d4103f07649708649e6cfba789ec39f5726753446c",
+              "copper": {
+                "digest": "91fd28db41462086498e5e6b9b6a708074d86e2483a85bbed58ccd57d038b635",
+                "point_count": 90184,
+                "polygon_count": 31,
+                "zone_count": 14
+              },
+              "native_definitions": "a15e793a0fee4be8cc8b182d7f457e34bbdf94b0b59dd6e0f1bdeb0ef87fd8d2"
+            },
+            "creations": [],
+            "intent_digest": "5e4148aca43efbb92d3722cda9ac7962f8f3abdc8040ea62a9cc38d9588d7e13"
+          },
+          "creation_map": {},
+          "drc_baseline": 171,
+          "drc_after": 171,
+          "drc_unchanged": 171,
+          "drc_resolved": 0,
+          "unconnected_before": 0,
+          "unconnected_after": 0
+        }
+      ],
+      "pad_count": 633,
+      "footprint_count": 112,
+      "max_preview_seconds": 219.46762675000355,
+      "max_commit_seconds": 190.85025095799938,
+      "max_record_bytes": 1306017,
+      "independent_saved_fields": true,
+      "rule_drift_revokes_approval": true,
+      "cleanup": {
+        "closed": true,
+        "pid": 64756,
+        "same_process_reload_verified": true,
+        "source_unchanged": true
+      },
+      "files": {
+        "result.json": "bf3e5c8e4fcd727c27af9729f71cd1be487a77a525be4caee288df0c379d1cc9",
+        "mcp.json": "a95feaf66c609677cb070a8db7431d2efefcb75788c88ea5e389511718338419",
+        "independent-saved-intent.json": "6cba3fadfda9705fcc4ca8a41f97911ef4d85ae43d564dc573e05d12cf918dda",
+        "cleanup.json": "785552e2dcc5753c7682996a374066a72a3e850dc47b557b54d99054aa020cdd"
+      }
+    }
+  ],
+  "failed_attempts": [
+    {
+      "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-mcp-geometry-write-cm5",
+      "reason": "Recovery record exceeded 4 MiB before source mutation",
+      "cleanup": {
+        "closed": true,
+        "pid": 20808,
+        "same_process_reload_verified": false,
+        "source_unchanged": true
+      }
+    },
+    {
+      "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-mcp-geometry-write-cm5-final",
+      "reason": "Complete DRC comparison incorrectly reordered only one UUID identity list",
+      "cleanup": {
+        "closed": true,
+        "pid": 33488,
+        "same_process_reload_verified": false,
+        "source_unchanged": true
+      }
+    }
+  ],
+  "drc_diagnosis": {
+    "expected_count": 171,
+    "actual_count": 171,
+    "missing": [],
+    "added": [],
+    "nonlexical_uuid_identities": 57,
+    "ignored_checks_equal": true,
+    "unconnected_equal": true
+  },
+  "uncertainty_contract": "Cross-plan and cross-state-directory pending markers verified by architecture tests; live GUI cancellation and interrupted geometry recovery acceptance remain separate",
+  "quality": {
+    "passed": 457,
+    "failed": 0,
+    "ignored": 15,
+    "command": "python3 scripts/quality.py",
+    "capabilities": 17,
+    "router_tools": 13,
+    "release_stdio_schema_verified": true
+  }
+}

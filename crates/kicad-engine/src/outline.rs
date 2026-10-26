@@ -1,6 +1,7 @@
 //! Compile revision-bound outline intent without treating primitives as a verified board boundary.
 use crate::{EngineError, MAX_BOARD_POSITION_NM};
 use kicad_model::{LockState, OutlineEdge, OutlineEdit, OutlinePoint, RevisionDigest, StableId};
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const MAX_OUTLINE_LOOPS: usize = 32;
@@ -8,7 +9,7 @@ pub const MAX_OUTLINE_PRIMITIVES: usize = 512;
 pub const MAX_OUTLINE_REMOVALS: usize = 100;
 pub const MAX_OUTLINE_SPAN_NM: i64 = kicad_geometry::MAX_OUTLINE_SPAN_NM;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub enum OutlineSourceGeometry {
     Segment,
     Arc,
@@ -17,7 +18,7 @@ pub enum OutlineSourceGeometry {
     Polygon,
     Unsupported,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ObservedOutlineTarget {
     pub source_uuid: StableId,
     pub lock_state: LockState,

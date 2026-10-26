@@ -4,9 +4,10 @@ use crate::{
     outline::{CompiledOutlineEdit, ObservedOutlineTarget, compile_outline_edit},
 };
 use kicad_model::{CopperLayer, LockState, RevisionDigest, StableId, board_net_id, geometry::*};
+use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct ObservedZoneTarget {
     pub source_uuid: StableId,
     pub lock_state: LockState,
@@ -14,7 +15,7 @@ pub struct ObservedZoneTarget {
     pub refillable: bool,
     pub net: Option<ZoneNetIdentity>,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct GeometryContext {
     pub board_id: StableId,
     pub revision: RevisionDigest,

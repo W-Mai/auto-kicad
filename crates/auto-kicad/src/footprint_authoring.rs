@@ -595,10 +595,16 @@ pub(crate) fn prepare_shadow_library_table(
         .iter()
         .flat_map(|operation| operation.kind.footprint_placements())
         .collect::<Vec<_>>();
-    let Some(first) = placements.first() else {
+    let registry = if let Some(first) = placements.first() {
+        verify_sources(settings, project, first)?
+    } else if crate::geometry::contains(operations) {
+        let version = &existing
+            .ok_or("geometry requires an observed source")?
+            .kicad_version;
+        crate::library_settings::registry(settings, project, version)?
+    } else {
         return Ok(());
     };
-    let registry = verify_sources(settings, project, first)?;
     let mut roots = std::collections::BTreeMap::new();
     let mut insert = |resolved: kicad_adapter::footprint::ResolvedFootprint| -> Result<(), String> {
         let nickname = resolved.identifier.nickname;

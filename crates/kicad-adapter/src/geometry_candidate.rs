@@ -28,6 +28,15 @@ struct GeometryContent {
     copper: FilledCopperEvidence,
 }
 
+/// Complete baseline content across editor instances; source/rule bindings remain separate.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct GeometryBaselineEvidence(GeometryContent);
+impl GeometryBaselineEvidence {
+    pub fn capture(observed: &crate::geometry::GeometryObservation) -> Result<Self, String> {
+        Ok(Self(content(observed.live(), &BTreeMap::new())?))
+    }
+}
+
 /// Verified content correspondence, not topology, electrical acceptance or source approval.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct GeometryCandidateEvidence {
@@ -100,6 +109,10 @@ fn content(
 }
 
 impl GeometryCandidateEvidence {
+    pub fn baseline(&self) -> GeometryBaselineEvidence {
+        GeometryBaselineEvidence(self.before.clone())
+    }
+
     /// Each caller must establish saved/live reconciliation and bind all observations to its editor/document.
     /// This checks definition receipts and independent refill content before constructing comparable evidence.
     pub fn capture(

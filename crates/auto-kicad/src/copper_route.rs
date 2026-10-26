@@ -240,7 +240,7 @@ fn verify_components(
     Ok(())
 }
 
-fn preserves_clusters(
+pub(super) fn preserves_clusters(
     source: &ProjectSnapshot,
     before: &[Vec<String>],
     after: &[Vec<String>],
@@ -759,12 +759,13 @@ mod tests {
             project_dir: source.project_dir.clone(),
             source_files: shadow_source_fingerprint(&source.board_path),
             routing_evidence: Some(evidence.clone()),
+            geometry_evidence: None,
             execution_state: StoredExecutionState::Ready,
             shadow_validation: None,
             validation_evidence_hash: Some("evidence".into()),
             approval_hash: Some("approved".into()),
         };
-        assert!(server.verify_route_source(&stored, &source).is_ok());
+        assert!(server.verify_native_source(&stored, &source).is_ok());
         server
             .sessions
             .lock()
@@ -777,8 +778,8 @@ mod tests {
             .saved
             .constraints
             .min_track_width_nm = Some(999);
-        assert!(server.verify_route_source(&stored, &source).is_err());
-        server.invalidate_route_approval("plan");
+        assert!(server.verify_native_source(&stored, &source).is_err());
+        server.invalidate_native_approval("plan");
         *state.lock().unwrap() = evidence;
         let persisted = server.sessions.lock().unwrap();
         let invalidated = &persisted["plan"];

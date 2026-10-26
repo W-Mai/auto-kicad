@@ -164,6 +164,12 @@ pub enum OperationKind {
         bottom_right: Coordinate,
         width_nm: i64,
     },
+    EditGeometry {
+        board: StableId,
+        request: kicad_model::geometry::GeometryRequest,
+        context: geometry::GeometryContext,
+        source_evidence: RevisionDigest,
+    },
     AddCopperRoute {
         board: StableId,
         intent: kicad_model::CopperRouteIntent,
@@ -273,6 +279,7 @@ impl Operation {
                 .collect(),
             OperationKind::AddBoardGraphicSegments { board, .. }
             | OperationKind::AddBoardOutline { board, .. }
+            | OperationKind::EditGeometry { board, .. }
             | OperationKind::AddCopperRoute { board, .. }
             | OperationKind::AddStraightTrack { board, .. }
             | OperationKind::AddThroughVia { board, .. } => vec![board],
@@ -347,6 +354,16 @@ impl ChangePlan {
             {
                 return Err(EngineError::DuplicateIdempotencyKey);
             }
+        }
+        if self
+            .operations
+            .iter()
+            .any(|op| matches!(op.kind, OperationKind::EditGeometry { .. }))
+            && self.operations.len() != 1
+        {
+            return Err(EngineError::InvalidPlan(
+                "geometry requires an exclusive operation",
+            ));
         }
         let has_route = self
             .operations
@@ -487,6 +504,7 @@ impl ChangePlan {
                     | OperationKind::PlaceConnectedFootprints { .. }
                     | OperationKind::AddBoardGraphicSegments { .. }
                     | OperationKind::AddBoardOutline { .. }
+                    | OperationKind::EditGeometry { .. }
                     | OperationKind::AddCopperRoute { .. }
                     | OperationKind::AddStraightTrack { .. }
                     | OperationKind::AddThroughVia { .. }
@@ -615,6 +633,19 @@ impl ChangePlan {
                     {
                         return Err(EngineError::TargetAlreadyExists(segment.graphic_id.clone()));
                     }
+                }
+                OperationKind::EditGeometry {
+                    board,
+                    request,
+                    context,
+                    ..
+                } => {
+                    if snapshot.board.document_id.as_ref() != Some(board)
+                        || &context.board_id != board
+                    {
+                        return Err(EngineError::ScopeMismatch);
+                    }
+                    geometry::compile_geometry_change(request, context)?;
                 }
                 OperationKind::AddCopperRoute { board, intent, .. } => {
                     let route = compile_copper_route(snapshot, board, intent)?;
@@ -865,6 +896,58 @@ impl Engine {
             after,
         })
     }
+    fn validate_native_geometry_result(
+        &self,
+        plan: &ChangePlan,
+        after: &ProjectSnapshot,
+    ) -> Result<(), EngineError> {
+        if !matches!(
+            plan.operations.as_slice(),
+            [Operation {
+                kind: OperationKind::EditGeometry { .. },
+                ..
+            }]
+        ) {
+            return Err(EngineError::InvalidPlan(
+                "observed transition requires exclusive native geometry",
+            ));
+        }
+        if after.project_id != self.snapshot.project_id
+            || after.board.document_id != self.snapshot.board.document_id
+            || after.kicad_version != self.snapshot.kicad_version
+        {
+            return Err(EngineError::ScopeMismatch);
+        }
+        after
+            .validate()
+            .map_err(|e| EngineError::Serialization(e.to_string()))
+    }
+
+    /// Use a native result verified by the caller; pure simulation cannot establish geometry effects.
+    pub fn preview_observed_session(
+        &self,
+        session: &mut ChangeSession,
+        after: ProjectSnapshot,
+    ) -> Result<Preview, EngineError> {
+        if session.state != SessionState::Planned {
+            return Err(EngineError::InvalidState);
+        }
+        self.check_identity(&session.plan)?;
+        session.plan.validate(&self.snapshot)?;
+        self.validate_native_geometry_result(&session.plan, &after)?;
+        let preview = Preview {
+            plan_hash: session.plan.hash()?,
+            before: self.snapshot.clone(),
+            after,
+        };
+        session.state = SessionState::Previewed;
+        session.audit.push(AuditEvent {
+            event: "native_previewed".into(),
+            detail: preview.plan_hash.clone(),
+        });
+        Ok(preview)
+    }
+
     pub fn preview_session(&self, session: &mut ChangeSession) -> Result<Preview, EngineError> {
         if session.state != SessionState::Planned {
             return Err(EngineError::InvalidState);
@@ -917,6 +1000,24 @@ impl Engine {
         Ok(())
     }
     pub fn commit(&mut self, session: &mut ChangeSession) -> Result<(), EngineError> {
+        self.commit_result(session, None)
+    }
+
+    /// Record an externally verified native result after the exact session approval checks.
+    pub fn commit_observed(
+        &mut self,
+        session: &mut ChangeSession,
+        after: ProjectSnapshot,
+    ) -> Result<(), EngineError> {
+        self.validate_native_geometry_result(&session.plan, &after)?;
+        self.commit_result(session, Some(after))
+    }
+
+    fn commit_result(
+        &mut self,
+        session: &mut ChangeSession,
+        observed: Option<ProjectSnapshot>,
+    ) -> Result<(), EngineError> {
         let current_hash = session.plan.hash()?;
         if session.state != SessionState::AwaitingApproval
             || session.plan_hash != current_hash
@@ -939,7 +1040,10 @@ impl Engine {
         }
         self.check_identity(&session.plan)?;
         session.plan.validate(&self.snapshot)?;
-        let updated = apply_operations(self.snapshot.clone(), &session.plan.operations)?;
+        let updated = match observed {
+            Some(after) => after,
+            None => apply_operations(self.snapshot.clone(), &session.plan.operations)?,
+        };
         self.snapshot = updated;
         for op in &session.plan.operations {
             self.committed
@@ -1046,6 +1150,11 @@ fn apply_operations(
                     *top_left,
                     *bottom_right,
                     *width_nm,
+                ));
+            }
+            OperationKind::EditGeometry { .. } => {
+                return Err(EngineError::InvalidPlan(
+                    "geometry requires verified native observations",
                 ));
             }
             OperationKind::AddCopperRoute { board, intent, .. } => {
@@ -1894,6 +2003,90 @@ mod tests {
             operations: ops,
         }
     }
+    #[test]
+    fn geometry_requires_exclusive_native_results_and_exact_session_approval() {
+        let mut engine = Engine::new(snapshot(), "token");
+        let context = geometry::GeometryContext {
+            board_id: id("board"),
+            revision: digest('a'),
+            nets: vec![],
+            enabled_layers: vec![
+                kicad_model::CopperLayer::FRONT,
+                kicad_model::CopperLayer::BACK,
+            ],
+            zones: vec![],
+            outline_targets: vec![],
+        };
+        let operation = op(
+            OperationKind::EditGeometry {
+                board: id("board"),
+                request: kicad_model::geometry::GeometryRequest {
+                    observed_revision: context.revision.clone(),
+                    outline: None,
+                    zones: vec![],
+                    refill: kicad_model::geometry::RefillMode::All,
+                },
+                context,
+                source_evidence: digest('b'),
+            },
+            "board",
+            "geometry",
+        );
+        let mut session = engine
+            .begin_session(plan(&engine, vec![operation.clone()]))
+            .unwrap();
+        assert!(engine.preview_session(&mut session).is_err());
+        assert_eq!(session.state, SessionState::Planned);
+        assert!(
+            engine
+                .begin_session(plan(
+                    &engine,
+                    vec![
+                        operation,
+                        op(
+                            OperationKind::AddSymbol {
+                                symbol: symbol("new")
+                            },
+                            "new",
+                            "other"
+                        )
+                    ]
+                ))
+                .is_err()
+        );
+        let mut foreign = engine.snapshot().clone();
+        foreign.project_id = id("foreign");
+        assert_eq!(
+            engine.preview_observed_session(&mut session, foreign),
+            Err(EngineError::ScopeMismatch)
+        );
+        let actual = engine.snapshot().clone();
+        engine
+            .preview_observed_session(&mut session, actual.clone())
+            .unwrap();
+        assert!(
+            engine
+                .preview_observed_session(&mut session, actual.clone())
+                .is_err()
+        );
+        engine.validate(&mut session).unwrap();
+        engine.request_approval(&mut session).unwrap();
+        assert!(
+            engine
+                .commit_observed(&mut session, actual.clone())
+                .is_err()
+        );
+        assert!(engine.approve(&mut session, "wrong").is_err());
+        let hash = session.plan_hash.clone();
+        engine.approve(&mut session, &hash).unwrap();
+        assert!(engine.commit(&mut session).is_err());
+        engine
+            .commit_observed(&mut session, actual.clone())
+            .unwrap();
+        assert_eq!(engine.snapshot(), &actual);
+        assert!(engine.commit_observed(&mut session, actual).is_err());
+    }
+
     #[test]
     fn invalid_order_duplicate_scope_and_count_rejected() {
         let engine = Engine::new(snapshot(), "token");
