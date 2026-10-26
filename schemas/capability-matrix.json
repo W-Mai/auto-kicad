@@ -1,7 +1,7 @@
 {
   "schema_version": "1",
   "product": "auto-kicad",
-  "source_revision": "0d1efc8",
+  "source_revision": "9ca933e+guarded-recovery-corrections",
   "supported_kicad_family": "10.x",
   "advertised_tools": {
     "always": [
@@ -11,15 +11,15 @@
       "kicad_inspect_project",
       "kicad_plan_change",
       "kicad_preview_change",
-      "kicad_commit_change",
-      "kicad_plan_recovery",
-      "kicad_preview_recovery",
-      "kicad_commit_recovery"
+      "kicad_commit_change"
     ],
     "conditional": [
       "kicad_plan_schematic_change",
       "kicad_preview_schematic_change",
-      "kicad_commit_schematic_change"
+      "kicad_commit_schematic_change",
+      "kicad_plan_recovery",
+      "kicad_preview_recovery",
+      "kicad_commit_recovery"
     ]
   },
   "capabilities": [
@@ -56,13 +56,25 @@
       "domain": "project",
       "mode": "write",
       "status": "verified",
-      "mcp_tools": ["kicad_plan_recovery", "kicad_preview_recovery", "kicad_commit_recovery"],
-      "constraints": ["durable state directory", "complete byte backups", "source and backup fingerprints must remain unchanged", "explicit approval required"],
+      "mcp_tools": [
+        "kicad_plan_recovery",
+        "kicad_preview_recovery",
+        "kicad_commit_recovery"
+      ],
+      "constraints": [
+        "durable state directory",
+        "closed project editors and stopped external writers",
+        "complete backups and post-execution fingerprints; legacy records permit unchanged bytes only",
+        "session-bound exact approval",
+        "per-file atomic replacement; partial failures remain unknown"
+      ],
       "evidence": {
-        "fixture": "offline-recovery-fault-injection",
-        "tested_versions": ["10.0.6"],
-        "command": "cargo test -p auto-kicad recovery",
-        "record": ".local/specs/auto-kicad/m2-guarded-recovery/IMPLEMENTATION.md"
+        "fixture": "populated-partially-routed-pcb-copy",
+        "tested_versions": [
+          "10.0.6"
+        ],
+        "command": "cargo test -p auto-kicad tests::recovery_acceptance::live_recovery_restores_native_board_and_allows_next_mcp_commit --lib -- --ignored --exact",
+        "record": "docs/acceptance/guarded-recovery.md"
       }
     },
     {
@@ -139,15 +151,19 @@
       "id": "pcb.edit_existing",
       "domain": "pcb",
       "mode": "write",
-      "status": "verified",
-      "mcp_tools": ["kicad_plan_change", "kicad_preview_change", "kicad_commit_change"],
-      "constraints": ["one existing footprint per operation", "connected tracks and vias are rejected", "zones and unobservable copper are rejected"],
-      "evidence": {
-        "fixture": "m1-minimal-pcb-single-editor",
-        "tested_versions": ["10.0.6"],
-        "command": "cargo run -p auto-kicad --example m1_live",
-        "record": ".local/specs/auto-kicad/m1-existing-footprint-edit/research.md"
-      }
+      "status": "unavailable",
+      "mcp_tools": [
+        "kicad_plan_change",
+        "kicad_preview_change",
+        "kicad_commit_change"
+      ],
+      "constraints": [
+        "one existing footprint per operation",
+        "connected tracks and vias are rejected",
+        "zones and unobservable copper are rejected",
+        "implementation exists; complete MCP lifecycle acceptance pending"
+      ],
+      "evidence": null
     },
     {
       "id": "schematic.general_edit",

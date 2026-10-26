@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 
 const MAX_FILE_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_RECORD_BYTES: u64 = 4 * 1024 * 1024;
@@ -11,6 +13,7 @@ const MAX_RECORD_BYTES: u64 = 4 * 1024 * 1024;
 #[derive(Clone, Debug)]
 pub struct ExecutionStore {
     root: PathBuf,
+    plans: Arc<Mutex<BTreeMap<String, String>>>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -26,6 +29,14 @@ pub struct ExecutionRecord {
     pub evidence: Value,
     pub outcome: Option<Value>,
     pub backups: Vec<Backup>,
+    #[serde(default)]
+    pub post_attempt: Option<Vec<SourceFingerprint>>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SourceFingerprint {
+    pub path: PathBuf,
+    pub sha256: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -80,8 +91,24 @@ fn invalid(message: &str) -> io::Error {
 }
 
 fn read_bounded(path: &Path, limit: u64) -> io::Result<Vec<u8>> {
+    if fs::canonicalize(path)? != path || !fs::symlink_metadata(path)?.is_file() {
+        return Err(invalid(
+            "recovery path must be a canonical regular file without symlinks",
+        ));
+    }
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    let file = options.open(path)?;
+    if !file.metadata()?.is_file() {
+        return Err(invalid("recovery input is not a regular file"));
+    }
     let mut bytes = Vec::new();
-    File::open(path)?.take(limit + 1).read_to_end(&mut bytes)?;
+    file.take(limit + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > limit {
         return Err(invalid("recovery file exceeds size limit"));
     }
@@ -97,8 +124,12 @@ fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
         options.mode(0o600);
     }
     let mut file = options.open(path)?;
-    file.write_all(bytes)?;
-    file.sync_all()
+    let result = file.write_all(bytes).and_then(|()| file.sync_all());
+    if result.is_err() {
+        drop(file);
+        let _ = fs::remove_file(path);
+    }
+    result
 }
 
 fn sync_directory(path: &Path) -> io::Result<()> {
@@ -119,7 +150,10 @@ impl ExecutionStore {
                 fs::set_permissions(&root, fs::Permissions::from_mode(0o700))?;
             }
         }
-        Ok(Self { root })
+        Ok(Self {
+            root,
+            plans: Arc::default(),
+        })
     }
 
     fn records_dir(&self, project: &Path) -> PathBuf {
@@ -137,16 +171,24 @@ impl ExecutionStore {
         if fs::symlink_metadata(&path).is_ok_and(|m| !m.file_type().is_file()) {
             return Err(invalid("project writer lock is not a regular file"));
         }
-        let lock = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&path)?;
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true).truncate(false);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        }
+        let lock = options.open(&path)?;
+        if !lock.metadata()?.is_file() {
+            return Err(invalid("project writer lock is not a regular file"));
+        }
         lock.try_lock()
             .map_err(|_| invalid("project writer is busy"))?;
         let records = self.records_dir(&project);
         fs::create_dir_all(&records)?;
+        if fs::canonicalize(&records)? != records {
+            return Err(invalid("execution directory contains symlinks"));
+        }
         sync_directory(&self.root)?;
         Ok(ProjectWriter {
             _lock: lock,
@@ -173,6 +215,13 @@ fn read_records(root: &Path, project: &Path, limit: usize) -> io::Result<Vec<Exe
     paths.sort();
     let mut records = Vec::new();
     for directory in paths.into_iter().rev() {
+        // Legacy recovery records shared this directory. Never parse them as executions.
+        if directory
+            .file_name()
+            .is_some_and(|name| name.to_string_lossy().starts_with("recovery-"))
+        {
+            continue;
+        }
         let path = directory.join("record.json");
         if !path.exists() {
             continue;
@@ -186,11 +235,8 @@ fn read_records(root: &Path, project: &Path, limit: usize) -> io::Result<Vec<Exe
             record.state = "in_flight_or_interrupted".into();
         }
         if record.attempt_id.is_empty() {
-            record.attempt_id = record
-                .backups
-                .first()
-                .and_then(|backup| backup.saved.parent())
-                .and_then(Path::file_name)
+            record.attempt_id = directory
+                .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_default();
         }
@@ -260,6 +306,7 @@ impl ProjectWriter {
             evidence,
             outcome: None,
             backups,
+            post_attempt: None,
         };
         let path = directory.join("record.json");
         let bytes = serde_json::to_vec_pretty(&record)?;
@@ -273,27 +320,189 @@ impl ProjectWriter {
     }
 }
 
+#[derive(Debug)]
+pub struct RecoveryFailure {
+    pub unknown: bool,
+    error: io::Error,
+}
+
+impl From<io::Error> for RecoveryFailure {
+    fn from(error: io::Error) -> Self {
+        Self {
+            unknown: false,
+            error,
+        }
+    }
+}
+impl std::fmt::Display for RecoveryFailure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(f)
+    }
+}
+impl std::error::Error for RecoveryFailure {}
+
+fn valid_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 120 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+}
+
+fn recovery_hash(record: &RecoveryRecord) -> io::Result<String> {
+    Ok(crate::digest_bytes(&serde_json::to_vec(&serde_json::json!({
+        "schema_version": record.schema_version, "recovery_id": record.recovery_id,
+        "attempt_id": record.attempt_id, "project_dir": record.project_dir,
+        "domain": record.domain, "action": record.action, "files": record.files,
+    }))?)
+    .to_string())
+}
+
+// Disk recovery cannot synchronize an editor's unsaved model. Require closed documents.
+fn require_closed_project(project: &Path) -> io::Result<()> {
+    let mut pending = vec![project.to_path_buf()];
+    let mut count = 0;
+    while let Some(directory) = pending.pop() {
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            count += 1;
+            if count > 10000 {
+                return Err(invalid("project lock scan exceeds limit"));
+            }
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with('~') && name.ends_with(".lck") {
+                return Err(invalid(&format!(
+                    "close the project editors before recovery; editor lock is present: {}",
+                    entry.path().display()
+                )));
+            }
+            if entry.file_type()?.is_dir() && !name.starts_with('.') {
+                pending.push(entry.path());
+            }
+        }
+    }
+    Ok(())
+}
+
 impl ExecutionStore {
     fn recovery_dir(&self, project: &Path) -> PathBuf {
-        self.records_dir(project)
+        // Separate namespace: older execution readers never encounter these records.
+        self.root
+            .join("recoveries")
+            .join(crate::digest_bytes(project.as_os_str().as_encoded_bytes()).to_string())
     }
 
-    fn read_recovery(&self, project: &Path, recovery_id: &str) -> io::Result<RecoveryAttempt> {
-        let project = fs::canonicalize(project)?;
-        if recovery_id.is_empty() {
-            return Err(invalid("recovery identity is missing"));
+    fn execution_record(&self, project: &Path, id: &str) -> io::Result<ExecutionRecord> {
+        if !valid_id(id) || id.starts_with("recovery-") {
+            return Err(invalid("invalid execution identity"));
         }
-        let path = self
-            .recovery_dir(&project)
-            .join(recovery_id)
-            .join("record.json");
+        let path = self.records_dir(project).join(id).join("record.json");
+        let mut record: ExecutionRecord =
+            serde_json::from_slice(&read_bounded(&path, MAX_RECORD_BYTES)?)?;
+        if record.attempt_id.is_empty() {
+            record.attempt_id = id.into();
+        }
+        if record.schema_version != 1 || record.project_dir != project || record.attempt_id != id {
+            return Err(invalid("execution record identity mismatch"));
+        }
+        Ok(record)
+    }
+
+    fn recovery_files(
+        &self,
+        project: &Path,
+        record: &ExecutionRecord,
+    ) -> io::Result<Vec<RecoveryFile>> {
+        if !matches!(record.state.as_str(), "unknown" | "in_flight")
+            || !matches!(record.domain.as_str(), "pcb" | "schematic")
+            || record.backups.is_empty()
+        {
+            return Err(invalid("execution attempt is not recoverable"));
+        }
+        if record
+            .post_attempt
+            .as_ref()
+            .is_some_and(|files| files.len() != record.backups.len())
+        {
+            return Err(invalid("incomplete post-attempt evidence"));
+        }
+        let backup_root = self.records_dir(project).join(&record.attempt_id);
+        let mut paths = std::collections::BTreeSet::new();
+        record
+            .backups
+            .iter()
+            .map(|backup| {
+                let extension = backup
+                    .original
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("");
+                let supported = match record.domain.as_str() {
+                    "pcb" => matches!(extension, "kicad_pcb" | "kicad_pro" | "kicad_dru"),
+                    "schematic" => extension == "kicad_sch",
+                    _ => false,
+                };
+                if !supported
+                    || !backup.original.starts_with(project)
+                    || backup.saved.parent() != Some(backup_root.as_path())
+                    || !paths.insert(&backup.original)
+                {
+                    return Err(invalid("invalid or duplicate recovery source/backup path"));
+                }
+                let current = read_bounded(&backup.original, MAX_FILE_BYTES)?;
+                let saved = read_bounded(&backup.saved, MAX_FILE_BYTES)?;
+                if crate::digest_bytes(&saved).to_string() != backup.sha256 {
+                    return Err(invalid("recovery backup digest mismatch"));
+                }
+                let current_hash = crate::digest_bytes(&current).to_string();
+                let expected = match &record.post_attempt {
+                    Some(files) => {
+                        &files
+                            .iter()
+                            .find(|f| f.path == backup.original)
+                            .ok_or_else(|| invalid("missing post-attempt fingerprint"))?
+                            .sha256
+                    }
+                    // Legacy or interrupted attempts can only recover an unchanged file.
+                    None => &backup.sha256,
+                };
+                if &current_hash != expected {
+                    return Err(invalid(
+                        "source changed after execution or post-attempt evidence is unavailable",
+                    ));
+                }
+                Ok(RecoveryFile {
+                    original: backup.original.clone(),
+                    backup: backup.saved.clone(),
+                    current_sha256: current_hash,
+                    backup_sha256: backup.sha256.clone(),
+                })
+            })
+            .collect()
+    }
+
+    fn read_recovery(&self, project: &Path, id: &str) -> io::Result<RecoveryAttempt> {
+        if !valid_id(id) || !id.starts_with("recovery-") {
+            return Err(invalid("invalid recovery identity"));
+        }
+        let path = self.recovery_dir(project).join(id).join("record.json");
         let record: RecoveryRecord =
             serde_json::from_slice(&read_bounded(&path, MAX_RECORD_BYTES)?)?;
-        if record.schema_version != 1
+        if record.schema_version != 2
             || record.project_dir != project
-            || record.recovery_id != recovery_id
+            || record.recovery_id != id
+            || record.action != "restore_backups"
+            || recovery_hash(&record)? != record.plan_hash
         {
-            return Err(invalid("recovery record identity mismatch"));
+            return Err(invalid("recovery record identity or digest mismatch"));
+        }
+        if self
+            .plans
+            .lock()
+            .map_err(|_| invalid("recovery plans unavailable"))?
+            .get(id)
+            != Some(&record.plan_hash)
+        {
+            return Err(invalid(
+                "recovery plan expired, was consumed, or belongs to another server session",
+            ));
         }
         Ok(RecoveryAttempt { path, record })
     }
@@ -301,105 +510,91 @@ impl ExecutionStore {
     fn persist_recovery(attempt: &RecoveryAttempt) -> io::Result<()> {
         let bytes = serde_json::to_vec_pretty(&attempt.record)?;
         if bytes.len() as u64 > MAX_RECORD_BYTES {
-            return Err(invalid("recovery outcome exceeds size limit"));
+            return Err(invalid("recovery record exceeds size limit"));
         }
         let temporary = attempt.path.with_extension("pending");
         write_new(&temporary, &bytes)?;
-        fs::rename(&temporary, &attempt.path)?;
-        sync_directory(attempt.path.parent().expect("recovery record has parent"))
+        let result = fs::rename(&temporary, &attempt.path)
+            .and_then(|()| sync_directory(attempt.path.parent().expect("record parent")));
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result
     }
 
     pub fn plan_recovery(&self, project: &Path, attempt_id: &str) -> io::Result<RecoveryRecord> {
-        let project = fs::canonicalize(project)?;
-        let record = self
-            .history(&project)?
-            .into_iter()
-            .find(|record| record.attempt_id == attempt_id)
-            .ok_or_else(|| invalid("execution attempt was not found"))?;
-        if !matches!(
-            record.state.as_str(),
-            "unknown" | "in_flight_or_interrupted"
-        ) {
-            return Err(invalid("execution attempt is not recoverable"));
-        }
-        if record.backups.is_empty() {
-            return Err(invalid("execution attempt has no complete backups"));
-        }
-        let mut files = Vec::with_capacity(record.backups.len());
-        for backup in &record.backups {
-            if !backup.original.starts_with(&project) || !backup.saved.starts_with(&self.root) {
-                return Err(invalid("recovery path escaped its safety boundary"));
-            }
-            let current = read_bounded(&backup.original, MAX_FILE_BYTES)?;
-            let saved = read_bounded(&backup.saved, MAX_FILE_BYTES)?;
-            let saved_hash = crate::digest_bytes(&saved).to_string();
-            if saved_hash != backup.sha256 {
-                return Err(invalid("recovery backup digest mismatch"));
-            }
-            files.push(RecoveryFile {
-                original: backup.original.clone(),
-                backup: backup.saved.clone(),
-                current_sha256: crate::digest_bytes(&current).to_string(),
-                backup_sha256: saved_hash,
-            });
-        }
+        let writer = self.acquire(project)?;
+        let project = &writer.project;
+        require_closed_project(project)?;
+        let execution = self.execution_record(project, attempt_id)?;
+        let files = self.recovery_files(project, &execution)?;
         static SEQUENCE: AtomicU64 = AtomicU64::new(0);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_err(io::Error::other)?
             .as_nanos();
-        let recovery_id = format!(
+        let id = format!(
             "recovery-{now:039}-{}-{}",
             std::process::id(),
             SEQUENCE.fetch_add(1, Ordering::Relaxed)
         );
-        let plan_input = serde_json::json!({
-            "attempt_id": record.attempt_id.clone(),
-            "project_dir": project,
-            "domain": record.domain.clone(),
-            "action": "restore_backups",
-            "files": files,
-        });
-        let plan_hash =
-            crate::digest_bytes(&serde_json::to_vec(&plan_input).map_err(io::Error::other)?)
-                .to_string();
-        let recovery_dir = self.recovery_dir(&project).join(&recovery_id);
-        fs::create_dir(&recovery_dir)?;
-        let attempt = RecoveryAttempt {
-            path: recovery_dir.join("record.json"),
-            record: RecoveryRecord {
-                schema_version: 1,
-                recovery_id: recovery_id.clone(),
-                attempt_id: record.attempt_id,
-                project_dir: project,
-                domain: record.domain,
-                action: "restore_backups".into(),
-                plan_hash,
-                approval_hash: None,
-                state: "prepared".into(),
-                files,
-                outcome: None,
-            },
+        let root = self.recovery_dir(project);
+        fs::create_dir_all(&root)?;
+        if fs::canonicalize(&root)? != root {
+            return Err(invalid("recovery directory must not contain symlinks"));
+        }
+        let directory = root.join(&id);
+        fs::create_dir(&directory)?;
+        let mut record = RecoveryRecord {
+            schema_version: 2,
+            recovery_id: id.clone(),
+            attempt_id: execution.attempt_id,
+            project_dir: project.clone(),
+            domain: execution.domain,
+            action: "restore_backups".into(),
+            plan_hash: String::new(),
+            approval_hash: None,
+            state: "prepared".into(),
+            files,
+            outcome: None,
         };
-        let bytes = serde_json::to_vec_pretty(&attempt.record)?;
-        write_new(&attempt.path, &bytes)?;
-        sync_directory(&recovery_dir)?;
-        sync_directory(&self.recovery_dir(&attempt.record.project_dir))?;
+        record.plan_hash = recovery_hash(&record)?;
+        let attempt = RecoveryAttempt {
+            path: directory.join("record.json"),
+            record,
+        };
+        Self::persist_recovery(&attempt)?;
+        sync_directory(&root)?;
+        sync_directory(root.parent().expect("namespace"))?;
+        sync_directory(&self.root)?;
+        self.plans
+            .lock()
+            .map_err(|_| invalid("recovery plans unavailable"))?
+            .insert(id, attempt.record.plan_hash.clone());
         Ok(attempt.record)
     }
 
-    fn check_recovery_files(record: &RecoveryRecord) -> io::Result<()> {
-        for file in &record.files {
-            let current = read_bounded(&file.original, MAX_FILE_BYTES)?;
-            if crate::digest_bytes(&current).to_string() != file.current_sha256 {
-                return Err(invalid("source files changed since recovery preparation"));
-            }
-            let backup = read_bounded(&file.backup, MAX_FILE_BYTES)?;
-            if crate::digest_bytes(&backup).to_string() != file.backup_sha256 {
-                return Err(invalid("recovery backup changed since preparation"));
-            }
+    fn check_recovery_files(&self, record: &RecoveryRecord) -> io::Result<()> {
+        require_closed_project(&record.project_dir)?;
+        let execution = self.execution_record(&record.project_dir, &record.attempt_id)?;
+        let current = self.recovery_files(&record.project_dir, &execution)?;
+        if serde_json::to_value(current)? != serde_json::to_value(&record.files)? {
+            return Err(invalid(
+                "source or backup changed since recovery preparation",
+            ));
         }
         Ok(())
+    }
+
+    fn invalidate(&self, attempt: &mut RecoveryAttempt, reason: &io::Error) {
+        self.plans
+            .lock()
+            .expect("plans")
+            .remove(&attempt.record.recovery_id);
+        attempt.record.state = "rejected".into();
+        attempt.record.outcome =
+            Some(serde_json::json!({"kind": "rejected", "reason": reason.to_string()}));
+        let _ = Self::persist_recovery(attempt);
     }
 
     pub fn preview_recovery(
@@ -408,13 +603,17 @@ impl ExecutionStore {
         recovery_id: &str,
         plan_hash: &str,
     ) -> io::Result<String> {
-        let mut attempt = self.read_recovery(project, recovery_id)?;
+        let writer = self.acquire(project)?;
+        let mut attempt = self.read_recovery(&writer.project, recovery_id)?;
         if attempt.record.plan_hash != plan_hash || attempt.record.state != "prepared" {
             return Err(invalid("recovery plan is stale or already used"));
         }
-        Self::check_recovery_files(&attempt.record)?;
+        if let Err(error) = self.check_recovery_files(&attempt.record) {
+            self.invalidate(&mut attempt, &error);
+            return Err(error);
+        }
         let approval =
-            crate::digest_bytes(format!("{}:{}", plan_hash, attempt.record.attempt_id).as_bytes())
+            crate::digest_bytes(format!("{plan_hash}:{recovery_id}:restore_backups").as_bytes())
                 .to_string();
         attempt.record.approval_hash = Some(approval.clone());
         attempt.record.state = "awaiting_approval".into();
@@ -428,8 +627,8 @@ impl ExecutionStore {
         recovery_id: &str,
         plan_hash: &str,
         approval_hash: &str,
-    ) -> io::Result<RecoveryRecord> {
-        self.commit_recovery_internal(project, recovery_id, plan_hash, approval_hash, None)
+    ) -> Result<RecoveryRecord, RecoveryFailure> {
+        self.commit_recovery_internal(project, recovery_id, plan_hash, approval_hash, |_| Ok(()))
     }
 
     fn commit_recovery_internal(
@@ -438,107 +637,134 @@ impl ExecutionStore {
         recovery_id: &str,
         plan_hash: &str,
         approval_hash: &str,
-        fail_after: Option<usize>,
-    ) -> io::Result<RecoveryRecord> {
-        let mut attempt = self.read_recovery(project, recovery_id)?;
+        mut checkpoint: impl FnMut(usize) -> io::Result<()>,
+    ) -> Result<RecoveryRecord, RecoveryFailure> {
+        let writer = self.acquire(project)?;
+        let mut attempt = self.read_recovery(&writer.project, recovery_id)?;
+        let expected =
+            crate::digest_bytes(format!("{plan_hash}:{recovery_id}:restore_backups").as_bytes())
+                .to_string();
         if attempt.record.plan_hash != plan_hash
             || attempt.record.state != "awaiting_approval"
+            || expected != approval_hash
             || attempt.record.approval_hash.as_deref() != Some(approval_hash)
         {
-            return Err(invalid("recovery approval mismatch or state is not ready"));
+            return Err(invalid("recovery approval mismatch or state is not ready").into());
         }
-        Self::check_recovery_files(&attempt.record)?;
+        if let Err(error) = self.check_recovery_files(&attempt.record) {
+            self.invalidate(&mut attempt, &error);
+            return Err(error.into());
+        }
         attempt.record.state = "in_flight".into();
-        Self::persist_recovery(&attempt)?;
+        // Consume before any durable transition; persistence ambiguity cannot enable replay.
+        self.plans.lock().expect("plans").remove(recovery_id);
+        Self::persist_recovery(&attempt).map_err(|error| RecoveryFailure {
+            unknown: true,
+            error,
+        })?;
         let result = (|| {
             for (index, file) in attempt.record.files.iter().enumerate() {
+                require_closed_project(&writer.project)?;
                 let bytes = read_bounded(&file.backup, MAX_FILE_BYTES)?;
+                if crate::digest_bytes(&bytes).to_string() != file.backup_sha256 {
+                    return Err(invalid("backup changed during recovery"));
+                }
                 let temporary = file
                     .original
-                    .with_file_name(format!(".{}.auto-kicad-recovery.tmp", recovery_id));
+                    .with_file_name(format!(".{recovery_id}-{index}.auto-kicad-recovery.tmp"));
                 write_new(&temporary, &bytes)?;
-                fs::rename(&temporary, &file.original)?;
-                sync_directory(
-                    file.original
-                        .parent()
-                        .ok_or_else(|| invalid("recovery source has no parent"))?,
-                )?;
-                let restored = read_bounded(&file.original, MAX_FILE_BYTES)?;
-                if crate::digest_bytes(&restored).to_string() != file.backup_sha256 {
+                let result = (|| {
+                    let current = read_bounded(&file.original, MAX_FILE_BYTES)?;
+                    if crate::digest_bytes(&current).to_string() != file.current_sha256 {
+                        return Err(invalid("source changed during recovery"));
+                    }
+                    fs::rename(&temporary, &file.original)?;
+                    sync_directory(
+                        file.original
+                            .parent()
+                            .ok_or_else(|| invalid("source has no parent"))?,
+                    )
+                })();
+                let _ = fs::remove_file(&temporary);
+                result?;
+                checkpoint(index)?;
+            }
+            for file in &attempt.record.files {
+                if crate::digest_bytes(&read_bounded(&file.original, MAX_FILE_BYTES)?).to_string()
+                    != file.backup_sha256
+                {
                     return Err(invalid("restored file digest did not match backup"));
                 }
-                if fail_after == Some(index) {
-                    return Err(invalid("injected recovery write failure"));
-                }
             }
-            Ok::<(), io::Error>(())
+            checkpoint(usize::MAX)?;
+            attempt.record.state = "restored".into();
+            attempt.record.outcome = Some(serde_json::json!({"kind": "restored"}));
+            Self::persist_recovery(&attempt)
         })();
         match result {
-            Ok(()) => {
-                attempt.record.state = "restored".into();
-                attempt.record.outcome = Some(serde_json::json!({"kind": "restored"}));
-                Self::persist_recovery(&attempt)?;
-                Ok(attempt.record)
-            }
+            Ok(()) => Ok(attempt.record),
             Err(error) => {
                 attempt.record.state = "unknown".into();
-                attempt.record.outcome = Some(serde_json::json!({
-                    "kind": "unknown",
-                    "reason": error.to_string()
-                }));
+                attempt.record.outcome =
+                    Some(serde_json::json!({"kind": "unknown", "reason": error.to_string()}));
                 let _ = Self::persist_recovery(&attempt);
-                Err(error)
+                Err(RecoveryFailure {
+                    unknown: true,
+                    error,
+                })
             }
         }
-    }
-
-    #[cfg(test)]
-    fn commit_recovery_with_fault(
-        &self,
-        project: &Path,
-        recovery_id: &str,
-        plan_hash: &str,
-        approval_hash: &str,
-        fail_after: usize,
-    ) -> io::Result<RecoveryRecord> {
-        self.commit_recovery_internal(
-            project,
-            recovery_id,
-            plan_hash,
-            approval_hash,
-            Some(fail_after),
-        )
     }
 
     pub fn recovery_history(&self, project: &Path) -> io::Result<Vec<RecoveryRecord>> {
         let project = fs::canonicalize(project)?;
-        let root = self.recovery_dir(&project);
-        let entries = match fs::read_dir(&root) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(error),
-        };
         let mut records = Vec::new();
-        for entry in entries {
-            let directory = entry?.path();
-            if !directory
-                .file_name()
-                .is_some_and(|name| name.to_string_lossy().starts_with("recovery-"))
+        // Retain read-only visibility of the old, unsafe recovery schema.
+        for root in [self.recovery_dir(&project), self.records_dir(&project)] {
+            let entries = match fs::read_dir(&root) {
+                Ok(entries) => entries,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
+                Err(error) => return Err(error),
+            };
+            let mut paths = entries
+                .map(|entry| entry.map(|e| e.path()))
+                .collect::<io::Result<Vec<_>>>()?;
+            paths.sort();
+            for directory in paths
+                .into_iter()
+                .rev()
+                .filter(|p| {
+                    p.file_name()
+                        .is_some_and(|name| name.to_string_lossy().starts_with("recovery-"))
+                })
+                .take(100)
             {
-                continue;
-            }
-            let path = directory.join("record.json");
-            if !path.exists() {
-                continue;
-            }
-            let record: RecoveryRecord =
-                serde_json::from_slice(&read_bounded(&path, MAX_RECORD_BYTES)?)?;
-            if record.project_dir == project && record.schema_version == 1 {
+                let path = directory.join("record.json");
+                if !path.exists() {
+                    continue;
+                }
+                let mut record: RecoveryRecord =
+                    serde_json::from_slice(&read_bounded(&path, MAX_RECORD_BYTES)?)?;
+                if record.project_dir != project || !matches!(record.schema_version, 1 | 2) {
+                    return Err(invalid("invalid recovery history record"));
+                }
+                if record.state == "in_flight" {
+                    record.state = "unknown".into();
+                }
+                if matches!(record.state.as_str(), "prepared" | "awaiting_approval")
+                    && !self
+                        .plans
+                        .lock()
+                        .expect("plans")
+                        .contains_key(&record.recovery_id)
+                {
+                    record.state = "expired".into();
+                }
                 records.push(record);
             }
         }
-        records.sort_by(|left, right| left.recovery_id.cmp(&right.recovery_id));
-        records.reverse();
+        records.sort_by(|a, b| b.recovery_id.cmp(&a.recovery_id));
+        records.truncate(100);
         Ok(records)
     }
 }
@@ -549,6 +775,23 @@ impl ExecutionAttempt {
     }
 
     pub fn finish(mut self, state: &str, outcome: Value) -> io::Result<()> {
+        // Missing evidence leaves an interrupted record; recovery must then be a byte no-op.
+        self.record.post_attempt = Some(
+            self.record
+                .backups
+                .iter()
+                .map(|backup| {
+                    Ok(SourceFingerprint {
+                        path: backup.original.clone(),
+                        sha256: crate::digest_bytes(&read_bounded(
+                            &backup.original,
+                            MAX_FILE_BYTES,
+                        )?)
+                        .to_string(),
+                    })
+                })
+                .collect::<io::Result<Vec<_>>>()?,
+        );
         self.record.state = state.into();
         self.record.outcome = Some(outcome);
         let bytes = serde_json::to_vec_pretty(&self.record)?;
@@ -566,214 +809,375 @@ impl ExecutionAttempt {
 mod tests {
     use super::*;
 
+    struct Fixture {
+        root: PathBuf,
+        project: PathBuf,
+        source: PathBuf,
+        store: ExecutionStore,
+        id: String,
+    }
+    impl Fixture {
+        fn new(interrupted: bool) -> Self {
+            static SEQ: AtomicU64 = AtomicU64::new(0);
+            let root = std::env::temp_dir().join(format!(
+                "auto-kicad-recovery-test-{}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                SEQ.fetch_add(1, Ordering::Relaxed)
+            ));
+            fs::create_dir(&root).unwrap();
+            let root = fs::canonicalize(root).unwrap();
+            let project = root.join("project");
+            fs::create_dir(&project).unwrap();
+            let source = project.join("board.kicad_pcb");
+            fs::write(&source, b"before").unwrap();
+            fs::write(source.with_extension("kicad_pro"), b"project-before").unwrap();
+            let store = ExecutionStore::open(&root.join("state")).unwrap();
+            let writer = store.acquire(&project).unwrap();
+            let attempt = writer
+                .begin(
+                    "pcb",
+                    "plan",
+                    "approval",
+                    Value::Null,
+                    &[source.clone(), source.with_extension("kicad_pro")],
+                )
+                .unwrap();
+            let id = attempt.attempt_id().to_owned();
+            if interrupted {
+                drop(attempt);
+            } else {
+                fs::write(&source, b"attempt-write").unwrap();
+                fs::write(source.with_extension("kicad_pro"), b"project-attempt-write").unwrap();
+                attempt.finish("unknown", Value::Null).unwrap();
+            }
+            drop(writer);
+            Self {
+                root,
+                project,
+                source,
+                store,
+                id,
+            }
+        }
+        fn ready(&self) -> (RecoveryRecord, String) {
+            let plan = self.store.plan_recovery(&self.project, &self.id).unwrap();
+            let approval = self
+                .store
+                .preview_recovery(&self.project, &plan.recovery_id, &plan.plan_hash)
+                .unwrap();
+            (plan, approval)
+        }
+        fn commit(
+            &self,
+            p: &RecoveryRecord,
+            approval: &str,
+        ) -> Result<RecoveryRecord, RecoveryFailure> {
+            self.store
+                .commit_recovery(&self.project, &p.recovery_id, &p.plan_hash, approval)
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+
     #[test]
-    fn writer_exclusion_and_interrupted_evidence_survive_store_recreation() {
-        let root = std::env::temp_dir().join(format!(
-            "auto-kicad-recovery-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let project = root.join("project");
-        fs::create_dir_all(&project).unwrap();
-        let source = project.join("board.kicad_pcb");
-        fs::write(&source, b"saved source").unwrap();
-        let store = ExecutionStore::open(&root.join("state")).unwrap();
-        let writer = store.acquire(&project).unwrap();
-        assert!(store.acquire(&project).is_err());
-        let other_store = ExecutionStore::open(&root.join("other-state")).unwrap();
-        assert!(other_store.acquire(&project).is_err());
-        let attempt = writer
-            .begin(
-                "pcb",
-                "plan",
-                "approval",
-                serde_json::json!({"revision": "before"}),
-                std::slice::from_ref(&source),
-            )
-            .unwrap();
-        drop(attempt);
-        drop(writer);
-        let reopened = ExecutionStore::open(&root.join("state")).unwrap();
-        let history = reopened.history(&project).unwrap();
-        assert_eq!(history[0].state, "in_flight_or_interrupted");
+    fn recovery_preserves_execution_history_and_allows_subsequent_writes() {
+        let f = Fixture::new(false);
+        let execution_path = f
+            .store
+            .records_dir(&f.project)
+            .join(&f.id)
+            .join("record.json");
+        let original_record = fs::read(&execution_path).unwrap();
+        let (p, a) = f.ready();
+        assert_eq!(f.store.history(&f.project).unwrap().len(), 1);
+        assert!(!f.commit(&p, "wrong").unwrap_err().unknown);
+        assert_eq!(f.commit(&p, &a).unwrap().state, "restored");
+        assert_eq!(fs::read(&f.source).unwrap(), b"before");
         assert_eq!(
-            fs::read(&history[0].backups[0].saved).unwrap(),
-            b"saved source"
+            fs::read(f.source.with_extension("kicad_pro")).unwrap(),
+            b"project-before"
         );
-        let writer = reopened.acquire(&project).unwrap();
+        assert_eq!(fs::read(&execution_path).unwrap(), original_record);
+        assert!(f.commit(&p, &a).is_err());
+        let writer = f.store.acquire(&f.project).unwrap();
+        assert!(f.store.acquire(&f.project).is_err());
+        assert!(
+            ExecutionStore::open(&f.root.join("other-state"))
+                .unwrap()
+                .acquire(&f.project)
+                .is_err()
+        );
         assert!(
             writer
                 .begin("pcb", "plan", "approval", Value::Null, &[])
                 .is_err()
         );
-        let attempt = writer
+        writer
             .begin(
                 "pcb",
-                "fresh-plan",
-                "fresh-approval",
+                "next-plan",
+                "next-approval",
                 Value::Null,
-                &[source],
+                std::slice::from_ref(&f.source),
             )
+            .unwrap()
+            .finish("committed", Value::Null)
             .unwrap();
-        attempt.finish("committed", Value::Null).unwrap();
-        assert_eq!(reopened.history(&project).unwrap()[0].state, "committed");
-        drop(writer);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn guarded_recovery_restores_only_after_fresh_hash_checks() {
-        let root = std::env::temp_dir().join(format!(
-            "auto-kicad-guarded-recovery-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let project = root.join("project");
-        fs::create_dir_all(&project).unwrap();
-        let source = project.join("board.kicad_pcb");
-        fs::write(&source, b"before").unwrap();
-        let store = ExecutionStore::open(&root.join("state")).unwrap();
-        let writer = store.acquire(&project).unwrap();
-        let attempt = writer
-            .begin(
-                "pcb",
-                "plan",
-                "approval",
-                Value::Null,
-                std::slice::from_ref(&source),
-            )
-            .unwrap();
-        let attempt_id = attempt.record.attempt_id.clone();
-        attempt
-            .finish("unknown", serde_json::json!({"kind": "unknown"}))
-            .unwrap();
-        fs::write(&source, b"later user edit").unwrap();
-        let plan = store.plan_recovery(&project, &attempt_id).unwrap();
-        let approval = store
-            .preview_recovery(&project, &plan.recovery_id, &plan.plan_hash)
-            .unwrap();
-        let restored = store
-            .commit_recovery(&project, &plan.recovery_id, &plan.plan_hash, &approval)
-            .unwrap();
-        assert_eq!(restored.state, "restored");
-        assert_eq!(fs::read(&source).unwrap(), b"before");
-        drop(writer);
-        fs::remove_dir_all(root).unwrap();
-    }
-
-    #[test]
-    fn guarded_recovery_rejects_edits_after_preview_without_writing() {
-        let root = std::env::temp_dir().join(format!(
-            "auto-kicad-guarded-recovery-drift-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let project = root.join("project");
-        fs::create_dir_all(&project).unwrap();
-        let source = project.join("board.kicad_pcb");
-        fs::write(&source, b"before").unwrap();
-        let store = ExecutionStore::open(&root.join("state")).unwrap();
-        let writer = store.acquire(&project).unwrap();
-        let attempt = writer
-            .begin(
-                "pcb",
-                "plan",
-                "approval",
-                Value::Null,
-                std::slice::from_ref(&source),
-            )
-            .unwrap();
-        let attempt_id = attempt.record.attempt_id.clone();
-        attempt.finish("unknown", Value::Null).unwrap();
-        fs::write(&source, b"first edit").unwrap();
-        let plan = store.plan_recovery(&project, &attempt_id).unwrap();
-        let approval = store
-            .preview_recovery(&project, &plan.recovery_id, &plan.plan_hash)
-            .unwrap();
-        fs::write(&source, b"second edit").unwrap();
-        assert!(
-            store
-                .commit_recovery(&project, &plan.recovery_id, &plan.plan_hash, &approval)
-                .is_err()
+        assert_eq!(f.store.history(&f.project).unwrap().len(), 2);
+        assert_eq!(
+            f.store.recovery_history(&f.project).unwrap()[0].state,
+            "restored"
         );
-        assert_eq!(fs::read(&source).unwrap(), b"second edit");
-        let state = store
-            .recovery_history(&project)
-            .unwrap()
-            .into_iter()
-            .find(|record| record.recovery_id == plan.recovery_id)
-            .unwrap()
-            .state;
-        assert_eq!(state, "awaiting_approval");
-        drop(writer);
-        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
-    fn guarded_recovery_marks_partial_restore_unknown() {
-        let root = std::env::temp_dir().join(format!(
-            "auto-kicad-guarded-recovery-fault-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let project = root.join("project");
-        fs::create_dir_all(&project).unwrap();
-        let first = project.join("board.kicad_pcb");
-        let second = project.join("board.kicad_pro");
-        fs::write(&first, b"board-before").unwrap();
-        fs::write(&second, b"project-before").unwrap();
-        let store = ExecutionStore::open(&root.join("state")).unwrap();
-        let writer = store.acquire(&project).unwrap();
-        let attempt = writer
-            .begin(
-                "pcb",
-                "plan",
-                "approval",
-                Value::Null,
-                &[first.clone(), second.clone()],
-            )
-            .unwrap();
-        let attempt_id = attempt.record.attempt_id.clone();
-        attempt.finish("unknown", Value::Null).unwrap();
-        fs::write(&first, b"board-later").unwrap();
-        fs::write(&second, b"project-later").unwrap();
-        let plan = store.plan_recovery(&project, &attempt_id).unwrap();
-        let approval = store
-            .preview_recovery(&project, &plan.recovery_id, &plan.plan_hash)
-            .unwrap();
-        assert!(
-            store
-                .commit_recovery_with_fault(
-                    &project,
-                    &plan.recovery_id,
-                    &plan.plan_hash,
-                    &approval,
-                    0,
+    fn recovery_rejects_later_edits_at_every_boundary() {
+        for boundary in 0..3 {
+            let f = Fixture::new(false);
+            let p = if boundary > 0 {
+                Some(f.store.plan_recovery(&f.project, &f.id).unwrap())
+            } else {
+                None
+            };
+            let a = if boundary > 1 {
+                let p = p.as_ref().unwrap();
+                Some(
+                    f.store
+                        .preview_recovery(&f.project, &p.recovery_id, &p.plan_hash)
+                        .unwrap(),
                 )
+            } else {
+                None
+            };
+            fs::write(&f.source, b"user-edit").unwrap();
+            match boundary {
+                0 => assert!(f.store.plan_recovery(&f.project, &f.id).is_err()),
+                1 => {
+                    let p = p.unwrap();
+                    assert!(
+                        f.store
+                            .preview_recovery(&f.project, &p.recovery_id, &p.plan_hash)
+                            .is_err()
+                    );
+                }
+                _ => assert!(!f.commit(&p.unwrap(), &a.unwrap()).unwrap_err().unknown),
+            }
+            assert_eq!(fs::read(&f.source).unwrap(), b"user-edit");
+            if boundary > 0 {
+                assert_eq!(
+                    f.store.recovery_history(&f.project).unwrap()[0].state,
+                    "rejected"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn recovery_requires_post_attempt_evidence_for_changed_interrupted_files() {
+        let f = Fixture::new(true);
+        let reopened = ExecutionStore::open(&f.root.join("state")).unwrap();
+        assert_eq!(
+            reopened.history(&f.project).unwrap()[0].state,
+            "in_flight_or_interrupted"
+        );
+        let (p, a) = f.ready();
+        assert!(f.commit(&p, &a).is_ok());
+        fs::write(&f.source, b"unattributed-change").unwrap();
+        assert!(reopened.plan_recovery(&f.project, &f.id).is_err());
+    }
+
+    #[test]
+    fn recovery_approvals_expire_on_restart_and_record_tampering_is_rejected() {
+        let f = Fixture::new(false);
+        let (p, a) = f.ready();
+        let reopened = ExecutionStore::open(&f.root.join("state")).unwrap();
+        assert!(
+            reopened
+                .commit_recovery(&f.project, &p.recovery_id, &p.plan_hash, &a)
                 .is_err()
         );
-        assert_eq!(fs::read(&first).unwrap(), b"board-before");
-        assert_eq!(fs::read(&second).unwrap(), b"project-later");
-        let recovery = store
-            .recovery_history(&project)
-            .unwrap()
-            .into_iter()
-            .find(|record| record.recovery_id == plan.recovery_id)
-            .unwrap();
-        assert_eq!(recovery.state, "unknown");
-        drop(writer);
-        fs::remove_dir_all(root).unwrap();
+        assert_eq!(
+            reopened.recovery_history(&f.project).unwrap()[0].state,
+            "expired"
+        );
+        let path = f
+            .store
+            .recovery_dir(&f.project)
+            .join(&p.recovery_id)
+            .join("record.json");
+        let mut modified = p.clone();
+        modified.files[0].original = f.root.join("outside.kicad_pcb");
+        modified.plan_hash = recovery_hash(&modified).unwrap();
+        fs::write(path, serde_json::to_vec(&modified).unwrap()).unwrap();
+        assert!(f.commit(&modified, &a).is_err());
+        assert!(
+            f.store
+                .preview_recovery(&f.project, "../escaped", &p.plan_hash)
+                .is_err()
+        );
+        assert_eq!(fs::read(&f.source).unwrap(), b"attempt-write");
+    }
+
+    #[test]
+    fn recovery_rejects_missing_tampered_and_redirected_inputs() {
+        for fault in 0..5 {
+            let f = Fixture::new(false);
+            let (p, a) = f.ready();
+            match fault {
+                0 => fs::remove_file(&p.files[0].backup).unwrap(),
+                1 => fs::write(&p.files[0].backup, b"tampered").unwrap(),
+                2 => fs::remove_file(&f.source).unwrap(),
+                3 => fs::write(f.project.join("~board.kicad_pcb.lck"), b"lock").unwrap(),
+                _ => {
+                    let outside = f.root.join("outside.kicad_pcb");
+                    fs::write(&outside, b"attempt-write").unwrap();
+                    fs::remove_file(&f.source).unwrap();
+                    #[cfg(unix)]
+                    std::os::unix::fs::symlink(&outside, &f.source).unwrap();
+                }
+            }
+            assert!(!f.commit(&p, &a).unwrap_err().unknown);
+            assert_eq!(
+                f.store.recovery_history(&f.project).unwrap()[0].state,
+                "rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn recovery_partial_and_terminal_failures_are_unknown_and_nonreplayable() {
+        for fault in [0, usize::MAX] {
+            let f = Fixture::new(false);
+            let (p, a) = f.ready();
+            let error = f
+                .store
+                .commit_recovery_internal(&f.project, &p.recovery_id, &p.plan_hash, &a, |index| {
+                    if index == fault {
+                        if fault == usize::MAX {
+                            let pending = f
+                                .store
+                                .recovery_dir(&f.project)
+                                .join(&p.recovery_id)
+                                .join("record.pending");
+                            write_new(&pending, b"interrupted journal")?;
+                        } else {
+                            return Err(invalid("injected post-write failure"));
+                        }
+                    }
+                    Ok(())
+                })
+                .unwrap_err();
+            assert!(error.unknown);
+            assert_eq!(
+                f.store.recovery_history(&f.project).unwrap()[0].state,
+                "unknown"
+            );
+            assert_eq!(fs::read(&f.source).unwrap(), b"before");
+            assert_eq!(
+                fs::read(f.source.with_extension("kicad_pro")).unwrap(),
+                if fault == 0 {
+                    b"project-attempt-write".as_slice()
+                } else {
+                    b"project-before".as_slice()
+                }
+            );
+            assert!(f.commit(&p, &a).is_err());
+            assert!(f.store.plan_recovery(&f.project, &f.id).is_err());
+        }
+    }
+
+    #[test]
+    fn recovery_legacy_records_remain_inspectable_without_blocking_execution_history() {
+        let f = Fixture::new(false);
+        let (mut p, _) = f.ready();
+        p.schema_version = 1;
+        let directory = f.store.records_dir(&f.project).join(&p.recovery_id);
+        fs::create_dir(&directory).unwrap();
+        fs::write(
+            directory.join("record.json"),
+            serde_json::to_vec(&p).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(f.store.history(&f.project).unwrap().len(), 1);
+        assert_eq!(f.store.recovery_history(&f.project).unwrap().len(), 2);
+    }
+    #[test]
+    fn recovery_detects_external_writes_during_restore_and_final_readback() {
+        for after_index in [0, 1] {
+            let f = Fixture::new(false);
+            let (p, a) = f.ready();
+            let changed = if after_index == 0 {
+                f.source.with_extension("kicad_pro")
+            } else {
+                f.source.clone()
+            };
+            let error = f
+                .store
+                .commit_recovery_internal(&f.project, &p.recovery_id, &p.plan_hash, &a, |index| {
+                    if index == after_index {
+                        fs::write(&changed, b"external-change")?;
+                    }
+                    Ok(())
+                })
+                .unwrap_err();
+            assert!(error.unknown);
+            assert_eq!(fs::read(&changed).unwrap(), b"external-change");
+            assert_eq!(
+                f.store.recovery_history(&f.project).unwrap()[0].state,
+                "unknown"
+            );
+            assert!(f.commit(&p, &a).is_err());
+            assert!(!fs::read_dir(&f.project).unwrap().any(|entry| {
+                entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".auto-kicad-recovery.tmp")
+            }));
+        }
+    }
+
+    #[test]
+    fn recovery_supports_schematic_bytes_and_rejects_unsupported_domains() {
+        for domain in ["schematic", "unsupported"] {
+            let f = Fixture::new(false);
+            let schematic = f.project.join("board.kicad_sch");
+            fs::write(&schematic, b"schematic-before").unwrap();
+            let writer = f.store.acquire(&f.project).unwrap();
+            let attempt = writer
+                .begin(
+                    domain,
+                    "sch-plan",
+                    "sch-approval",
+                    Value::Null,
+                    std::slice::from_ref(&schematic),
+                )
+                .unwrap();
+            let id = attempt.attempt_id().to_owned();
+            fs::write(&schematic, b"schematic-attempt").unwrap();
+            attempt.finish("unknown", Value::Null).unwrap();
+            drop(writer);
+            let plan = f.store.plan_recovery(&f.project, &id);
+            if domain == "unsupported" {
+                assert!(plan.is_err());
+                continue;
+            }
+            let plan = plan.unwrap();
+            let approval = f
+                .store
+                .preview_recovery(&f.project, &plan.recovery_id, &plan.plan_hash)
+                .unwrap();
+            f.store
+                .commit_recovery(&f.project, &plan.recovery_id, &plan.plan_hash, &approval)
+                .unwrap();
+            assert_eq!(fs::read(schematic).unwrap(), b"schematic-before");
+        }
     }
 }

@@ -4,6 +4,7 @@
 import json
 from pathlib import Path
 import re
+import subprocess
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -71,6 +72,10 @@ def main():
             record = ROOT / evidence["record"]
             if not record.is_file():
                 fail(f"evidence record does not exist for {identifier}: {record}")
+            if not record.resolve().is_relative_to(ROOT):
+                fail(f"evidence record escapes repository: {record}")
+            if subprocess.run(["git", "check-ignore", "-q", str(record)], cwd=ROOT).returncode == 0:
+                fail(f"evidence record is ignored and unavailable in clean checkouts: {record}")
         elif evidence is not None:
             fail(f"non-verified capability must use null evidence: {identifier}")
     print(f"Capability matrix valid: {len(capabilities)} capabilities, {len(listed_tools)} router tools")

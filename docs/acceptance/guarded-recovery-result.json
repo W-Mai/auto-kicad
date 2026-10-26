@@ -1,0 +1,39 @@
+{
+  "date": "2026-10-26",
+  "kicad_version": "10.0.6",
+  "fixture": "populated-partially-routed-pcb-copy",
+  "native_changes_transport": "MCP SDK transport with production IPC execution",
+  "recovery_transport": "stdio executable, restarted before fresh approval",
+  "fault_injection": "test-only unknown receipt after real native save",
+  "checks": {
+    "restored_objects_equal": true,
+    "restored_bytes_equal": true,
+    "original_project_unchanged": true,
+    "owned_editors_closed": true,
+    "fixture_cleaned": true
+  },
+  "restart_rejected": true,
+  "replay_rejected": true,
+  "closed_document_history": true,
+  "restored_state": "restored",
+  "subsequent_commit_state": "committed",
+  "drc": {
+    "baseline_violations": 49,
+    "unchanged": 49,
+    "introduced": 0,
+    "unconnected_items": 43,
+    "restored_report_equals_baseline": true
+  },
+  "source_files_sha256": {
+    "crates/auto-kicad/src/recovery.rs": "e40224bec2687c0128a47b8bd87224f838bc6d2164b0b419cdb01f8561aaafc1",
+    "crates/auto-kicad/src/lib.rs": "9a17a8dc9f0c28089d9d64d94e31b0e2a65dabe1570aa7a4ecce6070dc0f25f2",
+    "crates/auto-kicad/src/tests/recovery_acceptance.rs": "6de4ec9336c5a720167ddae21fe18ec7374070223f30de403561da5e7946a1ac",
+    "scripts/check-recovery.py": "030452198760662057a381ad2a2ff87ec96ce5be61eb4712666f6170842ee42f"
+  },
+  "unsupported_trial": {
+    "fixture": "xNAS-copy",
+    "stage": "initial board observation",
+    "error": "invalid_observed_board_graphic: board graphic must be a segment",
+    "passed": false
+  }
+}

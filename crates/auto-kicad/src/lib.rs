@@ -2522,9 +2522,26 @@ impl Default for Server {
     }
 }
 
+const RECOVERY_TOOLS: [&str; 3] = [
+    "kicad_plan_recovery",
+    "kicad_preview_recovery",
+    "kicad_commit_recovery",
+];
+
 impl Server {
     pub fn with_state_dir(mut self, directory: &std::path::Path) -> std::io::Result<Self> {
         self.execution_store = Some(Arc::new(recovery::ExecutionStore::open(directory)?));
+        for name in RECOVERY_TOOLS {
+            self.tool_router.enable_route(name);
+        }
+        self.capabilities
+            .retain(|c| c.id != "project.guarded_recovery");
+        self.capabilities.push(Capability {
+            id: "project.guarded_recovery",
+            domain: "project",
+            mode: "write",
+            status: "verified",
+        });
         Ok(self)
     }
 
@@ -2595,6 +2612,9 @@ impl Server {
     ) -> Self {
         let schematic_verified = schematic.verified();
         let mut tool_router = Self::tool_router();
+        for name in RECOVERY_TOOLS {
+            tool_router.disable_route(name);
+        }
         if !schematic_verified {
             for name in [
                 "kicad_plan_schematic_change",
@@ -2683,6 +2703,9 @@ impl Server {
             .collect::<BTreeMap<_, _>>();
         if let Some(entries) = matrix["capabilities"].as_array_mut() {
             for entry in entries {
+                if entry["id"] == "project.guarded_recovery" && self.execution_store.is_none() {
+                    entry["status"] = json!("unavailable");
+                }
                 if let Some(id) = entry["id"].as_str()
                     && let Some(status) = statuses.get(id)
                 {
@@ -2951,7 +2974,7 @@ impl Server {
 
     #[tool(
         name = "kicad_inspect_project",
-        description = "Read the open KiCad documents and return a normalized project snapshot."
+        description = "Read open KiCad documents, or durable project history with an empty endpoint."
     )]
     pub async fn kicad_inspect_project(
         &self,
@@ -2961,6 +2984,21 @@ impl Server {
             .request_id
             .unwrap_or_else(|| "req_inspect_project".to_owned());
         let project_dir = arguments.project_dir.as_deref().map(std::path::Path::new);
+        if arguments.endpoint.is_empty() {
+            let (Some(project), Some(store)) = (project_dir, self.execution_store.as_ref()) else {
+                return Ok(self.rejected(
+                    request_id,
+                    "durable history requires project_dir and a state directory",
+                ));
+            };
+            let execution_history = store.history(project).map_err(|e| {
+                ErrorData::internal_error(format!("execution history unavailable: {e}"), None)
+            })?;
+            let recovery_history = store.recovery_history(project).map_err(|e| {
+                ErrorData::internal_error(format!("recovery history unavailable: {e}"), None)
+            })?;
+            return self.envelope(request_id, None, json!({"observation": "durable_history_only", "execution_history": execution_history, "recovery_history": recovery_history}));
+        }
         let snapshot = self
             .discovery
             .discover(&arguments.endpoint, project_dir)
@@ -3062,7 +3100,7 @@ impl Server {
                 "recovery_id": record.recovery_id,
                 "attempt_id": record.attempt_id,
                 "action": record.action,
-                "plan_hash": record.plan_hash,
+                "recovery_plan_hash": record.plan_hash,
                 "files": record.files,
                 "state": record.state
             }),
@@ -3118,7 +3156,6 @@ impl Server {
             return Ok(self.rejected(request_id, "recovery_unavailable"));
         };
         let project = std::path::Path::new(&arguments.project_dir);
-        let _writer = self.acquire_project_writer(project)?;
         let result = store.commit_recovery(
             project,
             &arguments.recovery_id,
@@ -3136,16 +3173,7 @@ impl Server {
                 }),
             ),
             Err(error) => {
-                let state = store
-                    .recovery_history(project)
-                    .ok()
-                    .and_then(|records| {
-                        records
-                            .into_iter()
-                            .find(|record| record.recovery_id == arguments.recovery_id)
-                            .map(|record| record.state)
-                    })
-                    .unwrap_or_else(|| "rejected".into());
+                let state = if error.unknown { "unknown" } else { "rejected" };
                 Ok(self.envelope_sync(
                     request_id,
                     None,
@@ -6825,7 +6853,7 @@ mod tests {
                 .iter()
                 .find(|entry| entry["id"] == "pcb.edit_existing")
                 .unwrap()["status"],
-            "verified"
+            "unavailable"
         );
     }
 
@@ -8111,4 +8139,5 @@ mod tests {
             .expect_err("unsupported tool must fail");
         assert!(error.to_string().contains("not found"));
     }
+    mod recovery_acceptance;
 }
