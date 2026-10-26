@@ -1,3 +1,5 @@
+mod item_deletion;
+pub use item_deletion::{ExistingItemKind, ExistingItemTarget, expected_item_deletion};
 mod footprint_flip;
 pub use footprint_flip::{FootprintFlipAxis, expected_footprint_flip};
 mod existing_item_edit;
@@ -166,6 +168,11 @@ pub enum OperationKind {
         board: StableId,
         intent: ThroughViaIntent,
     },
+    DeleteExistingItems {
+        board: StableId,
+        targets: Vec<ExistingItemTarget>,
+        native_evidence: RevisionDigest,
+    },
     EditExistingItems {
         board: StableId,
         changes: Vec<ExistingItemChange>,
@@ -196,6 +203,15 @@ pub fn default_footprint_copper_tolerance() -> i64 {
 }
 
 impl OperationKind {
+    pub fn is_existing_item_mutation(&self) -> bool {
+        matches!(
+            self,
+            Self::EditExistingItems { .. }
+                | Self::FlipExistingFootprint { .. }
+                | Self::DeleteExistingItems { .. }
+        )
+    }
+
     pub fn footprint_placements(&self) -> &[AllowlistedFootprintPlacement] {
         match self {
             Self::PlaceAllowlistedFootprint { placement, .. } => std::slice::from_ref(placement),
@@ -249,6 +265,9 @@ impl Operation {
             | OperationKind::AddBoardOutline { board, .. }
             | OperationKind::AddStraightTrack { board, .. }
             | OperationKind::AddThroughVia { board, .. } => vec![board],
+            OperationKind::DeleteExistingItems { board, targets, .. } => std::iter::once(board)
+                .chain(targets.iter().flat_map(|t| [&t.target_id, &t.source_uuid]))
+                .collect(),
             OperationKind::EditExistingItems { board, changes, .. } => std::iter::once(board)
                 .chain(changes.iter().flat_map(|c| {
                     let (target, source) = c.identities();
@@ -414,6 +433,7 @@ impl ChangePlan {
                     | OperationKind::AddThroughVia { .. }
                     | OperationKind::MoveExistingFootprint { .. }
                     | OperationKind::EditExistingItems { .. }
+                    | OperationKind::DeleteExistingItems { .. }
                     | OperationKind::FlipExistingFootprint { .. }
             ) {
                 for target in op.refs() {
@@ -581,6 +601,14 @@ impl ChangePlan {
                 }
                 OperationKind::FlipExistingFootprint { .. } => {
                     expected_footprint_flip(snapshot, &op.kind)?;
+                }
+                OperationKind::DeleteExistingItems { .. } => {
+                    expected_item_deletion(snapshot, &op.kind)?;
+                    if op.risk_class != RiskClass::High {
+                        return Err(EngineError::InvalidPlan(
+                            "deletion requires high risk classification",
+                        ));
+                    }
                 }
                 OperationKind::EditExistingItems { .. } => {
                     expected_existing_item_edit(snapshot, &op.kind)?;
@@ -1071,6 +1099,9 @@ fn apply_operations(
             }
             OperationKind::FlipExistingFootprint { .. } => {
                 snapshot = expected_footprint_flip(&snapshot, &op.kind)?;
+            }
+            OperationKind::DeleteExistingItems { .. } => {
+                snapshot = expected_item_deletion(&snapshot, &op.kind)?;
             }
             OperationKind::EditExistingItems { .. } => {
                 snapshot = expected_existing_item_edit(&snapshot, &op.kind)?;
@@ -2840,5 +2871,115 @@ mod tests {
                 Err(EngineError::ScopeMismatch)
             );
         }
+    }
+
+    #[test]
+    fn deletion_is_exact_and_cannot_bypass_original_connections() {
+        let (mut before, _, _, _) = observed_routing_snapshot(BoardSide::Front);
+        let board = before.board.document_id.clone().unwrap();
+        before.native_routing =
+            Some(ObservedBoardRouting::new(board.clone(), vec![], vec![]).unwrap());
+        let fp = before.native_footprints.as_ref().unwrap().placements[0].clone();
+        let target = ExistingItemTarget {
+            kind: ExistingItemKind::Footprint,
+            target_id: fp.placement_id.clone(),
+            source_uuid: fp.source_uuid.clone(),
+        };
+        let operation = OperationKind::DeleteExistingItems {
+            board: board.clone(),
+            targets: vec![target.clone()],
+            native_evidence: digest('a'),
+        };
+        let engine = Engine::new(before.clone(), "instance");
+        let mut deletion = Operation {
+            operation_id: id("delete"),
+            kind: operation.clone(),
+            targets: vec![
+                board.clone(),
+                target.target_id.clone(),
+                target.source_uuid.clone(),
+            ],
+            preconditions: vec![],
+            expected_effects: vec!["delete exact set".into()],
+            risk_class: RiskClass::Medium,
+            idempotency_key: "delete".into(),
+            source_run_id: "run".into(),
+        };
+        assert!(matches!(
+            plan(&engine, vec![deletion.clone()]).validate(&before),
+            Err(EngineError::InvalidPlan(
+                "deletion requires high risk classification"
+            ))
+        ));
+        deletion.risk_class = RiskClass::High;
+        plan(&engine, vec![deletion]).validate(&before).unwrap();
+        let after = expected_item_deletion(&before, &operation).unwrap();
+        assert_eq!(after.board, before.board);
+        assert_eq!(after.native_routing, before.native_routing);
+        assert_eq!(
+            after.native_footprints.as_ref().unwrap().placements.len(),
+            1
+        );
+        let remaining = &after.native_footprints.as_ref().unwrap().placements[0];
+        assert_eq!(
+            remaining.source_uuid,
+            before.native_footprints.as_ref().unwrap().placements[1].source_uuid
+        );
+        assert!(expected_item_deletion(&after, &operation).is_err());
+        for targets in [
+            vec![],
+            vec![target.clone(), target.clone()],
+            vec![target.in_board_scope(&id("foreign"))],
+        ] {
+            assert!(
+                expected_item_deletion(
+                    &before,
+                    &OperationKind::DeleteExistingItems {
+                        board: board.clone(),
+                        targets,
+                        native_evidence: digest('a')
+                    }
+                )
+                .is_err()
+            );
+        }
+        let source = id("connected-track");
+        let track_id = kicad_model::board_track_id(&board, &source);
+        before.native_routing = Some(
+            ObservedBoardRouting::new(
+                board.clone(),
+                vec![ObservedTrack {
+                    track_id: track_id.clone(),
+                    source_uuid: source.clone(),
+                    geometry: ObservedTrackGeometry::Segment {
+                        start: board_coordinate(100, 250),
+                        end: board_coordinate(300, 250),
+                    },
+                    width_nm: 100,
+                    layer: BoardLayer::FrontCopper,
+                    lock_state: LockState::Unlocked,
+                    net: None,
+                    observed_revision: digest('0'),
+                }],
+                vec![],
+            )
+            .unwrap(),
+        );
+        let batch = OperationKind::DeleteExistingItems {
+            board,
+            targets: vec![
+                ExistingItemTarget {
+                    kind: ExistingItemKind::Track,
+                    target_id: track_id,
+                    source_uuid: source,
+                },
+                target,
+            ],
+            native_evidence: digest('a'),
+        };
+        assert!(matches!(
+            expected_item_deletion(&before, &batch),
+            Err(EngineError::InvalidPlan("connected_copper"))
+        ));
     }
 }

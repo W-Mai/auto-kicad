@@ -95,6 +95,15 @@ pub struct Capability {
 }
 
 pub trait DiscoveryService: Send + Sync {
+    fn item_deletion_evidence(
+        &self,
+        _endpoint: &str,
+        _source: &LiveBoardObservation,
+        _kind: &OperationKind,
+    ) -> Result<RevisionDigest, String> {
+        Err("complete deletion evidence is unavailable".into())
+    }
+
     fn footprint_flip_evidence(
         &self,
         _endpoint: &str,
@@ -148,6 +157,15 @@ pub trait DiscoveryService: Send + Sync {
 pub struct IpcDiscoveryService;
 
 impl DiscoveryService for IpcDiscoveryService {
+    fn item_deletion_evidence(
+        &self,
+        endpoint: &str,
+        source: &LiveBoardObservation,
+        kind: &OperationKind,
+    ) -> Result<RevisionDigest, String> {
+        existing_item_edit::prepare_deletion_evidence(endpoint, source, kind)
+    }
+
     fn footprint_flip_evidence(
         &self,
         endpoint: &str,
@@ -494,6 +512,7 @@ fn validate_shadow_operation_kinds(operations: &[Operation]) -> Result<(), Strin
                 | OperationKind::AddThroughVia { .. }
                 | OperationKind::MoveExistingFootprint { .. }
                 | OperationKind::EditExistingItems { .. }
+                | OperationKind::DeleteExistingItems { .. }
                 | OperationKind::FlipExistingFootprint { .. }
         )
     }) {
@@ -511,6 +530,19 @@ fn existing_item_targets(
             let (target, source) = c.identities();
             [target.clone(), source.clone()]
         }))
+        .collect()
+}
+
+fn deletion_targets(
+    board: &StableId,
+    targets: &[kicad_engine::ExistingItemTarget],
+) -> Vec<StableId> {
+    std::iter::once(board.clone())
+        .chain(
+            targets
+                .iter()
+                .flat_map(|t| [t.target_id.clone(), t.source_uuid.clone()]),
+        )
         .collect()
 }
 
@@ -532,6 +564,9 @@ fn operation_matches_board(operation: &Operation, observed: &StableId) -> bool {
         | OperationKind::AddStraightTrack { board, .. }
         | OperationKind::AddThroughVia { board, .. } => {
             board == observed && operation.targets == vec![board.clone()]
+        }
+        OperationKind::DeleteExistingItems { board, targets, .. } => {
+            board == observed && operation.targets == deletion_targets(board, targets)
         }
         OperationKind::EditExistingItems { board, changes, .. } => {
             board == observed && operation.targets == existing_item_targets(board, changes)
@@ -578,6 +613,7 @@ fn bind_shadow_operations(
             operations[0].kind,
             OperationKind::MoveExistingFootprint { .. }
                 | OperationKind::EditExistingItems { .. }
+                | OperationKind::DeleteExistingItems { .. }
                 | OperationKind::FlipExistingFootprint { .. }
         )
     {
@@ -614,6 +650,7 @@ fn bind_shadow_operations(
             | OperationKind::AddThroughVia { board, .. }
             | OperationKind::MoveExistingFootprint { board, .. }
             | OperationKind::EditExistingItems { board, .. }
+            | OperationKind::DeleteExistingItems { board, .. }
             | OperationKind::FlipExistingFootprint { board, .. } => board,
             _ => return Err("shadow validation only accepts supported board operations".into()),
         };
@@ -687,6 +724,18 @@ fn bind_shadow_operations(
                 axis: *axis,
                 native_evidence: native_evidence.clone(),
             },
+            OperationKind::DeleteExistingItems {
+                targets,
+                native_evidence,
+                ..
+            } => OperationKind::DeleteExistingItems {
+                board: shadow_board.clone(),
+                targets: targets
+                    .iter()
+                    .map(|t| t.in_board_scope(shadow_board))
+                    .collect(),
+                native_evidence: native_evidence.clone(),
+            },
             OperationKind::EditExistingItems {
                 changes,
                 native_evidence,
@@ -724,6 +773,9 @@ fn bind_shadow_operations(
         | OperationKind::FlipExistingFootprint { placement_id, .. } = &operation.kind
         {
             operation.targets[1] = placement_id.clone();
+        }
+        if let OperationKind::DeleteExistingItems { board, targets, .. } = &operation.kind {
+            operation.targets = deletion_targets(board, targets);
         }
         if let OperationKind::EditExistingItems { board, changes, .. } = &operation.kind {
             operation.targets = existing_item_targets(board, changes);
@@ -772,6 +824,7 @@ fn shadow_graphic_segments(
             OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. } => {}
             OperationKind::MoveExistingFootprint { .. }
             | OperationKind::EditExistingItems { .. }
+            | OperationKind::DeleteExistingItems { .. }
             | OperationKind::FlipExistingFootprint { .. } => {}
             _ => return Err("shadow postcondition contains an unsupported operation".into()),
         }
@@ -964,10 +1017,7 @@ fn apply_shadow_operations(
         return Ok((expected, prepared));
     }
     if let [operation] = operations
-        && matches!(
-            operation.kind,
-            OperationKind::EditExistingItems { .. } | OperationKind::FlipExistingFootprint { .. }
-        )
+        && operation.kind.is_existing_item_mutation()
     {
         let expected =
             existing_item_edit::expected_snapshot(&observation.snapshot, &operation.kind)
@@ -1501,6 +1551,7 @@ pub struct PlanBoardGraphicsRequest {
     pub footprint: Option<BoardFootprintRequest>,
     pub move_footprint: Option<BoardMoveExistingFootprintRequest>,
     pub edit_existing: Option<BoardExistingItemEditRequest>,
+    pub delete_items: Option<BoardDeleteItemsRequest>,
     pub flip_footprint: Option<BoardFlipFootprintRequest>,
     pub assembly: Option<BoardAssemblyRequest>,
     pub track: Option<BoardTrackRequest>,
@@ -1529,6 +1580,28 @@ pub struct BoardFlipFootprintRequest {
     pub source_uuid: String,
     pub target_side: BoardFlipSideRequest,
     pub axis: BoardFlipAxisRequest,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardDeleteItemsRequest {
+    pub observed_revision: String,
+    pub targets: Vec<BoardDeletionTargetRequest>,
+}
+#[derive(Clone, Copy, Debug, serde::Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BoardDeletionKindRequest {
+    Track,
+    Via,
+    GraphicSegment,
+    Footprint,
+}
+#[derive(Clone, Debug, serde::Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardDeletionTargetRequest {
+    pub kind: BoardDeletionKindRequest,
+    pub target_id: String,
+    pub source_uuid: String,
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -1976,6 +2049,7 @@ fn expected_board_effect(kind: &OperationKind) -> &'static str {
         OperationKind::AddStraightTrack { .. } => "add straight copper track",
         OperationKind::AddThroughVia { .. } => "add through via",
         OperationKind::MoveExistingFootprint { .. } => "move or rotate existing footprint",
+        OperationKind::DeleteExistingItems { .. } => "delete exact approved native object set",
         OperationKind::EditExistingItems { .. } => "edit existing track via or drawing fields",
         OperationKind::FlipExistingFootprint { .. } => "flip existing footprint to approved side",
         _ => "apply bounded board change",
@@ -2455,6 +2529,7 @@ impl IpcBoardGraphicsExecutionService {
                     | OperationKind::AddThroughVia { .. }
                     | OperationKind::MoveExistingFootprint { .. }
                     | OperationKind::EditExistingItems { .. }
+                    | OperationKind::DeleteExistingItems { .. }
                     | OperationKind::FlipExistingFootprint { .. }
             )
         }) {
@@ -2594,11 +2669,7 @@ impl IpcBoardGraphicsExecutionService {
             };
         }
         if let [operation] = operations
-            && matches!(
-                operation.kind,
-                OperationKind::EditExistingItems { .. }
-                    | OperationKind::FlipExistingFootprint { .. }
-            )
+            && operation.kind.is_existing_item_mutation()
         {
             return existing_item_edit::execute(&mut client, &observation, operation, endpoint);
         }
@@ -3471,6 +3542,23 @@ impl Server {
         if arguments.endpoint.is_empty() {
             return Ok(self.rejected(arguments.request_id, "identity_is_required"));
         }
+        if arguments.delete_items.is_some()
+            && (arguments.flip_footprint.is_some()
+                || arguments.edit_existing.is_some()
+                || arguments.move_footprint.is_some()
+                || arguments.assembly.is_some()
+                || arguments.footprint.is_some()
+                || arguments.batch.is_some()
+                || arguments.segments.is_some()
+                || arguments.outline.is_some()
+                || arguments.track.is_some()
+                || arguments.via.is_some())
+        {
+            return Err(ErrorData::invalid_params(
+                "deletion requires its own plan",
+                None,
+            ));
+        }
         if arguments.flip_footprint.is_some()
             && (arguments.edit_existing.is_some()
                 || arguments.move_footprint.is_some()
@@ -3603,6 +3691,49 @@ impl Server {
                 }],
                 false,
             )
+        } else if let Some(request) = &arguments.delete_items {
+            if snapshot
+                .revision()
+                .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?
+                .to_string()
+                != request.observed_revision
+            {
+                return Ok(self.rejected(arguments.request_id, "stale_plan"));
+            }
+            let targets: Vec<kicad_engine::ExistingItemTarget> = serde_json::from_value(
+                serde_json::to_value(&request.targets)
+                    .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?,
+            )
+            .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+            let mut kind = OperationKind::DeleteExistingItems {
+                board: board.clone(),
+                targets,
+                native_evidence: digest_bytes(b"unbound"),
+            };
+            if let Err(error) = kicad_engine::expected_item_deletion(&snapshot, &kind) {
+                return Ok(self.rejected(arguments.request_id, &error.to_string()));
+            }
+            let evidence = match self.discovery.item_deletion_evidence(
+                &arguments.endpoint,
+                &observation,
+                &kind,
+            ) {
+                Ok(evidence) => evidence,
+                Err(reason) => {
+                    return Ok(self.envelope_sync(
+                        arguments.request_id,
+                        None,
+                        json!({"reason":"item_deletion_unavailable", "detail": reason}),
+                    ));
+                }
+            };
+            if let OperationKind::DeleteExistingItems {
+                native_evidence, ..
+            } = &mut kind
+            {
+                *native_evidence = evidence;
+            }
+            (vec![kind], false)
         } else if let Some(request) = &arguments.flip_footprint {
             if snapshot
                 .revision()
@@ -3812,6 +3943,9 @@ impl Server {
                     StableId::new(operation_id).expect("deterministic operation id is valid");
                 let expected_effect = expected_board_effect(&kind);
                 let targets = match &kind {
+                    OperationKind::DeleteExistingItems { board, targets, .. } => {
+                        deletion_targets(board, targets)
+                    }
                     OperationKind::EditExistingItems { board, changes, .. } => {
                         existing_item_targets(board, changes)
                     }
@@ -3833,13 +3967,18 @@ impl Server {
                         )
                         .collect(),
                 };
+                let risk_class = if matches!(kind, OperationKind::DeleteExistingItems { .. }) {
+                    RiskClass::High
+                } else {
+                    RiskClass::Medium
+                };
                 Operation {
                     operation_id,
                     kind,
                     targets,
                     preconditions: vec![Precondition::Revision(base_revision.clone())],
                     expected_effects: vec![expected_effect.into()],
-                    risk_class: RiskClass::Medium,
+                    risk_class,
                     idempotency_key: if is_batch {
                         format!("{}:{index}", arguments.request_id)
                     } else {
@@ -6753,6 +6892,7 @@ mod tests {
             assembly: None,
             move_footprint: None,
             edit_existing: None,
+            delete_items: None,
             flip_footprint: None,
             track: None,
             via: None,
@@ -8646,5 +8786,6 @@ mod tests {
     mod existing_item_edit_acceptance;
     mod existing_item_protocol;
     mod footprint_flip_acceptance;
+    mod item_deletion_acceptance;
     mod recovery_acceptance;
 }

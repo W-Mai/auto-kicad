@@ -1,6 +1,6 @@
 # Existing PCB item fields
 
-`edit_existing` in `kicad_plan_change` modifies 1–100 distinct existing objects through inspect, plan, isolated preview and exact approved commit. It supports straight-track endpoints/width, uniform circular through-via position/copper diameter/primary drill diameter, and Dwgs.User segment endpoints/width. KiCad 10.0.6 is the verified backend. [Footprint movement and rotation](existing-footprint-transform.md) use the separate `move_footprint` request. [Footprint flips](footprint-flip.md) use `flip_footprint`; item deletion is unavailable through MCP.
+`edit_existing` in `kicad_plan_change` modifies 1–100 distinct existing objects through inspect, plan, isolated preview and exact approved commit. It supports straight-track endpoints/width, uniform circular through-via position/copper diameter/primary drill diameter, and Dwgs.User segment endpoints/width. KiCad 10.0.6 is the verified backend. [Footprint movement and rotation](existing-footprint-transform.md) use the separate `move_footprint` request. [Footprint flips](footprint-flip.md) use `flip_footprint`; [exact-set deletion](item-deletion.md) uses `delete_items`.
 
 ## Request
 

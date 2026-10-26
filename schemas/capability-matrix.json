@@ -221,13 +221,14 @@
         "kicad_commit_change"
       ],
       "constraints": [
-        "one unlocked footprint move/rotate/explicit-side flip, or 1\u2013100 explicit track/through-via/Dwgs.User field edits per plan",
+        "one footprint move/rotate/explicit-side flip, 1\u2013100 track/through-via/Dwgs.User field edits, or 1\u2013100 explicit supported deletions per plan",
         "current observed revision and complete server-derived native payload binding",
         "footprint transforms reject connected copper; field edits must preserve existing pad-to-pad connectivity",
         "zones, unsupported copper, locks, nonuniform vias and unsupported target geometry reject",
         "exact approval, full saved reload, protected source files and no DRC/connectivity regression",
-        "native and stdio acceptance on KiCad 10.0.6; deletion remains unavailable through MCP",
-        "flips require normal front/back pad stacks and supported child geometry; fixed paired layers only"
+        "native and stdio acceptance on KiCad 10.0.6",
+        "flips require normal front/back pad stacks and supported child geometry; fixed paired layers only",
+        "deletion is high risk; only observed tracks/arcs, through vias, Dwgs.User segments and free unassociated footprints; surviving pad connections remain intact"
       ],
       "evidence": {
         "fixture": "synthetic-native-footprint-and-connected-item-edits",

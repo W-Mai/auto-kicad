@@ -319,6 +319,42 @@ impl ExistingBoardItemSet {
         Ok(Self { items: records })
     }
 
+    /// Derive exact removal without changing surviving native records.
+    pub fn without(&self, ids: &[String]) -> Result<Self, IpcError> {
+        super::existing_items::identifiers(ids, 100)?;
+        let mut result = self.clone();
+        for id in ids {
+            let item = self
+                .items
+                .get(id)
+                .ok_or_else(|| invalid("deletion target is missing"))?;
+            let lock = match item {
+                NativeItem::Track(v) => v.locked,
+                NativeItem::Arc(v) => v.locked,
+                NativeItem::Via(v)
+                    if v.type_.enum_value() == Ok(board_types::ViaType::VT_THROUGH) =>
+                {
+                    v.locked
+                }
+                NativeItem::Graphic(v)
+                    if v.layer.enum_value() == Ok(board_types::BoardLayer::BL_Dwgs_User)
+                        && matches!(
+                            v.shape.as_ref().and_then(|s| s.geometry.as_ref()),
+                            Some(base_types::graphic_shape::Geometry::Segment(_))
+                        ) =>
+                {
+                    v.locked
+                }
+                _ => return Err(invalid("unsupported deletion target")),
+            };
+            if lock.enum_value() != Ok(base_types::LockedState::LS_UNLOCKED) {
+                return Err(invalid("deletion target is locked or unknown"));
+            }
+            result.items.remove(id);
+        }
+        Ok(result)
+    }
+
     pub fn persistent_evidence(&self) -> Result<Vec<u8>, IpcError> {
         let mut evidence = Vec::new();
         for item in self.items.values() {
@@ -543,6 +579,38 @@ mod tests {
                 width_nm: Some(150_000),
             },
         ]
+    }
+
+    #[test]
+    fn exact_deletion_preserves_surviving_native_fields_and_rejects_ambiguous_sets() {
+        let before = fixture();
+        let evidence = before.persistent_evidence().unwrap();
+        let after = before.without(&["graphic".into()]).unwrap();
+        assert_eq!(after.items.len(), 2);
+        for id in ["track", "via"] {
+            assert_eq!(before.items[id], after.items[id]);
+        }
+        for ids in [
+            vec![],
+            vec!["graphic".into(), "graphic".into()],
+            vec!["graphic".into(), "missing".into()],
+        ] {
+            assert!(before.without(&ids).is_err());
+        }
+        assert_eq!(before.persistent_evidence().unwrap(), evidence);
+        let mut locked = before.clone();
+        let NativeItem::Track(v) = locked.items.get_mut("track").unwrap() else {
+            unreachable!()
+        };
+        v.locked = protobuf::EnumOrUnknown::new(base_types::LockedState::LS_LOCKED);
+        let saved = locked.clone();
+        assert!(locked.without(&["graphic".into(), "track".into()]).is_err());
+        assert_eq!(locked, saved);
+        let NativeItem::Graphic(v) = locked.items.get_mut("graphic").unwrap() else {
+            unreachable!()
+        };
+        v.layer = protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_Edge_Cuts);
+        assert!(locked.without(&["graphic".into()]).is_err());
     }
 
     #[test]

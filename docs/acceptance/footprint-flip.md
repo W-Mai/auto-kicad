@@ -38,4 +38,4 @@ env CARGO_TARGET_DIR=/tmp/auto-kicad-flip-target CARGO_INCREMENTAL=0 CARGO_PROFI
 env CARGO_TARGET_DIR=/tmp/auto-kicad-flip-target CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 AUTO_KICAD_FLIP_SERVER=/tmp/auto-kicad-flip-target/debug/auto-kicad AUTO_KICAD_FLIP_EVIDENCE=/tmp/auto-kicad-flip-result.json cargo test -p auto-kicad --lib tests::footprint_flip_acceptance::live_existing_footprint_flip_stdio_lifecycle -- --ignored --exact --nocapture
 ```
 
-Run `python3 scripts/quality.py` for the complete offline gate. Remove the temporary target after all build/test processes exit. Acceptance does not replace the installed user MCP executable. Item deletion has a separate contract and remains unavailable through MCP in this delivery.
+Run `python3 scripts/quality.py` for the complete offline gate. Remove the temporary target after all build/test processes exit. Acceptance does not replace the installed user MCP executable. [Exact-set deletion](item-deletion.md) has a separate contract.

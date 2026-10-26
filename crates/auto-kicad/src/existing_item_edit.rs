@@ -5,7 +5,6 @@ use kicad_ipc::{ExistingBoardItemSet, ExistingItemUpdate, FootprintInstanceTempl
 pub(super) struct Evidence {
     items: ExistingBoardItemSet,
     footprints: Vec<FootprintInstanceTemplate>,
-    pads: Vec<String>,
     clusters: Vec<Vec<String>>,
     digest: RevisionDigest,
 }
@@ -52,7 +51,6 @@ pub(super) fn capture(
     Ok(Evidence {
         items,
         footprints,
-        pads,
         clusters,
         digest,
     })
@@ -134,6 +132,9 @@ pub(super) fn expected_snapshot(
     kind: &OperationKind,
 ) -> Result<ProjectSnapshot, String> {
     match kind {
+        OperationKind::DeleteExistingItems { .. } => {
+            kicad_engine::expected_item_deletion(source, kind)
+        }
         OperationKind::FlipExistingFootprint { .. } => {
             kicad_engine::expected_footprint_flip(source, kind)
         }
@@ -170,6 +171,73 @@ fn flipped_template(
     } else {
         Ok(None)
     }
+}
+
+fn deletion_ids(kind: &OperationKind, footprints: bool) -> Vec<String> {
+    if let OperationKind::DeleteExistingItems { targets, .. } = kind {
+        targets
+            .iter()
+            .filter(|t| (t.kind == kicad_engine::ExistingItemKind::Footprint) == footprints)
+            .map(|t| t.source_uuid.to_string())
+            .collect()
+    } else {
+        Vec::new()
+    }
+}
+
+fn expected_native_items(
+    before: &Evidence,
+    kind: &OperationKind,
+) -> Result<ExistingBoardItemSet, String> {
+    match kind {
+        OperationKind::DeleteExistingItems { .. } => {
+            let ids = deletion_ids(kind, false);
+            if ids.is_empty() {
+                Ok(before.items.clone())
+            } else {
+                before.items.without(&ids).map_err(|e| e.to_string())
+            }
+        }
+        OperationKind::EditExistingItems { changes, .. } => before
+            .items
+            .updated(&updates(changes))
+            .map_err(|e| e.to_string()),
+        OperationKind::FlipExistingFootprint { .. } => Ok(before.items.clone()),
+        _ => Err("unsupported existing item operation".into()),
+    }
+}
+
+pub(super) fn prepare_deletion_evidence(
+    endpoint: &str,
+    source: &LiveBoardObservation,
+    kind: &OperationKind,
+) -> Result<RevisionDigest, String> {
+    expected_snapshot(&source.snapshot, kind)?;
+    let config =
+        ClientConfig::new(endpoint, "auto-kicad-delete-check").map_err(|e| e.to_string())?;
+    let mut client = KiCadClient::new(
+        NngTransport::connect(config.clone()).map_err(|e| e.to_string())?,
+        config,
+    );
+    let evidence = capture(&mut client, source)?;
+    expected_native_items(&evidence, kind)?;
+    for id in deletion_ids(kind, true) {
+        if !evidence
+            .footprints
+            .iter()
+            .any(|f| f.metadata().source_uuid == id)
+        {
+            return Err("native footprint deletion target is missing".into());
+        }
+    }
+    if IpcDiscoveryService
+        .live_board_observation(endpoint, None)
+        .as_ref()
+        != Ok(source)
+    {
+        return Err("source changed while preparing deletion evidence".into());
+    }
+    Ok(evidence.digest)
 }
 
 pub(super) fn prepare_flip_evidence(
@@ -211,8 +279,11 @@ pub(super) fn execute(
         } => (updates(changes), native_evidence),
         OperationKind::FlipExistingFootprint {
             native_evidence, ..
+        }
+        | OperationKind::DeleteExistingItems {
+            native_evidence, ..
         } => (Vec::new(), native_evidence),
-        _ => return reject("expected existing item edit or footprint flip".into()),
+        _ => return reject("expected existing item operation".into()),
     };
     let preflight = (|| -> Result<_, String> {
         let expected = expected_snapshot(&source.snapshot, &operation.kind)?;
@@ -221,11 +292,7 @@ pub(super) fn execute(
             return Err("native items or connectivity changed since planning".into());
         }
         let expected_flip = flipped_template(&before, &operation.kind)?;
-        let expected_native = if expected_flip.is_some() {
-            before.items.clone()
-        } else {
-            before.items.updated(&changes).map_err(|e| e.to_string())?
-        };
+        let expected_native = expected_native_items(&before, &operation.kind)?;
         let protected = existing_footprint::protected_files(&source.board_path)?;
         let policy = DrcPolicy {
             allowed_root: source.project_dir.clone(),
@@ -264,6 +331,17 @@ pub(super) fn execute(
         &source.board_filename,
         "auto-kicad approved existing item edit",
         |client| {
+            if let OperationKind::DeleteExistingItems { targets, .. } = &operation.kind {
+                let ids = targets
+                    .iter()
+                    .map(|t| t.source_uuid.to_string())
+                    .collect::<Vec<_>>();
+                // Both receipt variants are provisional until the complete saved set is verified below.
+                return client
+                    .delete_board_items(&source.board_filename, &ids)
+                    .map(|_| ())
+                    .map_err(|e| e.to_string());
+            }
             if let OperationKind::FlipExistingFootprint {
                 source_uuid, axis, ..
             } = &operation.kind
@@ -314,10 +392,15 @@ pub(super) fn execute(
             let footprints = client
                 .capture_footprint_instance_templates(&source.board_filename)
                 .map_err(|e| e.to_string())?;
-            if footprints.len() != before.footprints.len() {
+            let removed = deletion_ids(&operation.kind, true);
+            if footprints.len() + removed.len() != before.footprints.len() {
                 return Err("footprint set changed".into());
             }
-            for original in &before.footprints {
+            for original in before
+                .footprints
+                .iter()
+                .filter(|f| !removed.contains(&f.metadata().source_uuid))
+            {
                 let actual = footprints
                     .iter()
                     .find(|f| f.metadata().source_uuid == original.metadata().source_uuid)
@@ -335,8 +418,16 @@ pub(super) fn execute(
                     return Err("saved footprint content differs from approved intent".into());
                 }
             }
+            let surviving_pads = expected
+                .native_footprints
+                .as_ref()
+                .ok_or("missing expected footprints")?
+                .placements
+                .iter()
+                .flat_map(|f| f.pads.iter().map(|p| p.source_uuid.to_string()))
+                .collect::<Vec<_>>();
             let clusters = client
-                .connected_pad_clusters(&source.board_filename, &before.pads)
+                .connected_pad_clusters(&source.board_filename, &surviving_pads)
                 .map_err(|e| e.to_string())?;
             if !preserves_pad_connectivity(&before.clusters, &clusters) {
                 return Err("existing item edit disconnected previously connected pads".into());

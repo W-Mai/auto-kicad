@@ -1,0 +1,684 @@
+{
+  "baseline_drc": {
+    "ignored_checks": 5,
+    "kicad_version": "10.0.6",
+    "parser_version": "kicad-drc-v1",
+    "schema": "https://schemas.kicad.org/drc.v1.json",
+    "source": "board.kicad_pcb",
+    "unconnected_items": 7,
+    "violations": [
+      {
+        "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+        "identity": {
+          "Uuids": {
+            "rule_type": "lib_footprint_issues",
+            "uuids": [
+              "10000000-0000-4000-8000-000000000001"
+            ]
+          }
+        },
+        "items": [
+          {
+            "description": "\u5c01\u88c5 J1",
+            "position": {
+              "x": 5.0,
+              "y": 5.0
+            },
+            "uuid": "10000000-0000-4000-8000-000000000001"
+          }
+        ],
+        "rule_type": "lib_footprint_issues",
+        "severity": "warning"
+      },
+      {
+        "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+        "identity": {
+          "Uuids": {
+            "rule_type": "lib_footprint_issues",
+            "uuids": [
+              "10000000-0000-4000-8000-000000000002"
+            ]
+          }
+        },
+        "items": [
+          {
+            "description": "\u5c01\u88c5 J2",
+            "position": {
+              "x": 10.0,
+              "y": 5.0
+            },
+            "uuid": "10000000-0000-4000-8000-000000000002"
+          }
+        ],
+        "rule_type": "lib_footprint_issues",
+        "severity": "warning"
+      },
+      {
+        "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+        "identity": {
+          "Uuids": {
+            "rule_type": "lib_footprint_issues",
+            "uuids": [
+              "10000000-0000-4000-8000-000000000003"
+            ]
+          }
+        },
+        "items": [
+          {
+            "description": "\u5c01\u88c5 J3",
+            "position": {
+              "x": 7.5,
+              "y": 8.0
+            },
+            "uuid": "10000000-0000-4000-8000-000000000003"
+          }
+        ],
+        "rule_type": "lib_footprint_issues",
+        "severity": "warning"
+      },
+      {
+        "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+        "identity": {
+          "Uuids": {
+            "rule_type": "lib_footprint_issues",
+            "uuids": [
+              "10000000-0000-4000-8000-000000000004"
+            ]
+          }
+        },
+        "items": [
+          {
+            "description": "\u5c01\u88c5 J4",
+            "position": {
+              "x": 15.0,
+              "y": 8.0
+            },
+            "uuid": "10000000-0000-4000-8000-000000000004"
+          }
+        ],
+        "rule_type": "lib_footprint_issues",
+        "severity": "warning"
+      },
+      {
+        "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+        "identity": {
+          "Uuids": {
+            "rule_type": "lib_footprint_issues",
+            "uuids": [
+              "10000000-0000-4000-8000-000000000005"
+            ]
+          }
+        },
+        "items": [
+          {
+            "description": "\u5c01\u88c5 J5",
+            "position": {
+              "x": 13.0,
+              "y": 10.0
+            },
+            "uuid": "10000000-0000-4000-8000-000000000005"
+          }
+        ],
+        "rule_type": "lib_footprint_issues",
+        "severity": "warning"
+      },
+      {
+        "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+        "identity": {
+          "Uuids": {
+            "rule_type": "lib_footprint_issues",
+            "uuids": [
+              "10000000-0000-4000-8000-000000000006"
+            ]
+          }
+        },
+        "items": [
+          {
+            "description": "\u5c01\u88c5 J6",
+            "position": {
+              "x": 17.0,
+              "y": 8.0
+            },
+            "uuid": "10000000-0000-4000-8000-000000000006"
+          }
+        ],
+        "rule_type": "lib_footprint_issues",
+        "severity": "warning"
+      },
+      {
+        "description": "Track has unconnected end",
+        "identity": {
+          "Uuids": {
+            "rule_type": "track_dangling",
+            "uuids": [
+              "40000000-0000-4000-8000-000000000003"
+            ]
+          }
+        },
+        "items": [
+          {
+            "description": "\u8d70\u7ebf [GND] (F.Cu), \u957f\u5ea6: 1.0000 mm",
+            "position": {
+              "x": 2.0,
+              "y": 10.0
+            },
+            "uuid": "40000000-0000-4000-8000-000000000003"
+          }
+        ],
+        "rule_type": "track_dangling",
+        "severity": "warning"
+      },
+      {
+        "description": "Track has unconnected end",
+        "identity": {
+          "Uuids": {
+            "rule_type": "track_dangling",
+            "uuids": [
+              "40000000-0000-4000-8000-000000000004"
+            ]
+          }
+        },
+        "items": [
+          {
+            "description": "\u8d70\u7ebf [GND] (F.Cu), \u957f\u5ea6: 1.0000 mm",
+            "position": {
+              "x": 2.0,
+              "y": 11.0
+            },
+            "uuid": "40000000-0000-4000-8000-000000000004"
+          }
+        ],
+        "rule_type": "track_dangling",
+        "severity": "warning"
+      },
+      {
+        "description": "Track has unconnected end",
+        "identity": {
+          "Uuids": {
+            "rule_type": "track_dangling",
+            "uuids": [
+              "40000000-0000-4000-8000-000000000005"
+            ]
+          }
+        },
+        "items": [
+          {
+            "description": "\u8d70\u7ebf (\u5f27\u5f62) [GND] \u4f4d\u4e8e F.Cu, \u957f\u5ea6 1.5708 mm",
+            "position": {
+              "x": 2.5,
+              "y": 8.0
+            },
+            "uuid": "40000000-0000-4000-8000-000000000005"
+          }
+        ],
+        "rule_type": "track_dangling",
+        "severity": "warning"
+      },
+      {
+        "description": "Via is not connected or connected on only one layer",
+        "identity": {
+          "Uuids": {
+            "rule_type": "via_dangling",
+            "uuids": [
+              "50000000-0000-4000-8000-000000000002"
+            ]
+          }
+        },
+        "items": [
+          {
+            "description": "\u8fc7\u5b54 [GND] (F.Cu - B.Cu)",
+            "position": {
+              "x": 12.0,
+              "y": 12.0
+            },
+            "uuid": "50000000-0000-4000-8000-000000000002"
+          }
+        ],
+        "rule_type": "via_dangling",
+        "severity": "warning"
+      }
+    ]
+  },
+  "deleted_targets": [
+    {
+      "kind": "graphic_segment",
+      "source_uuid": "30000000-0000-4000-8000-000000000005",
+      "target_id": "30000000-0000-4000-8000-000000000005"
+    },
+    {
+      "kind": "track",
+      "source_uuid": "40000000-0000-4000-8000-000000000004",
+      "target_id": "d408799e6baac2d67b3701599bd060b154ed9548701ae7c2480575c05690e27d"
+    },
+    {
+      "kind": "track",
+      "source_uuid": "40000000-0000-4000-8000-000000000005",
+      "target_id": "a1444892ba290e60c3be8626be83c1e3f5fe3ca4c730526393233d8570d51726"
+    },
+    {
+      "kind": "via",
+      "source_uuid": "50000000-0000-4000-8000-000000000002",
+      "target_id": "4b2ab6e30747afd248ad72dbd8a6630c033e7c065c7be5c259c8e7bca557d484"
+    },
+    {
+      "kind": "footprint",
+      "source_uuid": "10000000-0000-4000-8000-000000000005",
+      "target_id": "ad040bbd200db69c0a0e8ce9fe821b9a8513b43eb3d4e2619ec194c7e1112d0f"
+    }
+  ],
+  "final_drc": {
+    "baseline_id": "drc-baseline:0",
+    "captured_revision": "sha256:67a8c299250215a576784caeef62afb1d7d0a3ade9b1a3fc8e8406b1d22b2081",
+    "current_revision": "sha256:9711f2893208dcd37a0b0b0b63af9215f4fcebb242b3b845863b349fb130a6fd",
+    "delta": {
+      "introduced": [],
+      "resolved": [
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000005"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J5",
+              "position": {
+                "x": 13.0,
+                "y": 10.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000005"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "Track has unconnected end",
+          "identity": {
+            "Uuids": {
+              "rule_type": "track_dangling",
+              "uuids": [
+                "40000000-0000-4000-8000-000000000004"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u8d70\u7ebf [GND] (F.Cu), \u957f\u5ea6: 1.0000 mm",
+              "position": {
+                "x": 2.0,
+                "y": 11.0
+              },
+              "uuid": "40000000-0000-4000-8000-000000000004"
+            }
+          ],
+          "rule_type": "track_dangling",
+          "severity": "warning"
+        },
+        {
+          "description": "Track has unconnected end",
+          "identity": {
+            "Uuids": {
+              "rule_type": "track_dangling",
+              "uuids": [
+                "40000000-0000-4000-8000-000000000005"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u8d70\u7ebf (\u5f27\u5f62) [GND] \u4f4d\u4e8e F.Cu, \u957f\u5ea6 1.5708 mm",
+              "position": {
+                "x": 2.5,
+                "y": 8.0
+              },
+              "uuid": "40000000-0000-4000-8000-000000000005"
+            }
+          ],
+          "rule_type": "track_dangling",
+          "severity": "warning"
+        },
+        {
+          "description": "Via is not connected or connected on only one layer",
+          "identity": {
+            "Uuids": {
+              "rule_type": "via_dangling",
+              "uuids": [
+                "50000000-0000-4000-8000-000000000002"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u8fc7\u5b54 [GND] (F.Cu - B.Cu)",
+              "position": {
+                "x": 12.0,
+                "y": 12.0
+              },
+              "uuid": "50000000-0000-4000-8000-000000000002"
+            }
+          ],
+          "rule_type": "via_dangling",
+          "severity": "warning"
+        }
+      ],
+      "unchanged": [
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000001"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J1",
+              "position": {
+                "x": 5.0,
+                "y": 5.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000001"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000002"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J2",
+              "position": {
+                "x": 10.0,
+                "y": 5.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000002"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000003"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J3",
+              "position": {
+                "x": 7.5,
+                "y": 8.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000003"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000004"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J4",
+              "position": {
+                "x": 15.0,
+                "y": 8.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000004"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000006"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J6",
+              "position": {
+                "x": 17.0,
+                "y": 8.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000006"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "Track has unconnected end",
+          "identity": {
+            "Uuids": {
+              "rule_type": "track_dangling",
+              "uuids": [
+                "40000000-0000-4000-8000-000000000003"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u8d70\u7ebf [GND] (F.Cu), \u957f\u5ea6: 1.0000 mm",
+              "position": {
+                "x": 2.0,
+                "y": 10.0
+              },
+              "uuid": "40000000-0000-4000-8000-000000000003"
+            }
+          ],
+          "rule_type": "track_dangling",
+          "severity": "warning"
+        }
+      ]
+    },
+    "report": {
+      "ignored_checks": 5,
+      "kicad_version": "10.0.6",
+      "parser_version": "kicad-drc-v1",
+      "schema": "https://schemas.kicad.org/drc.v1.json",
+      "source": "board.kicad_pcb",
+      "unconnected_items": 3,
+      "violations": [
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000001"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J1",
+              "position": {
+                "x": 5.0,
+                "y": 5.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000001"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000002"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J2",
+              "position": {
+                "x": 10.0,
+                "y": 5.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000002"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000003"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J3",
+              "position": {
+                "x": 7.5,
+                "y": 8.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000003"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000004"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J4",
+              "position": {
+                "x": 15.0,
+                "y": 8.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000004"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000006"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J6",
+              "position": {
+                "x": 17.0,
+                "y": 8.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000006"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "Track has unconnected end",
+          "identity": {
+            "Uuids": {
+              "rule_type": "track_dangling",
+              "uuids": [
+                "40000000-0000-4000-8000-000000000003"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u8d70\u7ebf [GND] (F.Cu), \u957f\u5ea6: 1.0000 mm",
+              "position": {
+                "x": 2.0,
+                "y": 10.0
+              },
+              "uuid": "40000000-0000-4000-8000-000000000003"
+            }
+          ],
+          "rule_type": "track_dangling",
+          "severity": "warning"
+        }
+      ]
+    }
+  },
+  "fixture_cleaned": true,
+  "owned_editors_closed": true,
+  "passed": true,
+  "restart_replay_rejected": true,
+  "same_process_reload_verified": true,
+  "source_editor_reused": true,
+  "source_pid": 62661,
+  "date": "2026-10-26",
+  "backend": "KiCad 10.0.6",
+  "transport": "production stdio MCP and native IPC",
+  "live_tests_passed": 1,
+  "live_seconds": 34.08,
+  "real_project_profile": false,
+  "verified": [
+    "mixed exact deletion of straight track, arc, through via, Dwgs.User segment and free footprint",
+    "complete surviving native objects and independent normalized snapshot",
+    "same-process save/reload and protected files",
+    "required track/via deletion preview rejected with source unchanged",
+    "associated/locked/connected/foreign/duplicate/empty/outline target rejection",
+    "batch removal cannot bypass original footprint connection policy",
+    "wrong approval and replay rejection before and after MCP restart",
+    "no introduced DRC; unconnected count 7 to 3"
+  ],
+  "offline_tests_passed": 367,
+  "offline_tests_ignored": 15
+}
