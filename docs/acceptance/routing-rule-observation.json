@@ -1,4 +1,5 @@
 {
+  "changed_evidence_not_preview_equivalent": true,
   "classes": [
     {
       "class": "Default",
@@ -34,10 +35,24 @@
       }
     }
   ],
+  "combined_evidence_digest": "989e16730267149b7d9f7a7d49e1a2decce21b5b3118d260ffadb260203c6127",
   "copper_layers": 4,
   "kicad_version": "10.0.7",
+  "project_and_custom_rule_drift_rejected": [
+    "routing rules changed while observing; save/reload and inspect again",
+    "routing rules changed while observing; save/reload and inspect again"
+  ],
   "read_only_source_unchanged": true,
+  "relocated_copy_evidence_equivalent": true,
   "repeated_native_evidence_equal": true,
+  "restored_evidence_equal": true,
+  "saved_constraints": {
+    "min_clearance_nm": 100000,
+    "min_through_hole_diameter_nm": 200000,
+    "min_track_width_nm": 200000,
+    "min_via_annular_width_nm": 100000,
+    "min_via_diameter_nm": 500000
+  },
   "stable_token": true,
   "unknown_net_rejected": true,
   "cleanup": {
@@ -45,5 +60,6 @@
     "owned_editor_closed": true,
     "shadow_cleaned": true
   },
-  "scope": "read-only native effective netclass observation; no new routing or public MCP rule query"
+  "scope": "read-only saved constraints and native effective netclass observation; no public MCP rule query or route authoring",
+  "relocation_check_scope": "saved fixture bytes with relocated in-memory native evidence; no second native preview editor"
 }
