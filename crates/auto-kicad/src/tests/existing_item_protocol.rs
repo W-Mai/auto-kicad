@@ -114,16 +114,37 @@ fn live_existing_item_protocol_uses_one_editor() {
                 .iter()
                 .find(|p| p.source_uuid.as_str() == target)
                 .unwrap();
+            let template = client
+                .capture_footprint_instance_templates(&identity.board_filename)
+                .unwrap()
+                .into_iter()
+                .find(|t| t.metadata().source_uuid == target)
+                .unwrap();
+            let expected = template.expected_flipped(axis).unwrap();
             let commit = client.begin_commit().unwrap();
             let receipt = client
                 .flip_existing_footprint(&identity.board_filename, target, axis)
                 .unwrap();
             assert_eq!(receipt.metadata().source_uuid, target);
+            assert!(
+                expected.matches_flip_result(&receipt).unwrap(),
+                "independent native flip receipt differs: {axis:?} step {step}"
+            );
             client
                 .commit_changes(&commit, "native flip protocol verification")
                 .unwrap();
             client.save_board(&identity.board_filename).unwrap();
             editor.reload_owned().unwrap();
+            let actual_template = client
+                .capture_footprint_instance_templates(&identity.board_filename)
+                .unwrap()
+                .into_iter()
+                .find(|t| t.metadata().source_uuid == target)
+                .unwrap();
+            assert!(
+                expected.matches_flip_result(&actual_template).unwrap(),
+                "independent saved flip differs: {axis:?} step {step}"
+            );
             let after = observe_owned_shadow(&mut editor).unwrap();
             let actual = after
                 .snapshot

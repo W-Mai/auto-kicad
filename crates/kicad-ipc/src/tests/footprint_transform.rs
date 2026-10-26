@@ -280,3 +280,145 @@ fn copper_graphic_probe_rejects_unknown_layers_and_reports_copper_ids() {
         }
     }
 }
+
+fn flip_fixture() -> board_types::FootprintInstance {
+    let mut value = fixture();
+    for f in [&mut value.reference_field, &mut value.value_field] {
+        f.as_mut()
+            .unwrap()
+            .text
+            .as_mut()
+            .unwrap()
+            .text
+            .as_mut()
+            .unwrap()
+            .attributes
+            .mut_or_insert_default()
+            .angle
+            .mut_or_insert_default();
+    }
+    let item = &mut value.definition.as_mut().unwrap().items[0];
+    let mut pad = board_types::Pad::parse_from_bytes(&item.value).unwrap();
+    let stack = pad.pad_stack.as_mut().unwrap();
+    stack
+        .layers
+        .retain(|l| l.enum_value() != Ok(board_types::BoardLayer::BL_In2_Cu));
+    stack
+        .copper_layers
+        .retain(|l| l.layer.enum_value() == Ok(board_types::BoardLayer::BL_F_Cu));
+    stack.drill.as_mut().unwrap().start_layer =
+        protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Cu);
+    stack.drill.as_mut().unwrap().end_layer =
+        protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_B_Cu);
+    item.value = pad.write_to_bytes().unwrap();
+    value
+}
+
+#[test]
+fn flip_comparison_preserves_geometry_metadata_and_unknown_fields() {
+    let before = flip_fixture();
+    let mut client = footprint_client(get_items_response(
+        "observed",
+        base_types::ItemRequestStatus::IRS_OK,
+        vec![any(&before)],
+    ));
+    let baseline = client
+        .capture_footprint_instance_templates("main.kicad_pcb")
+        .unwrap()
+        .remove(0);
+    for axis in [FootprintFlipAxis::TopBottom, FootprintFlipAxis::LeftRight] {
+        let expected = baseline.expected_flipped(axis).unwrap();
+        let mut value = board_types::FootprintInstance::parse_from_bytes(&expected.bytes).unwrap();
+        value.orientation.as_mut().unwrap().value_degrees += 360.0;
+        value.parent = MessageField::some(base_types::KIID {
+            value: "reloaded".into(),
+            ..Default::default()
+        });
+        let item = &mut value.definition.as_mut().unwrap().items[0];
+        let mut pad = board_types::Pad::parse_from_bytes(&item.value).unwrap();
+        pad.pad_stack.as_mut().unwrap().layers.reverse();
+        item.value = pad.write_to_bytes().unwrap();
+        let mut actual = expected.clone();
+        actual.bytes = value.write_to_bytes().unwrap();
+        assert!(expected.matches_flip_result(&actual).unwrap());
+        for fault in 0..5 {
+            let mut corrupted = value.clone();
+            match fault {
+                0 => corrupted.orientation.as_mut().unwrap().value_degrees += 0.0001,
+                1 => corrupted.position.as_mut().unwrap().x_nm += 1,
+                2 => corrupted
+                    .special_fields
+                    .mut_unknown_fields()
+                    .add_varint(998, 4),
+                3 => corrupted.id.as_mut().unwrap().value.push('x'),
+                _ => {
+                    let item = &mut corrupted.definition.as_mut().unwrap().items[0];
+                    let mut pad = board_types::Pad::parse_from_bytes(&item.value).unwrap();
+                    pad.number.push('x');
+                    item.value = pad.write_to_bytes().unwrap();
+                }
+            }
+            actual.bytes = corrupted.write_to_bytes().unwrap();
+            assert!(
+                !expected.matches_flip_result(&actual).unwrap(),
+                "fault {fault:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn flip_rejects_unmodelled_children_and_preserves_input() {
+    let before = flip_fixture();
+    let mut client = footprint_client(get_items_response(
+        "observed",
+        base_types::ItemRequestStatus::IRS_OK,
+        vec![any(&before)],
+    ));
+    let mut baseline = client
+        .capture_footprint_instance_templates("main.kicad_pcb")
+        .unwrap()
+        .remove(0);
+    let mut bad = before;
+    bad.definition.as_mut().unwrap().items.push(Any {
+        type_url: "type.googleapis.com/unsupported".into(),
+        value: vec![0],
+        ..Default::default()
+    });
+    baseline.bytes = bad.write_to_bytes().unwrap();
+    let bytes = baseline.bytes.clone();
+    assert!(
+        baseline
+            .expected_flipped(FootprintFlipAxis::TopBottom)
+            .is_err()
+    );
+    assert_eq!(baseline.bytes, bytes);
+}
+
+#[test]
+fn zero_size_pad_drills_accept_only_empty_full_span_metadata() {
+    for (a, b) in [
+        (
+            board_types::BoardLayer::BL_F_Cu,
+            board_types::BoardLayer::BL_B_Cu,
+        ),
+        (
+            board_types::BoardLayer::BL_B_Cu,
+            board_types::BoardLayer::BL_F_Cu,
+        ),
+    ] {
+        let mut drill = board_types::DrillProperties {
+            start_layer: protobuf::EnumOrUnknown::new(a),
+            end_layer: protobuf::EnumOrUnknown::new(b),
+            shape: protobuf::EnumOrUnknown::new(board_types::DrillShape::DS_CIRCLE),
+            diameter: MessageField::some(base_types::Vector2::default()),
+            ..Default::default()
+        };
+        assert_eq!(observed_pad_drill(&drill).unwrap(), None);
+        drill.start_layer = protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_In1_Cu);
+        assert!(observed_pad_drill(&drill).is_err());
+        drill.start_layer = protobuf::EnumOrUnknown::new(a);
+        drill.diameter.as_mut().unwrap().x_nm = 10;
+        assert!(observed_pad_drill(&drill).is_err());
+    }
+}

@@ -3,6 +3,7 @@ pub use existing_item_updates::{ExistingBoardItemSet, ExistingItemUpdate};
 include!(concat!(env!("OUT_DIR"), "/generated/mod.rs"));
 
 mod existing_items;
+mod footprint_flip;
 mod footprint_transform;
 pub use existing_items::{DeleteItemsReceipt, FootprintFlipAxis};
 
@@ -3575,9 +3576,11 @@ fn observed_pad_drill(
     let is_empty_metadata = (drill.start_layer.value() == 0
         && drill.end_layer.value() == 0
         && drill.shape.value() == 0
-        || drill.start_layer.value() == board_types::BoardLayer::BL_F_Cu as i32
-            && drill.end_layer.value() == board_types::BoardLayer::BL_B_Cu as i32
-            && drill.shape.value() == board_types::DrillShape::DS_CIRCLE as i32)
+        || ((drill.start_layer.enum_value() == Ok(board_types::BoardLayer::BL_F_Cu)
+            && drill.end_layer.enum_value() == Ok(board_types::BoardLayer::BL_B_Cu))
+            || (drill.start_layer.enum_value() == Ok(board_types::BoardLayer::BL_B_Cu)
+                && drill.end_layer.enum_value() == Ok(board_types::BoardLayer::BL_F_Cu)))
+            && drill.shape.enum_value() == Ok(board_types::DrillShape::DS_CIRCLE))
         && drill.capped.value() == 0
         && drill.filled.value() == 0;
     let Some(diameter) = drill.diameter.as_ref() else {

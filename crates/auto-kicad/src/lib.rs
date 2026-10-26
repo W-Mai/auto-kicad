@@ -95,6 +95,15 @@ pub struct Capability {
 }
 
 pub trait DiscoveryService: Send + Sync {
+    fn footprint_flip_evidence(
+        &self,
+        _endpoint: &str,
+        _source: &LiveBoardObservation,
+        _kind: &OperationKind,
+    ) -> Result<RevisionDigest, String> {
+        Err("complete native flip evidence is unavailable".into())
+    }
+
     fn existing_item_edit_evidence(
         &self,
         _endpoint: &str,
@@ -139,6 +148,15 @@ pub trait DiscoveryService: Send + Sync {
 pub struct IpcDiscoveryService;
 
 impl DiscoveryService for IpcDiscoveryService {
+    fn footprint_flip_evidence(
+        &self,
+        endpoint: &str,
+        source: &LiveBoardObservation,
+        kind: &OperationKind,
+    ) -> Result<RevisionDigest, String> {
+        existing_item_edit::prepare_flip_evidence(endpoint, source, kind)
+    }
+
     fn existing_item_edit_evidence(
         &self,
         endpoint: &str,
@@ -476,6 +494,7 @@ fn validate_shadow_operation_kinds(operations: &[Operation]) -> Result<(), Strin
                 | OperationKind::AddThroughVia { .. }
                 | OperationKind::MoveExistingFootprint { .. }
                 | OperationKind::EditExistingItems { .. }
+                | OperationKind::FlipExistingFootprint { .. }
         )
     }) {
         return Err("shadow validation only accepts supported board operations".into());
@@ -517,7 +536,13 @@ fn operation_matches_board(operation: &Operation, observed: &StableId) -> bool {
         OperationKind::EditExistingItems { board, changes, .. } => {
             board == observed && operation.targets == existing_item_targets(board, changes)
         }
-        OperationKind::MoveExistingFootprint {
+        OperationKind::FlipExistingFootprint {
+            board,
+            placement_id,
+            source_uuid,
+            ..
+        }
+        | OperationKind::MoveExistingFootprint {
             board,
             placement_id,
             source_uuid,
@@ -551,7 +576,9 @@ fn bind_shadow_operations(
     if operations[0].kind.footprint_placements().is_empty()
         && !matches!(
             operations[0].kind,
-            OperationKind::MoveExistingFootprint { .. } | OperationKind::EditExistingItems { .. }
+            OperationKind::MoveExistingFootprint { .. }
+                | OperationKind::EditExistingItems { .. }
+                | OperationKind::FlipExistingFootprint { .. }
         )
     {
         kicad_adapter::prepare_bound_native_batch(
@@ -586,7 +613,8 @@ fn bind_shadow_operations(
             | OperationKind::AddStraightTrack { board, .. }
             | OperationKind::AddThroughVia { board, .. }
             | OperationKind::MoveExistingFootprint { board, .. }
-            | OperationKind::EditExistingItems { board, .. } => board,
+            | OperationKind::EditExistingItems { board, .. }
+            | OperationKind::FlipExistingFootprint { board, .. } => board,
             _ => return Err("shadow validation only accepts supported board operations".into()),
         };
         if operation_board != template_board {
@@ -645,6 +673,20 @@ fn bind_shadow_operations(
                 bottom_right: *bottom_right,
                 width_nm: *width_nm,
             },
+            OperationKind::FlipExistingFootprint {
+                source_uuid,
+                target_side,
+                axis,
+                native_evidence,
+                ..
+            } => OperationKind::FlipExistingFootprint {
+                board: shadow_board.clone(),
+                placement_id: kicad_model::footprint_placement_id(shadow_board, source_uuid),
+                source_uuid: source_uuid.clone(),
+                target_side: *target_side,
+                axis: *axis,
+                native_evidence: native_evidence.clone(),
+            },
             OperationKind::EditExistingItems {
                 changes,
                 native_evidence,
@@ -678,7 +720,9 @@ fn bind_shadow_operations(
             }
         };
         operation.targets[0] = shadow_board.clone();
-        if let OperationKind::MoveExistingFootprint { placement_id, .. } = &operation.kind {
+        if let OperationKind::MoveExistingFootprint { placement_id, .. }
+        | OperationKind::FlipExistingFootprint { placement_id, .. } = &operation.kind
+        {
             operation.targets[1] = placement_id.clone();
         }
         if let OperationKind::EditExistingItems { board, changes, .. } = &operation.kind {
@@ -727,7 +771,8 @@ fn shadow_graphic_segments(
             }
             OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. } => {}
             OperationKind::MoveExistingFootprint { .. }
-            | OperationKind::EditExistingItems { .. } => {}
+            | OperationKind::EditExistingItems { .. }
+            | OperationKind::FlipExistingFootprint { .. } => {}
             _ => return Err("shadow postcondition contains an unsupported operation".into()),
         }
     }
@@ -919,10 +964,13 @@ fn apply_shadow_operations(
         return Ok((expected, prepared));
     }
     if let [operation] = operations
-        && matches!(operation.kind, OperationKind::EditExistingItems { .. })
+        && matches!(
+            operation.kind,
+            OperationKind::EditExistingItems { .. } | OperationKind::FlipExistingFootprint { .. }
+        )
     {
         let expected =
-            kicad_engine::expected_existing_item_edit(&observation.snapshot, &operation.kind)
+            existing_item_edit::expected_snapshot(&observation.snapshot, &operation.kind)
                 .map_err(|e| unknown(e.to_string()))?;
         let mut client = launcher
             .connect_owned()
@@ -1453,11 +1501,34 @@ pub struct PlanBoardGraphicsRequest {
     pub footprint: Option<BoardFootprintRequest>,
     pub move_footprint: Option<BoardMoveExistingFootprintRequest>,
     pub edit_existing: Option<BoardExistingItemEditRequest>,
+    pub flip_footprint: Option<BoardFlipFootprintRequest>,
     pub assembly: Option<BoardAssemblyRequest>,
     pub track: Option<BoardTrackRequest>,
     pub via: Option<BoardViaRequest>,
     pub batch: Option<Vec<BoardBatchItemRequest>>,
     pub request_id: String,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BoardFlipAxisRequest {
+    TopBottom,
+    LeftRight,
+}
+#[derive(Clone, Copy, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum BoardFlipSideRequest {
+    Front,
+    Back,
+}
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardFlipFootprintRequest {
+    pub observed_revision: String,
+    pub placement_id: String,
+    pub source_uuid: String,
+    pub target_side: BoardFlipSideRequest,
+    pub axis: BoardFlipAxisRequest,
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -1906,6 +1977,7 @@ fn expected_board_effect(kind: &OperationKind) -> &'static str {
         OperationKind::AddThroughVia { .. } => "add through via",
         OperationKind::MoveExistingFootprint { .. } => "move or rotate existing footprint",
         OperationKind::EditExistingItems { .. } => "edit existing track via or drawing fields",
+        OperationKind::FlipExistingFootprint { .. } => "flip existing footprint to approved side",
         _ => "apply bounded board change",
     }
 }
@@ -2383,6 +2455,7 @@ impl IpcBoardGraphicsExecutionService {
                     | OperationKind::AddThroughVia { .. }
                     | OperationKind::MoveExistingFootprint { .. }
                     | OperationKind::EditExistingItems { .. }
+                    | OperationKind::FlipExistingFootprint { .. }
             )
         }) {
             return BoardGraphicsCommitOutcome::Rejected {
@@ -2521,7 +2594,11 @@ impl IpcBoardGraphicsExecutionService {
             };
         }
         if let [operation] = operations
-            && matches!(operation.kind, OperationKind::EditExistingItems { .. })
+            && matches!(
+                operation.kind,
+                OperationKind::EditExistingItems { .. }
+                    | OperationKind::FlipExistingFootprint { .. }
+            )
         {
             return existing_item_edit::execute(&mut client, &observation, operation, endpoint);
         }
@@ -3394,6 +3471,22 @@ impl Server {
         if arguments.endpoint.is_empty() {
             return Ok(self.rejected(arguments.request_id, "identity_is_required"));
         }
+        if arguments.flip_footprint.is_some()
+            && (arguments.edit_existing.is_some()
+                || arguments.move_footprint.is_some()
+                || arguments.assembly.is_some()
+                || arguments.footprint.is_some()
+                || arguments.batch.is_some()
+                || arguments.segments.is_some()
+                || arguments.outline.is_some()
+                || arguments.track.is_some()
+                || arguments.via.is_some())
+        {
+            return Err(ErrorData::invalid_params(
+                "footprint flip requires its own plan",
+                None,
+            ));
+        }
         if arguments.edit_existing.is_some()
             && (arguments.move_footprint.is_some()
                 || arguments.assembly.is_some()
@@ -3510,6 +3603,55 @@ impl Server {
                 }],
                 false,
             )
+        } else if let Some(request) = &arguments.flip_footprint {
+            if snapshot
+                .revision()
+                .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?
+                .to_string()
+                != request.observed_revision
+            {
+                return Ok(self.rejected(arguments.request_id, "stale_plan"));
+            }
+            let mut kind = OperationKind::FlipExistingFootprint {
+                board: board.clone(),
+                placement_id: StableId::new(request.placement_id.clone())
+                    .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?,
+                source_uuid: StableId::new(request.source_uuid.clone())
+                    .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?,
+                target_side: match request.target_side {
+                    BoardFlipSideRequest::Front => kicad_model::BoardSide::Front,
+                    BoardFlipSideRequest::Back => kicad_model::BoardSide::Back,
+                },
+                axis: match request.axis {
+                    BoardFlipAxisRequest::TopBottom => kicad_engine::FootprintFlipAxis::TopBottom,
+                    BoardFlipAxisRequest::LeftRight => kicad_engine::FootprintFlipAxis::LeftRight,
+                },
+                native_evidence: digest_bytes(b"unbound"),
+            };
+            if let Err(error) = kicad_engine::expected_footprint_flip(&snapshot, &kind) {
+                return Ok(self.rejected(arguments.request_id, &error.to_string()));
+            }
+            let evidence = match self.discovery.footprint_flip_evidence(
+                &arguments.endpoint,
+                &observation,
+                &kind,
+            ) {
+                Ok(e) => e,
+                Err(reason) => {
+                    return Ok(self.envelope_sync(
+                        arguments.request_id,
+                        None,
+                        json!({"reason":"footprint_flip_unavailable", "detail": reason}),
+                    ));
+                }
+            };
+            if let OperationKind::FlipExistingFootprint {
+                native_evidence, ..
+            } = &mut kind
+            {
+                *native_evidence = evidence;
+            }
+            (vec![kind], false)
         } else if let Some(request) = &arguments.edit_existing {
             if snapshot
                 .revision()
@@ -3673,7 +3815,12 @@ impl Server {
                     OperationKind::EditExistingItems { board, changes, .. } => {
                         existing_item_targets(board, changes)
                     }
-                    OperationKind::MoveExistingFootprint {
+                    OperationKind::FlipExistingFootprint {
+                        placement_id,
+                        source_uuid,
+                        ..
+                    }
+                    | OperationKind::MoveExistingFootprint {
                         placement_id,
                         source_uuid,
                         ..
@@ -6606,6 +6753,7 @@ mod tests {
             assembly: None,
             move_footprint: None,
             edit_existing: None,
+            flip_footprint: None,
             track: None,
             via: None,
             batch: None,
@@ -8497,5 +8645,6 @@ mod tests {
     mod existing_footprint_acceptance;
     mod existing_item_edit_acceptance;
     mod existing_item_protocol;
+    mod footprint_flip_acceptance;
     mod recovery_acceptance;
 }

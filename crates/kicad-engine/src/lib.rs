@@ -1,3 +1,5 @@
+mod footprint_flip;
+pub use footprint_flip::{FootprintFlipAxis, expected_footprint_flip};
 mod existing_item_edit;
 pub use existing_item_edit::{
     ExistingItemChange, ItemPointNm, expected_existing_item_edit, preserves_pad_connectivity,
@@ -169,6 +171,14 @@ pub enum OperationKind {
         changes: Vec<ExistingItemChange>,
         native_evidence: RevisionDigest,
     },
+    FlipExistingFootprint {
+        board: StableId,
+        placement_id: StableId,
+        source_uuid: StableId,
+        target_side: kicad_model::BoardSide,
+        axis: FootprintFlipAxis,
+        native_evidence: RevisionDigest,
+    },
     MoveExistingFootprint {
         board: StableId,
         placement_id: StableId,
@@ -245,7 +255,13 @@ impl Operation {
                     [target, source]
                 }))
                 .collect(),
-            OperationKind::MoveExistingFootprint {
+            OperationKind::FlipExistingFootprint {
+                board,
+                placement_id,
+                source_uuid,
+                ..
+            }
+            | OperationKind::MoveExistingFootprint {
                 board,
                 placement_id,
                 source_uuid,
@@ -398,6 +414,7 @@ impl ChangePlan {
                     | OperationKind::AddThroughVia { .. }
                     | OperationKind::MoveExistingFootprint { .. }
                     | OperationKind::EditExistingItems { .. }
+                    | OperationKind::FlipExistingFootprint { .. }
             ) {
                 for target in op.refs() {
                     if !known.contains(target) {
@@ -561,6 +578,9 @@ impl ChangePlan {
                     if !routing_ids.insert(intent.source_uuid.clone()) {
                         return Err(EngineError::TargetAlreadyExists(intent.source_uuid.clone()));
                     }
+                }
+                OperationKind::FlipExistingFootprint { .. } => {
+                    expected_footprint_flip(snapshot, &op.kind)?;
                 }
                 OperationKind::EditExistingItems { .. } => {
                     expected_existing_item_edit(snapshot, &op.kind)?;
@@ -1048,6 +1068,9 @@ fn apply_operations(
                     ObservedBoardRouting::new(board.clone(), routing.tracks, routing.vias)
                         .map_err(|error| EngineError::Serialization(error.to_string()))?,
                 );
+            }
+            OperationKind::FlipExistingFootprint { .. } => {
+                snapshot = expected_footprint_flip(&snapshot, &op.kind)?;
             }
             OperationKind::EditExistingItems { .. } => {
                 snapshot = expected_existing_item_edit(&snapshot, &op.kind)?;
@@ -2764,5 +2787,58 @@ mod tests {
             engine.preview(&plan(&engine, vec![wrong_board])),
             Err(EngineError::ScopeMismatch)
         );
+    }
+
+    #[test]
+    fn explicit_side_flip_preserves_scope_and_is_not_a_replay_toggle() {
+        let (mut before, _, _, _) = observed_routing_snapshot(BoardSide::Front);
+        let board = before.board.document_id.clone().unwrap();
+        before.native_routing =
+            Some(ObservedBoardRouting::new(board.clone(), vec![], vec![]).unwrap());
+        let original = before.native_footprints.as_ref().unwrap().placements[0].clone();
+        for axis in [FootprintFlipAxis::TopBottom, FootprintFlipAxis::LeftRight] {
+            let mut kind = OperationKind::FlipExistingFootprint {
+                board: board.clone(),
+                placement_id: original.placement_id.clone(),
+                source_uuid: original.source_uuid.clone(),
+                target_side: BoardSide::Back,
+                axis,
+                native_evidence: digest('a'),
+            };
+            let after = expected_footprint_flip(&before, &kind).unwrap();
+            let mut cyclic = before.clone();
+            let footprints = cyclic.native_footprints.as_mut().unwrap();
+            footprints.placements[0].orientation_mdeg -= 360_000;
+            footprints.placements[0].pads[0].orientation_mdeg += 720_000;
+            *footprints =
+                ObservedBoardFootprints::new(board.clone(), footprints.placements.clone()).unwrap();
+            assert_eq!(cyclic.canonical(), before.canonical());
+            assert_eq!(cyclic.revision().unwrap(), before.revision().unwrap());
+            assert_eq!(after.native_routing, before.native_routing);
+            assert_eq!(after.board, before.board);
+            let target = &after.native_footprints.as_ref().unwrap().placements[0];
+            assert_eq!(target.position, original.position);
+            assert_eq!(target.pads[0].position, original.pads[0].position);
+            assert_eq!(target.pads[0].net, original.pads[0].net);
+            assert!(expected_footprint_flip(&after, &kind).is_err());
+            if let OperationKind::FlipExistingFootprint { target_side, .. } = &mut kind {
+                *target_side = BoardSide::Front;
+            }
+            assert_eq!(
+                expected_footprint_flip(&after, &kind).unwrap(),
+                before.canonical()
+            );
+            if let OperationKind::FlipExistingFootprint {
+                board, target_side, ..
+            } = &mut kind
+            {
+                *board = id("foreign");
+                *target_side = BoardSide::Back;
+            }
+            assert_eq!(
+                expected_footprint_flip(&before, &kind),
+                Err(EngineError::ScopeMismatch)
+            );
+        }
     }
 }

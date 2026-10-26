@@ -849,6 +849,7 @@ pub struct ObservedPad {
 impl ObservedPad {
     pub fn canonical(&self) -> Self {
         let mut pad = self.clone();
+        pad.orientation_mdeg = pad.orientation_mdeg.rem_euclid(360_000);
         pad.layers.sort();
         pad.copper_shapes.sort_by_key(|shape| shape.layer);
         pad
@@ -929,6 +930,7 @@ pub struct ObservedFootprintPlacement {
 impl ObservedFootprintPlacement {
     pub fn canonical(&self) -> Self {
         let mut placement = self.clone();
+        placement.orientation_mdeg = placement.orientation_mdeg.rem_euclid(360_000);
         placement.pads = placement.pads.iter().map(ObservedPad::canonical).collect();
         placement
             .pads

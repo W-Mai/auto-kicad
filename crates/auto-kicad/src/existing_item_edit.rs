@@ -129,6 +129,72 @@ pub(super) fn prepare_evidence(
     Ok(evidence.digest)
 }
 
+pub(super) fn expected_snapshot(
+    source: &ProjectSnapshot,
+    kind: &OperationKind,
+) -> Result<ProjectSnapshot, String> {
+    match kind {
+        OperationKind::FlipExistingFootprint { .. } => {
+            kicad_engine::expected_footprint_flip(source, kind)
+        }
+        _ => expected_existing_item_edit(source, kind),
+    }
+    .map_err(|e| e.to_string())
+}
+
+fn native_axis(axis: kicad_engine::FootprintFlipAxis) -> kicad_ipc::FootprintFlipAxis {
+    match axis {
+        kicad_engine::FootprintFlipAxis::TopBottom => kicad_ipc::FootprintFlipAxis::TopBottom,
+        kicad_engine::FootprintFlipAxis::LeftRight => kicad_ipc::FootprintFlipAxis::LeftRight,
+    }
+}
+
+fn flipped_template(
+    before: &Evidence,
+    kind: &OperationKind,
+) -> Result<Option<FootprintInstanceTemplate>, String> {
+    if let OperationKind::FlipExistingFootprint {
+        source_uuid, axis, ..
+    } = kind
+    {
+        let target = before
+            .footprints
+            .iter()
+            .find(|f| f.metadata().source_uuid == source_uuid.as_str())
+            .ok_or("missing native flip target")?;
+        Ok(Some(
+            target
+                .expected_flipped(native_axis(*axis))
+                .map_err(|e| e.to_string())?,
+        ))
+    } else {
+        Ok(None)
+    }
+}
+
+pub(super) fn prepare_flip_evidence(
+    endpoint: &str,
+    source: &LiveBoardObservation,
+    kind: &OperationKind,
+) -> Result<RevisionDigest, String> {
+    expected_snapshot(&source.snapshot, kind)?;
+    let config = ClientConfig::new(endpoint, "auto-kicad-flip-check").map_err(|e| e.to_string())?;
+    let mut client = KiCadClient::new(
+        NngTransport::connect(config.clone()).map_err(|e| e.to_string())?,
+        config,
+    );
+    let evidence = capture(&mut client, source)?;
+    flipped_template(&evidence, kind)?.ok_or("expected flip operation")?;
+    if IpcDiscoveryService
+        .live_board_observation(endpoint, None)
+        .as_ref()
+        != Ok(source)
+    {
+        return Err("source changed while preparing flip evidence".into());
+    }
+    Ok(evidence.digest)
+}
+
 pub(super) fn execute(
     client: &mut KiCadClient<NngTransport>,
     source: &LiveBoardObservation,
@@ -137,23 +203,29 @@ pub(super) fn execute(
 ) -> BoardGraphicsCommitOutcome {
     let reject = |reason: String| BoardGraphicsCommitOutcome::Rejected { reason };
     let unknown = |reason: String| BoardGraphicsCommitOutcome::Unknown { reason };
-    let OperationKind::EditExistingItems {
-        changes,
-        native_evidence,
-        ..
-    } = &operation.kind
-    else {
-        return reject("expected existing item edits".into());
+    let (changes, native_evidence) = match &operation.kind {
+        OperationKind::EditExistingItems {
+            changes,
+            native_evidence,
+            ..
+        } => (updates(changes), native_evidence),
+        OperationKind::FlipExistingFootprint {
+            native_evidence, ..
+        } => (Vec::new(), native_evidence),
+        _ => return reject("expected existing item edit or footprint flip".into()),
     };
     let preflight = (|| -> Result<_, String> {
-        let expected = expected_existing_item_edit(&source.snapshot, &operation.kind)
-            .map_err(|e| e.to_string())?;
+        let expected = expected_snapshot(&source.snapshot, &operation.kind)?;
         let before = capture(client, source)?;
         if &before.digest != native_evidence {
             return Err("native items or connectivity changed since planning".into());
         }
-        let changes = updates(changes);
-        let expected_native = before.items.updated(&changes).map_err(|e| e.to_string())?;
+        let expected_flip = flipped_template(&before, &operation.kind)?;
+        let expected_native = if expected_flip.is_some() {
+            before.items.clone()
+        } else {
+            before.items.updated(&changes).map_err(|e| e.to_string())?
+        };
         let protected = existing_footprint::protected_files(&source.board_path)?;
         let policy = DrcPolicy {
             allowed_root: source.project_dir.clone(),
@@ -176,25 +248,48 @@ pub(super) fn execute(
             before,
             changes,
             expected_native,
+            expected_flip,
             protected,
             policy,
             baseline,
         ))
     })();
-    let (expected, before, changes, expected_native, protected, policy, baseline) = match preflight
-    {
-        Ok(v) => v,
-        Err(e) => return reject(e),
-    };
+    let (expected, before, changes, expected_native, expected_flip, protected, policy, baseline) =
+        match preflight {
+            Ok(v) => v,
+            Err(e) => return reject(e),
+        };
     let outcome = kicad_adapter::execute_native_edit_transaction(
         client,
         &source.board_filename,
         "auto-kicad approved existing item edit",
         |client| {
-            client
-                .update_existing_board_items(&source.board_filename, &before.items, &changes)
-                .map(|_| ())
-                .map_err(|e| e.to_string())
+            if let OperationKind::FlipExistingFootprint {
+                source_uuid, axis, ..
+            } = &operation.kind
+            {
+                let receipt = client
+                    .flip_existing_footprint(
+                        &source.board_filename,
+                        source_uuid.as_str(),
+                        native_axis(*axis),
+                    )
+                    .map_err(|e| e.to_string())?;
+                if !expected_flip
+                    .as_ref()
+                    .ok_or("missing expected flip")?
+                    .matches_flip_result(&receipt)
+                    .map_err(|e| e.to_string())?
+                {
+                    return Err("native flip receipt differs from independent expectation".into());
+                }
+                Ok(())
+            } else {
+                client
+                    .update_existing_board_items(&source.board_filename, &before.items, &changes)
+                    .map(|_| ())
+                    .map_err(|e| e.to_string())
+            }
         },
     );
     if outcome != BoardGraphicsCommitOutcome::CommittedAndSaved {
@@ -219,10 +314,26 @@ pub(super) fn execute(
             let footprints = client
                 .capture_footprint_instance_templates(&source.board_filename)
                 .map_err(|e| e.to_string())?;
-            if existing_footprint::footprint_evidence(&footprints)?
-                != existing_footprint::footprint_evidence(&before.footprints)?
-            {
-                return Err("existing item edit changed footprint content".into());
+            if footprints.len() != before.footprints.len() {
+                return Err("footprint set changed".into());
+            }
+            for original in &before.footprints {
+                let actual = footprints
+                    .iter()
+                    .find(|f| f.metadata().source_uuid == original.metadata().source_uuid)
+                    .ok_or("footprint missing after edit")?;
+                let matches = if let Some(expected) = expected_flip
+                    .as_ref()
+                    .filter(|f| f.metadata().source_uuid == original.metadata().source_uuid)
+                {
+                    expected.matches_flip_result(actual)
+                } else {
+                    original.matches_saved_instance(actual)
+                }
+                .map_err(|e| e.to_string())?;
+                if !matches {
+                    return Err("saved footprint content differs from approved intent".into());
+                }
             }
             let clusters = client
                 .connected_pad_clusters(&source.board_filename, &before.pads)
@@ -245,10 +356,18 @@ pub(super) fn execute(
         let CheckResult::Completed(after) = run_pcb_drc(&source.board_path, &policy) else {
             return Err("saved DRC unavailable".into());
         };
-        if !compare_drc(&baseline, &after).introduced.is_empty()
-            || after.unconnected_items > baseline.unconnected_items
-        {
-            return Err("existing item edit regressed DRC or connectivity".into());
+        let delta = compare_drc(&baseline, &after);
+        if !delta.introduced.is_empty() || after.unconnected_items > baseline.unconnected_items {
+            return Err(format!(
+                "existing item edit regressed DRC or connectivity: introduced {:?}; unconnected {} -> {}",
+                delta
+                    .introduced
+                    .iter()
+                    .map(|v| (&v.rule_type, &v.description))
+                    .collect::<Vec<_>>(),
+                baseline.unconnected_items,
+                after.unconnected_items
+            ));
         }
         Ok(())
     })();
