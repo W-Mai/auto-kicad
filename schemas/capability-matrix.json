@@ -221,20 +221,20 @@
         "kicad_commit_change"
       ],
       "constraints": [
-        "one unlocked existing footprint per operation; move/rotate only",
-        "current observed revision and complete native payload binding",
-        "connected tracks/vias, zones and unsupported copper reject",
-        "supported rigid child geometry; rectangles rotate in quarter turns",
-        "exact approval, saved reload, no introduced DRC or increased unconnected count",
-        "native acceptance on KiCad 10.0.6; other versions require validation"
+        "one unlocked footprint move/rotate, or 1\u2013100 explicit track/through-via/Dwgs.User field edits per plan",
+        "current observed revision and complete server-derived native payload binding",
+        "footprint transforms reject connected copper; field edits must preserve existing pad-to-pad connectivity",
+        "zones, unsupported copper, locks, nonuniform vias and unsupported target geometry reject",
+        "exact approval, full saved reload, protected source files and no DRC/connectivity regression",
+        "native and stdio acceptance on KiCad 10.0.6; flip/delete remain unavailable through MCP"
       ],
       "evidence": {
-        "fixture": "synthetic-four-footprint-asymmetric-front-back",
+        "fixture": "synthetic-native-footprint-and-connected-item-edits",
         "tested_versions": [
           "10.0.6"
         ],
-        "command": "cargo test -p auto-kicad --lib tests::existing_footprint_acceptance::live_existing_footprint_stdio_lifecycle -- --ignored --exact",
-        "record": "docs/acceptance/existing-footprint-transform.md"
+        "command": "cargo test -p auto-kicad --lib tests::existing_item_edit_acceptance::live_existing_item_stdio_lifecycle -- --ignored --exact",
+        "record": "docs/acceptance/existing-item-edit.md"
       }
     },
     {

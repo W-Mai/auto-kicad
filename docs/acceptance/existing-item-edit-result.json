@@ -1,0 +1,335 @@
+{
+  "baseline_drc": {
+    "ignored_checks": 5,
+    "kicad_version": "10.0.6",
+    "parser_version": "kicad-drc-v1",
+    "schema": "https://schemas.kicad.org/drc.v1.json",
+    "source": "board.kicad_pcb",
+    "unconnected_items": 1,
+    "violations": [
+      {
+        "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+        "identity": {
+          "Uuids": {
+            "rule_type": "lib_footprint_issues",
+            "uuids": [
+              "10000000-0000-4000-8000-000000000001"
+            ]
+          }
+        },
+        "items": [
+          {
+            "description": "\u5c01\u88c5 J1",
+            "position": {
+              "x": 5.0,
+              "y": 5.0
+            },
+            "uuid": "10000000-0000-4000-8000-000000000001"
+          }
+        ],
+        "rule_type": "lib_footprint_issues",
+        "severity": "warning"
+      },
+      {
+        "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+        "identity": {
+          "Uuids": {
+            "rule_type": "lib_footprint_issues",
+            "uuids": [
+              "10000000-0000-4000-8000-000000000002"
+            ]
+          }
+        },
+        "items": [
+          {
+            "description": "\u5c01\u88c5 J2",
+            "position": {
+              "x": 10.0,
+              "y": 5.0
+            },
+            "uuid": "10000000-0000-4000-8000-000000000002"
+          }
+        ],
+        "rule_type": "lib_footprint_issues",
+        "severity": "warning"
+      },
+      {
+        "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+        "identity": {
+          "Uuids": {
+            "rule_type": "lib_footprint_issues",
+            "uuids": [
+              "10000000-0000-4000-8000-000000000003"
+            ]
+          }
+        },
+        "items": [
+          {
+            "description": "\u5c01\u88c5 J3",
+            "position": {
+              "x": 7.5,
+              "y": 8.0
+            },
+            "uuid": "10000000-0000-4000-8000-000000000003"
+          }
+        ],
+        "rule_type": "lib_footprint_issues",
+        "severity": "warning"
+      },
+      {
+        "description": "Track has unconnected end",
+        "identity": {
+          "Uuids": {
+            "rule_type": "track_dangling",
+            "uuids": [
+              "40000000-0000-4000-8000-000000000003"
+            ]
+          }
+        },
+        "items": [
+          {
+            "description": "\u8d70\u7ebf [GND] (F.Cu), \u957f\u5ea6: 1.0000 mm",
+            "position": {
+              "x": 2.0,
+              "y": 10.0
+            },
+            "uuid": "40000000-0000-4000-8000-000000000003"
+          }
+        ],
+        "rule_type": "track_dangling",
+        "severity": "warning"
+      }
+    ]
+  },
+  "final_drc": {
+    "baseline_id": "drc-baseline:0",
+    "captured_revision": "sha256:b6d2a0c705113e815ffcd4b6f4a452b5ce52219be3c5a1e4f88561ecac2fd5bb",
+    "current_revision": "sha256:7d1c47eb833f5bc674501e6cf41eb343fe0b56e65505e7d33a54cedd827aa388",
+    "delta": {
+      "introduced": [],
+      "resolved": [],
+      "unchanged": [
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000001"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J1",
+              "position": {
+                "x": 5.0,
+                "y": 5.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000001"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000002"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J2",
+              "position": {
+                "x": 10.0,
+                "y": 5.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000002"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000003"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J3",
+              "position": {
+                "x": 7.5,
+                "y": 8.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000003"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "Track has unconnected end",
+          "identity": {
+            "Uuids": {
+              "rule_type": "track_dangling",
+              "uuids": [
+                "40000000-0000-4000-8000-000000000003"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u8d70\u7ebf [GND] (F.Cu), \u957f\u5ea6: 1.0000 mm",
+              "position": {
+                "x": 2.0,
+                "y": 10.0
+              },
+              "uuid": "40000000-0000-4000-8000-000000000003"
+            }
+          ],
+          "rule_type": "track_dangling",
+          "severity": "warning"
+        }
+      ]
+    },
+    "report": {
+      "ignored_checks": 5,
+      "kicad_version": "10.0.6",
+      "parser_version": "kicad-drc-v1",
+      "schema": "https://schemas.kicad.org/drc.v1.json",
+      "source": "board.kicad_pcb",
+      "unconnected_items": 1,
+      "violations": [
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000001"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J1",
+              "position": {
+                "x": 5.0,
+                "y": 5.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000001"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000002"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J2",
+              "position": {
+                "x": 10.0,
+                "y": 5.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000002"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000003"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J3",
+              "position": {
+                "x": 7.5,
+                "y": 8.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000003"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "Track has unconnected end",
+          "identity": {
+            "Uuids": {
+              "rule_type": "track_dangling",
+              "uuids": [
+                "40000000-0000-4000-8000-000000000003"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u8d70\u7ebf [GND] (F.Cu), \u957f\u5ea6: 1.0000 mm",
+              "position": {
+                "x": 2.0,
+                "y": 10.0
+              },
+              "uuid": "40000000-0000-4000-8000-000000000003"
+            }
+          ],
+          "rule_type": "track_dangling",
+          "severity": "warning"
+        }
+      ]
+    }
+  },
+  "fixture_cleaned": true,
+  "owned_editors_closed": true,
+  "passed": true,
+  "same_process_reload_verified": true,
+  "source_editor_reused": true,
+  "source_pid": 67399,
+  "date": "2026-10-26",
+  "backend": "KiCad 10.0.6",
+  "transport": "production stdio MCP and native IPC",
+  "offline_tests_passed": 361,
+  "offline_tests_ignored": 13,
+  "live_tests_passed": 1,
+  "live_seconds": 36.98,
+  "real_project_profile": false,
+  "verified": [
+    "connected track width and endpoint",
+    "through via position/copper diameter/primary drill diameter",
+    "Dwgs.User segment endpoint/width",
+    "complete native payload and normalized postconditions",
+    "protected project and schematic bytes",
+    "saved reload in same source editor",
+    "wrong approval and replay rejection",
+    "stale revision, duplicate, foreign identity, no-op, invalid dimension and locked track rejection",
+    "track and via disconnection previews denied without source mutation",
+    "no introduced DRC or increased unconnected count"
+  ]
+}

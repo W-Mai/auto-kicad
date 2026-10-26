@@ -2560,6 +2560,29 @@ impl BoardGraphicsExecutor {
     }
 }
 
+/// Commit and save one native edit; callers must verify complete saved postconditions.
+pub fn execute_native_edit_transaction<I: BoardGraphicsIpc>(
+    ipc: &mut I,
+    board_filename: &str,
+    message: &str,
+    update: impl FnOnce(&mut I) -> Result<(), String>,
+) -> BoardGraphicsCommitOutcome {
+    let commit = match ipc.begin_commit() {
+        Ok(commit) => commit,
+        Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
+    };
+    if let Err(reason) = update(ipc) {
+        return drop_native_pcb_commit(ipc, &commit, reason);
+    }
+    if let Err(reason) = ipc.commit_changes(&commit, message) {
+        return BoardGraphicsCommitOutcome::Unknown { reason };
+    }
+    if let Err(reason) = ipc.save_board(board_filename) {
+        return BoardGraphicsCommitOutcome::Unknown { reason };
+    }
+    BoardGraphicsCommitOutcome::CommittedAndSaved
+}
+
 fn drop_native_pcb_commit<I: BoardGraphicsIpc>(
     ipc: &mut I,
     commit: &str,
@@ -4115,6 +4138,54 @@ mod tests {
                 .iter()
                 .any(|diagnostic| { diagnostic.code == "content_not_observed" })
         );
+    }
+
+    #[test]
+    fn native_edit_transaction_drops_partial_updates_and_reports_ambiguity() {
+        for fault in 0..6 {
+            let mut ipc = FakeGraphicsIpc::default();
+            match fault {
+                1 => ipc.begin = Err("begin lost".into()),
+                3 => ipc.drop = Err("drop lost".into()),
+                4 => ipc.commit = Err("commit lost".into()),
+                5 => ipc.save = Err("save lost".into()),
+                _ => {}
+            }
+            let outcome =
+                execute_native_edit_transaction(&mut ipc, "board.kicad_pcb", "edit", |ipc| {
+                    ipc.calls.push("update-first".into());
+                    ipc.calls.push("update-second".into());
+                    if fault == 2 || fault == 3 {
+                        Err("second item rejected".into())
+                    } else {
+                        Ok(())
+                    }
+                });
+            match fault {
+                0 => assert_eq!(outcome, BoardGraphicsCommitOutcome::CommittedAndSaved),
+                2 => assert!(matches!(
+                    outcome,
+                    BoardGraphicsCommitOutcome::Rejected { .. }
+                )),
+                _ => assert!(matches!(
+                    outcome,
+                    BoardGraphicsCommitOutcome::Unknown { .. }
+                )),
+            }
+            let expected = match fault {
+                1 => vec!["begin"],
+                2 | 3 => vec!["begin", "update-first", "update-second", "drop:c1"],
+                4 => vec!["begin", "update-first", "update-second", "commit:c1"],
+                _ => vec![
+                    "begin",
+                    "update-first",
+                    "update-second",
+                    "commit:c1",
+                    "save:board.kicad_pcb",
+                ],
+            };
+            assert_eq!(ipc.calls, expected, "fault {fault}");
+        }
     }
 
     struct FakeGraphicsIpc {

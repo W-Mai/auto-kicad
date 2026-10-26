@@ -1,6 +1,8 @@
 use super::*;
 
-fn protected_files(board: &std::path::Path) -> Result<Vec<Option<RevisionDigest>>, String> {
+pub(super) fn protected_files(
+    board: &std::path::Path,
+) -> Result<Vec<Option<RevisionDigest>>, String> {
     ["kicad_pro", "kicad_dru", "kicad_sch"]
         .into_iter()
         .map(|extension| {

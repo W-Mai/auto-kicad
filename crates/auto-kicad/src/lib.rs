@@ -1,4 +1,5 @@
 mod existing_footprint;
+mod existing_item_edit;
 mod footprint_authoring;
 pub mod recovery;
 
@@ -94,6 +95,15 @@ pub struct Capability {
 }
 
 pub trait DiscoveryService: Send + Sync {
+    fn existing_item_edit_evidence(
+        &self,
+        _endpoint: &str,
+        _source: &LiveBoardObservation,
+        _changes: &[kicad_engine::ExistingItemChange],
+    ) -> Result<RevisionDigest, String> {
+        Err("complete existing item evidence is unavailable".into())
+    }
+
     fn footprint_move_evidence(
         &self,
         _endpoint: &str,
@@ -129,6 +139,15 @@ pub trait DiscoveryService: Send + Sync {
 pub struct IpcDiscoveryService;
 
 impl DiscoveryService for IpcDiscoveryService {
+    fn existing_item_edit_evidence(
+        &self,
+        endpoint: &str,
+        source: &LiveBoardObservation,
+        changes: &[kicad_engine::ExistingItemChange],
+    ) -> Result<RevisionDigest, String> {
+        existing_item_edit::prepare_evidence(endpoint, source, changes)
+    }
+
     fn footprint_move_evidence(
         &self,
         endpoint: &str,
@@ -456,11 +475,24 @@ fn validate_shadow_operation_kinds(operations: &[Operation]) -> Result<(), Strin
                 | OperationKind::AddStraightTrack { .. }
                 | OperationKind::AddThroughVia { .. }
                 | OperationKind::MoveExistingFootprint { .. }
+                | OperationKind::EditExistingItems { .. }
         )
     }) {
         return Err("shadow validation only accepts supported board operations".into());
     }
     Ok(())
+}
+
+fn existing_item_targets(
+    board: &StableId,
+    changes: &[kicad_engine::ExistingItemChange],
+) -> Vec<StableId> {
+    std::iter::once(board.clone())
+        .chain(changes.iter().flat_map(|c| {
+            let (target, source) = c.identities();
+            [target.clone(), source.clone()]
+        }))
+        .collect()
 }
 
 fn operation_matches_board(operation: &Operation, observed: &StableId) -> bool {
@@ -481,6 +513,9 @@ fn operation_matches_board(operation: &Operation, observed: &StableId) -> bool {
         | OperationKind::AddStraightTrack { board, .. }
         | OperationKind::AddThroughVia { board, .. } => {
             board == observed && operation.targets == vec![board.clone()]
+        }
+        OperationKind::EditExistingItems { board, changes, .. } => {
+            board == observed && operation.targets == existing_item_targets(board, changes)
         }
         OperationKind::MoveExistingFootprint {
             board,
@@ -516,7 +551,7 @@ fn bind_shadow_operations(
     if operations[0].kind.footprint_placements().is_empty()
         && !matches!(
             operations[0].kind,
-            OperationKind::MoveExistingFootprint { .. }
+            OperationKind::MoveExistingFootprint { .. } | OperationKind::EditExistingItems { .. }
         )
     {
         kicad_adapter::prepare_bound_native_batch(
@@ -550,7 +585,8 @@ fn bind_shadow_operations(
             | OperationKind::AddBoardOutline { board, .. }
             | OperationKind::AddStraightTrack { board, .. }
             | OperationKind::AddThroughVia { board, .. }
-            | OperationKind::MoveExistingFootprint { board, .. } => board,
+            | OperationKind::MoveExistingFootprint { board, .. }
+            | OperationKind::EditExistingItems { board, .. } => board,
             _ => return Err("shadow validation only accepts supported board operations".into()),
         };
         if operation_board != template_board {
@@ -609,6 +645,18 @@ fn bind_shadow_operations(
                 bottom_right: *bottom_right,
                 width_nm: *width_nm,
             },
+            OperationKind::EditExistingItems {
+                changes,
+                native_evidence,
+                ..
+            } => OperationKind::EditExistingItems {
+                board: shadow_board.clone(),
+                changes: changes
+                    .iter()
+                    .map(|c| c.in_board_scope(shadow_board))
+                    .collect(),
+                native_evidence: native_evidence.clone(),
+            },
             OperationKind::MoveExistingFootprint {
                 source_uuid,
                 position,
@@ -632,6 +680,9 @@ fn bind_shadow_operations(
         operation.targets[0] = shadow_board.clone();
         if let OperationKind::MoveExistingFootprint { placement_id, .. } = &operation.kind {
             operation.targets[1] = placement_id.clone();
+        }
+        if let OperationKind::EditExistingItems { board, changes, .. } = &operation.kind {
+            operation.targets = existing_item_targets(board, changes);
         }
         bound.push(operation);
     }
@@ -675,7 +726,8 @@ fn shadow_graphic_segments(
                 graphics.extend(expand_board_outline(*top_left, *bottom_right, *width_nm));
             }
             OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. } => {}
-            OperationKind::MoveExistingFootprint { .. } => {}
+            OperationKind::MoveExistingFootprint { .. }
+            | OperationKind::EditExistingItems { .. } => {}
             _ => return Err("shadow postcondition contains an unsupported operation".into()),
         }
     }
@@ -865,6 +917,26 @@ fn apply_shadow_operations(
             footprint_authoring::verify_sources(source_project, placement).map_err(unknown)?;
         }
         return Ok((expected, prepared));
+    }
+    if let [operation] = operations
+        && matches!(operation.kind, OperationKind::EditExistingItems { .. })
+    {
+        let expected =
+            kicad_engine::expected_existing_item_edit(&observation.snapshot, &operation.kind)
+                .map_err(|e| unknown(e.to_string()))?;
+        let mut client = launcher
+            .connect_owned()
+            .map_err(|e| unknown(e.to_string()))?;
+        let endpoint = launcher
+            .current_identity()
+            .map_err(|e| unknown(e.to_string()))?
+            .endpoint
+            .clone();
+        return match existing_item_edit::execute(&mut client, observation, operation, &endpoint) {
+            BoardGraphicsCommitOutcome::CommittedAndSaved => Ok((expected, Vec::new())),
+            BoardGraphicsCommitOutcome::CommittedButNotSaved { reason } => Err(unknown(reason)),
+            outcome => Err(outcome),
+        };
     }
     let revision = observation
         .snapshot
@@ -1380,11 +1452,52 @@ pub struct PlanBoardGraphicsRequest {
     pub outline: Option<BoardOutlineRequest>,
     pub footprint: Option<BoardFootprintRequest>,
     pub move_footprint: Option<BoardMoveExistingFootprintRequest>,
+    pub edit_existing: Option<BoardExistingItemEditRequest>,
     pub assembly: Option<BoardAssemblyRequest>,
     pub track: Option<BoardTrackRequest>,
     pub via: Option<BoardViaRequest>,
     pub batch: Option<Vec<BoardBatchItemRequest>>,
     pub request_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardExistingItemEditRequest {
+    pub observed_revision: String,
+    pub changes: Vec<BoardExistingItemChangeRequest>,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct BoardItemPointNmRequest {
+    pub x: i64,
+    pub y: i64,
+}
+
+#[derive(Clone, Debug, serde::Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum BoardExistingItemChangeRequest {
+    Track {
+        target_id: String,
+        source_uuid: String,
+        start_nm: Option<BoardItemPointNmRequest>,
+        end_nm: Option<BoardItemPointNmRequest>,
+        width_nm: Option<i64>,
+    },
+    Via {
+        target_id: String,
+        source_uuid: String,
+        position_nm: Option<BoardItemPointNmRequest>,
+        diameter_nm: Option<i64>,
+        drill_nm: Option<i64>,
+    },
+    GraphicSegment {
+        target_id: String,
+        source_uuid: String,
+        start_nm: Option<BoardItemPointNmRequest>,
+        end_nm: Option<BoardItemPointNmRequest>,
+        width_nm: Option<i64>,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -1792,6 +1905,7 @@ fn expected_board_effect(kind: &OperationKind) -> &'static str {
         OperationKind::AddStraightTrack { .. } => "add straight copper track",
         OperationKind::AddThroughVia { .. } => "add through via",
         OperationKind::MoveExistingFootprint { .. } => "move or rotate existing footprint",
+        OperationKind::EditExistingItems { .. } => "edit existing track via or drawing fields",
         _ => "apply bounded board change",
     }
 }
@@ -2268,6 +2382,7 @@ impl IpcBoardGraphicsExecutionService {
                     | OperationKind::AddStraightTrack { .. }
                     | OperationKind::AddThroughVia { .. }
                     | OperationKind::MoveExistingFootprint { .. }
+                    | OperationKind::EditExistingItems { .. }
             )
         }) {
             return BoardGraphicsCommitOutcome::Rejected {
@@ -2404,6 +2519,11 @@ impl IpcBoardGraphicsExecutionService {
             return BoardGraphicsCommitOutcome::Rejected {
                 reason: "live identity or revision is stale".into(),
             };
+        }
+        if let [operation] = operations
+            && matches!(operation.kind, OperationKind::EditExistingItems { .. })
+        {
+            return existing_item_edit::execute(&mut client, &observation, operation, endpoint);
         }
         if let [operation] = operations
             && matches!(operation.kind, OperationKind::MoveExistingFootprint { .. })
@@ -3265,7 +3385,7 @@ impl Server {
 
     #[tool(
         name = "kicad_plan_change",
-        description = "Plan bounded PCB graphics, pad-bound routing, a source-bound footprint, or an atomic connected footprint assembly without mutating KiCad."
+        description = "Plan bounded PCB graphics, pad-bound routing, existing item fields, footprint transforms or source-bound placements without mutating KiCad."
     )]
     pub async fn kicad_plan_change(
         &self,
@@ -3273,6 +3393,21 @@ impl Server {
     ) -> Result<CallToolResponse, ErrorData> {
         if arguments.endpoint.is_empty() {
             return Ok(self.rejected(arguments.request_id, "identity_is_required"));
+        }
+        if arguments.edit_existing.is_some()
+            && (arguments.move_footprint.is_some()
+                || arguments.assembly.is_some()
+                || arguments.footprint.is_some()
+                || arguments.batch.is_some()
+                || arguments.segments.is_some()
+                || arguments.outline.is_some()
+                || arguments.track.is_some()
+                || arguments.via.is_some())
+        {
+            return Err(ErrorData::invalid_params(
+                "existing item edits require their own plan",
+                None,
+            ));
         }
         let observation = self
             .discovery
@@ -3375,6 +3510,49 @@ impl Server {
                 }],
                 false,
             )
+        } else if let Some(request) = &arguments.edit_existing {
+            if snapshot
+                .revision()
+                .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?
+                .to_string()
+                != request.observed_revision
+            {
+                return Ok(self.rejected(arguments.request_id, "stale_plan"));
+            }
+            let changes: Vec<kicad_engine::ExistingItemChange> = serde_json::from_value(
+                serde_json::to_value(&request.changes)
+                    .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?,
+            )
+            .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+            let mut kind = OperationKind::EditExistingItems {
+                board: board.clone(),
+                changes: changes.clone(),
+                native_evidence: digest_bytes(b"unbound"),
+            };
+            if let Err(error) = kicad_engine::expected_existing_item_edit(&snapshot, &kind) {
+                return Ok(self.rejected(arguments.request_id, &error.to_string()));
+            }
+            let evidence = match self.discovery.existing_item_edit_evidence(
+                &arguments.endpoint,
+                &observation,
+                &changes,
+            ) {
+                Ok(evidence) => evidence,
+                Err(reason) => {
+                    return Ok(self.envelope_sync(
+                        arguments.request_id,
+                        None,
+                        json!({"reason":"existing_item_edit_unavailable","detail":reason}),
+                    ));
+                }
+            };
+            if let OperationKind::EditExistingItems {
+                native_evidence, ..
+            } = &mut kind
+            {
+                *native_evidence = evidence;
+            }
+            (vec![kind], false)
         } else if let Some(move_request) = &arguments.move_footprint {
             if arguments.batch.is_some()
                 || arguments.segments.is_some()
@@ -3492,6 +3670,9 @@ impl Server {
                     StableId::new(operation_id).expect("deterministic operation id is valid");
                 let expected_effect = expected_board_effect(&kind);
                 let targets = match &kind {
+                    OperationKind::EditExistingItems { board, changes, .. } => {
+                        existing_item_targets(board, changes)
+                    }
                     OperationKind::MoveExistingFootprint {
                         placement_id,
                         source_uuid,
@@ -6424,6 +6605,7 @@ mod tests {
             footprint: None,
             assembly: None,
             move_footprint: None,
+            edit_existing: None,
             track: None,
             via: None,
             batch: None,
@@ -8313,6 +8495,7 @@ mod tests {
         assert!(error.to_string().contains("not found"));
     }
     mod existing_footprint_acceptance;
+    mod existing_item_edit_acceptance;
     mod existing_item_protocol;
     mod recovery_acceptance;
 }

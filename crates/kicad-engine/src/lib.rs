@@ -1,3 +1,7 @@
+mod existing_item_edit;
+pub use existing_item_edit::{
+    ExistingItemChange, ItemPointNm, expected_existing_item_edit, preserves_pad_connectivity,
+};
 mod footprint_edit;
 pub use footprint_edit::{
     FOOTPRINT_COPPER_TOLERANCE_NM, connected_footprint_copper, expected_footprint_move,
@@ -160,6 +164,11 @@ pub enum OperationKind {
         board: StableId,
         intent: ThroughViaIntent,
     },
+    EditExistingItems {
+        board: StableId,
+        changes: Vec<ExistingItemChange>,
+        native_evidence: RevisionDigest,
+    },
     MoveExistingFootprint {
         board: StableId,
         placement_id: StableId,
@@ -230,6 +239,12 @@ impl Operation {
             | OperationKind::AddBoardOutline { board, .. }
             | OperationKind::AddStraightTrack { board, .. }
             | OperationKind::AddThroughVia { board, .. } => vec![board],
+            OperationKind::EditExistingItems { board, changes, .. } => std::iter::once(board)
+                .chain(changes.iter().flat_map(|c| {
+                    let (target, source) = c.identities();
+                    [target, source]
+                }))
+                .collect(),
             OperationKind::MoveExistingFootprint {
                 board,
                 placement_id,
@@ -382,6 +397,7 @@ impl ChangePlan {
                     | OperationKind::AddStraightTrack { .. }
                     | OperationKind::AddThroughVia { .. }
                     | OperationKind::MoveExistingFootprint { .. }
+                    | OperationKind::EditExistingItems { .. }
             ) {
                 for target in op.refs() {
                     if !known.contains(target) {
@@ -545,6 +561,9 @@ impl ChangePlan {
                     if !routing_ids.insert(intent.source_uuid.clone()) {
                         return Err(EngineError::TargetAlreadyExists(intent.source_uuid.clone()));
                     }
+                }
+                OperationKind::EditExistingItems { .. } => {
+                    expected_existing_item_edit(snapshot, &op.kind)?;
                 }
                 OperationKind::MoveExistingFootprint {
                     board,
@@ -1030,6 +1049,9 @@ fn apply_operations(
                         .map_err(|error| EngineError::Serialization(error.to_string()))?,
                 );
             }
+            OperationKind::EditExistingItems { .. } => {
+                snapshot = expected_existing_item_edit(&snapshot, &op.kind)?;
+            }
             OperationKind::MoveExistingFootprint { .. } => {
                 snapshot = expected_footprint_move(&snapshot, &op.kind)?;
             }
@@ -1369,6 +1391,125 @@ mod tests {
         PadKind, Schematic, Unit, footprint_definition_id, footprint_pad_id,
         footprint_placement_id,
     };
+    #[test]
+    fn native_item_edit_expected_state_is_bounded_and_preserves_other_objects() {
+        let (mut before, _, _, _) = observed_routing_snapshot(BoardSide::Front);
+        let board = id("board");
+        let source = id("existing-track");
+        let target = kicad_model::board_track_id(&board, &source);
+        before.native_routing = Some(
+            ObservedBoardRouting::new(
+                board.clone(),
+                vec![ObservedTrack {
+                    track_id: target.clone(),
+                    source_uuid: source.clone(),
+                    geometry: ObservedTrackGeometry::Segment {
+                        start: board_coordinate(100, 250),
+                        end: board_coordinate(300, 250),
+                    },
+                    width_nm: 100,
+                    layer: BoardLayer::FrontCopper,
+                    lock_state: LockState::Unlocked,
+                    net: None,
+                    observed_revision: digest('0'),
+                }],
+                vec![],
+            )
+            .unwrap(),
+        );
+        let change = ExistingItemChange::Track {
+            target_id: target,
+            source_uuid: source,
+            start_nm: None,
+            end_nm: None,
+            width_nm: Some(150),
+        };
+        let kind = OperationKind::EditExistingItems {
+            board: board.clone(),
+            changes: vec![change.clone()],
+            native_evidence: digest('a'),
+        };
+        let after = expected_existing_item_edit(&before, &kind).unwrap();
+        assert_eq!(after.native_footprints, before.native_footprints);
+        assert_eq!(after.board, before.board);
+        assert_eq!(
+            after.native_routing.as_ref().unwrap().tracks[0].width_nm,
+            150
+        );
+        assert_eq!(
+            before.native_routing.as_ref().unwrap().tracks[0].width_nm,
+            100
+        );
+        let rebound = change.in_board_scope(&id("shadow"));
+        assert_ne!(rebound.identities().0, change.identities().0);
+        assert_eq!(rebound.identities().1, change.identities().1);
+        for fault in 0..5 {
+            let mut kind = kind.clone();
+            let OperationKind::EditExistingItems { board, changes, .. } = &mut kind else {
+                unreachable!()
+            };
+            match fault {
+                0 => changes.push(changes[0].clone()),
+                1 => *board = id("wrong"),
+                2 => {
+                    if let ExistingItemChange::Track { source_uuid, .. } = &mut changes[0] {
+                        *source_uuid = id("foreign");
+                    }
+                }
+                3 => {
+                    if let ExistingItemChange::Track { width_nm, .. } = &mut changes[0] {
+                        *width_nm = Some(100);
+                    }
+                }
+                4 => {
+                    if let ExistingItemChange::Track { end_nm, .. } = &mut changes[0] {
+                        *end_nm = Some(ItemPointNm { x: 100, y: 250 });
+                    }
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                expected_existing_item_edit(&before, &kind).is_err(),
+                "{fault}"
+            );
+        }
+    }
+
+    #[test]
+    fn pad_partition_contract_detects_equal_count_rewiring() {
+        let clusters = |sets: &[&[&str]]| {
+            sets.iter()
+                .map(|s| s.iter().map(|v| v.to_string()).collect())
+                .collect::<Vec<Vec<String>>>()
+        };
+        let before = clusters(&[&["a", "b"], &["c", "d"]]);
+        assert!(preserves_pad_connectivity(&before, &before));
+        assert!(preserves_pad_connectivity(
+            &before,
+            &clusters(&[&["d", "c", "b", "a"]])
+        ));
+        assert!(!preserves_pad_connectivity(
+            &before,
+            &clusters(&[&["a", "c"], &["b", "d"]])
+        ));
+        assert!(!preserves_pad_connectivity(
+            &before,
+            &clusters(&[&["a", "b"], &["c"], &["d"]])
+        ));
+        assert!(!preserves_pad_connectivity(
+            &before,
+            &clusters(&[&["a", "b", "foreign"], &["c", "d"]])
+        ));
+        assert!(!preserves_pad_connectivity(
+            &before,
+            &clusters(&[&["a", "b"], &["a", "c", "d"]])
+        ));
+        assert!(preserves_pad_connectivity(
+            &before,
+            &clusters(&[&["a"], &["c", "d"]])
+        ));
+    }
+
     fn id(v: &str) -> StableId {
         StableId::new(v).unwrap()
     }
