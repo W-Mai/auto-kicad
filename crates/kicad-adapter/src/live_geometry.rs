@@ -4,6 +4,7 @@ use kicad_ipc::{
     base_types::LockedState,
 };
 use kiutils_sexpr::{Atom, CstDocument, Node, Span, parse_one};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
@@ -118,26 +119,225 @@ fn preflight(text: &str) -> Result<(), String> {
 
 // Hash original lexical atoms, including quotes and escapes. Only inter-token whitespace is
 // ignored; numeric spelling, list order, unknown fields and every filled polygon remain exact.
-fn structural_digest(text: &str, node: &Node) -> String {
-    fn feed(hash: &mut Sha256, text: &str, node: &Node) {
-        match node {
-            Node::List { items, .. } => {
-                hash.update([0]);
-                hash.update((items.len() as u64).to_be_bytes());
-                for child in items {
-                    feed(hash, text, child);
-                }
-            }
-            Node::Atom { span, .. } => {
-                hash.update([1]);
-                hash.update(((span.end - span.start) as u64).to_be_bytes());
-                hash.update(&text.as_bytes()[span.start..span.end]);
+fn feed_structure(hash: &mut Sha256, text: &str, node: &Node) {
+    match node {
+        Node::List { items, .. } => {
+            hash.update([0]);
+            hash.update((items.len() as u64).to_be_bytes());
+            for child in items {
+                feed_structure(hash, text, child);
             }
         }
+        Node::Atom { span, .. } => {
+            hash.update([1]);
+            hash.update(((span.end - span.start) as u64).to_be_bytes());
+            hash.update(&text.as_bytes()[span.start..span.end]);
+        }
     }
+}
+fn structural_digest(text: &str, node: &Node) -> String {
     let mut hash = Sha256::new();
-    feed(&mut hash, text, node);
+    feed_structure(&mut hash, text, node);
     hex::encode(hash.finalize())
+}
+
+// Only the exact native derived grammar may disappear from the definition fingerprint.
+fn filled_polygon(node: &Node, points: &mut usize) -> Result<(), String> {
+    let (mut layer, mut island, mut pts) = (false, false, false);
+    for field in &items(node)?[1..] {
+        match tag(field)? {
+            "layer" if !layer => {
+                scalar(field)?;
+                layer = true;
+            }
+            "island" if !island && scalar(field)? == "yes" => {
+                island = true;
+            }
+            "pts" if !pts => {
+                pts = true;
+                for point in &items(field)?[1..] {
+                    let xy = |node: &Node| -> Result<(), String> {
+                        let values = items(node)?;
+                        if values.len() != 3 {
+                            return Err("invalid derived fill point".into());
+                        }
+                        atom(&values[1])?;
+                        atom(&values[2])?;
+                        Ok(())
+                    };
+                    match tag(point)? {
+                        "xy" => {
+                            xy(point)?;
+                            *points += 1;
+                        }
+                        "arc" => {
+                            let fields = items(point)?;
+                            if fields.len() != 4 {
+                                return Err("invalid derived fill arc".into());
+                            }
+                            for (field, expected) in fields[1..].iter().zip(["start", "mid", "end"])
+                            {
+                                if tag(field)? != expected {
+                                    return Err("invalid derived fill arc control".into());
+                                }
+                                xy(field)?;
+                            }
+                            *points += 3;
+                        }
+                        _ => return Err("unknown derived fill point field".into()),
+                    }
+                    if *points > 500_000 {
+                        return Err("derived fill points exceed bound".into());
+                    }
+                }
+            }
+            _ => return Err("unknown or duplicate derived fill field".into()),
+        }
+    }
+    if !layer || !pts {
+        return Err("incomplete derived fill polygon".into());
+    }
+    Ok(())
+}
+
+fn feed_zone_definition(
+    hash: &mut Sha256,
+    text: &str,
+    zone: &Node,
+    points: &mut usize,
+) -> Result<(), String> {
+    let mut kept = Vec::new();
+    let mut fill_seen = false;
+    for field in &items(zone)?[1..] {
+        match tag(field)? {
+            "filled_polygon" => filled_polygon(field, points)?,
+            "fill" => {
+                if fill_seen {
+                    return Err("duplicate zone fill definition".into());
+                }
+                fill_seen = true;
+                let fields = items(field)?;
+                for (index, item) in fields[1..].iter().enumerate() {
+                    if matches!(item, Node::Atom { .. }) && (index != 0 || atom(item)? != "yes") {
+                        return Err("ambiguous zone filled marker".into());
+                    }
+                }
+                kept.push(field);
+            }
+            _ => kept.push(field),
+        }
+    }
+    hash.update([0]);
+    hash.update(((kept.len() + 1) as u64).to_be_bytes());
+    feed_structure(hash, text, &items(zone)?[0]);
+    for field in kept {
+        if tag(field)? != "fill" {
+            feed_structure(hash, text, field);
+            continue;
+        }
+        let fields = items(field)?;
+        let filled = fields
+            .get(1)
+            .is_some_and(|node| matches!(node, Node::Atom { .. }));
+        hash.update([0]);
+        hash.update(((fields.len() - usize::from(filled)) as u64).to_be_bytes());
+        feed_structure(hash, text, &fields[0]);
+        for item in &fields[1 + usize::from(filled)..] {
+            feed_structure(hash, text, item);
+        }
+    }
+    Ok(())
+}
+
+// Closed-file comparison has a separate type and never weakens source live equality.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct ClosedRefillDefinitionEvidence {
+    definition_digest: String,
+    automatic_dimension_ids: Vec<String>,
+}
+
+fn unique_form<'a>(node: &'a Node, name: &str) -> Result<Option<&'a Node>, String> {
+    let mut result = None;
+    for field in &items(node)?[1..] {
+        if tag(field)? == name && result.replace(field).is_some() {
+            return Err(format!("duplicate dimension {name} field"));
+        }
+    }
+    Ok(result)
+}
+fn feed_closed_dimension(
+    hash: &mut Sha256,
+    text: &str,
+    node: &Node,
+    ids: &mut Vec<String>,
+) -> Result<(), String> {
+    let kind = unique_form(node, "type")?.map(scalar).transpose()?;
+    let format = unique_form(node, "format")?;
+    let automatic = if let Some(format) = format {
+        unique_form(format, "units")?.map(scalar).transpose()? == Some("3")
+            && unique_form(format, "override_value")?.is_none()
+    } else {
+        false
+    };
+    if !automatic || !matches!(kind, Some("aligned" | "orthogonal" | "radial")) {
+        feed_structure(hash, text, node);
+        return Ok(());
+    }
+    let rendered =
+        unique_form(node, "gr_text")?.ok_or("automatic dimension lacks rendered text")?;
+    let rendered_fields = items(rendered)?;
+    atom(
+        rendered_fields
+            .get(1)
+            .ok_or("automatic dimension lacks rendered value")?,
+    )?;
+    let id = scalar(unique_form(node, "uuid")?.ok_or("automatic dimension lacks identity")?)?;
+    if id.is_empty() || id.len() > 128 || ids.len() >= 4096 || ids.iter().any(|s| s == id) {
+        return Err("automatic dimension identities must be bounded and unique".into());
+    }
+    ids.push(id.into());
+    let fields = items(node)?;
+    hash.update([0]);
+    hash.update((fields.len() as u64).to_be_bytes());
+    for field in fields {
+        if std::ptr::eq(field, rendered) {
+            hash.update([0]);
+            hash.update((rendered_fields.len() as u64).to_be_bytes());
+            feed_structure(hash, text, &rendered_fields[0]);
+            hash.update([2]); // Typed marker for this derived display value, never authored text.
+            for child in &rendered_fields[2..] {
+                feed_structure(hash, text, child);
+            }
+        } else {
+            feed_structure(hash, text, field);
+        }
+    }
+    Ok(())
+}
+fn feed_closed_footprint(
+    hash: &mut Sha256,
+    text: &str,
+    node: &Node,
+    ids: &mut Vec<String>,
+) -> Result<(), String> {
+    let fields = items(node)?;
+    if fields.len() < 2 {
+        return Err("invalid native footprint".into());
+    }
+    atom(&fields[1])?;
+    hash.update([0]);
+    hash.update((fields.len() as u64).to_be_bytes());
+    for field in &fields[..2] {
+        feed_structure(hash, text, field);
+    }
+    for field in &fields[2..] {
+        if tag(field)? == "dimension" {
+            feed_closed_dimension(hash, text, field, ids)?;
+        } else {
+            feed_structure(hash, text, field);
+        }
+    }
+    Ok(())
 }
 
 impl LiveBoardText {
@@ -213,6 +413,51 @@ impl LiveBoardText {
         })
     }
 
+    /// Hash every board definition while omitting only direct zone fill results.
+    /// This preserves all unknown definition fields and does not verify the omitted copper.
+    pub fn refill_definition_digest(&self) -> Result<String, String> {
+        let root = self.cst.nodes.first().ok_or("missing native board root")?;
+        let fields = items(root)?;
+        let mut hash = Sha256::new();
+        hash.update([0]);
+        hash.update((fields.len() as u64).to_be_bytes());
+        feed_structure(&mut hash, self.raw_text(), &fields[0]);
+        let mut points = 0;
+        for node in &fields[1..] {
+            if tag(node)? == "zone" {
+                feed_zone_definition(&mut hash, self.raw_text(), node, &mut points)?;
+            } else {
+                feed_structure(&mut hash, self.raw_text(), node);
+            }
+        }
+        Ok(hex::encode(hash.finalize()))
+    }
+
+    /// Compare closed CLI input/output definitions, separately from strict live preservation.
+    /// Only generated automatic dimension labels additionally normalize; authored fields remain exact.
+    pub fn closed_refill_definitions(&self) -> Result<ClosedRefillDefinitionEvidence, String> {
+        let root = self.cst.nodes.first().ok_or("missing native board root")?;
+        let fields = items(root)?;
+        let mut hash = Sha256::new();
+        let mut ids = Vec::new();
+        let mut points = 0;
+        hash.update([0]);
+        hash.update((fields.len() as u64).to_be_bytes());
+        feed_structure(&mut hash, self.raw_text(), &fields[0]);
+        for node in &fields[1..] {
+            match tag(node)? {
+                "zone" => feed_zone_definition(&mut hash, self.raw_text(), node, &mut points)?,
+                "dimension" => feed_closed_dimension(&mut hash, self.raw_text(), node, &mut ids)?,
+                "footprint" => feed_closed_footprint(&mut hash, self.raw_text(), node, &mut ids)?,
+                _ => feed_structure(&mut hash, self.raw_text(), node),
+            }
+        }
+        Ok(ClosedRefillDefinitionEvidence {
+            definition_digest: hex::encode(hash.finalize()),
+            automatic_dimension_ids: ids,
+        })
+    }
+
     pub fn raw_text(&self) -> &str {
         self.cst.to_lossless_string()
     }
@@ -251,6 +496,32 @@ impl LiveBoardText {
 pub struct LiveGeometryEvidence {
     pub native: NativeBoardGeometry,
     pub text: LiveBoardText,
+}
+
+/// Immutable complete definition evidence, separate from any fill-success claim.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RefillDefinitionEvidence {
+    board_definition_digest: String,
+    native_zone_definition_digest: String,
+    zone_count: usize,
+}
+impl RefillDefinitionEvidence {
+    pub fn from_observation(observed: &LiveGeometryEvidence) -> Result<Self, String> {
+        observed.text.validate_native_zones(&observed.native)?;
+        Ok(Self {
+            board_definition_digest: observed.text.refill_definition_digest()?,
+            native_zone_definition_digest: hex::encode(Sha256::digest(
+                observed
+                    .native
+                    .zone_definition_bytes()
+                    .map_err(|e| e.to_string())?,
+            )),
+            zone_count: observed.native.zones().len(),
+        })
+    }
+    pub fn board_definition_digest(&self) -> &str {
+        &self.board_definition_digest
+    }
 }
 
 /// Bind repeated native/text observations to one exact 10.0.7 editor and document.
@@ -305,6 +576,101 @@ pub fn observe_live_geometry<T: KiCadTransport>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn closed_copy_display_projection_never_weakens_live_or_authored_text() {
+        let a = r#"(kicad_pcb (version 20260206) (footprint "x" (dimension (type orthogonal)
+          (uuid "dimension") (format (units 3) (precision 4)) (pts (xy 0 0) (xy 30 0))
+          (gr_text "1181.1024" (at 15 0) (unknown_style 7)))))"#;
+        let b = a.replace("1181.1024", "30");
+        let parse = |s: &str| LiveBoardText::parse(s).unwrap();
+        let evidence = parse(a).closed_refill_definitions().unwrap();
+        assert_eq!(evidence, parse(&b).closed_refill_definitions().unwrap());
+        assert_eq!(evidence.automatic_dimension_ids, ["dimension"]);
+        assert_ne!(
+            parse(a).refill_definition_digest().unwrap(),
+            parse(&b).refill_definition_digest().unwrap()
+        );
+        for (from, to) in [
+            ("unknown_style 7", "unknown_style 8"),
+            ("precision 4", "precision 5"),
+            ("xy 30 0", "xy 31 0"),
+            ("at 15 0", "at 16 0"),
+            ("dimension\"", "other\""),
+        ] {
+            assert_ne!(
+                evidence,
+                parse(&b.replace(from, to))
+                    .closed_refill_definitions()
+                    .unwrap(),
+                "{from}"
+            );
+        }
+        for (from, to) in [
+            ("units 3", "units 2"),
+            ("(precision 4)", "(precision 4) (override_value \"manual\")"),
+            ("type orthogonal", "type leader"),
+        ] {
+            assert_ne!(
+                parse(&a.replace(from, to))
+                    .closed_refill_definitions()
+                    .unwrap(),
+                parse(&b.replace(from, to))
+                    .closed_refill_definitions()
+                    .unwrap()
+            );
+        }
+        assert!(
+            parse(&a.replace("(units 3)", "(units 3) (units 3)"))
+                .closed_refill_definitions()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn refill_definition_fingerprint_preserves_all_unclassified_content() {
+        let base = r#"(kicad_pcb (version 20260206) (unknown_board "keep")
+          (zone (uuid "z") (locked yes) (layers "F.Cu" "In1.Cu")
+            (unknown_zone (nested "keep")) (property (layer "F.Cu") (offset 1))
+            (fill (thermal_gap 0.2) (unknown_fill 7)) (polygon (pts (xy 0 0) (xy 1 0) (xy 0 1)))))"#;
+        let filled = base.replace("(fill (thermal_gap", "(fill yes (thermal_gap").replace("(polygon (pts", "(filled_polygon (layer \"F.Cu\") (island yes) (pts (xy 0 0) (xy 1 0) (xy 0 1))) (polygon (pts");
+        let digest = |s: &str| LiveBoardText::parse(s).unwrap().refill_definition_digest();
+        let expected = digest(base).unwrap();
+        assert_eq!(expected, digest(&filled).unwrap());
+        assert_eq!(expected, digest(&filled.replace(" ", "\n")).unwrap());
+        for (from, to) in [
+            ("unknown_board", "changed_board"),
+            ("unknown_zone", "changed_zone"),
+            ("unknown_fill 7", "unknown_fill 8"),
+            ("locked yes", "locked no"),
+            ("thermal_gap 0.2", "thermal_gap 0.3"),
+            ("offset 1", "offset 2"),
+            ("uuid \"z\"", "uuid \"other\""),
+            ("In1.Cu", "B.Cu"),
+            ("(polygon (pts (xy 0 0)", "(polygon (pts (xy 0 2)"),
+        ] {
+            assert_ne!(
+                expected,
+                digest(&filled.replace(from, to)).unwrap(),
+                "{from}"
+            );
+        }
+        for changed in [
+            filled.replace("(island yes)", "(island yes) (unknown_derived 1)"),
+            filled.replace("(island yes)", "(island yes) (island yes)"),
+            filled.replace("(fill yes", "(fill no"),
+            filled.replace("(fill yes", "(fill yes yes"),
+            filled.replace("(fill yes", "(fill) (fill yes"),
+            filled.replace("(island yes)", "(island false)"),
+        ] {
+            assert!(digest(&changed).is_err());
+        }
+        let nested = base.replace("(unknown_board \"keep\")", "(footprint (zone (fill yes)))");
+        assert_ne!(
+            digest(&nested).unwrap(),
+            digest(&nested.replace("(fill yes)", "(fill)")).unwrap()
+        );
+    }
+
     use super::*;
     fn board(body: &str) -> String {
         format!("(kicad_pcb (version 20260206) {body})")

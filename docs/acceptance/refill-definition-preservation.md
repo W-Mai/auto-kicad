@@ -1,0 +1,28 @@
+# Complete definition preservation during refill
+
+`RefillDefinitionEvidence` combines strict whole-board live-text definitions with complete native zone definitions. Construction cross-checks native/text UUID and lock observations. Exact equality covers every non-zone board field and every persistent zone definition field, including unknown fields, layers, nets, polygon boundaries, thermal settings, locks and layer properties. It is separate from fill correctness, completion, connectivity and authorization.
+
+The text fingerprint omits only direct board-zone `filled_polygon` records and the optional leading `yes` in a zone's `fill` form. All fill settings remain significant. Derived polygon grammar is checked before omission: layer, optional island marker and straight/arc point records; unknown fields, duplicate fields, ambiguous fill markers and excessive point counts reject. Nested footprint zones remain exact. Lexical atom spelling and list order remain exact; only inter-token whitespace is ignored. Native `zone_definition_bytes` clears only `filled`, `filled_polygons` and the transient parent, retaining all other protobuf fields and unknown values in identity order with length framing. These fields correspond to the pinned [native zone serializer](https://raw.githubusercontent.com/KiCad/kicad-source-mirror/10.0.7/pcbnew/zone.cpp) and [saved zone format](https://raw.githubusercontent.com/KiCad/kicad-source-mirror/10.0.7/pcbnew/pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.cpp).
+
+`ClosedRefillDefinitionEvidence` separately compares the saved input and output of an independent CLI refill. Live IPC footprint headers differ from saved-file headers, so those two serialization contexts are never directly compared. The closed-file type preserves all saved fields except zone fill results and the generated display string of an automatic-unit aligned, orthogonal or radial dimension without an override. Dimension UUID, geometry, units mode, precision, prefix/suffix, placement, style and unknown fields remain significant. The record lists every projected dimension UUID. Explicit units, manual overrides and other text remain exact. Strict live/source comparison does not apply this display projection.
+
+CM5's automatic orthogonal dimension produced `1181.1024` in the editor's mil display and `30` under the CLI's millimetre context. A read-only native probe independently reproduced both labels with automatic mode 3 and no text override. The [dimension implementation](https://raw.githubusercontent.com/KiCad/kicad-source-mirror/10.0.7/pcbnew/pcb_dimension.cpp) selects board display units for automatic mode and derives its displayed value from the dimension geometry. This verified display distinction does not authorize source text changes or replacement by the CLI file.
+
+## Reproduction
+
+```sh
+cargo build -p kicad-adapter --example check-refill-definitions
+target/debug/examples/check-refill-definitions /absolute/source.kicad_pcb /absolute/new-output
+```
+
+The example prepares an unfilled owned copy and launches one editor. It runs the fixed KiCad 10.0.7 zone-fill action twice, verifies complete live/native definition equality after each response, saves and reloads in the same process, and compares definitions again. A closed independent copy is refilled with `kicad-cli pcb drc --refill-zones --save-board`; its saved definitions are compared with its saved input. Original source files and settled project bytes must remain unchanged. The independent copy never replaces the live board. Working copies and owned editors are cleaned; native PCB/project results, live snapshots, fingerprints and CLI output remain available. The action remains acceptance-only and is not exposed as a production refill API.
+
+## Acceptance
+
+Actual CM5 Minima acceptance preserved complete definitions across two fills, native reload and CLI refill for 14 zones, including one locked rule area. The multilayer island fixture passed the same checks for two zones. Its native pad connectivity remained exactly two expected two-pad groups before and after reload. CM5 reported 171 existing DRC items and zero unconnected; the intentional island fixture reported five items and one unconnected. This test does not assert DRC-delta or full filled-copper equivalence, and these counts are not a manufacturing approval. See [compact evidence](refill-definition-preservation.json).
+
+The initial CM5 attempt rejected a direct live/CLI text comparison. Retained diagnostics identified footprint serialization headers and automatic dimension text as the differences; the separate closed-file comparison resolved the verified contexts while preserving strict source equality. Native Python emitted a wx application-initialization diagnostic during preparation; the helper completed successfully. Each accepted profile used one owned editor and closed it afterward.
+
+Full quality passed 425 tests with 15 environment-dependent tests ignored, format validation, warnings-denied Clippy and capability validation. Architecture checks verify significant unknown fields, thermal/lock/layer-property changes, unchanged authored text, rejection of ambiguous derived grammar and separation of live versus closed-copy evidence. Worker tests retain timeout/output-limit behavior while allowing normal process startup and scheduler latency; no production deadline changed.
+
+Zone create/update/delete, unknown-field-preserving native patch receipts, hatched-zone and teardrop regeneration acceptance, full copper equivalence, cancellation/timeout recovery and production MCP integration remain unverified. Definition fingerprints alone cannot establish any of these outcomes. Generated zone identities are not exempted from strict live comparison.

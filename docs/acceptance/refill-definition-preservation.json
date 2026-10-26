@@ -1,0 +1,262 @@
+{
+  "kicad_version": "10.0.7",
+  "profiles": {
+    "cm5": {
+      "result": {
+        "cancellation_tested": false,
+        "complete_definitions_preserved": true,
+        "independent_cli_preserved": true,
+        "kicad_version": "10.0.7",
+        "locked_zone_count": 1,
+        "native_reload_preserved": true,
+        "pid": 23979,
+        "repeated_fill_preserved": true,
+        "scope": "definition preservation only; not completed production fill, copper equivalence, DRC delta or MCP acceptance",
+        "settled_project_unchanged": true,
+        "zone_count": 14
+      },
+      "cleanup": {
+        "owned_editor_closed": true,
+        "owned_pid": 23979,
+        "source_files_unchanged": true
+      },
+      "definitions": {
+        "board_definition_digest": "76c1825b14c973402a81d9ce3655c12ee1c6f1a6f88b4e60fcc7b23fa039f207",
+        "native_zone_definition_digest": "1b4334382a449a595d4bbe18fa779dceeadc2d0e8cf45649207e937004cf8bf0",
+        "zone_count": 14
+      },
+      "definitions-0": {
+        "board_definition_digest": "76c1825b14c973402a81d9ce3655c12ee1c6f1a6f88b4e60fcc7b23fa039f207",
+        "native_zone_definition_digest": "1b4334382a449a595d4bbe18fa779dceeadc2d0e8cf45649207e937004cf8bf0",
+        "zone_count": 14
+      },
+      "definitions-1": {
+        "board_definition_digest": "76c1825b14c973402a81d9ce3655c12ee1c6f1a6f88b4e60fcc7b23fa039f207",
+        "native_zone_definition_digest": "1b4334382a449a595d4bbe18fa779dceeadc2d0e8cf45649207e937004cf8bf0",
+        "zone_count": 14
+      },
+      "definitions-reload": {
+        "board_definition_digest": "76c1825b14c973402a81d9ce3655c12ee1c6f1a6f88b4e60fcc7b23fa039f207",
+        "native_zone_definition_digest": "1b4334382a449a595d4bbe18fa779dceeadc2d0e8cf45649207e937004cf8bf0",
+        "zone_count": 14
+      },
+      "saved-definitions": {
+        "definition_digest": "88b3fc6bff28e291c8a311dbdfd001744e193691ac8e93cba25fbbcd1429d6f3",
+        "automatic_dimension_ids": [
+          "5db1e4c4-a4eb-4089-b0a3-868253fe7188"
+        ]
+      },
+      "independent-definitions": {
+        "definitions": {
+          "automatic_dimension_ids": [
+            "5db1e4c4-a4eb-4089-b0a3-868253fe7188"
+          ],
+          "definition_digest": "88b3fc6bff28e291c8a311dbdfd001744e193691ac8e93cba25fbbcd1429d6f3"
+        },
+        "equal": true
+      },
+      "action": {
+        "cancellation_tested": false,
+        "kicad_version": "10.0.7",
+        "pid": 23979,
+        "records": [
+          {
+            "action_millis": 871,
+            "filled_zones": 13,
+            "immediate_capture_millis": 2048,
+            "iteration": 0,
+            "repeated_geometry_equal": true,
+            "status": 1,
+            "zones": 14
+          },
+          {
+            "action_millis": 864,
+            "filled_zones": 13,
+            "immediate_capture_millis": 2020,
+            "iteration": 1,
+            "repeated_geometry_equal": true,
+            "status": 1,
+            "zones": 14
+          }
+        ]
+      },
+      "artifact_sha256": {
+        "result.json": "cbf1cdb1de582972b1947d3d37aad4ce3ebb149cdd05e079e645871f82c718ee",
+        "cleanup.json": "d9866b68477d5cc8d3070e27d0c48b0eb2f4ac5a93f9b34cce4d0545bc1850ed",
+        "definitions.json": "d84c45161084cde0ccc8829a65356ef742c50fc095cb7233f2939e1acdb8d934",
+        "definitions-0.json": "d84c45161084cde0ccc8829a65356ef742c50fc095cb7233f2939e1acdb8d934",
+        "definitions-1.json": "d84c45161084cde0ccc8829a65356ef742c50fc095cb7233f2939e1acdb8d934",
+        "definitions-reload.json": "d84c45161084cde0ccc8829a65356ef742c50fc095cb7233f2939e1acdb8d934",
+        "saved-definitions.json": "ab3e73a2476199defc7ddc4edaf99f760f9eab33363b891e60a624ac6d69a44a",
+        "independent-definitions.json": "66df7ab86ebc9bc9f1dccd810b7a63c6d802202a22bd21e7acd46b220b121312",
+        "action.json": "5445c39d130f25a3af8fcc71f6ce95c1bffe4d5de6ec91f0a5203058242a66a0",
+        "result/board.kicad_pcb": "5a68280f56d9296a6ba1922196e0b3f0d67c6372223101b6887c4abd277addf8",
+        "result/board.kicad_pro": "a53e984e1356fe4f2a2efd7c7d78de5243061e3a823d6b7e412831c4b178916a",
+        "cli-refilled.kicad_pcb": "acff96d04f63ec9543eb4ecbd765926a209160fadac9582678fb1ce3dfbe3ec9"
+      }
+    },
+    "islands": {
+      "result": {
+        "cancellation_tested": false,
+        "complete_definitions_preserved": true,
+        "independent_cli_preserved": true,
+        "kicad_version": "10.0.7",
+        "locked_zone_count": 0,
+        "native_reload_preserved": true,
+        "pid": 26059,
+        "repeated_fill_preserved": true,
+        "scope": "definition preservation only; not completed production fill, copper equivalence, DRC delta or MCP acceptance",
+        "settled_project_unchanged": true,
+        "zone_count": 2
+      },
+      "cleanup": {
+        "owned_editor_closed": true,
+        "owned_pid": 26059,
+        "source_files_unchanged": true
+      },
+      "definitions": {
+        "board_definition_digest": "4d13ee9089a5552afe49a064aefda55530694032f74b453e561d637d008e91f3",
+        "native_zone_definition_digest": "1800d92ae8864e1cbcb178005755caa43341ce50ebc5f60a973f216665a5a346",
+        "zone_count": 2
+      },
+      "definitions-0": {
+        "board_definition_digest": "4d13ee9089a5552afe49a064aefda55530694032f74b453e561d637d008e91f3",
+        "native_zone_definition_digest": "1800d92ae8864e1cbcb178005755caa43341ce50ebc5f60a973f216665a5a346",
+        "zone_count": 2
+      },
+      "definitions-1": {
+        "board_definition_digest": "4d13ee9089a5552afe49a064aefda55530694032f74b453e561d637d008e91f3",
+        "native_zone_definition_digest": "1800d92ae8864e1cbcb178005755caa43341ce50ebc5f60a973f216665a5a346",
+        "zone_count": 2
+      },
+      "definitions-reload": {
+        "board_definition_digest": "4d13ee9089a5552afe49a064aefda55530694032f74b453e561d637d008e91f3",
+        "native_zone_definition_digest": "1800d92ae8864e1cbcb178005755caa43341ce50ebc5f60a973f216665a5a346",
+        "zone_count": 2
+      },
+      "saved-definitions": {
+        "definition_digest": "c346b971e8af34ae497f0b038a9153d21d316f074b2e791274b77370d60d175c",
+        "automatic_dimension_ids": []
+      },
+      "independent-definitions": {
+        "definitions": {
+          "automatic_dimension_ids": [],
+          "definition_digest": "c346b971e8af34ae497f0b038a9153d21d316f074b2e791274b77370d60d175c"
+        },
+        "equal": true
+      },
+      "action": {
+        "cancellation_tested": false,
+        "kicad_version": "10.0.7",
+        "pid": 26059,
+        "records": [
+          {
+            "action_millis": 56,
+            "filled_zones": 1,
+            "immediate_capture_millis": 102,
+            "iteration": 0,
+            "repeated_geometry_equal": true,
+            "status": 1,
+            "zones": 2
+          },
+          {
+            "action_millis": 49,
+            "filled_zones": 1,
+            "immediate_capture_millis": 82,
+            "iteration": 1,
+            "repeated_geometry_equal": true,
+            "status": 1,
+            "zones": 2
+          }
+        ]
+      },
+      "clusters-before-reload": {
+        "actual": [
+          [
+            "5845750b-d048-4047-8870-9dccad89df56",
+            "6c416b1f-b793-49ed-a6d6-fbf570ff847b"
+          ],
+          [
+            "a8f689cb-5ce0-4614-9b47-3fefdf7b57e1",
+            "c7d569d2-10fc-44eb-9dfb-cb312f0596bf"
+          ]
+        ],
+        "equal": true,
+        "expected": [
+          [
+            "5845750b-d048-4047-8870-9dccad89df56",
+            "6c416b1f-b793-49ed-a6d6-fbf570ff847b"
+          ],
+          [
+            "a8f689cb-5ce0-4614-9b47-3fefdf7b57e1",
+            "c7d569d2-10fc-44eb-9dfb-cb312f0596bf"
+          ]
+        ]
+      },
+      "clusters-after-reload": {
+        "actual": [
+          [
+            "5845750b-d048-4047-8870-9dccad89df56",
+            "6c416b1f-b793-49ed-a6d6-fbf570ff847b"
+          ],
+          [
+            "a8f689cb-5ce0-4614-9b47-3fefdf7b57e1",
+            "c7d569d2-10fc-44eb-9dfb-cb312f0596bf"
+          ]
+        ],
+        "equal": true,
+        "expected": [
+          [
+            "5845750b-d048-4047-8870-9dccad89df56",
+            "6c416b1f-b793-49ed-a6d6-fbf570ff847b"
+          ],
+          [
+            "a8f689cb-5ce0-4614-9b47-3fefdf7b57e1",
+            "c7d569d2-10fc-44eb-9dfb-cb312f0596bf"
+          ]
+        ]
+      },
+      "artifact_sha256": {
+        "result.json": "83ab4d6c4e4aa8b3595ce070260a219765d7cb894688a2ceb52063ff870f7348",
+        "cleanup.json": "d2219d897f868e5edbc0021c2de603b9b0e480b236d1ea24a0b5dc640877e9af",
+        "definitions.json": "76c74319430dcc82c2e0bce4377a4990abf0495797a589231c10489d0d194d44",
+        "definitions-0.json": "76c74319430dcc82c2e0bce4377a4990abf0495797a589231c10489d0d194d44",
+        "definitions-1.json": "76c74319430dcc82c2e0bce4377a4990abf0495797a589231c10489d0d194d44",
+        "definitions-reload.json": "76c74319430dcc82c2e0bce4377a4990abf0495797a589231c10489d0d194d44",
+        "saved-definitions.json": "cd260e21b0fee7b1b507e2802095a3a886ceb550b6b95080ef10ea9f298dfa20",
+        "independent-definitions.json": "07ff96d132e16183361a1db62b70a7782fce7174b75f3ba34db441ed58bd5e77",
+        "action.json": "4cda8ea3bcd54891b99c2aa84ecb95737b54593eec9d9f221210ddf11971856a",
+        "result/board.kicad_pcb": "35ae8fd1fd73c9303f652b9bff30679d3cbcd77b24d30f59a699f7651e12c495",
+        "result/board.kicad_pro": "3eab5817b32aadd9965fe914ff138d831dcbbc8ffab1896f3f130cfb4120b2ea",
+        "cli-refilled.kicad_pcb": "35ae8fd1fd73c9303f652b9bff30679d3cbcd77b24d30f59a699f7651e12c495"
+      }
+    }
+  },
+  "quality": {
+    "passed": 425,
+    "failed": 0,
+    "ignored": 15,
+    "format": true,
+    "clippy_warnings_denied": true,
+    "capability_matrix": true
+  },
+  "dimension_display_probe": [
+    {
+      "uuid": "5db1e4c4-a4eb-4089-b0a3-868253fe7188",
+      "mode": 3,
+      "automatic": 3,
+      "override": false,
+      "renderings": [
+        {
+          "unit": "mm",
+          "text": "30"
+        },
+        {
+          "unit": "mils",
+          "text": "1181.1024"
+        }
+      ]
+    }
+  ],
+  "scope": "complete definition preservation across native fill, saved reload and closed CLI refill; not zone mutation, completed production fill or MCP acceptance"
+}

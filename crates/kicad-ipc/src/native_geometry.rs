@@ -115,6 +115,24 @@ impl NativeBoardGeometry {
         &self.shapes
     }
 
+    /// Complete zone definitions, excluding only derived fills and transient board parents.
+    /// Equality does not establish fill correctness, completion, connectivity or authorization.
+    pub fn zone_definition_bytes(&self) -> Result<Vec<u8>, IpcError> {
+        let mut result = Vec::new();
+        for zone in self.zones.values() {
+            let mut definition = zone.clone();
+            definition.filled = false;
+            definition.filled_polygons.clear();
+            definition.parent = MessageField::none();
+            let bytes = definition
+                .write_to_bytes()
+                .map_err(|_| IpcError::MalformedEnvelope)?;
+            result.extend_from_slice(&(bytes.len() as u64).to_be_bytes());
+            result.extend_from_slice(&bytes);
+        }
+        Ok(result)
+    }
+
     /// Encode every observed field deterministically by kind and native identity.
     /// No parent, lock, definition or derived-fill field is discarded.
     pub fn evidence_bytes(&self) -> Result<Vec<u8>, IpcError> {
@@ -279,6 +297,44 @@ mod tests {
         assert_ne!(
             observed.evidence_bytes().unwrap(),
             changed.evidence_bytes().unwrap()
+        );
+    }
+
+    #[test]
+    fn zone_definition_comparison_omits_only_classified_derived_fields() {
+        let before = NativeBoardGeometry::decode(&[zone("zone")]).unwrap();
+        let expected = before.zone_definition_bytes().unwrap();
+        let mut after = before.clone();
+        let item = after.zones.get_mut("zone").unwrap();
+        item.filled = !item.filled;
+        item.parent = MessageField::some(base_types::KIID {
+            value: "new-board".into(),
+            ..Default::default()
+        });
+        item.filled_polygons
+            .push(board_types::ZoneFilledPolygons::default());
+        assert_eq!(expected, after.zone_definition_bytes().unwrap());
+        for mutation in 0..6 {
+            let mut changed = after.clone();
+            let item = changed.zones.get_mut("zone").unwrap();
+            match mutation {
+                0 => item.special_fields.mut_unknown_fields().add_varint(1001, 7),
+                1 => item.locked = base_types::LockedState::LS_LOCKED.into(),
+                2 => item
+                    .layer_properties
+                    .push(board_types::ZoneLayerProperties::default()),
+                3 => item.priority += 1,
+                4 => item.name = "changed".into(),
+                _ => item.id.as_mut().unwrap().value = "other".into(),
+            }
+            assert_ne!(expected, changed.zone_definition_bytes().unwrap());
+        }
+        assert_ne!(
+            expected,
+            NativeBoardGeometry::decode(&[])
+                .unwrap()
+                .zone_definition_bytes()
+                .unwrap()
         );
     }
 

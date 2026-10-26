@@ -1027,12 +1027,12 @@ mod tests {
             .unwrap_err();
         assert!(matches!(error, NetlistRunnerError::Timeout { .. }));
 
-        let (_cli_dir, executable, _args, _stderr) =
-            fake_cli("#!/bin/sh\nprintf '1234567890'\nsleep 2\n");
+        let (_cli_dir, executable, completion, _stderr) =
+            fake_cli("#!/bin/sh\nprintf '1234567890'\nsleep 30\nprintf done > 'ARGS_FILE'\n");
         let (project_root, schematic) = project();
         let started = Instant::now();
         let error = NetlistRunner::new(executable)
-            .with_timeout(Duration::from_secs(1))
+            .with_timeout(Duration::from_secs(2))
             .with_output_limits(3, 100)
             .run(&fs::canonicalize(project_root.path()).unwrap(), &schematic)
             .unwrap_err();
@@ -1040,6 +1040,9 @@ mod tests {
             error,
             NetlistRunnerError::StdoutTooLarge { limit: 3 }
         ));
-        assert!(started.elapsed() < Duration::from_millis(500));
+        // Verify early termination of a long-running writer, allowing scheduler and filesystem
+        // latency instead of imposing an unrelated subsecond desktop performance requirement.
+        assert!(!completion.exists());
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 }

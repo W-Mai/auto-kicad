@@ -433,6 +433,7 @@ dependencies = [
  "kicad-schematic",
  "kiutils_sexpr",
  "libc",
+ "protobuf",
  "serde",
  "serde_json",
  "sha2",

@@ -355,15 +355,21 @@ mod tests {
             br#"{"board":{"design_settings":{"rule_severities":{"invalid_outline":"error"}}}}"#;
         fs::write(&project, project_text).unwrap();
         let executable = work.path().join("fake-python");
-        let policy = DrcPolicy {
-            allowed_root: work.path().into(),
-            timeout: Duration::from_millis(100),
-        };
         for (body, timeout) in [
             ("exec sleep 5", true),
             ("printf '{}'; exit 0", false),
             ("exit 2", false),
         ] {
+            // Only the intentional timeout case uses a short deadline. Normal process startup
+            // must not be mistaken for a timeout under concurrent build or desktop load.
+            let policy = DrcPolicy {
+                allowed_root: work.path().into(),
+                timeout: if timeout {
+                    Duration::from_millis(100)
+                } else {
+                    Duration::from_secs(5)
+                },
+            };
             fs::write(&executable, format!("#!/bin/sh\n{body}\n")).unwrap();
             fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
             let failure = run(&board, &policy, &executable).unwrap_err();
