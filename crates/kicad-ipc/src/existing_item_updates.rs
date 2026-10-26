@@ -397,6 +397,35 @@ impl ExistingBoardItemSet {
         self.matches_saved(&surviving)
     }
 
+    /// Compare an explicit outline replacement while retaining every unrelated native payload.
+    /// New payloads must separately match their creation receipts; existing deletion policy is unchanged.
+    pub fn matches_after_outline_replacement(
+        &self,
+        actual: &Self,
+        removed_ids: &[String],
+        added_ids: &[String],
+    ) -> Result<bool, IpcError> {
+        let mut surviving = self.clone();
+        if !removed_ids.is_empty() {
+            super::existing_items::identifiers(removed_ids, 100)?;
+            for id in removed_ids {
+                let Some(NativeItem::Graphic(shape)) = self.items.get(id) else {
+                    return Err(invalid("outline removal target missing or not a shape"));
+                };
+                super::native_outline::removable_outline(shape)?;
+                surviving.items.remove(id);
+            }
+        }
+        if added_ids.iter().any(|id| self.items.contains_key(id)) {
+            return Err(invalid("new outline identity overlaps an original item"));
+        }
+        if added_ids.is_empty() {
+            surviving.matches_saved(actual)
+        } else {
+            surviving.matches_after_additions(actual, added_ids)
+        }
+    }
+
     /// Derive an expected result solely from the observed payloads and explicit intent.
     pub fn updated(&self, changes: &[ExistingItemUpdate]) -> Result<Self, IpcError> {
         let ids = changes
@@ -685,6 +714,75 @@ mod tests {
         };
         v.parent = MessageField::none();
         assert!(before.matches_after_additions(&after, &ids).unwrap());
+    }
+
+    #[test]
+    fn outline_replacement_preserves_unrelated_payloads_without_widening_deletion() {
+        let mut before = fixture();
+        let NativeItem::Graphic(shape) = before.items.get_mut("graphic").unwrap() else {
+            unreachable!()
+        };
+        shape.layer = board_types::BoardLayer::BL_Edge_Cuts.into();
+        let mut after = before.clone();
+        let mut new_shape = after.items.remove("graphic").unwrap();
+        let NativeItem::Graphic(shape) = &mut new_shape else {
+            unreachable!()
+        };
+        shape.id.as_mut().unwrap().value = "replacement".into();
+        after.items.insert("replacement".into(), new_shape);
+        assert!(before.without(&["graphic".into()]).is_err());
+        assert!(
+            before
+                .matches_after_outline_replacement(
+                    &after,
+                    &["graphic".into()],
+                    &["replacement".into()]
+                )
+                .unwrap()
+        );
+        assert!(
+            before
+                .matches_after_outline_replacement(
+                    &after,
+                    &["track".into()],
+                    &["replacement".into()]
+                )
+                .is_err()
+        );
+        assert!(
+            before
+                .matches_after_outline_replacement(&after, &["graphic".into()], &["graphic".into()])
+                .is_err()
+        );
+        let NativeItem::Track(track) = after.items.get_mut("track").unwrap() else {
+            unreachable!()
+        };
+        track
+            .special_fields
+            .mut_unknown_fields()
+            .add_varint(1001, 100);
+        assert!(
+            !before
+                .matches_after_outline_replacement(
+                    &after,
+                    &["graphic".into()],
+                    &["replacement".into()]
+                )
+                .unwrap()
+        );
+        let NativeItem::Graphic(shape) = before.items.get_mut("graphic").unwrap() else {
+            unreachable!()
+        };
+        shape.locked = base_types::LockedState::LS_LOCKED.into();
+        assert!(
+            before
+                .matches_after_outline_replacement(
+                    &after,
+                    &["graphic".into()],
+                    &["replacement".into()]
+                )
+                .is_err()
+        );
     }
 
     #[test]

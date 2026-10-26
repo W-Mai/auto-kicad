@@ -1,3 +1,5 @@
+mod native_outline;
+pub use native_outline::{CreatedOutlineReceipt, OutlineGeometry, OutlinePrimitive};
 mod native_geometry;
 pub use native_geometry::{MAX_NATIVE_GEOMETRY_BYTES, NativeBoardGeometry};
 mod copper_connectivity;
