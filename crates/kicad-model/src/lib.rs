@@ -356,10 +356,12 @@ pub struct FootprintSourceBinding {
     pub pad_nets: std::collections::BTreeMap<String, Option<String>>,
     pub library_digest: RevisionDigest,
     pub library_size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resolution_digest: Option<RevisionDigest>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-pub struct AllowlistedFootprintPlacement {
+pub struct SourceBoundFootprintPlacement {
     pub target_id: StableId,
     pub library_identifier: FootprintLibraryIdentifier,
     pub position: Coordinate,
@@ -369,7 +371,9 @@ pub struct AllowlistedFootprintPlacement {
     pub source: Option<Box<FootprintSourceBinding>>,
 }
 
-impl AllowlistedFootprintPlacement {
+pub type AllowlistedFootprintPlacement = SourceBoundFootprintPlacement;
+
+impl SourceBoundFootprintPlacement {
     pub fn new(
         target_id: StableId,
         library_identifier: FootprintLibraryIdentifier,
@@ -451,7 +455,7 @@ impl AllowlistedFootprintPlacement {
     }
 }
 
-impl<'de> Deserialize<'de> for AllowlistedFootprintPlacement {
+impl<'de> Deserialize<'de> for SourceBoundFootprintPlacement {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,

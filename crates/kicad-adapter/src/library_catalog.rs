@@ -46,6 +46,7 @@ pub struct LibraryCatalogPolicy {
     extra_roots: Vec<PathBuf>,
     variables: BTreeMap<String, String>,
     legacy_mappings: Vec<LegacyLibraryMapping>,
+    configuration_digest: Option<String>,
 }
 
 impl LibraryCatalogPolicy {
@@ -95,7 +96,15 @@ impl LibraryCatalogPolicy {
             extra_roots,
             variables,
             legacy_mappings,
+            configuration_digest: None,
         })
+    }
+    pub fn with_configuration_digest(mut self, digest: &str) -> Result<Self, String> {
+        if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
+            return Err("invalid library configuration digest".into());
+        }
+        self.configuration_digest = Some(digest.into());
+        Ok(self)
     }
 }
 
@@ -452,7 +461,7 @@ fn hash_json(value: &impl Serialize) -> Result<String, String> {
     )))
 }
 
-fn read_source_digest(path: &Path) -> Result<(u64, String), String> {
+pub(crate) fn read_source_digest(path: &Path) -> Result<(u64, String), String> {
     let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
     if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_FOOTPRINT_SOURCE_BYTES {
         return Err("footprint source exceeds regular-file size bounds".into());

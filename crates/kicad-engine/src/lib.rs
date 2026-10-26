@@ -2261,6 +2261,7 @@ mod tests {
                     unreachable!()
                 };
                 placement.source = Some(Box::new(FootprintSourceBinding {
+                    resolution_digest: None,
                     schematic: schematic.clone(),
                     symbol: ObservedSchematicSymbol {
                         symbol_id: id(reference),

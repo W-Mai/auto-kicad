@@ -3063,6 +3063,7 @@ mod tests {
         assert_eq!(binding.schematic_revision, project.revision.digest);
         let mut sourced = placement.clone();
         sourced.source = Some(Box::new(kicad_model::FootprintSourceBinding {
+            resolution_digest: None,
             schematic: project.revision.clone(),
             symbol: binding.symbol.clone(),
             symbol_path: binding.symbol_path.clone(),

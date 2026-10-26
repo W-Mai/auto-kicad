@@ -1,0 +1,29 @@
+{
+  "kicad_version": "10.0.6",
+  "backend": "production stdio MCP and native IPC",
+  "scope": "general source resolution and supported footprint creation; official thermal QFN is unsupported",
+  "cases": [
+    "installed",
+    "alias",
+    "qfn",
+    "connected"
+  ],
+  "footprints": 5,
+  "physical_pads": 78,
+  "qfn_physical_pads": 52,
+  "qfn_unnumbered_pads": 9,
+  "qfn_pad33_instances": 11,
+  "qfn_source": "project fixture without fabrication attributes",
+  "official_thermal_qfn": "unsupported; rejected without mutation",
+  "introduced_drc": 0,
+  "unconnected_items": 0,
+  "table_and_source_drift_rejected": true,
+  "stale_approval_rejected": true,
+  "complete_native_reload_matches": true,
+  "protected_files_unchanged": true,
+  "cleanup": {
+    "owned_editor_closed": true,
+    "owned_shadow_cleaned": true
+  },
+  "result_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m3-source-contract/result/board.kicad_pcb"
+}

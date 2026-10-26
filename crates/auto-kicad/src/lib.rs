@@ -1,6 +1,7 @@
 mod existing_footprint;
 mod existing_item_edit;
 mod footprint_authoring;
+mod library_settings;
 pub mod recovery;
 
 use kicad_adapter::{
@@ -966,6 +967,7 @@ fn apply_shadow_operations(
     observation: &LiveBoardObservation,
     operations: &[Operation],
     source_project: &std::path::Path,
+    library_settings: &library_settings::SharedLibrarySettings,
 ) -> Result<
     (
         ProjectSnapshot,
@@ -980,8 +982,9 @@ fn apply_shadow_operations(
         let placements = operation.kind.footprint_placements();
         let mut prepared = Vec::with_capacity(placements.len());
         for placement in placements {
-            let registry = footprint_authoring::verify_sources(source_project, placement)
-                .map_err(|reason| BoardGraphicsCommitOutcome::Rejected { reason })?;
+            let registry =
+                footprint_authoring::verify_sources(library_settings, source_project, placement)
+                    .map_err(|reason| BoardGraphicsCommitOutcome::Rejected { reason })?;
             let template = kicad_adapter::footprint::capture_source_footprint_template(
                 launcher,
                 &registry,
@@ -1012,7 +1015,8 @@ fn apply_shadow_operations(
         let expected =
             footprint_authoring::execute(&mut client, observation, &prepared, connections)?;
         for placement in placements {
-            footprint_authoring::verify_sources(source_project, placement).map_err(unknown)?;
+            footprint_authoring::verify_sources(library_settings, source_project, placement)
+                .map_err(unknown)?;
         }
         return Ok((expected, prepared));
     }
@@ -1162,6 +1166,7 @@ pub fn validate_disposable_shadow(
         drc_timeout,
         None,
         source_board.parent().unwrap_or(server_root),
+        &library_settings::capture(),
     )
 }
 
@@ -1172,6 +1177,7 @@ fn validate_disposable_shadow_bound(
     drc_timeout: Duration,
     expected_source: Option<&ProjectSnapshot>,
     source_project: &std::path::Path,
+    library_settings: &library_settings::SharedLibrarySettings,
 ) -> ShadowValidationOutcome {
     static PREVIEW_EDITOR: Mutex<()> = Mutex::new(());
     let Ok(_preview_guard) = PREVIEW_EDITOR.try_lock() else {
@@ -1213,6 +1219,20 @@ fn validate_disposable_shadow_bound(
             source_board,
             &source_before,
             ShadowValidationOutcome::rejected("shadow paths escaped the server root"),
+        );
+    }
+    if let Err(error) = footprint_authoring::prepare_shadow_library_table(
+        library_settings,
+        source_project,
+        shadow.root(),
+        operations,
+        expected_source,
+    ) {
+        return cleanup_shadow(
+            &mut launcher,
+            source_board,
+            &source_before,
+            ShadowValidationOutcome::rejected(error),
         );
     }
     if let Err(error) = launcher.launch(&shadow) {
@@ -1349,6 +1369,7 @@ fn validate_disposable_shadow_bound(
         &observation,
         &bound_operations,
         source_project,
+        library_settings,
     ) {
         Ok(result) => result,
         Err(outcome) => {
@@ -1365,6 +1386,28 @@ fn validate_disposable_shadow_bound(
                 }
             };
             return cleanup_shadow(&mut launcher, source_board, &source_before, outcome);
+        }
+    };
+    let native_before_reload = if prepared_footprints.is_empty() {
+        Vec::new()
+    } else {
+        match launcher
+            .connect_owned()
+            .map_err(|e| e.to_string())
+            .and_then(|mut client| {
+                client
+                    .capture_footprint_instance_templates(&observation.board_filename)
+                    .map_err(|e| e.to_string())
+            }) {
+            Ok(native) => native,
+            Err(error) => {
+                return cleanup_shadow(
+                    &mut launcher,
+                    source_board,
+                    &source_before,
+                    ShadowValidationOutcome::unknown(error),
+                );
+            }
         }
     };
     if let Err(error) = launcher.reload_owned() {
@@ -1386,6 +1429,39 @@ fn validate_disposable_shadow_bound(
             );
         }
     };
+    if !prepared_footprints.is_empty() {
+        let verified = (|| -> Result<(), String> {
+            let native_after = launcher
+                .connect_owned()
+                .map_err(|e| e.to_string())?
+                .capture_footprint_instance_templates(&observation.board_filename)
+                .map_err(|e| e.to_string())?;
+            if native_before_reload.len() != native_after.len() {
+                return Err("native footprint set changed on reload".into());
+            }
+            for before in &native_before_reload {
+                let after = native_after
+                    .iter()
+                    .find(|item| item.metadata().source_uuid == before.metadata().source_uuid)
+                    .ok_or("native footprint disappeared on reload")?;
+                if !before
+                    .matches_saved_instance(after)
+                    .map_err(|e| e.to_string())?
+                {
+                    return Err("complete native footprint payload changed on reload".into());
+                }
+            }
+            Ok(())
+        })();
+        if let Err(error) = verified {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::unknown(error),
+            );
+        }
+    }
     let reopened_revision = match reopened.snapshot.revision() {
         Ok(revision) => revision,
         Err(error) => {
@@ -1788,6 +1864,7 @@ impl BoardAssemblyRequest {
     fn prepare(
         &self,
         observation: &LiveBoardObservation,
+        library_settings: &library_settings::SharedLibrarySettings,
     ) -> Result<kicad_engine::ConnectedFootprintAssembly, String> {
         if self.placements.is_empty()
             || self.connections.is_empty()
@@ -1816,7 +1893,7 @@ impl BoardAssemblyRequest {
         let placements = self
             .placements
             .iter()
-            .map(|p| footprint_authoring::prepare(p, observation))
+            .map(|p| footprint_authoring::prepare(library_settings, p, observation))
             .collect::<Result<Vec<_>, _>>()?;
         let assembly = kicad_engine::ConnectedFootprintAssembly {
             placements,
@@ -2289,6 +2366,7 @@ pub trait ShadowValidationService: Send + Sync {
 
 #[derive(Clone, Debug)]
 pub struct IpcShadowValidationService {
+    library_settings: library_settings::SharedLibrarySettings,
     server_root: std::path::PathBuf,
 }
 
@@ -2296,6 +2374,7 @@ impl IpcShadowValidationService {
     pub fn new(server_root: impl Into<std::path::PathBuf>) -> Self {
         Self {
             server_root: server_root.into(),
+            library_settings: library_settings::capture(),
         }
     }
 }
@@ -2357,9 +2436,11 @@ impl ShadowValidationService for IpcShadowValidationService {
         }
         for operation in operations {
             for placement in operation.kind.footprint_placements() {
-                if let Err(reason) =
-                    footprint_authoring::verify_sources(&source.project_dir, placement)
-                {
+                if let Err(reason) = footprint_authoring::verify_sources(
+                    &self.library_settings,
+                    &source.project_dir,
+                    placement,
+                ) {
                     return ShadowValidationOutcome::rejected(reason);
                 }
             }
@@ -2376,6 +2457,7 @@ impl ShadowValidationService for IpcShadowValidationService {
             timeout,
             Some(&source.snapshot),
             &source.project_dir,
+            &self.library_settings,
         );
         if shadow_source_fingerprint(&source.board_path) != fingerprint
             || IpcDiscoveryService
@@ -2456,8 +2538,18 @@ pub trait BoardGraphicsExecutionService: Send + Sync {
     }
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct IpcBoardGraphicsExecutionService;
+#[derive(Clone, Debug)]
+pub struct IpcBoardGraphicsExecutionService {
+    library_settings: library_settings::SharedLibrarySettings,
+}
+
+impl Default for IpcBoardGraphicsExecutionService {
+    fn default() -> Self {
+        Self {
+            library_settings: library_settings::capture(),
+        }
+    }
+}
 
 impl BoardGraphicsExecutionService for IpcBoardGraphicsExecutionService {
     fn execute(
@@ -2694,8 +2786,12 @@ impl IpcBoardGraphicsExecutionService {
                     });
                 }
                 for placement in placements {
-                    footprint_authoring::verify_sources(project_dir, placement)
-                        .map_err(|reason| BoardGraphicsCommitOutcome::Rejected { reason })?;
+                    footprint_authoring::verify_sources(
+                        &self.library_settings,
+                        project_dir,
+                        placement,
+                    )
+                    .map_err(|reason| BoardGraphicsCommitOutcome::Rejected { reason })?;
                 }
                 let unknown = |reason: String| BoardGraphicsCommitOutcome::Unknown { reason };
                 let connections = match &operation.kind {
@@ -2725,7 +2821,12 @@ impl IpcBoardGraphicsExecutionService {
                     ));
                 }
                 for placement in placements {
-                    footprint_authoring::verify_sources(project_dir, placement).map_err(unknown)?;
+                    footprint_authoring::verify_sources(
+                        &self.library_settings,
+                        project_dir,
+                        placement,
+                    )
+                    .map_err(unknown)?;
                 }
                 Ok(())
             })();
@@ -2776,6 +2877,7 @@ struct StoredDrcBaseline {
 
 #[derive(Clone)]
 pub struct Server {
+    library_settings: library_settings::SharedLibrarySettings,
     execution_store: Option<Arc<recovery::ExecutionStore>>,
     sessions: Arc<Mutex<BTreeMap<String, StoredChangeSession>>>,
     schematic_sessions: Arc<Mutex<BTreeMap<String, StoredSchematicChange>>>,
@@ -2817,8 +2919,16 @@ pub struct SchematicAuditRequest {
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 pub struct InspectProjectRequest {
     pub endpoint: String,
+    pub footprint_source: Option<FootprintSourceRequest>,
     pub project_dir: Option<String>,
     pub request_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct FootprintSourceRequest {
+    pub library_nickname: String,
+    pub library_entry_name: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -2834,12 +2944,19 @@ pub struct Envelope {
 
 impl Default for Server {
     fn default() -> Self {
-        Self::with_discovery_and_execution_and_shadow(
+        let library_settings = library_settings::capture();
+        Self::with_frozen_library_settings(
             Arc::new(IpcDiscoveryService),
-            Arc::new(IpcBoardGraphicsExecutionService),
-            Arc::new(IpcShadowValidationService::new(
-                std::env::temp_dir().join("auto-kicad-shadow"),
-            )),
+            Arc::new(IpcBoardGraphicsExecutionService {
+                library_settings: library_settings.clone(),
+            }),
+            Arc::new(IpcBoardValidationService),
+            Arc::new(ProductionSchematicChangeService),
+            Some(Arc::new(IpcShadowValidationService {
+                server_root: std::env::temp_dir().join("auto-kicad-shadow"),
+                library_settings: library_settings.clone(),
+            })),
+            library_settings,
         )
     }
 }
@@ -2879,7 +2996,10 @@ impl Server {
     }
 
     pub fn with_discovery(discovery: Arc<dyn DiscoveryService>) -> Self {
-        Self::with_discovery_and_execution(discovery, Arc::new(IpcBoardGraphicsExecutionService))
+        Self::with_discovery_and_execution(
+            discovery,
+            Arc::new(IpcBoardGraphicsExecutionService::default()),
+        )
     }
 
     pub fn with_discovery_and_execution(
@@ -2932,6 +3052,24 @@ impl Server {
         schematic: Arc<dyn SchematicChangeService>,
         shadow_validation: Option<Arc<dyn ShadowValidationService>>,
     ) -> Self {
+        Self::with_frozen_library_settings(
+            discovery,
+            execution,
+            validation,
+            schematic,
+            shadow_validation,
+            library_settings::capture(),
+        )
+    }
+
+    fn with_frozen_library_settings(
+        discovery: Arc<dyn DiscoveryService>,
+        execution: Arc<dyn BoardGraphicsExecutionService>,
+        validation: Arc<dyn BoardValidationService>,
+        schematic: Arc<dyn SchematicChangeService>,
+        shadow_validation: Option<Arc<dyn ShadowValidationService>>,
+        library_settings: library_settings::SharedLibrarySettings,
+    ) -> Self {
         let schematic_verified = schematic.verified();
         let mut tool_router = Self::tool_router();
         for name in RECOVERY_TOOLS {
@@ -2947,6 +3085,7 @@ impl Server {
             }
         }
         Self {
+            library_settings,
             execution_store: None,
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             schematic_sessions: Arc::new(Mutex::new(BTreeMap::new())),
@@ -3312,6 +3451,12 @@ impl Server {
             .request_id
             .unwrap_or_else(|| "req_inspect_project".to_owned());
         let project_dir = arguments.project_dir.as_deref().map(std::path::Path::new);
+        if arguments.footprint_source.is_some() && arguments.endpoint.is_empty() {
+            return Err(ErrorData::invalid_params(
+                "footprint source lookup requires a live board endpoint",
+                None,
+            ));
+        }
         if arguments.endpoint.is_empty() {
             let (Some(project), Some(store)) = (project_dir, self.execution_store.as_ref()) else {
                 return Ok(self.rejected(
@@ -3362,6 +3507,24 @@ impl Server {
                     .snapshot
                     .revision()
                     .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+                if let Some(query) = &arguments.footprint_source {
+                    let identifier = kicad_model::FootprintLibraryIdentifier {
+                        nickname: query.library_nickname.clone(),
+                        entry_name: query.library_entry_name.clone(),
+                    };
+                    data["footprint_source"] = match library_settings::registry(
+                        &self.library_settings,
+                        &pcb.project_dir,
+                        &pcb.snapshot.kicad_version,
+                    )
+                    .and_then(|r| r.resolve_identifier(&identifier).map_err(|e| e.to_string()))
+                    {
+                        Ok(source) => {
+                            json!({"status":"resolved", "geometry_verified": false, "evidence":source.provenance.catalog_evidence})
+                        }
+                        Err(reason) => json!({"status":"unavailable", "reason":reason}),
+                    };
+                }
                 data["pcb"] = json!({"snapshot": pcb.snapshot, "revision": revision.to_string(), "instance_token": pcb.instance_token.as_str()});
             }
             Err(reason) => {
@@ -3609,7 +3772,7 @@ impl Server {
                     None,
                 ));
             }
-            match request.prepare(&observation) {
+            match request.prepare(&observation, &self.library_settings) {
                 Ok(assembly) => Some(assembly),
                 Err(reason) => {
                     return Ok(self.envelope_sync(
@@ -3635,7 +3798,7 @@ impl Server {
                     None,
                 ));
             }
-            match footprint_authoring::prepare(request, &observation) {
+            match footprint_authoring::prepare(&self.library_settings, request, &observation) {
                 Ok(placement) => Some(placement),
                 Err(reason) => {
                     return Ok(self.envelope_sync(
@@ -4000,6 +4163,20 @@ impl Server {
         let session = engine
             .begin_session(plan)
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+        let footprint_sources = session
+            .plan
+            .operations
+            .iter()
+            .flat_map(|operation| operation.kind.footprint_placements())
+            .map(|placement| {
+                footprint_authoring::source_evidence(
+                    &self.library_settings,
+                    &observation.project_dir,
+                    placement,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| ErrorData::invalid_params(e, None))?;
         let plan_hash = session.plan_hash.clone();
         let base_revision = session.plan.base_revision.to_string();
         self.sessions.lock().expect("session lock").insert(
@@ -4023,6 +4200,7 @@ impl Server {
             json!({
                 "plan_id": plan_id,
                 "plan_hash": plan_hash,
+                "footprint_sources": footprint_sources,
                 "state": "planned"
             }),
         )
@@ -4301,6 +4479,17 @@ impl Server {
             }
             BoardGraphicsCommitOutcome::Rejected { reason } => {
                 stored.execution_state = StoredExecutionState::Ready;
+                if stored
+                    .session
+                    .plan
+                    .operations
+                    .iter()
+                    .any(|op| !op.kind.footprint_placements().is_empty())
+                {
+                    stored.approval_hash = None;
+                    stored.validation_evidence_hash = None;
+                    stored.shadow_validation = None;
+                }
                 (
                     false,
                     "rejected",
@@ -5581,7 +5770,7 @@ mod tests {
         (
             Server::with_services(
                 discovery,
-                Arc::new(IpcBoardGraphicsExecutionService),
+                Arc::new(IpcBoardGraphicsExecutionService::default()),
                 validation,
             ),
             calls,
@@ -5951,6 +6140,7 @@ mod tests {
                 source_observation.project_dir = root.clone();
                 source_observation.board_path = board_path.clone();
                 let placement = footprint_authoring::prepare(
+                    &library_settings::capture(),
                     &BoardFootprintRequest {
                         target_id: format!("placed-{reference}"),
                         library_nickname: "Resistor_SMD".into(),
@@ -5968,9 +6158,14 @@ mod tests {
                     board: board.clone(),
                     placement,
                 };
-                let (expected, templates) =
-                    apply_shadow_operations(&mut launcher, &observation, &[operation], &root)
-                        .map_err(|e| format!("footprint execution: {e:?}"))?;
+                let (expected, templates) = apply_shadow_operations(
+                    &mut launcher,
+                    &observation,
+                    &[operation],
+                    &root,
+                    &library_settings::capture(),
+                )
+                .map_err(|e| format!("footprint execution: {e:?}"))?;
                 if templates.len() != 1 {
                     return Err("missing source template".into());
                 }
@@ -6044,9 +6239,14 @@ mod tests {
                 .map_err(|e| e.to_string())?,
             };
             let operations = [shadow_graphics_operation(board), track];
-            let (expected, _) =
-                apply_shadow_operations(&mut launcher, &observation, &operations, &root)
-                    .map_err(|e| format!("routing execution: {e:?}"))?;
+            let (expected, _) = apply_shadow_operations(
+                &mut launcher,
+                &observation,
+                &operations,
+                &root,
+                &library_settings::capture(),
+            )
+            .map_err(|e| format!("routing execution: {e:?}"))?;
             launcher.reload_owned().map_err(|e| e.to_string())?;
             let actual = observe_owned_shadow(&mut launcher)?;
             if actual.snapshot.canonical() != expected {
@@ -6062,8 +6262,14 @@ mod tests {
             if !delta.introduced.is_empty() {
                 return Err(format!("introduced DRC: {:?}", delta.introduced));
             }
-            let (expected, _) = apply_shadow_operations(&mut launcher, &actual, &[via], &root)
-                .map_err(|error| format!("via execution: {error:?}"))?;
+            let (expected, _) = apply_shadow_operations(
+                &mut launcher,
+                &actual,
+                &[via],
+                &root,
+                &library_settings::capture(),
+            )
+            .map_err(|error| format!("via execution: {error:?}"))?;
             launcher.reload_owned().map_err(|error| error.to_string())?;
             let with_via = observe_owned_shadow(&mut launcher)?;
             if with_via.snapshot.canonical() != expected {
@@ -6360,7 +6566,7 @@ mod tests {
             let state_dir = fixture.root.join("state");
             let server = Server::with_discovery_and_execution_and_shadow(
                 Arc::new(IpcDiscoveryService),
-                Arc::new(IpcBoardGraphicsExecutionService),
+                Arc::new(IpcBoardGraphicsExecutionService::default()),
                 Arc::new(IpcShadowValidationService::new(&shadow_root)),
             )
             .with_state_dir(&state_dir)
@@ -6829,7 +7035,9 @@ mod tests {
             reference: "R1".into(),
             value: "1k".into(),
         };
-        let placement = footprint_authoring::prepare(&request, &observation).unwrap();
+        let placement =
+            footprint_authoring::prepare(&library_settings::capture(), &request, &observation)
+                .unwrap();
         let binding = placement.source.as_ref().unwrap();
         assert_eq!(binding.symbol_path.len(), 2);
         assert_eq!(
@@ -6876,10 +7084,16 @@ mod tests {
         assert!(invalid.validate().is_err());
         let lock = root.join("~board.kicad_sch.lck");
         std::fs::write(&lock, b"locked").unwrap();
-        assert!(footprint_authoring::verify_sources(&root, &placement).is_err());
+        assert!(
+            footprint_authoring::verify_sources(&library_settings::capture(), &root, &placement)
+                .is_err()
+        );
         std::fs::remove_file(lock).unwrap();
         std::fs::write(&sch, empty).unwrap();
-        assert!(footprint_authoring::verify_sources(&root, &placement).is_err());
+        assert!(
+            footprint_authoring::verify_sources(&library_settings::capture(), &root, &placement)
+                .is_err()
+        );
     }
 
     fn plan_request(_snapshot: ProjectSnapshot, request_id: &str) -> PlanBoardGraphicsRequest {
@@ -7156,7 +7370,7 @@ mod tests {
             Arc::new(FakeDiscovery {
                 write_capability: true,
             }),
-            Arc::new(IpcBoardGraphicsExecutionService),
+            Arc::new(IpcBoardGraphicsExecutionService::default()),
             Arc::new(IpcBoardValidationService),
             Arc::new(FakeSchematic {
                 preview_calls: preview_calls.clone(),
@@ -7301,7 +7515,7 @@ mod tests {
             Arc::new(FakeDiscovery {
                 write_capability: true,
             }),
-            Arc::new(IpcBoardGraphicsExecutionService),
+            Arc::new(IpcBoardGraphicsExecutionService::default()),
             Arc::new(IpcBoardValidationService),
             Arc::new(UnavailableSchematic),
         ))
@@ -7435,7 +7649,7 @@ mod tests {
             Arc::new(FakeDiscovery {
                 write_capability: true,
             }),
-            Arc::new(IpcBoardGraphicsExecutionService),
+            Arc::new(IpcBoardGraphicsExecutionService::default()),
             Arc::new(IpcBoardValidationService),
             Arc::new(UnavailableSchematic),
         ))
@@ -7701,7 +7915,7 @@ mod tests {
             Arc::new(FakeDiscovery {
                 write_capability: true,
             }),
-            Arc::new(IpcBoardGraphicsExecutionService),
+            Arc::new(IpcBoardGraphicsExecutionService::default()),
             Arc::new(FakeShadowValidation {
                 outcome: shadow_outcome(ShadowValidationState::Committed),
                 calls: Arc::new(AtomicUsize::new(0)),

@@ -150,7 +150,7 @@ impl BoardGraphicsExecutionService for UncertainSavedReceipt {
         revision: &RevisionDigest,
         operations: &[Operation],
     ) -> BoardGraphicsCommitOutcome {
-        let outcome = IpcBoardGraphicsExecutionService.execute(
+        let outcome = IpcBoardGraphicsExecutionService::default().execute(
             endpoint, filename, path, project, token, revision, operations,
         );
         if outcome == BoardGraphicsCommitOutcome::CommittedAndSaved

@@ -1,4 +1,5 @@
 mod existing_item_updates;
+mod footprint_creation;
 pub use existing_item_updates::{ExistingBoardItemSet, ExistingItemUpdate};
 include!(concat!(env!("OUT_DIR"), "/generated/mod.rs"));
 
@@ -378,6 +379,7 @@ impl FootprintInstanceTemplate {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CreatedFootprintInstanceReceipt {
+    pub native: FootprintInstanceTemplate,
     pub footprint: ObservedFootprintInstance,
     pub pads: Vec<ObservedPad>,
     pub source_uuid: String,
@@ -1524,59 +1526,16 @@ impl<T: KiCadTransport> KiCadClient<T> {
             reference,
             value,
         )?;
-        if let Some(association) = &template.association {
-            let item = response
-                .0
-                .created_items
-                .first()
-                .and_then(|item| item.item.as_ref())
-                .ok_or(IpcError::InvalidObservedFootprint(
-                    "created footprint item is missing",
-                ))?;
-            let actual = board_types::FootprintInstance::parse_from_bytes(&item.value)
-                .map_err(|_| IpcError::MalformedEnvelope)?;
-            let mut expected = actual.clone();
-            apply_footprint_association(&mut expected, association)?;
-            if actual.symbol_path.as_ref().map(|path| &path.path)
-                != expected.symbol_path.as_ref().map(|path| &path.path)
-            {
-                return Err(IpcError::InvalidObservedFootprint(
-                    "created footprint symbol association differs",
-                ));
-            }
-            let actual_items = &actual
-                .definition
-                .as_ref()
-                .ok_or(IpcError::InvalidObservedFootprint(
-                    "created footprint definition is missing",
-                ))?
-                .items;
-            for (actual_item, expected_item) in actual_items
-                .iter()
-                .zip(&expected.definition.as_ref().unwrap().items)
-            {
-                if actual_item.type_url == PAD_TYPE_URL {
-                    let actual_pad = board_types::Pad::parse_from_bytes(&actual_item.value)
-                        .map_err(|_| IpcError::MalformedEnvelope)?;
-                    let expected_pad = board_types::Pad::parse_from_bytes(&expected_item.value)
-                        .map_err(|_| IpcError::MalformedEnvelope)?;
-                    if actual_pad
-                        .net
-                        .as_ref()
-                        .map(|net| net.name.as_str())
-                        .unwrap_or_default()
-                        != expected_pad
-                            .net
-                            .as_ref()
-                            .map(|net| net.name.as_str())
-                            .unwrap_or_default()
-                    {
-                        return Err(IpcError::InvalidObservedFootprint(
-                            "created footprint pad net differs",
-                        ));
-                    }
-                }
-            }
+        if !template.matches_created_instance(
+            &receipt.native,
+            position_x_nm,
+            position_y_nm,
+            reference,
+            value,
+        )? {
+            return Err(IpcError::InvalidObservedFootprint(
+                "created footprint native payload differs from the source template",
+            ));
         }
         self.token = Some(response.1);
         Ok(receipt)
@@ -2623,29 +2582,31 @@ fn footprint_templates_from_response(
     response
         .items
         .iter()
-        .map(|item| {
-            if item.type_url != FOOTPRINT_INSTANCE_TYPE_URL {
-                return Err(IpcError::UnexpectedMessageType {
-                    expected: FOOTPRINT_INSTANCE_TYPE_URL,
-                    actual: item.type_url.clone(),
-                });
-            }
-            let instance = board_types::FootprintInstance::parse_from_bytes(&item.value)
-                .map_err(|_| IpcError::MalformedEnvelope)?;
-            validate_footprint_instance(&instance)?;
-            let observed = footprint_instance_from_any(item)?;
-            Ok(FootprintInstanceTemplate {
-                association: None,
-                bytes: item.value.clone(),
-                metadata: FootprintInstanceTemplateMetadata {
-                    source_uuid: observed.source_uuid,
-                    library_identifier: observed.library_identifier,
-                    orientation_mdeg: observed.orientation_mdeg,
-                    side: observed.side,
-                },
-            })
-        })
+        .map(footprint_template_from_item)
         .collect()
+}
+
+fn footprint_template_from_item(item: &Any) -> Result<FootprintInstanceTemplate, IpcError> {
+    if item.type_url != FOOTPRINT_INSTANCE_TYPE_URL {
+        return Err(IpcError::UnexpectedMessageType {
+            expected: FOOTPRINT_INSTANCE_TYPE_URL,
+            actual: item.type_url.clone(),
+        });
+    }
+    let instance = board_types::FootprintInstance::parse_from_bytes(&item.value)
+        .map_err(|_| IpcError::MalformedEnvelope)?;
+    validate_footprint_instance(&instance)?;
+    let observed = footprint_instance_from_any(item)?;
+    Ok(FootprintInstanceTemplate {
+        association: None,
+        bytes: item.value.clone(),
+        metadata: FootprintInstanceTemplateMetadata {
+            source_uuid: observed.source_uuid,
+            library_identifier: observed.library_identifier,
+            orientation_mdeg: observed.orientation_mdeg,
+            side: observed.side,
+        },
+    })
 }
 
 fn footprint_instance_from_template(
@@ -2926,6 +2887,7 @@ fn parsed_footprint_instance_receipt(
     let definition = instance.definition.as_ref().unwrap();
     let library = definition.id.as_ref().unwrap();
     Ok(CreatedFootprintInstanceReceipt {
+        native: footprint_template_from_item(item)?,
         footprint: footprint_instance_from_any(item)?,
         pads: footprint_definition_pads_from_any(item, &id)?,
         source_uuid: id,
@@ -2999,6 +2961,7 @@ fn created_footprint_instance_receipt(
     let definition = instance.definition.as_ref().unwrap();
     let library = definition.id.as_ref().unwrap();
     Ok(CreatedFootprintInstanceReceipt {
+        native: footprint_template_from_item(item)?,
         footprint: footprint_instance_from_any(item)?,
         pads: footprint_definition_pads_from_any(item, &id)?,
         source_uuid: id,
@@ -6040,6 +6003,21 @@ mod tests {
             ..Any::default()
         });
         source.value = source_value.write_to_bytes().unwrap();
+        let template = footprint_template_from_item(&source).unwrap();
+        let mut created =
+            footprint_instance_from_template(&template, 900, -800, "R9", "22k").unwrap();
+        created.id = MessageField::some(base_types::KIID {
+            value: "server-assigned".into(),
+            ..Default::default()
+        });
+        let created_response = create_items_response_with_results(
+            "created-token",
+            vec![create_item_result(Any {
+                type_url: FOOTPRINT_INSTANCE_TYPE_URL.into(),
+                value: created.write_to_bytes().unwrap(),
+                ..Default::default()
+            })],
+        );
         let mut client = KiCadClient::new(
             FakeTransport {
                 responses: vec![
@@ -6048,7 +6026,7 @@ mod tests {
                         base_types::ItemRequestStatus::IRS_OK,
                         vec![source],
                     ),
-                    created_footprint_response("created-token", "server-assigned"),
+                    created_response,
                 ],
                 requests: Vec::new(),
             },
@@ -6080,6 +6058,126 @@ mod tests {
             sent.definition.as_ref().unwrap().items[0].value,
             vec![1, 2, 3]
         );
+    }
+
+    #[test]
+    fn footprint_creation_requires_exact_physical_children_and_unknown_fields() {
+        let mut source = footprint_item("source");
+        let mut native = board_types::FootprintInstance::parse_from_bytes(&source.value).unwrap();
+        native.definition.as_mut().unwrap().items = vec![
+            pad_item("pad-a", "1"),
+            pad_item("pad-b", "1"),
+            pad_item("paste-aperture", ""),
+        ];
+        for (index, item) in native
+            .definition
+            .as_mut()
+            .unwrap()
+            .items
+            .iter_mut()
+            .enumerate()
+        {
+            let mut pad = board_types::Pad::parse_from_bytes(&item.value).unwrap();
+            pad.position.as_mut().unwrap().x_nm += index as i64;
+            item.value = pad.write_to_bytes().unwrap();
+        }
+        native.definition.as_mut().unwrap().items.push(Any {
+            type_url: "unknown-child".into(),
+            value: vec![8, 42],
+            ..Default::default()
+        });
+        source.value = native.write_to_bytes().unwrap();
+        let template = footprint_template_from_item(&source)
+            .unwrap()
+            .with_association(FootprintAssociation {
+                symbol_path: vec!["sheet".into(), "symbol".into()],
+                pad_nets: std::collections::BTreeMap::from([("1".into(), Some("GND".into()))]),
+            })
+            .unwrap();
+        let mut created =
+            footprint_instance_from_template(&template, 100, 200, "U1", "IC").unwrap();
+        created.id = MessageField::some(base_types::KIID {
+            value: "created".into(),
+            ..Default::default()
+        });
+        let wrap = |value: &board_types::FootprintInstance| {
+            footprint_template_from_item(&Any {
+                type_url: FOOTPRINT_INSTANCE_TYPE_URL.into(),
+                value: value.write_to_bytes().unwrap(),
+                ..Default::default()
+            })
+            .unwrap()
+        };
+        let matches = |value: &board_types::FootprintInstance| {
+            template.matches_created_instance(&wrap(value), 100, 200, "U1", "IC")
+        };
+        for item in &mut created.definition.as_mut().unwrap().items {
+            if item.type_url == PAD_TYPE_URL {
+                let mut pad = board_types::Pad::parse_from_bytes(&item.value).unwrap();
+                pad.id.as_mut().unwrap().value.push_str("-assigned");
+                item.value = pad.write_to_bytes().unwrap();
+            }
+        }
+        let correspondence = template
+            .created_child_mapping(&wrap(&created), 100, 200, "U1", "IC")
+            .unwrap()
+            .unwrap();
+        assert_eq!(correspondence["pad-a"], "pad-a-assigned");
+        assert_eq!(correspondence["pad-b"], "pad-b-assigned");
+        let mut ambiguous = created.clone();
+        let items = &mut ambiguous.definition.as_mut().unwrap().items;
+        let duplicate = items[0].clone();
+        items.push(duplicate);
+        assert!(matches(&ambiguous).is_err());
+        assert!(matches(&created).unwrap());
+        created.definition.as_mut().unwrap().items.reverse();
+        assert!(matches(&created).unwrap());
+        for mutation in 0..4 {
+            let mut changed = created.clone();
+            let items = &mut changed.definition.as_mut().unwrap().items;
+            match mutation {
+                0 => {
+                    items.pop();
+                }
+                1 => {
+                    items
+                        .iter_mut()
+                        .find(|i| i.type_url == "unknown-child")
+                        .unwrap()
+                        .value
+                        .push(0);
+                }
+                _ => {
+                    let item = items
+                        .iter_mut()
+                        .find(|i| i.type_url == PAD_TYPE_URL)
+                        .unwrap();
+                    let mut pad = board_types::Pad::parse_from_bytes(&item.value).unwrap();
+                    if mutation == 2 {
+                        pad.number = "wrong-physical-pad".into();
+                    } else {
+                        pad.net.as_mut().unwrap().name = "wrong-net".into();
+                    }
+                    item.value = pad.write_to_bytes().unwrap();
+                }
+            }
+            assert!(!matches(&changed).unwrap(), "accepted mutation {mutation}");
+        }
+        let item = created
+            .definition
+            .as_mut()
+            .unwrap()
+            .items
+            .iter_mut()
+            .find(|i| i.type_url == PAD_TYPE_URL)
+            .unwrap();
+        let mut pad = board_types::Pad::parse_from_bytes(&item.value).unwrap();
+        pad.parent = MessageField::some(base_types::KIID {
+            value: "foreign".into(),
+            ..Default::default()
+        });
+        item.value = pad.write_to_bytes().unwrap();
+        assert!(matches(&created).is_err());
     }
 
     #[test]

@@ -9,6 +9,7 @@ _app = wx.App(False)
 import pcbnew
 
 MAX_INPUT_BYTES = 64 * 1024
+MAX_SOURCE_BYTES = 8 * 1024 * 1024
 REQUIRED = {
     "board_path",
     "project_root",
@@ -51,8 +52,12 @@ def confined_file(path, root, name):
 
 
 def source_digest(path):
+    if os.stat(path).st_size > MAX_SOURCE_BYTES:
+        fail("footprint source exceeds byte limit")
     with open(path, "rb") as source:
-        data = source.read()
+        data = source.read(MAX_SOURCE_BYTES + 1)
+    if not data or len(data) > MAX_SOURCE_BYTES:
+        fail("footprint source exceeds byte limit")
     return len(data), hashlib.sha256(data).hexdigest()
 
 
@@ -81,9 +86,8 @@ def main():
     if set(identifier) != {"nickname", "entry_name"}:
         fail("library identifier fields are not exact")
     source_entry_name = os.path.basename(source_path)[:-10]
-    source_nickname = os.path.basename(os.path.dirname(source_path))
     if (source_entry_name != identifier["entry_name"]
-            or source_nickname != identifier["nickname"] + ".pretty"):
+            or not os.path.dirname(source_path).endswith(".pretty")):
         fail("source path does not match library identity")
 
     size, digest = source_digest(source_path)
@@ -110,6 +114,8 @@ def main():
     loaded_id = footprint.GetFPID()
     if str(loaded_id.GetLibItemName()) != identifier["entry_name"]:
         fail("loaded footprint library entry is not proven")
+    if any(pad.GetProperty() != pcbnew.PAD_PROP_NONE for pad in footprint.Pads()):
+        fail("unsupported pad fabrication property: KiCad IPC cannot preserve this source")
     footprint.SetFPID(pcbnew.LIB_ID(identifier["nickname"], identifier["entry_name"]))
     footprint.SetReference(request["reference"])
     footprint.SetValue(request["value"])
@@ -133,7 +139,7 @@ def main():
         fail("footprint identity is not unique")
     candidate = matches[0]
     pad_numbers = sorted(str(pad.GetNumber()) for pad in candidate.Pads())
-    if not pad_numbers or any(not number for number in pad_numbers):
+    if not pad_numbers or len(pad_numbers) > 128:
         fail("pad identity is invalid")
     print(json.dumps({"postcondition": {
         "library_identifier": identifier,

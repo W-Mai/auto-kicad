@@ -1,9 +1,13 @@
+use crate::library_catalog::{
+    FootprintCatalog, FootprintResolutionEvidence, LibraryScope, read_source_digest,
+};
 use crate::lifecycle::{DisposablePcbLifecycle, LifecycleError, OwnedPcbnewLauncher};
 use kicad_ipc::{
     CreatedFootprintInstanceReceipt, FootprintInstanceTemplate, KiCadClient, KiCadTransport,
     ObservedFootprintInstance, ObservedPad,
 };
 use kicad_model::{AllowlistedFootprintPlacement, FootprintLibraryIdentifier, RevisionDigest};
+#[cfg(test)]
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
@@ -64,6 +68,8 @@ impl AllowlistedFootprint {
 pub enum FootprintSourceKind {
     OfficialLibrary,
     ProjectLibrary,
+    GlobalLibrary,
+    ConfiguredLibrary,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -83,11 +89,11 @@ pub struct LibraryProvenance {
     pub source_size: u64,
     pub source_digest: RevisionDigest,
     pub resolution_evidence: ResolutionEvidence,
+    pub catalog_evidence: Option<FootprintResolutionEvidence>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedFootprint {
-    pub library: AllowlistedFootprint,
     pub identifier: FootprintLibraryIdentifier,
     pub source_path: PathBuf,
     pub provenance: LibraryProvenance,
@@ -151,16 +157,7 @@ pub(crate) fn place_allowlisted_footprints(
 
     let mut requests = Vec::with_capacity(placements.len());
     for placement in placements.iter().cloned() {
-        let library = match AllowlistedFootprint::from_identifier(&placement.library_identifier) {
-            Some(library) => library,
-            None => {
-                return cleanup_disposable_footprint_failure(
-                    &mut launcher,
-                    FootprintBackendError::UnsupportedLibrary,
-                );
-            }
-        };
-        match context.prepare(registry, library, placement) {
+        match context.prepare_identifier(registry, placement) {
             Ok(request) => requests.push(request),
             Err(error) => return cleanup_disposable_footprint_failure(&mut launcher, error),
         }
@@ -230,6 +227,7 @@ pub enum FootprintBackendError {
     PathOutsideProject,
     EditorLockPresent,
     UnsupportedLibrary,
+    SourceResolution(String),
     SourceMissing(PathBuf),
     InvalidPlacement(&'static str),
     UnsupportedRunner,
@@ -250,6 +248,9 @@ impl Display for FootprintBackendError {
             Self::InvalidRoot => formatter.write_str("footprint backend root must be a directory"),
             Self::PathOutsideProject => formatter.write_str("board path is outside project root"),
             Self::EditorLockPresent => formatter.write_str("PCB editor lock is present"),
+            Self::SourceResolution(reason) => {
+                write!(formatter, "footprint source resolution failed: {reason}")
+            }
             Self::UnsupportedLibrary => formatter.write_str("footprint library is not allowlisted"),
             Self::SourceMissing(path) => write!(
                 formatter,
@@ -294,6 +295,7 @@ impl std::error::Error for FootprintBackendError {}
 pub struct FootprintRegistry {
     official_library: PathBuf,
     project_library: PathBuf,
+    catalog: Option<FootprintCatalog>,
 }
 
 impl FootprintRegistry {
@@ -304,10 +306,63 @@ impl FootprintRegistry {
         Ok(Self {
             official_library: canonical_directory(official_library)?,
             project_library: canonical_directory(project_library)?,
+            catalog: None,
+        })
+    }
+
+    pub fn from_catalog(catalog: FootprintCatalog) -> Self {
+        Self {
+            official_library: PathBuf::new(),
+            project_library: PathBuf::new(),
+            catalog: Some(catalog),
+        }
+    }
+
+    pub fn resolve_identifier(
+        &self,
+        identifier: &FootprintLibraryIdentifier,
+    ) -> Result<ResolvedFootprint, FootprintBackendError> {
+        let Some(catalog) = &self.catalog else {
+            let library = AllowlistedFootprint::from_identifier(identifier)
+                .ok_or(FootprintBackendError::UnsupportedLibrary)?;
+            return self.resolve_legacy(library);
+        };
+        let evidence = catalog
+            .resolve(identifier)
+            .map_err(FootprintBackendError::SourceResolution)?;
+        Ok(ResolvedFootprint {
+            identifier: identifier.clone(),
+            source_path: evidence.canonical_source_path.clone(),
+            provenance: LibraryProvenance {
+                source_kind: match evidence.scope {
+                    LibraryScope::Project => FootprintSourceKind::ProjectLibrary,
+                    LibraryScope::Global => FootprintSourceKind::GlobalLibrary,
+                    LibraryScope::LegacyConfigured => FootprintSourceKind::ConfiguredLibrary,
+                },
+                registry_root: evidence.canonical_library_root.clone(),
+                source_path: evidence.canonical_source_path.clone(),
+                source_size: evidence.source_size,
+                source_digest: RevisionDigest::new(&evidence.source_digest).expect("sha256"),
+                resolution_evidence: ResolutionEvidence {
+                    method: "canonical_library_catalog",
+                    identifier: identifier.clone(),
+                    source_exists: true,
+                    source_is_confined: true,
+                    digest_verified: true,
+                },
+                catalog_evidence: Some(evidence),
+            },
         })
     }
 
     pub fn resolve(
+        &self,
+        library: AllowlistedFootprint,
+    ) -> Result<ResolvedFootprint, FootprintBackendError> {
+        self.resolve_identifier(&library.identifier())
+    }
+
+    fn resolve_legacy(
         &self,
         library: AllowlistedFootprint,
     ) -> Result<ResolvedFootprint, FootprintBackendError> {
@@ -323,15 +378,17 @@ impl FootprintRegistry {
         if !source_path.starts_with(root) || !source_path.is_file() {
             return Err(FootprintBackendError::SourceMissing(source_path));
         }
-        let source_bytes = fs::read(&source_path)
-            .map_err(|_| FootprintBackendError::SourceMissing(source_path.clone()))?;
-        let mut hasher = Sha256::new();
-        hasher.update(&source_bytes);
-        let source_digest = RevisionDigest::new(hex::encode(hasher.finalize()))
-            .expect("sha256 is a valid revision digest");
-        let source_size = source_bytes.len() as u64;
+        if fs::symlink_metadata(root.join(library.source_subpath()))
+            .map_err(|_| FootprintBackendError::SourceMissing(source_path.clone()))?
+            .file_type()
+            .is_symlink()
+        {
+            return Err(FootprintBackendError::PathOutsideProject);
+        }
+        let (source_size, digest) =
+            read_source_digest(&source_path).map_err(FootprintBackendError::SourceResolution)?;
+        let source_digest = RevisionDigest::new(digest).expect("sha256");
         Ok(ResolvedFootprint {
-            library,
             identifier: library.identifier(),
             source_path: source_path.clone(),
             provenance: LibraryProvenance {
@@ -346,6 +403,7 @@ impl FootprintRegistry {
                 source_path,
                 source_size,
                 source_digest,
+                catalog_evidence: None,
                 resolution_evidence: ResolutionEvidence {
                     method: "closed_allowlist_canonical_path",
                     identifier: library.identifier(),
@@ -401,10 +459,20 @@ impl DisposableFootprintContext {
     ) -> Result<PreparedFootprintPlacement, FootprintBackendError> {
         self.validate_before_place()?;
         validate_placement(&placement)?;
-        let resolved = registry.resolve(library)?;
-        if placement.library_identifier != resolved.identifier {
+        if placement.library_identifier != library.identifier() {
             return Err(FootprintBackendError::UnsupportedLibrary);
         }
+        self.prepare_identifier(registry, placement)
+    }
+
+    pub fn prepare_identifier(
+        &self,
+        registry: &FootprintRegistry,
+        placement: AllowlistedFootprintPlacement,
+    ) -> Result<PreparedFootprintPlacement, FootprintBackendError> {
+        self.validate_before_place()?;
+        validate_placement(&placement)?;
+        let resolved = registry.resolve_identifier(&placement.library_identifier)?;
         Ok(PreparedFootprintPlacement {
             context: self.clone(),
             resolved,
@@ -451,7 +519,7 @@ impl FootprintPostcondition {
             && self.pad_count == self.pad_numbers.len()
             && self.saved
             && self.reopened
-            && self.pad_numbers.iter().all(|number| !number.is_empty())
+            && (1..=kicad_model::MAX_FOOTPRINT_PADS).contains(&self.pad_count)
             && self.source_digest == provenance.source_digest
             && self.source_size == provenance.source_size
     }
@@ -924,9 +992,7 @@ pub fn capture_source_footprint_template(
     placement: AllowlistedFootprintPlacement,
 ) -> Result<SourceFootprintTemplate, FootprintBackendError> {
     validate_placement(&placement)?;
-    let library = AllowlistedFootprint::from_identifier(&placement.library_identifier)
-        .ok_or(FootprintBackendError::UnsupportedLibrary)?;
-    let resolved = registry.resolve(library)?;
+    let resolved = registry.resolve_identifier(&placement.library_identifier)?;
     let shadow = launcher.current_shadow().map_err(lifecycle_error)?.clone();
     let identity = launcher
         .current_identity()
@@ -1241,7 +1307,7 @@ fn run_fixed_python_helper(
         || response.value != request.placement().value
         || response.position != request.placement().position
         || response.pad_count != response.pad_numbers.len()
-        || response.pad_numbers.iter().any(String::is_empty)
+        || response.pad_count > kicad_model::MAX_FOOTPRINT_PADS
         || !response.saved
         || !response.reopened
     {
@@ -1431,7 +1497,7 @@ impl DisposablePythonFootprintExecutor {
             let pad_numbers: Vec<_> = pads.into_iter().map(|pad| pad.number).collect();
             if pad_numbers != helper.pad_numbers
                 || helper.pad_count != pad_numbers.len()
-                || pad_numbers.iter().any(String::is_empty)
+                || pad_numbers.len() > kicad_model::MAX_FOOTPRINT_PADS
             {
                 return abort_python_transaction(
                     launcher,
@@ -1537,20 +1603,22 @@ fn verify_source_provenance(
     request: &PreparedFootprintPlacement,
 ) -> Result<(), FootprintBackendError> {
     let source = &request.resolved().provenance;
-    let bytes = fs::read(&source.source_path)
-        .map_err(|_| FootprintBackendError::SourceMissing(source.source_path.clone()))?;
-    if bytes.len() as u64 != source.source_size {
-        return Err(FootprintBackendError::RunnerProtocol(
-            "allowlisted footprint source changed",
-        ));
+    let path = &source.source_path;
+    if fs::symlink_metadata(path)
+        .map_err(|_| FootprintBackendError::SourceMissing(path.clone()))?
+        .file_type()
+        .is_symlink()
+        || !fs::canonicalize(path)
+            .map_err(|_| FootprintBackendError::SourceMissing(path.clone()))?
+            .starts_with(&source.registry_root)
+    {
+        return Err(FootprintBackendError::PathOutsideProject);
     }
-    let mut hasher = Sha256::new();
-    hasher.update(&bytes);
-    let digest = RevisionDigest::new(hex::encode(hasher.finalize()))
-        .expect("sha256 is a valid revision digest");
-    if digest != source.source_digest {
+    let (size, digest) =
+        read_source_digest(path).map_err(FootprintBackendError::SourceResolution)?;
+    if size != source.source_size || digest != source.source_digest.as_str() {
         return Err(FootprintBackendError::RunnerProtocol(
-            "allowlisted footprint source changed",
+            "footprint source changed",
         ));
     }
     Ok(())
@@ -2090,7 +2158,7 @@ mod tests {
         assert!(repeated.matches(&prepared));
         let mut empty = good.clone();
         empty.pad_numbers = vec!["1".to_owned(), String::new()];
-        assert!(!empty.matches(&prepared));
+        assert!(empty.matches(&prepared));
         fs::remove_dir_all(root).unwrap();
     }
 

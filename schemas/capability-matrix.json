@@ -128,17 +128,19 @@
         "kicad_commit_change"
       ],
       "constraints": [
-        "closed server-owned footprint registry",
+        "canonical local library catalog under server path policy",
         "matching saved schematic",
-        "source digest binding"
+        "source digest binding",
+        "at most 128 physical pads and unique complete native child correspondence",
+        "non-default pad fabrication properties unsupported; official thermal QFN unaccepted"
       ],
       "evidence": {
-        "fixture": "source-bound-r0603",
+        "fixture": "installed-soic-project-alias-physical-pad-qfn-connected-ic-resistor",
         "tested_versions": [
           "10.0.6"
         ],
-        "command": "cargo test -p auto-kicad --lib",
-        "record": "crates/auto-kicad/src/footprint_authoring.rs"
+        "command": "cargo run -p auto-kicad --example check-general-footprints -- SERVER NEW_OUTPUT_DIR",
+        "record": "docs/acceptance/general-footprint-sources.md"
       }
     },
     {
@@ -153,16 +155,18 @@
       ],
       "constraints": [
         "same schematic revision",
-        "allowlisted sources",
-        "same-net pad connections"
+        "canonical local library sources with exact schematic binding",
+        "same-net pad connections",
+        "at most 128 physical pads and unique complete native child correspondence",
+        "non-default pad fabrication properties unsupported; official thermal QFN unaccepted"
       ],
       "evidence": {
-        "fixture": "connected-r0603-assembly",
+        "fixture": "installed-soic-project-alias-physical-pad-qfn-connected-ic-resistor",
         "tested_versions": [
           "10.0.6"
         ],
-        "command": "cargo test -p auto-kicad --lib",
-        "record": "crates/kicad-engine/src/lib.rs"
+        "command": "cargo run -p auto-kicad --example check-general-footprints -- SERVER NEW_OUTPUT_DIR",
+        "record": "docs/acceptance/general-footprint-sources.md"
       }
     },
     {
