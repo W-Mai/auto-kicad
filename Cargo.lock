@@ -431,6 +431,7 @@ dependencies = [
  "kicad-ipc",
  "kicad-model",
  "kicad-schematic",
+ "kiutils_sexpr",
  "serde",
  "serde_json",
  "sha2",

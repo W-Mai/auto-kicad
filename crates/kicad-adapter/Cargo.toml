@@ -9,6 +9,7 @@ kicad-ipc = { path = "../kicad-ipc" }
 kicad-model = { path = "../kicad-model" }
 kicad-schematic = { path = "../kicad-schematic" }
 hex = "0.4"
+kiutils_sexpr = "=0.1.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"

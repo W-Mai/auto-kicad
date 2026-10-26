@@ -44,6 +44,7 @@ use std::path::{Path, PathBuf};
 
 pub mod bindings;
 pub mod footprint;
+pub mod library_table;
 pub mod lifecycle;
 pub use footprint::{
     AllowlistedFootprint, DisabledFootprintRunner, DisposableFootprintContext,
