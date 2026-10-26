@@ -40,6 +40,16 @@ fn bind(
     created: &BTreeMap<String, String>,
 ) -> Result<(), Error> {
     match value {
+        Value::String(s) if s == "${outline_ids}" => {
+            *value = serde_json::to_value(
+                observed
+                    .context()
+                    .outline_targets
+                    .iter()
+                    .map(|o| &o.source_uuid)
+                    .collect::<Vec<_>>(),
+            )?;
+        }
         Value::String(s) if s == "${revision}" => {
             *s = observed.context().revision.as_str().to_owned()
         }
@@ -158,17 +168,14 @@ fn main() -> Result<(), Error> {
             let observed = observe_context(&mut client, &identity.board_filename, &board_id)?;
             bind(&mut value, &observed, &created)?;
             let request = GeometryRequest::from_json(&serde_json::to_string(&value)?)?;
-            if request.outline.is_some() || request.refill != RefillMode::All {
-                return Err(
-                    "this zone acceptance requires zone-only requests with refill all".into(),
-                );
+            if request.refill != RefillMode::All {
+                return Err("this acceptance requires refill all".into());
             }
             fs::write(
                 output.join(format!("request-{index}.json")),
                 serde_json::to_vec_pretty(&request)?,
             )?;
             let prepared = observed.prepare(&request)?;
-            let zones = prepared.zones().ok_or("expected zone mutation")?;
             let mut stale = request.clone();
             stale.observed_revision = kicad_model::RevisionDigest::new("f".repeat(64))?;
             if observed.prepare(&stale).is_ok() {
@@ -192,21 +199,35 @@ fn main() -> Result<(), Error> {
             let clusters = client.connected_pad_clusters(&identity.board_filename, &pads)?;
             let before_drc = drc(copy.board_path(), &policy)?;
             observed.verify_current(&mut client, &identity.board_filename)?;
-            let commit = client.begin_commit()?;
-            let receipts = match zones.apply_in_transaction(&mut client, &identity.board_filename) {
-                Ok(r) => r,
-                Err(e) => {
-                    client.drop_commit(&commit)?;
-                    return Err(e.into());
+            if index == 0 && request.outline.is_some() {
+                let cancelled = client.begin_commit()?;
+                let provisional =
+                    prepared.apply_in_transaction(&mut client, &identity.board_filename);
+                client.drop_commit(&cancelled)?;
+                provisional?;
+                observed.verify_current(&mut client, &identity.board_filename)?;
+                if !before_items.matches_saved(
+                    &client.capture_existing_board_items(&identity.board_filename)?,
+                )? {
+                    return Err("cancelled geometry changed original items".into());
                 }
-            };
-            client.commit_changes(&commit, "Apply explicit solid-zone request")?;
+            }
+            let commit = client.begin_commit()?;
+            let receipts =
+                match prepared.apply_in_transaction(&mut client, &identity.board_filename) {
+                    Ok(r) => r,
+                    Err(e) => {
+                        client.drop_commit(&commit)?;
+                        return Err(e.into());
+                    }
+                };
+            client.commit_changes(&commit, "Apply explicit geometry request")?;
             let mutated = observe_live_geometry(&mut client, &identity.board_filename)?;
-            zones.verify_definitions(&mutated, &receipts)?;
+            prepared.verify_definitions(&mutated, &receipts)?;
             client.save_board(&identity.board_filename)?;
             editor.reload_owned()?;
             let before_fill = observe_live_geometry(&mut client, &identity.board_filename)?;
-            zones.verify_definitions(&before_fill, &receipts)?;
+            prepared.verify_definitions(&before_fill, &receipts)?;
             client = fill(client, &identity.board_filename)?;
             let after_fill = observe_live_geometry(&mut client, &identity.board_filename)?;
             if RefillDefinitionEvidence::from_observation(&before_fill)?
@@ -220,11 +241,36 @@ fn main() -> Result<(), Error> {
             let independent = refill_closed_copy(copy.board_path(), &policy)
                 .map_err(|e| format!("independent fill: {e:?}"))?;
             let verified = VerifiedRefillContent::verify(&before_fill, &reloaded, &independent)?;
-            if !before_items
-                .matches_saved(&client.capture_existing_board_items(&identity.board_filename)?)?
-            {
-                return Err("zone edit changed tracks or graphics".into());
+            let removed = prepared
+                .compiled()
+                .outline()
+                .map(|o| o.removed_ids())
+                .unwrap_or(&[])
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            let added = receipts
+                .outlines()
+                .iter()
+                .map(|r| r.source_uuid.clone())
+                .collect::<Vec<_>>();
+            let items_after = client.capture_existing_board_items(&identity.board_filename)?;
+            let preserved = if request.outline.is_some() {
+                before_items.matches_after_outline_replacement(&items_after, &removed, &added)?
+            } else {
+                before_items.matches_saved(&items_after)?
+            };
+            if !preserved {
+                return Err("geometry changed unrelated tracks or graphics".into());
             }
+            let topology = if request.outline.is_some() {
+                Some(
+                    kicad_checks::outline::check_saved_outline(copy.board_path(), &policy)
+                        .map_err(|e| format!("native topology failed: {e:?}"))?,
+                )
+            } else {
+                None
+            };
             let current = client.capture_footprint_instance_templates(&identity.board_filename)?;
             if current.len() != footprints.len() {
                 return Err("zone edit changed footprint set".into());
@@ -259,10 +305,10 @@ fn main() -> Result<(), Error> {
                     None
                 }
             });
-            for (intent, receipt) in intents.zip(&receipts.created) {
+            for (intent, receipt) in intents.zip(&receipts.zones().created) {
                 created.insert(intent.to_string(), receipt.source_uuid().to_owned());
             }
-            let record = json!({"stage":index,"native_creation_ids":created,"refill_zone_ids":prepared.compiled().refill_zone_ids(),"affected_nets":prepared.compiled().affected_nets(),"verified":verified,"drc_delta":delta,"unconnected":after_drc.unconnected_items,"pad_count":pads.len(),"pad_clusters_preserved":true,"stale_request_refused":true});
+            let record = json!({"stage":index,"native_creation_ids":created,"outline_creation_ids":added,"native_topology":topology,"mixed_cancellation_verified":index==0 && request.outline.is_some(),"refill_zone_ids":prepared.compiled().refill_zone_ids(),"affected_nets":prepared.compiled().affected_nets(),"verified":verified,"drc_delta":delta,"unconnected":after_drc.unconnected_items,"pad_count":pads.len(),"pad_clusters_preserved":true,"stale_request_refused":true});
             fs::copy(
                 copy.board_path(),
                 output.join(format!("stage-{index}.kicad_pcb")),
@@ -282,7 +328,7 @@ fn main() -> Result<(), Error> {
         fs::write(
             output.join("result.json"),
             serde_json::to_vec_pretty(
-                &json!({"kicad_version":"10.0.7","pid":identity.pid,"stages":records,"restored_baseline":restored,"complete_intent_definitions_and_copper":true,"scope":"typed JSON compilation and native zone execution; combined outline/zone MCP approval/recovery is separate"}),
+                &json!({"kicad_version":"10.0.7","pid":identity.pid,"stages":records,"restored_baseline":restored,"complete_intent_definitions_and_copper":true,"scope":"typed JSON compilation and combined native geometry execution; MCP approval/recovery is separate"}),
             )?,
         )?;
         Ok(())

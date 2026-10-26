@@ -629,10 +629,41 @@ impl LiveBoardText {
         excluded: &std::collections::BTreeSet<String>,
         patches: &BTreeMap<String, kicad_ipc::SolidZonePatch>,
     ) -> Result<String, String> {
+        self.geometry_edit_digest(excluded, patches, &Default::default())
+    }
+
+    /// Exclusions are supplied only after exact native outline receipts have been verified.
+    pub(crate) fn geometry_edit_digest(
+        &self,
+        excluded: &std::collections::BTreeSet<String>,
+        patches: &BTreeMap<String, kicad_ipc::SolidZonePatch>,
+        outlines: &std::collections::BTreeSet<String>,
+    ) -> Result<String, String> {
         let root = self.cst.nodes.first().ok_or("missing board root")?;
         let fields = items(root)?;
         let mut kept = Vec::new();
+        let mut seen_outlines = std::collections::BTreeSet::new();
         for field in fields {
+            if matches!(field, Node::List { .. })
+                && matches!(
+                    tag(field)?,
+                    "gr_line" | "gr_arc" | "gr_circle" | "gr_rect" | "gr_poly"
+                )
+                && let Some(uuid) = unique_form(field, "uuid")?
+            {
+                let id = scalar(uuid)?;
+                if outlines.contains(id) {
+                    if scalar(unique_form(field, "layer")?.ok_or("outline layer missing")?)?
+                        != "Edge.Cuts"
+                        || !seen_outlines.insert(id)
+                    {
+                        return Err(
+                            "outline projection requires unique direct Edge.Cuts identities".into(),
+                        );
+                    }
+                    continue;
+                }
+            }
             let zone_id = if matches!(field, Node::List { .. }) && tag(field)? == "zone" {
                 self.zones.iter().find_map(|(id, e)| {
                     let Node::List { span, .. } = field else {
@@ -1055,5 +1086,71 @@ mod zone_edit_tests {
                 .zone_edit_digest(&excluded, &patches)
                 .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod mixed_geometry_tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn geometry_projection_excludes_only_explicit_direct_outline_objects() {
+        let parse =
+            |s: &str| LiveBoardText::parse(&format!("(kicad_pcb (version 20260206) {s})")).unwrap();
+        let base = r#"(gr_line (uuid keep) (layer "Edge.Cuts") (future 7))
+            (zone (uuid zone) (name before) (future 8))
+            (footprint (fp_line (uuid remove) (layer "Edge.Cuts") (future 9)))"#;
+        let old = format!(r#"{base} (gr_arc (uuid remove) (layer "Edge.Cuts") (future 10))"#);
+        let new = format!(
+            r#"{} (gr_line (uuid create) (layer "Edge.Cuts") (future 11))"#,
+            base.replace("name before", "name after")
+        );
+        let excluded = BTreeSet::new();
+        let outlines = BTreeSet::from(["remove".into(), "create".into()]);
+        let patches = BTreeMap::from([(
+            "zone".into(),
+            kicad_ipc::SolidZonePatch {
+                name: Some("after".into()),
+                ..Default::default()
+            },
+        )]);
+        let digest = |s: &str| parse(s).geometry_edit_digest(&excluded, &patches, &outlines);
+        assert_eq!(digest(&old).unwrap(), digest(&new).unwrap());
+        assert_ne!(
+            parse(&old).zone_edit_digest(&excluded, &patches).unwrap(),
+            parse(&new).zone_edit_digest(&excluded, &patches).unwrap()
+        );
+        for value in [7, 8, 9] {
+            assert_ne!(
+                digest(&old).unwrap(),
+                digest(&new.replace(
+                    &format!("future {value}"),
+                    &format!("future {}", value + 100)
+                ))
+                .unwrap()
+            );
+        }
+        for bad in [
+            new.replace(
+                "uuid create) (layer \"Edge.Cuts\"",
+                "uuid create) (layer \"Dwgs.User\"",
+            ),
+            new.replace("uuid create)", "uuid create) (uuid create)"),
+            format!(r#"{new} (gr_line (uuid create) (layer "Edge.Cuts"))"#),
+        ] {
+            assert!(digest(&bad).is_err());
+        }
+        for extra in [
+            r#"(future_shape (uuid create) (layer "Edge.Cuts"))"#,
+            r#"(gr_text (uuid create) (layer "Edge.Cuts"))"#,
+            r#"(footprint (gr_line (uuid create) (layer "Edge.Cuts")))"#,
+            r#"(segment (uuid create) (layer "F.Cu"))"#,
+        ] {
+            assert_ne!(
+                digest(&new).unwrap(),
+                digest(&format!("{new} {extra}")).unwrap()
+            );
+        }
     }
 }

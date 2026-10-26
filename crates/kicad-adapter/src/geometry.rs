@@ -16,6 +16,7 @@ use kicad_model::{
 #[derive(Clone, Debug)]
 pub struct PreparedGeometryChange {
     compiled: CompiledGeometryChange,
+    observation: GeometryObservation,
     zones: Option<PreparedSolidZoneEdits>,
 }
 
@@ -50,7 +51,7 @@ impl GeometryObservation {
         Ok(())
     }
     pub fn prepare(&self, request: &GeometryRequest) -> Result<PreparedGeometryChange, String> {
-        PreparedGeometryChange::new(request, &self.context, &self.live)
+        PreparedGeometryChange::new(request, self)
     }
 }
 
@@ -172,11 +173,9 @@ impl PreparedGeometryChange {
         self.zones.as_ref()
     }
 
-    fn new(
-        request: &GeometryRequest,
-        context: &GeometryContext,
-        observed: &LiveGeometryEvidence,
-    ) -> Result<Self, String> {
+    fn new(request: &GeometryRequest, observation: &GeometryObservation) -> Result<Self, String> {
+        let context = &observation.context;
+        let observed = &observation.live;
         let compiled = compile_geometry_change(request, context).map_err(|e| e.to_string())?;
         let mut edits = SolidZoneEdits::default();
         for change in &request.zones {
@@ -209,6 +208,153 @@ impl PreparedGeometryChange {
                 edits,
             )?)
         };
-        Ok(Self { compiled, zones })
+        Ok(Self {
+            compiled,
+            observation: observation.clone(),
+            zones,
+        })
+    }
+}
+
+/// Receipts are bound to one immutable request and constructed only by its native executor.
+#[derive(Clone, Debug)]
+pub struct GeometryMutationReceipts {
+    request: GeometryRequest,
+    zones: crate::zone_edits::SolidZoneMutationReceipts,
+    outlines: Vec<kicad_ipc::CreatedOutlineReceipt>,
+    deleted_outlines: Option<kicad_ipc::DeleteItemsReceipt>,
+}
+impl GeometryMutationReceipts {
+    pub fn zones(&self) -> &crate::zone_edits::SolidZoneMutationReceipts {
+        &self.zones
+    }
+    pub fn outlines(&self) -> &[kicad_ipc::CreatedOutlineReceipt] {
+        &self.outlines
+    }
+}
+
+impl PreparedGeometryChange {
+    /// Apply definitions inside a caller-owned commit; errors require cancellation and unchanged-state verification.
+    /// Successful receipts do not establish topology, refill, electrical correctness or source approval.
+    pub fn apply_in_transaction<T: KiCadTransport>(
+        &self,
+        client: &mut KiCadClient<T>,
+        filename: &str,
+    ) -> Result<GeometryMutationReceipts, String> {
+        self.observation.verify_current(client, filename)?;
+        let zones = match &self.zones {
+            Some(zones) => zones.apply_in_transaction(client, filename)?,
+            None => crate::zone_edits::SolidZoneMutationReceipts {
+                created: vec![],
+                updated: vec![],
+                deleted: None,
+            },
+        };
+        let mut outlines = vec![];
+        let mut deleted_outlines = None;
+        if let Some(outline) = self.compiled.outline() {
+            let ids = outline
+                .removed_ids()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+            if !ids.is_empty() {
+                let current = client
+                    .capture_board_geometry(filename)
+                    .map_err(|e| e.to_string())?;
+                deleted_outlines = Some(
+                    client
+                        .delete_outline_items(filename, &current, &ids)
+                        .map_err(|e| e.to_string())?,
+                );
+            }
+            let primitives = crate::outline::native_outline_primitives(outline);
+            if !primitives.is_empty() {
+                outlines = client
+                    .create_outline_primitives(filename, &primitives)
+                    .map_err(|e| e.to_string())?;
+            }
+        }
+        Ok(GeometryMutationReceipts {
+            request: self.compiled.request().clone(),
+            zones,
+            outlines,
+            deleted_outlines,
+        })
+    }
+
+    /// Verify complete native and unedited text definitions before refill, including after same-process reload.
+    pub fn verify_definitions(
+        &self,
+        after: &LiveGeometryEvidence,
+        receipts: &GeometryMutationReceipts,
+    ) -> Result<(), String> {
+        use kicad_ipc::DeleteItemsReceipt;
+        use std::collections::BTreeSet;
+        if &receipts.request != self.compiled.request() {
+            return Err("geometry receipts belong to a different request".into());
+        }
+        let before = &self.observation.live;
+        let removed = self
+            .compiled
+            .outline()
+            .map(|o| o.removed_ids())
+            .unwrap_or(&[])
+            .iter()
+            .map(ToString::to_string)
+            .collect::<BTreeSet<_>>();
+        let expected_count = self.compiled.outline().map_or(0, |o| o.primitives().len());
+        if receipts.outlines.len() != expected_count {
+            return Err("outline receipt count differs from compiled intent".into());
+        }
+        match (&receipts.deleted_outlines, removed.is_empty()) {
+            (None, true) => {}
+            (
+                Some(
+                    DeleteItemsReceipt::ExactItemStatuses { ids }
+                    | DeleteItemsReceipt::NeedsSavedVerification { ids },
+                ),
+                false,
+            ) if ids.len() == removed.len()
+                && ids.iter().cloned().collect::<BTreeSet<_>>() == removed => {}
+            _ => return Err("outline deletion receipt differs from compiled intent".into()),
+        }
+        let mut expected = before.native.shapes().clone();
+        for id in &removed {
+            if expected.remove(id).is_none() {
+                return Err("compiled outline removal target missing".into());
+            }
+        }
+        let mut exclusions = removed;
+        for (index, receipt) in receipts.outlines.iter().enumerate() {
+            if receipt.request_index != index
+                || receipt.native().id.as_ref().map(|id| id.value.as_str())
+                    != Some(receipt.source_uuid.as_str())
+                || before.native.shapes().contains_key(&receipt.source_uuid)
+                || before.native.zones().contains_key(&receipt.source_uuid)
+                || !exclusions.insert(receipt.source_uuid.clone())
+                || expected
+                    .insert(receipt.source_uuid.clone(), receipt.native().clone())
+                    .is_some()
+            {
+                return Err("outline receipt identity/index collides or differs".into());
+            }
+        }
+        let mut actual = after.native.shapes().clone();
+        for shape in expected.values_mut().chain(actual.values_mut()) {
+            shape.parent = None.into();
+        }
+        if expected != actual {
+            return Err("complete geometry graphics differ from native receipts".into());
+        }
+        let unchanged;
+        let zones = match &self.zones {
+            Some(zones) => zones,
+            None => {
+                unchanged = PreparedSolidZoneEdits::unchanged(before);
+                &unchanged
+            }
+        };
+        zones.verify_geometry_definitions(after, &receipts.zones, &exclusions)
     }
 }

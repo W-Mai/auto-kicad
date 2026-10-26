@@ -1,0 +1,391 @@
+[
+  {
+    "observed_revision": "${revision}",
+    "outline": {
+      "remove_ids": "${outline_ids}",
+      "loops": [
+        {
+          "loop_id": "curved-outer",
+          "width_nm": 50000,
+          "edges": [
+            {
+              "kind": "segment",
+              "start": {
+                "x_nm": 10000000,
+                "y_nm": 0
+              },
+              "end": {
+                "x_nm": 90000000,
+                "y_nm": 0
+              }
+            },
+            {
+              "kind": "arc",
+              "start": {
+                "x_nm": 90000000,
+                "y_nm": 0
+              },
+              "mid": {
+                "x_nm": 130000000,
+                "y_nm": 40000000
+              },
+              "end": {
+                "x_nm": 90000000,
+                "y_nm": 80000000
+              }
+            },
+            {
+              "kind": "segment",
+              "start": {
+                "x_nm": 90000000,
+                "y_nm": 80000000
+              },
+              "end": {
+                "x_nm": 10000000,
+                "y_nm": 80000000
+              }
+            },
+            {
+              "kind": "arc",
+              "start": {
+                "x_nm": 10000000,
+                "y_nm": 80000000
+              },
+              "mid": {
+                "x_nm": -30000000,
+                "y_nm": 40000000
+              },
+              "end": {
+                "x_nm": 10000000,
+                "y_nm": 0
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "zones": [
+      {
+        "kind": "create",
+        "zone_id": "created",
+        "definition": {
+          "name": "JSON concave zone",
+          "net": {
+            "net_id": "${net:GND}",
+            "name": "GND"
+          },
+          "layers": [
+            "F.Cu",
+            "In1.Cu"
+          ],
+          "polygon": {
+            "exterior": {
+              "points": [
+                {
+                  "x_nm": 10000000,
+                  "y_nm": 30000000
+                },
+                {
+                  "x_nm": 35000000,
+                  "y_nm": 30000000
+                },
+                {
+                  "x_nm": 35000000,
+                  "y_nm": 60000000
+                },
+                {
+                  "x_nm": 25000000,
+                  "y_nm": 60000000
+                },
+                {
+                  "x_nm": 25000000,
+                  "y_nm": 50000000
+                },
+                {
+                  "x_nm": 20000000,
+                  "y_nm": 50000000
+                },
+                {
+                  "x_nm": 20000000,
+                  "y_nm": 60000000
+                },
+                {
+                  "x_nm": 10000000,
+                  "y_nm": 60000000
+                }
+              ]
+            },
+            "holes": [
+              {
+                "points": [
+                  {
+                    "x_nm": 12000000,
+                    "y_nm": 32000000
+                  },
+                  {
+                    "x_nm": 16000000,
+                    "y_nm": 32000000
+                  },
+                  {
+                    "x_nm": 16000000,
+                    "y_nm": 36000000
+                  },
+                  {
+                    "x_nm": 12000000,
+                    "y_nm": 36000000
+                  }
+                ]
+              },
+              {
+                "points": [
+                  {
+                    "x_nm": 27000000,
+                    "y_nm": 40000000
+                  },
+                  {
+                    "x_nm": 31000000,
+                    "y_nm": 40000000
+                  },
+                  {
+                    "x_nm": 31000000,
+                    "y_nm": 44000000
+                  },
+                  {
+                    "x_nm": 27000000,
+                    "y_nm": 44000000
+                  }
+                ]
+              }
+            ]
+          },
+          "priority": 3,
+          "clearance_nm": 200000,
+          "min_thickness_nm": 200000,
+          "connection": "thermal",
+          "thermal_gap_nm": 500000,
+          "thermal_spoke_width_nm": 500000,
+          "island_removal": "below_area",
+          "min_island_area_nm2": 10000000000000
+        }
+      }
+    ],
+    "refill": "all"
+  },
+  {
+    "observed_revision": "${revision}",
+    "outline": {
+      "remove_ids": "${outline_ids}",
+      "loops": [
+        {
+          "loop_id": "rectangle",
+          "width_nm": 50000,
+          "edges": [
+            {
+              "kind": "segment",
+              "start": {
+                "x_nm": 0,
+                "y_nm": 0
+              },
+              "end": {
+                "x_nm": 100000000,
+                "y_nm": 0
+              }
+            },
+            {
+              "kind": "segment",
+              "start": {
+                "x_nm": 100000000,
+                "y_nm": 0
+              },
+              "end": {
+                "x_nm": 100000000,
+                "y_nm": 80000000
+              }
+            },
+            {
+              "kind": "segment",
+              "start": {
+                "x_nm": 100000000,
+                "y_nm": 80000000
+              },
+              "end": {
+                "x_nm": 0,
+                "y_nm": 80000000
+              }
+            },
+            {
+              "kind": "segment",
+              "start": {
+                "x_nm": 0,
+                "y_nm": 80000000
+              },
+              "end": {
+                "x_nm": 0,
+                "y_nm": 0
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "zones": [
+      {
+        "kind": "update",
+        "source_uuid": "${created:created}",
+        "patch": {
+          "name": "JSON patched zone",
+          "net": {
+            "net_id": "${net:VCC}",
+            "name": "VCC"
+          },
+          "layers": [
+            "F.Cu",
+            "B.Cu"
+          ],
+          "priority": 7,
+          "clearance_nm": 300000,
+          "min_thickness_nm": 150000,
+          "connection": "pth_thermal",
+          "thermal_gap_nm": 350000,
+          "thermal_spoke_width_nm": 400000,
+          "island_removal": "below_area",
+          "min_island_area_nm2": 2000000000000
+        }
+      }
+    ],
+    "refill": "all"
+  },
+  {
+    "observed_revision": "${revision}",
+    "outline": {
+      "remove_ids": "${outline_ids}",
+      "loops": [
+        {
+          "loop_id": "curved-outer",
+          "width_nm": 50000,
+          "edges": [
+            {
+              "kind": "segment",
+              "start": {
+                "x_nm": 10000000,
+                "y_nm": 0
+              },
+              "end": {
+                "x_nm": 90000000,
+                "y_nm": 0
+              }
+            },
+            {
+              "kind": "arc",
+              "start": {
+                "x_nm": 90000000,
+                "y_nm": 0
+              },
+              "mid": {
+                "x_nm": 130000000,
+                "y_nm": 40000000
+              },
+              "end": {
+                "x_nm": 90000000,
+                "y_nm": 80000000
+              }
+            },
+            {
+              "kind": "segment",
+              "start": {
+                "x_nm": 90000000,
+                "y_nm": 80000000
+              },
+              "end": {
+                "x_nm": 10000000,
+                "y_nm": 80000000
+              }
+            },
+            {
+              "kind": "arc",
+              "start": {
+                "x_nm": 10000000,
+                "y_nm": 80000000
+              },
+              "mid": {
+                "x_nm": -30000000,
+                "y_nm": 40000000
+              },
+              "end": {
+                "x_nm": 10000000,
+                "y_nm": 0
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "zones": [
+      {
+        "kind": "delete",
+        "source_uuid": "${created:created}"
+      }
+    ],
+    "refill": "all"
+  },
+  {
+    "observed_revision": "${revision}",
+    "outline": {
+      "remove_ids": "${outline_ids}",
+      "loops": [
+        {
+          "loop_id": "rectangle",
+          "width_nm": 50000,
+          "edges": [
+            {
+              "kind": "segment",
+              "start": {
+                "x_nm": 0,
+                "y_nm": 0
+              },
+              "end": {
+                "x_nm": 100000000,
+                "y_nm": 0
+              }
+            },
+            {
+              "kind": "segment",
+              "start": {
+                "x_nm": 100000000,
+                "y_nm": 0
+              },
+              "end": {
+                "x_nm": 100000000,
+                "y_nm": 80000000
+              }
+            },
+            {
+              "kind": "segment",
+              "start": {
+                "x_nm": 100000000,
+                "y_nm": 80000000
+              },
+              "end": {
+                "x_nm": 0,
+                "y_nm": 80000000
+              }
+            },
+            {
+              "kind": "segment",
+              "start": {
+                "x_nm": 0,
+                "y_nm": 80000000
+              },
+              "end": {
+                "x_nm": 0,
+                "y_nm": 0
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "zones": [],
+    "refill": "all"
+  }
+]

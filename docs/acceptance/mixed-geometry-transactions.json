@@ -1,0 +1,709 @@
+{
+  "kicad_version": "10.0.7",
+  "scope": "Combined native definition execution; public MCP writes and approval are not established",
+  "quality": {
+    "passed": 447,
+    "failed": 0,
+    "ignored": 15
+  },
+  "profiles": [
+    {
+      "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-mixed-geometry",
+      "pid": 42459,
+      "stages": [
+        {
+          "stage": 0,
+          "outline_creations": 4,
+          "mixed_cancellation": true,
+          "pad_count": 2,
+          "pad_clusters_preserved": true,
+          "unconnected": 2,
+          "introduced_drc": 0,
+          "unchanged_drc": 5,
+          "copper": {
+            "digest": "a3aa43e714d9f918c03edd53e52f8ebc0d7dcb0d41f48a880a6e8ca4b594a1aa",
+            "point_count": 1334,
+            "polygon_count": 5,
+            "zone_count": 4
+          },
+          "native_topology": {
+            "board_sha256": "41c7dcf64c4c03b0545a209ab285910db2bf2f8ce07c43919ee19f36846d120c",
+            "bounds_nm": [
+              -30000000,
+              0,
+              130000000,
+              80000000
+            ],
+            "chaining_epsilon_nm": 1,
+            "edge_count": 4,
+            "exact_endpoint_chains": true,
+            "filled_areas_nm2": [
+              1.1426340613986358e+16
+            ],
+            "holes": [
+              0
+            ],
+            "inferred_outline": false,
+            "kicad_version": "10.0.7",
+            "outer_count": 1,
+            "point_count": 202,
+            "project_sha256": "270b08bcf6ac1d95545a47ed72694b7d1016c8d55193226f433ce61cf3bc6c0f"
+          }
+        },
+        {
+          "stage": 1,
+          "outline_creations": 4,
+          "mixed_cancellation": false,
+          "pad_count": 2,
+          "pad_clusters_preserved": true,
+          "unconnected": 2,
+          "introduced_drc": 0,
+          "unchanged_drc": 5,
+          "copper": {
+            "digest": "b850ba73196351303ec40d16af4e71a40713b3e4cb44f61f2c97117ed17ea41c",
+            "point_count": 1312,
+            "polygon_count": 5,
+            "zone_count": 4
+          },
+          "native_topology": {
+            "board_sha256": "abfdfb94dc9c2be9c3b44cc2acca5c292d57e35a9a49a24bd3e40c120d55fcb2",
+            "bounds_nm": [
+              0,
+              0,
+              100000000,
+              80000000
+            ],
+            "chaining_epsilon_nm": 1,
+            "edge_count": 4,
+            "exact_endpoint_chains": true,
+            "filled_areas_nm2": [
+              8000000000000000.0
+            ],
+            "holes": [
+              0
+            ],
+            "inferred_outline": false,
+            "kicad_version": "10.0.7",
+            "outer_count": 1,
+            "point_count": 4,
+            "project_sha256": "270b08bcf6ac1d95545a47ed72694b7d1016c8d55193226f433ce61cf3bc6c0f"
+          }
+        },
+        {
+          "stage": 2,
+          "outline_creations": 4,
+          "mixed_cancellation": false,
+          "pad_count": 2,
+          "pad_clusters_preserved": true,
+          "unconnected": 2,
+          "introduced_drc": 0,
+          "unchanged_drc": 5,
+          "copper": {
+            "digest": "ae670083f17b49a83ae634e348412d81850aa5fc681ee6c706e7acdfabb43502",
+            "point_count": 924,
+            "polygon_count": 3,
+            "zone_count": 3
+          },
+          "native_topology": {
+            "board_sha256": "5f64167f8a40e11b4c33f62725c7ae2b929a722726f454b2db337143739658a6",
+            "bounds_nm": [
+              -30000000,
+              0,
+              130000000,
+              80000000
+            ],
+            "chaining_epsilon_nm": 1,
+            "edge_count": 4,
+            "exact_endpoint_chains": true,
+            "filled_areas_nm2": [
+              1.1426340613986358e+16
+            ],
+            "holes": [
+              0
+            ],
+            "inferred_outline": false,
+            "kicad_version": "10.0.7",
+            "outer_count": 1,
+            "point_count": 202,
+            "project_sha256": "270b08bcf6ac1d95545a47ed72694b7d1016c8d55193226f433ce61cf3bc6c0f"
+          }
+        },
+        {
+          "stage": 3,
+          "outline_creations": 4,
+          "mixed_cancellation": false,
+          "pad_count": 2,
+          "pad_clusters_preserved": true,
+          "unconnected": 2,
+          "introduced_drc": 0,
+          "unchanged_drc": 5,
+          "copper": {
+            "digest": "ae670083f17b49a83ae634e348412d81850aa5fc681ee6c706e7acdfabb43502",
+            "point_count": 924,
+            "polygon_count": 3,
+            "zone_count": 3
+          },
+          "native_topology": {
+            "board_sha256": "7c6c56a2c5be44120c1ba708aab24a1e3151ead0487abf22ed43419a61b2d68f",
+            "bounds_nm": [
+              0,
+              0,
+              100000000,
+              80000000
+            ],
+            "chaining_epsilon_nm": 1,
+            "edge_count": 4,
+            "exact_endpoint_chains": true,
+            "filled_areas_nm2": [
+              8000000000000000.0
+            ],
+            "holes": [
+              0
+            ],
+            "inferred_outline": false,
+            "kicad_version": "10.0.7",
+            "outer_count": 1,
+            "point_count": 4,
+            "project_sha256": "270b08bcf6ac1d95545a47ed72694b7d1016c8d55193226f433ce61cf3bc6c0f"
+          }
+        }
+      ],
+      "restored_baseline": false,
+      "independent_reader": {
+        "records": [
+          {
+            "file": "stage-0.kicad_pcb",
+            "sha256": "41c7dcf64c4c03b0545a209ab285910db2bf2f8ce07c43919ee19f36846d120c",
+            "mutations": [
+              {
+                "kind": "create",
+                "uuid": "50eb10da-fe6f-4b9a-a171-211334d3b327",
+                "fields": {
+                  "name": "JSON concave zone",
+                  "net": "GND",
+                  "layers": [
+                    0,
+                    4
+                  ],
+                  "polygon": {
+                    "exterior": {
+                      "points": [
+                        {
+                          "x_nm": 10000000,
+                          "y_nm": 30000000
+                        },
+                        {
+                          "x_nm": 35000000,
+                          "y_nm": 30000000
+                        },
+                        {
+                          "x_nm": 35000000,
+                          "y_nm": 60000000
+                        },
+                        {
+                          "x_nm": 25000000,
+                          "y_nm": 60000000
+                        },
+                        {
+                          "x_nm": 25000000,
+                          "y_nm": 50000000
+                        },
+                        {
+                          "x_nm": 20000000,
+                          "y_nm": 50000000
+                        },
+                        {
+                          "x_nm": 20000000,
+                          "y_nm": 60000000
+                        },
+                        {
+                          "x_nm": 10000000,
+                          "y_nm": 60000000
+                        }
+                      ]
+                    },
+                    "holes": [
+                      {
+                        "points": [
+                          {
+                            "x_nm": 12000000,
+                            "y_nm": 32000000
+                          },
+                          {
+                            "x_nm": 16000000,
+                            "y_nm": 32000000
+                          },
+                          {
+                            "x_nm": 16000000,
+                            "y_nm": 36000000
+                          },
+                          {
+                            "x_nm": 12000000,
+                            "y_nm": 36000000
+                          }
+                        ]
+                      },
+                      {
+                        "points": [
+                          {
+                            "x_nm": 27000000,
+                            "y_nm": 40000000
+                          },
+                          {
+                            "x_nm": 31000000,
+                            "y_nm": 40000000
+                          },
+                          {
+                            "x_nm": 31000000,
+                            "y_nm": 44000000
+                          },
+                          {
+                            "x_nm": 27000000,
+                            "y_nm": 44000000
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "priority": 3,
+                  "clearance_nm": 200000,
+                  "min_thickness_nm": 200000,
+                  "connection": 1,
+                  "thermal_gap_nm": 500000,
+                  "thermal_spoke_width_nm": 500000,
+                  "island_removal": 2,
+                  "min_island_area_nm2": 10000000000000
+                }
+              }
+            ],
+            "outlines": [
+              {
+                "uuid": "cb1f6f54-0678-4ce2-be06-07c303443a50",
+                "intent": {
+                  "edge": {
+                    "kind": "segment",
+                    "start": {
+                      "x_nm": 10000000,
+                      "y_nm": 0
+                    },
+                    "end": {
+                      "x_nm": 90000000,
+                      "y_nm": 0
+                    }
+                  },
+                  "width_nm": 50000
+                }
+              },
+              {
+                "uuid": "4a5bf622-125b-42f1-8b62-5482332924cb",
+                "intent": {
+                  "edge": {
+                    "kind": "arc",
+                    "start": {
+                      "x_nm": 90000000,
+                      "y_nm": 0
+                    },
+                    "mid": {
+                      "x_nm": 130000000,
+                      "y_nm": 40000000
+                    },
+                    "end": {
+                      "x_nm": 90000000,
+                      "y_nm": 80000000
+                    }
+                  },
+                  "width_nm": 50000
+                }
+              },
+              {
+                "uuid": "5b68e98f-d116-4e00-8674-afcf75e694eb",
+                "intent": {
+                  "edge": {
+                    "kind": "segment",
+                    "start": {
+                      "x_nm": 90000000,
+                      "y_nm": 80000000
+                    },
+                    "end": {
+                      "x_nm": 10000000,
+                      "y_nm": 80000000
+                    }
+                  },
+                  "width_nm": 50000
+                }
+              },
+              {
+                "uuid": "d8f1cf27-0523-41df-8d14-078e62b7df61",
+                "intent": {
+                  "edge": {
+                    "kind": "arc",
+                    "start": {
+                      "x_nm": 10000000,
+                      "y_nm": 80000000
+                    },
+                    "mid": {
+                      "x_nm": -30000000,
+                      "y_nm": 40000000
+                    },
+                    "end": {
+                      "x_nm": 10000000,
+                      "y_nm": 0
+                    }
+                  },
+                  "width_nm": 50000
+                }
+              }
+            ]
+          },
+          {
+            "file": "stage-1.kicad_pcb",
+            "sha256": "abfdfb94dc9c2be9c3b44cc2acca5c292d57e35a9a49a24bd3e40c120d55fcb2",
+            "mutations": [
+              {
+                "kind": "update",
+                "uuid": "50eb10da-fe6f-4b9a-a171-211334d3b327",
+                "fields": {
+                  "name": "JSON patched zone",
+                  "net": "VCC",
+                  "layers": [
+                    0,
+                    2
+                  ],
+                  "priority": 7,
+                  "clearance_nm": 300000,
+                  "min_thickness_nm": 150000,
+                  "connection": 3,
+                  "thermal_gap_nm": 350000,
+                  "thermal_spoke_width_nm": 400000,
+                  "island_removal": 2,
+                  "min_island_area_nm2": 2000000000000
+                }
+              }
+            ],
+            "outlines": [
+              {
+                "uuid": "eafb6237-dcd4-4f3e-a1b2-c0a3e88ae36d",
+                "intent": {
+                  "edge": {
+                    "kind": "segment",
+                    "start": {
+                      "x_nm": 0,
+                      "y_nm": 0
+                    },
+                    "end": {
+                      "x_nm": 100000000,
+                      "y_nm": 0
+                    }
+                  },
+                  "width_nm": 50000
+                }
+              },
+              {
+                "uuid": "0e4ab8af-c658-4172-909c-6ab67ecf8b40",
+                "intent": {
+                  "edge": {
+                    "kind": "segment",
+                    "start": {
+                      "x_nm": 100000000,
+                      "y_nm": 0
+                    },
+                    "end": {
+                      "x_nm": 100000000,
+                      "y_nm": 80000000
+                    }
+                  },
+                  "width_nm": 50000
+                }
+              },
+              {
+                "uuid": "4057fd62-c2de-47bd-9c68-0655ebf98a20",
+                "intent": {
+                  "edge": {
+                    "kind": "segment",
+                    "start": {
+                      "x_nm": 100000000,
+                      "y_nm": 80000000
+                    },
+                    "end": {
+                      "x_nm": 0,
+                      "y_nm": 80000000
+                    }
+                  },
+                  "width_nm": 50000
+                }
+              },
+              {
+                "uuid": "b468b797-e6a2-4ed0-a00a-a009bcbea858",
+                "intent": {
+                  "edge": {
+                    "kind": "segment",
+                    "start": {
+                      "x_nm": 0,
+                      "y_nm": 80000000
+                    },
+                    "end": {
+                      "x_nm": 0,
+                      "y_nm": 0
+                    }
+                  },
+                  "width_nm": 50000
+                }
+              }
+            ]
+          },
+          {
+            "file": "stage-2.kicad_pcb",
+            "sha256": "5f64167f8a40e11b4c33f62725c7ae2b929a722726f454b2db337143739658a6",
+            "mutations": [
+              {
+                "kind": "delete",
+                "uuid": "50eb10da-fe6f-4b9a-a171-211334d3b327",
+                "fields": null
+              }
+            ],
+            "outlines": [
+              {
+                "uuid": "4c93e63c-1fb5-4db6-b0e4-586ef41c7bf3",
+                "intent": {
+                  "edge": {
+                    "kind": "segment",
+                    "start": {
+                      "x_nm": 10000000,
+                      "y_nm": 0
+                    },
+                    "end": {
+                      "x_nm": 90000000,
+                      "y_nm": 0
+                    }
+                  },
+                  "width_nm": 50000
+                }
+              },
+              {
+                "uuid": "7b775597-1617-4335-a401-ca4b809cf153",
+                "intent": {
+                  "edge": {
+                    "kind": "arc",
+                    "start": {
+                      "x_nm": 90000000,
+                      "y_nm": 0
+                    },
+                    "mid": {
+                      "x_nm": 130000000,
+                      "y_nm": 40000000
+                    },
+                    "end": {
+                      "x_nm": 90000000,
+                      "y_nm": 80000000
+                    }
+                  },
+                  "width_nm": 50000
+                }
+              },
+              {
+                "uuid": "5147c38b-d22e-4b89-81be-8d625757524b",
+                "intent": {
+                  "edge": {
+                    "kind": "segment",
+                    "start": {
+                      "x_nm": 90000000,
+                      "y_nm": 80000000
+                    },
+                    "end": {
+                      "x_nm": 10000000,
+                      "y_nm": 80000000
+                    }
+                  },
+                  "width_nm": 50000
+                }
+              },
+              {
+                "uuid": "0ac0b9db-1ac0-448c-80b0-75bc5c475adf",
+                "intent": {
+                  "edge": {
+                    "kind": "arc",
+                    "start": {
+                      "x_nm": 10000000,
+                      "y_nm": 80000000
+                    },
+                    "mid": {
+                      "x_nm": -30000000,
+                      "y_nm": 40000000
+                    },
+                    "end": {
+                      "x_nm": 10000000,
+                      "y_nm": 0
+                    }
+                  },
+                  "width_nm": 50000
+                }
+              }
+            ]
+          },
+          {
+            "file": "stage-3.kicad_pcb",
+            "sha256": "7c6c56a2c5be44120c1ba708aab24a1e3151ead0487abf22ed43419a61b2d68f",
+            "mutations": [],
+            "outlines": [
+              {
+                "uuid": "f3be2f47-a412-4d53-beec-432dec0edf5b",
+                "intent": {
+                  "edge": {
+                    "kind": "segment",
+                    "start": {
+                      "x_nm": 0,
+                      "y_nm": 0
+                    },
+                    "end": {
+                      "x_nm": 100000000,
+                      "y_nm": 0
+                    }
+                  },
+                  "width_nm": 50000
+                }
+              },
+              {
+                "uuid": "6d04864e-f1cf-4965-846f-78de5880df06",
+                "intent": {
+                  "edge": {
+                    "kind": "segment",
+                    "start": {
+                      "x_nm": 100000000,
+                      "y_nm": 0
+                    },
+                    "end": {
+                      "x_nm": 100000000,
+                      "y_nm": 80000000
+                    }
+                  },
+                  "width_nm": 50000
+                }
+              },
+              {
+                "uuid": "85ef2b76-d0f4-4875-a6a0-ad4f1d35013d",
+                "intent": {
+                  "edge": {
+                    "kind": "segment",
+                    "start": {
+                      "x_nm": 100000000,
+                      "y_nm": 80000000
+                    },
+                    "end": {
+                      "x_nm": 0,
+                      "y_nm": 80000000
+                    }
+                  },
+                  "width_nm": 50000
+                }
+              },
+              {
+                "uuid": "60bf5e01-9e56-4c28-81f5-f303a6f86b5e",
+                "intent": {
+                  "edge": {
+                    "kind": "segment",
+                    "start": {
+                      "x_nm": 0,
+                      "y_nm": 80000000
+                    },
+                    "end": {
+                      "x_nm": 0,
+                      "y_nm": 0
+                    }
+                  },
+                  "width_nm": 50000
+                }
+              }
+            ]
+          }
+        ],
+        "exact_intent": true,
+        "read_only": true
+      },
+      "cleanup": {
+        "closed": true,
+        "owned_pid": 42459,
+        "source_unchanged": true
+      }
+    },
+    {
+      "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-composed-geometry-cm5",
+      "pid": 47454,
+      "stages": [
+        {
+          "stage": 0,
+          "outline_creations": 0,
+          "mixed_cancellation": false,
+          "pad_count": 633,
+          "pad_clusters_preserved": true,
+          "unconnected": 0,
+          "introduced_drc": 0,
+          "unchanged_drc": 171,
+          "copper": {
+            "digest": "9b68b4ce25a25ac8b1a33777048c402c31c58e4f563c44664a985b40e7518292",
+            "point_count": 90184,
+            "polygon_count": 31,
+            "zone_count": 14
+          },
+          "native_topology": null
+        },
+        {
+          "stage": 1,
+          "outline_creations": 0,
+          "mixed_cancellation": false,
+          "pad_count": 633,
+          "pad_clusters_preserved": true,
+          "unconnected": 0,
+          "introduced_drc": 0,
+          "unchanged_drc": 171,
+          "copper": {
+            "digest": "91fd28db41462086498e5e6b9b6a708074d86e2483a85bbed58ccd57d038b635",
+            "point_count": 90184,
+            "polygon_count": 31,
+            "zone_count": 14
+          },
+          "native_topology": null
+        }
+      ],
+      "restored_baseline": true,
+      "independent_reader": {
+        "records": [
+          {
+            "file": "stage-0.kicad_pcb",
+            "sha256": "f6f5f02a95a0a0f2e068b0899c2700588a73992eb944a4714bad5b58db80a3a8",
+            "mutations": [
+              {
+                "kind": "update",
+                "uuid": "2a1e1815-500f-4664-a2ef-ed3623186aa5",
+                "fields": {
+                  "clearance_nm": 160000
+                }
+              }
+            ],
+            "outlines": []
+          },
+          {
+            "file": "stage-1.kicad_pcb",
+            "sha256": "5ba90a24e2ea361dd1183b371005ea6d951b25f98153a0583f56a260fb073761",
+            "mutations": [
+              {
+                "kind": "update",
+                "uuid": "2a1e1815-500f-4664-a2ef-ed3623186aa5",
+                "fields": {
+                  "clearance_nm": 150000
+                }
+              }
+            ],
+            "outlines": []
+          }
+        ],
+        "exact_intent": true,
+        "read_only": true
+      },
+      "cleanup": {
+        "closed": true,
+        "owned_pid": 47454,
+        "source_unchanged": true
+      }
+    }
+  ]
+}

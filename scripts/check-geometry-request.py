@@ -84,9 +84,33 @@ def main():
                 assert identifier in zones
                 fields = check(board, zones[identifier], expected)
             mutations.append(dict(kind=edit['kind'], uuid=identifier, fields=fields))
+        outline_fields = []
+        if request.get('outline'):
+            shapes = {str(s.m_Uuid.AsString()): s for s in board.GetDrawings()}
+            intent = [dict(edge=edge, width_nm=loop['width_nm'])
+                      for loop in request['outline']['loops'] for edge in loop['edges']]
+            assert len(intent) == len(record['outline_creation_ids'])
+            assert not set(request['outline']['remove_ids']) & set(shapes)
+            for expected, identifier in zip(intent, record['outline_creation_ids']):
+                shape = shapes[identifier]
+                assert shape.GetLayer() == pcbnew.Edge_Cuts
+                assert not shape.IsLocked()
+                assert shape.GetWidth() == expected['width_nm']
+                edge = expected['edge']
+                point = lambda p: dict(x_nm=p.x, y_nm=p.y)
+                if edge['kind'] == 'segment':
+                    assert shape.GetShape() == pcbnew.SHAPE_T_SEGMENT
+                    assert point(shape.GetStart()) == edge['start']
+                    assert point(shape.GetEnd()) == edge['end']
+                else:
+                    assert edge['kind'] == 'arc' and shape.GetShape() == pcbnew.SHAPE_T_ARC
+                    assert point(shape.GetArcMid()) == edge['mid']
+                    endpoints = [point(shape.GetStart()), point(shape.GetEnd())]
+                    assert endpoints == [edge['start'], edge['end']] or endpoints == [edge['end'], edge['start']]
+                outline_fields.append(dict(uuid=identifier, intent=expected))
         assert path.read_bytes() == before
         records.append(dict(file=path.name, sha256=hashlib.sha256(before).hexdigest(),
-                            mutations=mutations))
+                            mutations=mutations, outlines=outline_fields))
     evidence = dict(records=records, exact_intent=True, read_only=True)
     (output / 'independent-saved-intent.json').write_text(json.dumps(evidence, indent=2) + '\n')
     print(json.dumps(dict(verified_saved_files=len(records), exact_intent=True, read_only=True)))

@@ -96,6 +96,22 @@ impl PreparedSolidZoneEdits {
         after: &LiveGeometryEvidence,
         receipts: &SolidZoneMutationReceipts,
     ) -> Result<(), String> {
+        self.verify_geometry_definitions(after, receipts, &BTreeSet::new())
+    }
+
+    pub(crate) fn unchanged(before: &LiveGeometryEvidence) -> Self {
+        Self {
+            before: before.clone(),
+            edits: SolidZoneEdits::default(),
+        }
+    }
+
+    pub(crate) fn verify_geometry_definitions(
+        &self,
+        after: &LiveGeometryEvidence,
+        receipts: &SolidZoneMutationReceipts,
+        outlines: &BTreeSet<String>,
+    ) -> Result<(), String> {
         after.text.validate_native_zones(&after.native)?;
         let mut zones = self.before.native.zones().clone();
         let mut excluded = self
@@ -183,6 +199,8 @@ impl PreparedSolidZoneEdits {
         }
         let mut shapes = self.before.native.shapes().clone();
         let mut after_shapes = after.native.shapes().clone();
+        shapes.retain(|id, _| !outlines.contains(id));
+        after_shapes.retain(|id, _| !outlines.contains(id));
         for shape in shapes.values_mut().chain(after_shapes.values_mut()) {
             shape.parent = None.into();
         }
@@ -190,9 +208,14 @@ impl PreparedSolidZoneEdits {
             return Err("zone edit changed board graphics".into());
         }
         let patches = self.edits.updates.iter().cloned().collect();
-        if self.before.text.zone_edit_digest(&excluded, &patches)?
-            != after.text.zone_edit_digest(&excluded, &patches)?
-        {
+        let digest = |text: &crate::live_geometry::LiveBoardText| {
+            if outlines.is_empty() {
+                text.zone_edit_digest(&excluded, &patches)
+            } else {
+                text.geometry_edit_digest(&excluded, &patches, outlines)
+            }
+        };
+        if digest(&self.before.text)? != digest(&after.text)? {
             return Err("zone mutation changed unedited live-text fields".into());
         }
         Ok(())
