@@ -6079,6 +6079,7 @@ mod tests {
         {
             let mut pad = board_types::Pad::parse_from_bytes(&item.value).unwrap();
             pad.position.as_mut().unwrap().x_nm += index as i64;
+            pad.fab_property = board_types::PadFabricationProperty::PFP_HEATSINK.into();
             item.value = pad.write_to_bytes().unwrap();
         }
         native.definition.as_mut().unwrap().items.push(Any {
@@ -6132,7 +6133,24 @@ mod tests {
         assert!(matches(&created).unwrap());
         created.definition.as_mut().unwrap().items.reverse();
         assert!(matches(&created).unwrap());
-        for mutation in 0..4 {
+        assert_eq!(template.pad_fabrication_properties().unwrap().len(), 3);
+        for property in [0, 99] {
+            let mut missing = created.clone();
+            let item = missing
+                .definition
+                .as_mut()
+                .unwrap()
+                .items
+                .iter_mut()
+                .find(|item| item.type_url == PAD_TYPE_URL)
+                .unwrap();
+            let mut pad = board_types::Pad::parse_from_bytes(&item.value).unwrap();
+            pad.fab_property = protobuf::EnumOrUnknown::from_i32(property);
+            item.value = pad.write_to_bytes().unwrap();
+            assert!(wrap(&missing).pad_fabrication_properties().is_err());
+            assert!(!matches(&missing).unwrap());
+        }
+        for mutation in 0..5 {
             let mut changed = created.clone();
             let items = &mut changed.definition.as_mut().unwrap().items;
             match mutation {
@@ -6155,6 +6173,8 @@ mod tests {
                     let mut pad = board_types::Pad::parse_from_bytes(&item.value).unwrap();
                     if mutation == 2 {
                         pad.number = "wrong-physical-pad".into();
+                    } else if mutation == 4 {
+                        pad.fab_property = board_types::PadFabricationProperty::PFP_NONE.into();
                     } else {
                         pad.net.as_mut().unwrap().name = "wrong-net".into();
                     }

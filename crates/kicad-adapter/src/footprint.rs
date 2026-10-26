@@ -9,7 +9,7 @@ use kicad_ipc::{
 use kicad_model::{AllowlistedFootprintPlacement, FootprintLibraryIdentifier, RevisionDigest};
 #[cfg(test)]
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::fs;
 use std::io::{Read, Write};
@@ -532,6 +532,7 @@ struct FootprintHelperPostcondition {
     position: kicad_model::Coordinate,
     pad_count: usize,
     pad_numbers: Vec<String>,
+    pad_fabrication_properties: BTreeMap<String, i32>,
     saved: bool,
     reopened: bool,
     source_digest: RevisionDigest,
@@ -569,6 +570,7 @@ impl FootprintHelperPostcondition {
             "position",
             "pad_count",
             "pad_numbers",
+            "pad_fabrication_properties",
             "saved",
             "reopened",
             "source_digest",
@@ -655,6 +657,20 @@ impl FootprintHelperPostcondition {
                     .ok_or(FootprintBackendError::RunnerProtocol("pad number"))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let pad_fabrication_properties: BTreeMap<String, i32> =
+            serde_json::from_value(object.get("pad_fabrication_properties").cloned().ok_or(
+                FootprintBackendError::RunnerProtocol("pad fabrication properties missing"),
+            )?)
+            .map_err(|_| FootprintBackendError::RunnerProtocol("pad fabrication properties"))?;
+        if pad_fabrication_properties.len() != pad_numbers.len()
+            || pad_fabrication_properties
+                .iter()
+                .any(|(id, value)| !is_uuid(id) || !(1..=9).contains(value))
+        {
+            return Err(FootprintBackendError::RunnerProtocol(
+                "pad fabrication property identity",
+            ));
+        }
         let pad_count = object
             .get("pad_count")
             .and_then(serde_json::Value::as_u64)
@@ -684,6 +700,7 @@ impl FootprintHelperPostcondition {
             },
             pad_count,
             pad_numbers,
+            pad_fabrication_properties,
             saved: boolean("saved")?,
             reopened: boolean("reopened")?,
             source_digest,
@@ -1094,6 +1111,13 @@ pub fn capture_source_footprint_template(
             .ok_or(FootprintBackendError::TemplateNotFound)?;
         if matches.next().is_some() {
             return Err(FootprintBackendError::TemplateNotFound);
+        }
+        if template
+            .pad_fabrication_properties()
+            .map_err(|e| FootprintBackendError::Ipc(e.to_string()))?
+            != helper.pad_fabrication_properties
+        {
+            return Err(FootprintBackendError::PostconditionMismatch);
         }
         verify_source_provenance(&request)?;
         Ok(SourceFootprintTemplate {

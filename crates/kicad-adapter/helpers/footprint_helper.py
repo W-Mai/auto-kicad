@@ -61,6 +61,29 @@ def source_digest(path):
     return len(data), hashlib.sha256(data).hexdigest()
 
 
+
+def fabrication_properties(footprint):
+    # Explicit protobuf values; pcbnew enum ordinals are not a wire contract.
+    wire = {
+        pcbnew.PAD_PROP_NONE: 1,
+        pcbnew.PAD_PROP_BGA: 2,
+        pcbnew.PAD_PROP_FIDUCIAL_GLBL: 3,
+        pcbnew.PAD_PROP_FIDUCIAL_LOCAL: 4,
+        pcbnew.PAD_PROP_TESTPOINT: 5,
+        pcbnew.PAD_PROP_HEATSINK: 6,
+        pcbnew.PAD_PROP_CASTELLATED: 7,
+        pcbnew.PAD_PROP_MECHANICAL: 8,
+        pcbnew.PAD_PROP_PRESSFIT: 9,
+    }
+    properties = {}
+    for pad in footprint.Pads():
+        identity = pad.m_Uuid.AsString()
+        if not identity or identity in properties or pad.GetProperty() not in wire:
+            fail("invalid physical pad fabrication property")
+        properties[identity] = wire[pad.GetProperty()]
+    return properties
+
+
 def main():
     if sys.argv[1:] != ["--fixed-footprint-placement-v2"]:
         fail("unsupported arguments")
@@ -114,8 +137,7 @@ def main():
     loaded_id = footprint.GetFPID()
     if str(loaded_id.GetLibItemName()) != identifier["entry_name"]:
         fail("loaded footprint library entry is not proven")
-    if any(pad.GetProperty() != pcbnew.PAD_PROP_NONE for pad in footprint.Pads()):
-        fail("unsupported pad fabrication property: KiCad IPC cannot preserve this source")
+    properties = fabrication_properties(footprint)
     footprint.SetFPID(pcbnew.LIB_ID(identifier["nickname"], identifier["entry_name"]))
     footprint.SetReference(request["reference"])
     footprint.SetValue(request["value"])
@@ -138,6 +160,8 @@ def main():
     if len(matches) != 1:
         fail("footprint identity is not unique")
     candidate = matches[0]
+    if fabrication_properties(candidate) != properties:
+        fail("saved pad fabrication properties changed")
     pad_numbers = sorted(str(pad.GetNumber()) for pad in candidate.Pads())
     if not pad_numbers or len(pad_numbers) > 128:
         fail("pad identity is invalid")
@@ -148,6 +172,7 @@ def main():
         "position": position,
         "pad_count": len(pad_numbers),
         "pad_numbers": pad_numbers,
+        "pad_fabrication_properties": properties,
         "saved": True,
         "reopened": True,
         "source_digest": digest,

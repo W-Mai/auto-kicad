@@ -9,6 +9,7 @@ fn main() {
             "proto/common/commands/editor_commands.proto",
             "proto/common/types/base_types.proto",
             "proto/common/types/enums.proto",
+            "proto/common/types/embedded_files.proto",
             "proto/common/types/project_settings.proto",
             "proto/board/board.proto",
             "proto/board/board_types.proto",

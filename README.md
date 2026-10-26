@@ -13,7 +13,7 @@ codex mcp get auto-kicad
 
 The installer copies the executable into `~/.local/lib/auto-kicad` and writes a launcher into `~/.local/bin`. `--prefix` selects another installation root. The launcher adds the macOS KiCad CLI directory to `PATH`; the embedded fixed footprint helper needs no source checkout. KiCad and its bundled Python runtime must remain installed. The build directory can be removed after installation and verification. Restart the Codex session to load the registered server. Set `tool_timeout_sec = 180` under `[mcp_servers.auto-kicad]` in the Codex configuration to allow editor startup, reload and DRC.
 
-The server uses MCP over standard input/output. Configure an MCP client to launch the built executable. KiCad 10.0.6 is the verified protocol baseline. Enable the KiCad IPC API and open the target PCB before using board tools. The endpoint identifies the editor instance; on macOS it is normally under `/tmp/kicad/`.
+The server uses MCP over standard input/output. Configure an MCP client to launch the built executable. KiCad 10.0.7 is the verified protocol baseline. Enable the KiCad IPC API and open the target PCB before using board tools. The endpoint identifies the editor instance; on macOS it is normally under `/tmp/kicad/`.
 
 ## Board workflow
 
@@ -37,7 +37,7 @@ PCB and schematic commits acquire an OS writer lock in `.auto-kicad-writer.lock`
 
 ## Footprint sources
 
-Placement resolves exact local KiCad project/global library identifiers and aliases. The legacy resistor, LED and Type-C mappings remain compatible. Sources with unsupported geometry or pad fabrication properties reject; the official thermal QFN is not supported through KiCad 10 IPC. See [source configuration, bounds and actual acceptance](docs/acceptance/general-footprint-sources.md). Save and close the same-named `.kicad_sch` before planning. Its reference, value and footprint field must match the request. The preview returns the source-bound operations for review.
+Placement resolves exact local KiCad project/global library identifiers and aliases. The legacy resistor, LED and Type-C mappings remain compatible. Sources with unsupported geometry or unverified native fabrication properties reject. KiCad 10.0.7 preserves the official thermal QFN’s physical pads and heatsink properties through creation and saved reload. See [source configuration, bounds and actual acceptance](docs/acceptance/general-footprint-sources.md). Save and close the same-named `.kicad_sch` before planning. Its reference, value and footprint field must match the request. The preview returns the source-bound operations for review.
 
 Existing footprint movement and rotation use `move_footprint` in `kicad_plan_change`. Read `placement_id`, native `source_uuid` and `observed_revision` from `kicad_inspect_project` → `data.pcb`. Supply optional paired `x_nm`/`y_nm` absolute coordinates, optional `orientation_mdeg`, or both. At least one transform is required. Orientation is normalized modulo 360000; `copper_tolerance_nm` defaults to 250000 and is bounded to 1–250000. Connected tracks/vias, zones, unsupported copper and unsupported child geometry reject. Accepted changes preserve native identities, rigid child geometry, nets and associations, then pass full saved/reloaded state and DRC checks. Front and back transforms have passed actual KiCad 10.0.6 + stdio MCP acceptance. See [the request contract, limits and reproducible evidence](docs/acceptance/existing-footprint-transform.md).
 

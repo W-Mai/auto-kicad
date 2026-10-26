@@ -1,20 +1,21 @@
 {
-  "kicad_version": "10.0.6",
+  "kicad_version": "10.0.7",
   "backend": "production stdio MCP and native IPC",
-  "scope": "general source resolution and supported footprint creation; official thermal QFN is unsupported",
+  "scope": "general source resolution and footprint creation including official thermal QFN",
   "cases": [
     "installed",
     "alias",
     "qfn",
+    "official-thermal-qfn",
     "connected"
   ],
-  "footprints": 5,
-  "physical_pads": 78,
+  "footprints": 6,
+  "physical_pads": 130,
   "qfn_physical_pads": 52,
   "qfn_unnumbered_pads": 9,
   "qfn_pad33_instances": 11,
-  "qfn_source": "project fixture without fabrication attributes",
-  "official_thermal_qfn": "unsupported; rejected without mutation",
+  "official_qfn_heatsink_pads": 11,
+  "official_thermal_qfn": "unmodified installed source accepted; native fabrication properties verified",
   "introduced_drc": 0,
   "unconnected_items": 0,
   "table_and_source_drift_rejected": true,
@@ -25,5 +26,42 @@
     "owned_editor_closed": true,
     "owned_shadow_cleaned": true
   },
-  "result_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m3-source-contract/result/board.kicad_pcb"
+  "regressions": [
+    {
+      "test": "tests::live_mcp_connected_assembly_lifecycle_uses_two_editors",
+      "exit_code": 0,
+      "seconds": 22.83
+    },
+    {
+      "test": "tests::live_mcp_source_bound_footprint_lifecycle_uses_two_editors",
+      "exit_code": 0,
+      "seconds": 18.37
+    },
+    {
+      "test": "tests::live_mcp_saved_routing_lifecycle_uses_two_editors",
+      "exit_code": 0,
+      "seconds": 13.9
+    },
+    {
+      "test": "tests::existing_footprint_acceptance::live_existing_footprint_stdio_lifecycle",
+      "exit_code": 0,
+      "seconds": 58.34
+    },
+    {
+      "test": "tests::footprint_flip_acceptance::live_existing_footprint_flip_stdio_lifecycle",
+      "exit_code": 0,
+      "seconds": 129.44
+    },
+    {
+      "test": "tests::existing_item_edit_acceptance::live_existing_item_stdio_lifecycle",
+      "exit_code": 0,
+      "seconds": 33.5
+    },
+    {
+      "test": "tests::item_deletion_acceptance::live_item_deletion_stdio_lifecycle",
+      "exit_code": 0,
+      "seconds": 32.1
+    }
+  ],
+  "result_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m3-kicad-1007/result/board.kicad_pcb"
 }

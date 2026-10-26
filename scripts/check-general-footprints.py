@@ -78,11 +78,7 @@ def check(endpoint,board_arg,output_arg,binary):
         rpc.send(dict(jsonrpc='2.0',method='notifications/initialized'))
         baseline=call('kicad_validate_project',dict(endpoint=endpoint))
         cases=[('installed',dict(footprint=place('U1','Package_SO',SO,20,20,'NE555D'))),('alias',dict(footprint=place('U2','LocalIC',SO,40,20,'NE555D'))),('qfn',dict(footprint=place('U3','LocalQFN',QFN,55,40,'QFN33'))),('connected',dict(assembly=dict(placements=[place('U4','Package_SO',SO,70,20,'NE555D'),place('R1','Resistor_SMD','R_0603_1608Metric',61.5,18.095,'1k')],connections=[dict(track_id='ic-resistor',start=dict(target_id='placed-U4',pad_number='1'),end=dict(target_id='placed-R1',pad_number='2'),width_nm=200000)])))]
-        saved=board.read_bytes()
-        unsupported=call('kicad_plan_change',dict(endpoint=endpoint,source_run_id='general-footprints',request_id='unsupported-property',footprint=place('U5','Package_DFN_QFN',QFN,55,60,'QFN33')))
-        rejected=call('kicad_preview_change',{key:unsupported[key] for key in ('plan_id','plan_hash')},False)
-        assert not rejected['ok'] and 'unsupported pad fabrication property' in json.dumps(rejected)
-        assert board.read_bytes()==saved and rejected['data']['shadow_validation']['shadow_cleaned']
+        cases.insert(3,('official-thermal-qfn',dict(footprint=place('U5','Package_DFN_QFN',QFN,55,60,'QFN33'))))
         for name,operation in cases:
             placement=operation.get('footprint') or operation['assembly']['placements'][0]
             inspected=call('kicad_inspect_project',dict(endpoint=endpoint,footprint_source={key:placement[key] for key in ('library_nickname','library_entry_name')}))
@@ -113,7 +109,7 @@ def check(endpoint,board_arg,output_arg,binary):
             print(json.dumps(dict(case=name,passed=True)),flush=True)
         after=call('kicad_inspect_project',dict(endpoint=endpoint))['pcb']['snapshot']
         footprints={fp['reference']:fp for fp in after['native_footprints']['placements']}
-        assert len(footprints)==5
+        assert len(footprints)==6
         assert len(footprints['U1']['pads'])==8 and len(footprints['U2']['pads'])==8
         assert footprints['U2']['library_identifier']['nickname']=='LocalIC'
         assert footprints['U3']['library_identifier']['nickname']=='LocalQFN'
@@ -121,11 +117,14 @@ def check(endpoint,board_arg,output_arg,binary):
         assert sum(p['number']=='' for p in pads)==9 and sum(p['number']=='33' for p in pads)==11
         assert len({p['source_uuid'] for p in pads})==52
         assert all(p['net'] is None for p in pads if not p['number'])
+        official=footprints['U5']; assert official['library_identifier']['nickname']=='Package_DFN_QFN'
+        assert len(official['pads'])==52 and sum(p['number']=='33' for p in official['pads'])==11
+        assert sum(p['number']=='' for p in official['pads'])==9
         tracks=after['native_routing']['tracks']; assert len(tracks)==1
         assert tracks[0]['net']['name']=='/CONNECTED'
         final=call('kicad_validate_project',dict(endpoint=endpoint,baseline_id=baseline['baseline_id']))
         assert not final['delta']['introduced'] and final['report']['unconnected_items']<=baseline['report']['unconnected_items']
-        (output/'result.json').write_text(json.dumps(dict(passed=True,cases=[name for name,_ in cases],footprints=5,physical_pads=sum(len(fp['pads']) for fp in footprints.values()),qfn_physical_pads=52,qfn_unnumbered=9,qfn_pad33=11,qfn_source='project fixture without fabrication attributes',official_thermal_qfn='unsupported; rejected without mutation',table_and_source_drift_rejected=True,stale_approval_rejected=True,baseline=baseline,final=final),indent=2)+'\n')
+        (output/'result.json').write_text(json.dumps(dict(passed=True,cases=[name for name,_ in cases],footprints=6,physical_pads=sum(len(fp['pads']) for fp in footprints.values()),qfn_physical_pads=52,qfn_unnumbered=9,qfn_pad33=11,qfn_source='project fixture without fabrication attributes',official_thermal_qfn='unmodified installed source accepted; native fabrication properties verified',table_and_source_drift_rejected=True,stale_approval_rejected=True,baseline=baseline,final=final),indent=2)+'\n')
     finally: rpc.close()
 
 if __name__=='__main__':

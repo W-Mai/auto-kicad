@@ -9,6 +9,32 @@ fn invalid() -> IpcError {
 }
 
 impl FootprintInstanceTemplate {
+    /// Return physical pad UUIDs and exact protobuf fabrication-property values.
+    /// Missing or unknown properties cannot establish source preservation.
+    pub fn pad_fabrication_properties(&self) -> Result<BTreeMap<String, i32>, IpcError> {
+        let instance = board_types::FootprintInstance::parse_from_bytes(&self.bytes)
+            .map_err(|_| IpcError::MalformedEnvelope)?;
+        let definition = instance.definition.as_ref().ok_or_else(invalid)?;
+        let mut properties = BTreeMap::new();
+        for item in &definition.items {
+            if item.type_url != PAD_TYPE_URL {
+                continue;
+            }
+            let pad = board_types::Pad::parse_from_bytes(&item.value)
+                .map_err(|_| IpcError::MalformedEnvelope)?;
+            let id = pad.id.as_ref().ok_or_else(invalid)?;
+            if id.value.is_empty()
+                || !(1..=9).contains(&pad.fab_property.value())
+                || properties
+                    .insert(id.value.clone(), pad.fab_property.value())
+                    .is_some()
+            {
+                return Err(invalid());
+            }
+        }
+        Ok(properties)
+    }
+
     /// Compare every native field after applying only the requested creation and association.
     pub fn matches_created_instance(
         &self,

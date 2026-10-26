@@ -79,6 +79,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         {
             return Err("saved reload changed native board or editor identity".into());
         }
+        let thermal = native
+            .iter()
+            .find(|fp| fp.metadata().library_identifier.nickname == "Package_DFN_QFN")
+            .ok_or("official thermal QFN missing")?;
+        let properties = thermal.pad_fabrication_properties()?;
+        if properties.len() != 52 || properties.values().filter(|value| **value == 6).count() != 11
+        {
+            return Err("official thermal QFN fabrication properties changed".into());
+        }
         for before in &native {
             let after = reloaded
                 .iter()
@@ -117,7 +126,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fs::write(
             output.join("native.json"),
             serde_json::to_vec_pretty(
-                &json!({"same_editor_pid":identity.pid,"native_reload_matches":true,"protected_files_unchanged":true,"snapshot":reopened.snapshot}),
+                &json!({"same_editor_pid":identity.pid,"native_reload_matches":true,"official_qfn_physical_pads":52,"official_qfn_heatsink_pads":11,"protected_files_unchanged":true,"snapshot":reopened.snapshot}),
             )?,
         )?;
         Ok(())
