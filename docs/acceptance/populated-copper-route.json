@@ -1,0 +1,57 @@
+{
+  "kicad_version": "10.0.7",
+  "transport": "production stdio MCP and native IPC",
+  "source_profile": "populated partially routed PawChrona prototype",
+  "source": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/replay-2/result/board.kicad_pcb",
+  "source_sha256": "93cfe373b11299ee576b717bb4827d5e80cdcee99c206daae0ef87e1f3ecb90a",
+  "output_directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-populated-route-restored",
+  "connection": {
+    "net": "SIM_VDD",
+    "start": "C6.1",
+    "end": "J3.1"
+  },
+  "copper_layers": 4,
+  "tracks_added": 3,
+  "vias_added": 2,
+  "footprints": 38,
+  "pads": 201,
+  "baseline": {
+    "violations": 49,
+    "unconnected_items": 43
+  },
+  "final": {
+    "violations": 49,
+    "unconnected_items": 42
+  },
+  "introduced_drc": 0,
+  "unchanged_unrelated_normalized_content": true,
+  "protected_files_unchanged": true,
+  "same_process_reload": true,
+  "original_source_unchanged": true,
+  "stackup_drift": {
+    "before_copper_layers": 4,
+    "changed_copper_layers": 6,
+    "restored": true,
+    "unsaved_source_bytes_unchanged": true,
+    "stale_approval_rejected": true,
+    "restored_approval_rejected": true
+  },
+  "cleanup": {
+    "owned_editor_closed": true,
+    "owned_shadow_cleaned": true,
+    "result_retained": true
+  },
+  "quality": {
+    "passed": 400,
+    "ignored": 15,
+    "format": true,
+    "clippy_warnings_as_errors": true,
+    "capability_matrix": true
+  },
+  "manual_interventions": [
+    "Explicit via corridor moved from x=78.5 mm to x=78.9 mm after native board-edge DRC rejection.",
+    "Acceptance probe document lookup corrected to the observed basename before restoring unsaved layer changes."
+  ],
+  "installed_mcp_replaced": false,
+  "final_three_project_gate_complete": false
+}

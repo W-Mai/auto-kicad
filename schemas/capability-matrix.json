@@ -1,7 +1,7 @@
 {
   "schema_version": "1",
   "product": "auto-kicad",
-  "source_revision": "aa72c88+verified-copper-routes",
+  "source_revision": "3ccf8d0",
   "supported_kicad_family": "10.x",
   "advertised_tools": {
     "always": [
@@ -325,15 +325,15 @@
         "canonical enabled copper layers; 16 legs, 128 segments and 15 vias per route; 256 batch copper objects",
         "source rule/native evidence, disposable reconciliation, exact approval and saved/reloaded verification",
         "complete original native preservation, same-net connectivity and no introduced DRC",
-        "zones and unsupported copper reject; synthetic MCP acceptance does not establish populated-project acceptance"
+        "zones and unsupported copper reject; populated prototype acceptance does not establish manufacturing readiness"
       ],
       "evidence": {
-        "fixture": "synthetic-4-layer-smd-track-via-anchors",
+        "fixture": "synthetic-4-layer-and-populated-pawchrona-copy",
         "tested_versions": [
           "10.0.7"
         ],
-        "command": "cargo run -p auto-kicad --example check-copper-route-mcp -- SERVER NEW_OUTPUT_DIR",
-        "record": "docs/acceptance/copper-route-mcp.md"
+        "command": "cargo run -p auto-kicad --example check-route-copy -- SOURCE.kicad_pcb SERVER NEW_OUTPUT_DIR STACKUP_PROBE ROUTE_PROFILE.json",
+        "record": "docs/acceptance/populated-copper-route.md"
       }
     }
   ]

@@ -1,0 +1,14 @@
+{
+  "net": "SIM_VDD",
+  "start": {"reference": "C6", "pad": "1"},
+  "end": {"reference": "J3", "pad": "1"},
+  "legs": [
+    {"layer": "F.Cu", "width_nm": 200000, "points": [{"x_nm": 79490000, "y_nm": 99500000}, {"x_nm": 78900000, "y_nm": 99500000}]},
+    {"layer": "In1.Cu", "width_nm": 200000, "points": [{"x_nm": 78900000, "y_nm": 99500000}, {"x_nm": 78900000, "y_nm": 102500000}]},
+    {"layer": "F.Cu", "width_nm": 200000, "points": [{"x_nm": 78900000, "y_nm": 102500000}, {"x_nm": 80000000, "y_nm": 102500000}]}
+  ],
+  "vias": [
+    {"via_id": "sim-cap-transition", "position": {"x_nm": 78900000, "y_nm": 99500000}, "pad_diameter_nm": 600000, "drill_diameter_nm": 300000},
+    {"via_id": "sim-socket-transition", "position": {"x_nm": 78900000, "y_nm": 102500000}, "pad_diameter_nm": 600000, "drill_diameter_nm": 300000}
+  ]
+}

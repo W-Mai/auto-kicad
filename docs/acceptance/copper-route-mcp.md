@@ -27,4 +27,4 @@ The complete offline quality gate passed 400 tests with 15 environment-dependent
 
 ## Boundaries
 
-Zones and unsupported native copper reject because complete preservation cannot yet be established for them. Curved route creation, blind/buried/microvias, differential pairs, length tuning and automatic routing are unsupported. Real populated-board route acceptance and live stackup-drift acceptance are not established by this synthetic record. General outlines, zone refill, schematic editing/synchronization and manufacturing delivery remain outside this capability.
+Zones and unsupported native copper reject because complete preservation cannot yet be established for them. Curved route creation, blind/buried/microvias, differential pairs, length tuning and automatic routing are unsupported. Populated-board routing and live stackup-drift acceptance are recorded in [the populated-copy evidence](populated-copper-route.md). General outlines, zone refill, schematic editing/synchronization and manufacturing delivery remain outside this capability.
