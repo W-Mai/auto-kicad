@@ -41,7 +41,7 @@ PCB and schematic commits acquire an OS writer lock in `.auto-kicad-writer.lock`
 
 ## Geometry changes
 
-Inspect with `geometry: true` and use the returned geometry revision, source UUIDs, named nets and enabled copper layers in the exclusive `geometry` field of `kicad_plan_change`. Zone edits and zoned outline changes require `refill: "all"`. Preview and commit verify complete native definitions, independent filled copper, saved topology, pad connectivity and DRC. Definitions and refill are separate native undo entries. Detected source or rule drift revokes approval; uncertain execution blocks further project writes until matching guarded recovery. See [the request contract and actual MCP evidence](docs/acceptance/geometry-mcp.md). Use release builds for populated boards; CM5 previews can exceed 180 seconds even in release builds, so configure Codex `tool_timeout_sec = 600`.
+Inspect with `geometry: true` and use the returned geometry revision, source UUIDs, named nets and enabled copper layers in the exclusive `geometry` field of `kicad_plan_change`. Zone edits and zoned outline changes require `refill: "all"`. Preview and commit verify complete native definitions, independent filled copper, saved topology, pad connectivity and DRC. Definitions and refill are separate native undo entries. Detected source or rule drift revokes approval; uncertain execution blocks further project writes until matching guarded recovery. See [the request contract and actual MCP evidence](docs/acceptance/geometry-mcp.md) and [native fault/recovery evidence](docs/acceptance/geometry-recovery.md). Use release builds for populated boards; CM5 previews can exceed 180 seconds even in release builds, so configure Codex `tool_timeout_sec = 600`.
 
 ## Footprint sources
 

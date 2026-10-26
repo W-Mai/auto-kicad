@@ -48,3 +48,5 @@ CM5 passed production stdio preview and source execution with 112 footprints and
 Exact counts, digests, timings, source/preview PIDs, output locations and record sizes are in [the machine-readable record](geometry-mcp.json). This acceptance covers the exclusive geometry family. Teardrop regeneration, GUI cancellation, zoned additive routing, combined maximum-size MCP requests, general schematic editing, manufacturing release and complete product qualification remain unverified or unavailable.
 
 Offline quality passed: 457 tests, 15 environment-dependent tests ignored, warning-denied workspace/all-target clippy, formatting and the 17-capability/13-tool matrix. The final release executable exposed the geometry schema and durable write capability over actual stdio. All recorded source and preview PIDs were verified absent after cleanup.
+
+[Geometry uncertainty and guarded recovery](geometry-recovery.md) records actual native saved-response corruption, pre-mutation MCP process termination, cross-state-directory write isolation and approved restoration. Its retained independent check and original runner metadata failure are documented explicitly.
