@@ -1,6 +1,8 @@
 mod existing_item_updates;
 mod footprint_creation;
+mod routing_rules;
 pub use existing_item_updates::{ExistingBoardItemSet, ExistingItemUpdate};
+pub use routing_rules::{ObservedNetClassRules, ObservedNetClassViaSize};
 include!(concat!(env!("OUT_DIR"), "/generated/mod.rs"));
 
 mod existing_items;
@@ -1925,6 +1927,16 @@ impl<T: KiCadTransport> KiCadClient<T> {
         token: &InstanceToken,
         board_filename: &str,
     ) -> Result<(), IpcError> {
+        self.require_current_board(token, board_filename)?;
+        items.header = MessageField::some(board_item_header(board_filename));
+        Ok(())
+    }
+
+    fn require_current_board(
+        &mut self,
+        token: &InstanceToken,
+        board_filename: &str,
+    ) -> Result<base_types::DocumentSpecifier, IpcError> {
         let invalid = || {
             IpcError::InvalidObservedBoardGraphic(
                 "headerless items require a stable instance and matching open board",
@@ -1952,8 +1964,7 @@ impl<T: KiCadTransport> KiCadClient<T> {
         {
             return Err(invalid());
         }
-        items.header = MessageField::some(board_item_header(board_filename));
-        Ok(())
+        Ok(document.clone())
     }
 
     pub fn get_board_graphics_by_id(

@@ -13,7 +13,7 @@ codex mcp get auto-kicad
 
 The installer copies the executable into `~/.local/lib/auto-kicad` and writes a launcher into `~/.local/bin`. `--prefix` selects another installation root. The launcher adds the macOS KiCad CLI directory to `PATH`; the embedded fixed footprint helper needs no source checkout. KiCad and its bundled Python runtime must remain installed. The build directory can be removed after installation and verification. Restart the Codex session to load the registered server. Set `tool_timeout_sec = 180` under `[mcp_servers.auto-kicad]` in the Codex configuration to allow editor startup, reload and DRC.
 
-The server uses MCP over standard input/output. Configure an MCP client to launch the built executable. KiCad 10.0.7 is the verified protocol baseline. Enable the KiCad IPC API and open the target PCB before using board tools. The endpoint identifies the editor instance; on macOS it is normally under `/tmp/kicad/`.
+The server uses MCP over standard input/output. Configure an MCP client to launch the built executable. KiCad 10.0.7 is the verified protocol baseline. Native effective-netclass observation is available to backend callers; [its read-only probe and boundaries](docs/acceptance/routing-rule-observation.md) are documented separately from routing support. Enable the KiCad IPC API and open the target PCB before using board tools. The endpoint identifies the editor instance; on macOS it is normally under `/tmp/kicad/`.
 
 ## Board workflow
 

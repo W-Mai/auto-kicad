@@ -1,0 +1,49 @@
+{
+  "classes": [
+    {
+      "class": "Default",
+      "clearance_nm": 200000,
+      "constituents": [
+        "Default"
+      ],
+      "implicit": false,
+      "native_payload_bytes": 72,
+      "net": "GND",
+      "preferred_track_width_nm": 250000,
+      "tuning_profile": null,
+      "via": {
+        "diameter_nm": 600000,
+        "drill_nm": 300000
+      }
+    },
+    {
+      "class": "Effective for net: VCC",
+      "clearance_nm": 300000,
+      "constituents": [
+        "Power",
+        "Default"
+      ],
+      "implicit": true,
+      "native_payload_bytes": 151,
+      "net": "VCC",
+      "preferred_track_width_nm": 400000,
+      "tuning_profile": null,
+      "via": {
+        "diameter_nm": 800000,
+        "drill_nm": 400000
+      }
+    }
+  ],
+  "copper_layers": 4,
+  "kicad_version": "10.0.7",
+  "read_only_source_unchanged": true,
+  "repeated_native_evidence_equal": true,
+  "stable_token": true,
+  "unknown_net_rejected": true,
+  "cleanup": {
+    "original_unchanged": true,
+    "owned_editor_closed": true,
+    "shadow_cleaned": true
+  },
+  "scope": "read-only native effective netclass observation; no new routing or public MCP rule query"
+}
