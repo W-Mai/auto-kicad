@@ -28,3 +28,5 @@ env CARGO_TARGET_DIR=/private/tmp/auto-kicad-m4-target CARGO_INCREMENTAL=0 CARGO
 The saved boards, request/response records and compact results remain in the output directory. This acceptance covers native definition editing on a synthetic fixture. Public geometry schemas/planning, whole-board fill completion/cancellation, copper equivalence, teardrop regeneration, populated-board zone editing, production MCP approval/recovery and committed maximum-batch acceptance remain required. No combined milestone or full product completion is asserted.
 
 [Fixed native refill and complete copper verification](complete-zone-refill.md) have separate backend acceptance, including hatched/locked regions and actual timeout isolation. The definition-edit evidence above does not establish the combined source-edit/MCP lifecycle.
+
+[Bound geometry request compilation](geometry-request-compilation.md) has separate JSON-to-native zone-edit/refill acceptance on a connected fixture and CM5 copy. It does not establish public MCP geometry approval or mixed outline/zone execution.

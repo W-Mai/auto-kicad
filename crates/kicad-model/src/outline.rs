@@ -45,6 +45,7 @@ impl OutlineEdge {
 #[serde(deny_unknown_fields)]
 pub struct OutlineLoop {
     pub loop_id: StableId,
+    #[serde(deserialize_with = "crate::geometry::bounded_vec::<_, _, 512>")]
     pub edges: Vec<OutlineEdge>,
     pub width_nm: i64,
 }
@@ -52,6 +53,8 @@ pub struct OutlineLoop {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OutlineEdit {
+    #[serde(deserialize_with = "crate::geometry::bounded_vec::<_, _, 100>")]
     pub remove_ids: Vec<StableId>,
+    #[serde(deserialize_with = "crate::geometry::bounded_vec::<_, _, 32>")]
     pub loops: Vec<OutlineLoop>,
 }

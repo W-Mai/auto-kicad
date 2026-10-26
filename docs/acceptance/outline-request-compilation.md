@@ -26,3 +26,5 @@ Offline quality passed 414 tests with 15 environment-dependent tests ignored, fo
 This acceptance covers backend request compilation and native execution on a synthetic fixture. General curve/retained-boundary validation, public geometry MCP requests, source approval/recovery, zoned-board refill and final real-project profile acceptance remain unfinished. The existing public rectangular-outline workflow is unchanged.
 
 [Saved-candidate verification](saved-outline-verification.md) checks complete retained/new boundaries with native parsing, exact arc envelopes and absolute topology DRC. The compiler alone still cannot authorize native creation or source execution.
+
+[Bound geometry request compilation](geometry-request-compilation.md) has separate JSON-to-native zone-edit/refill acceptance on a connected fixture and CM5 copy. It does not establish public MCP geometry approval or mixed outline/zone execution.

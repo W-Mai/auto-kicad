@@ -26,32 +26,7 @@ pub fn compile_outline_change(
     expected_revision: &RevisionDigest,
     observed: &LiveGeometryEvidence,
 ) -> Result<CompiledOutlineEdit, String> {
-    let mut targets = Vec::new();
-    for (uuid, shape) in observed.native.shapes() {
-        if shape.layer.enum_value() != Ok(board_types::BoardLayer::BL_Edge_Cuts) {
-            continue;
-        }
-        let lock_state = match shape.locked.enum_value() {
-            Ok(base_types::LockedState::LS_UNLOCKED) => LockState::Unlocked,
-            Ok(base_types::LockedState::LS_LOCKED) => LockState::Locked,
-            _ => LockState::Unknown,
-        };
-        let geometry = match shape.shape.as_ref().and_then(|s| s.geometry.as_ref()) {
-            Some(base_types::graphic_shape::Geometry::Segment(_)) => OutlineSourceGeometry::Segment,
-            Some(base_types::graphic_shape::Geometry::Arc(_)) => OutlineSourceGeometry::Arc,
-            Some(base_types::graphic_shape::Geometry::Circle(_)) => OutlineSourceGeometry::Circle,
-            Some(base_types::graphic_shape::Geometry::Rectangle(_)) => {
-                OutlineSourceGeometry::Rectangle
-            }
-            Some(base_types::graphic_shape::Geometry::Polygon(_)) => OutlineSourceGeometry::Polygon,
-            _ => OutlineSourceGeometry::Unsupported,
-        };
-        targets.push(ObservedOutlineTarget {
-            source_uuid: StableId::new(uuid).map_err(|e| e.to_string())?,
-            lock_state,
-            geometry,
-        });
-    }
+    let targets = observed_outline_targets(observed)?;
     compile_outline_edit(
         intent,
         expected_revision,
@@ -81,4 +56,36 @@ pub fn native_outline_primitives(compiled: &CompiledOutlineEdit) -> Vec<OutlineP
             width_nm: primitive.width_nm,
         })
         .collect()
+}
+
+pub(crate) fn observed_outline_targets(
+    observed: &LiveGeometryEvidence,
+) -> Result<Vec<ObservedOutlineTarget>, String> {
+    let mut targets = Vec::new();
+    for (uuid, shape) in observed.native.shapes() {
+        if shape.layer.enum_value() != Ok(board_types::BoardLayer::BL_Edge_Cuts) {
+            continue;
+        }
+        let lock_state = match shape.locked.enum_value() {
+            Ok(base_types::LockedState::LS_UNLOCKED) => LockState::Unlocked,
+            Ok(base_types::LockedState::LS_LOCKED) => LockState::Locked,
+            _ => LockState::Unknown,
+        };
+        let geometry = match shape.shape.as_ref().and_then(|s| s.geometry.as_ref()) {
+            Some(base_types::graphic_shape::Geometry::Segment(_)) => OutlineSourceGeometry::Segment,
+            Some(base_types::graphic_shape::Geometry::Arc(_)) => OutlineSourceGeometry::Arc,
+            Some(base_types::graphic_shape::Geometry::Circle(_)) => OutlineSourceGeometry::Circle,
+            Some(base_types::graphic_shape::Geometry::Rectangle(_)) => {
+                OutlineSourceGeometry::Rectangle
+            }
+            Some(base_types::graphic_shape::Geometry::Polygon(_)) => OutlineSourceGeometry::Polygon,
+            _ => OutlineSourceGeometry::Unsupported,
+        };
+        targets.push(ObservedOutlineTarget {
+            source_uuid: StableId::new(uuid).map_err(|e| e.to_string())?,
+            lock_state,
+            geometry,
+        });
+    }
+    Ok(targets)
 }

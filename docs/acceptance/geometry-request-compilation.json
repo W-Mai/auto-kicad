@@ -1,0 +1,609 @@
+{
+  "kicad_version": "10.0.7",
+  "profiles": {
+    "synthetic": {
+      "directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-json-zone-requests-final",
+      "pid": 90633,
+      "stages": [
+        {
+          "stage": 0,
+          "request": {
+            "observed_revision": "eb8d13f9c1a26e5b0ed088bf5e5deb92694fd8292ae515fc7e243fc72865ed4e",
+            "outline": null,
+            "zones": [
+              {
+                "kind": "create",
+                "zone_id": "created",
+                "definition": {
+                  "name": "JSON concave zone",
+                  "net": {
+                    "net_id": "ee9fa2da2af94ce01474ba8e76a18e07630fb9fa863e89cf6128f7c50682ef61",
+                    "name": "GND"
+                  },
+                  "layers": [
+                    "F.Cu",
+                    "In1.Cu"
+                  ],
+                  "polygon": {
+                    "exterior": {
+                      "points": [
+                        {
+                          "x_nm": 10000000,
+                          "y_nm": 30000000
+                        },
+                        {
+                          "x_nm": 35000000,
+                          "y_nm": 30000000
+                        },
+                        {
+                          "x_nm": 35000000,
+                          "y_nm": 60000000
+                        },
+                        {
+                          "x_nm": 25000000,
+                          "y_nm": 60000000
+                        },
+                        {
+                          "x_nm": 25000000,
+                          "y_nm": 50000000
+                        },
+                        {
+                          "x_nm": 20000000,
+                          "y_nm": 50000000
+                        },
+                        {
+                          "x_nm": 20000000,
+                          "y_nm": 60000000
+                        },
+                        {
+                          "x_nm": 10000000,
+                          "y_nm": 60000000
+                        }
+                      ]
+                    },
+                    "holes": [
+                      {
+                        "points": [
+                          {
+                            "x_nm": 12000000,
+                            "y_nm": 32000000
+                          },
+                          {
+                            "x_nm": 16000000,
+                            "y_nm": 32000000
+                          },
+                          {
+                            "x_nm": 16000000,
+                            "y_nm": 36000000
+                          },
+                          {
+                            "x_nm": 12000000,
+                            "y_nm": 36000000
+                          }
+                        ]
+                      },
+                      {
+                        "points": [
+                          {
+                            "x_nm": 27000000,
+                            "y_nm": 40000000
+                          },
+                          {
+                            "x_nm": 31000000,
+                            "y_nm": 40000000
+                          },
+                          {
+                            "x_nm": 31000000,
+                            "y_nm": 44000000
+                          },
+                          {
+                            "x_nm": 27000000,
+                            "y_nm": 44000000
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "priority": 3,
+                  "clearance_nm": 200000,
+                  "min_thickness_nm": 200000,
+                  "connection": "thermal",
+                  "thermal_gap_nm": 500000,
+                  "thermal_spoke_width_nm": 500000,
+                  "island_removal": "below_area",
+                  "min_island_area_nm2": 10000000000000
+                }
+              }
+            ],
+            "refill": "all"
+          },
+          "native_creation_ids": {
+            "created": "62bd13d6-f3dd-4481-b81a-55c8a21bdfa7"
+          },
+          "introduced_drc": 0,
+          "unchanged_drc": 5,
+          "unconnected": 2,
+          "pad_count": 2,
+          "pad_clusters_preserved": true,
+          "stale_request_refused": true,
+          "verification": {
+            "copper": {
+              "digest": "ecdf79a7256f1a114948712f127a75adc6a291429b28503ce3aab6b46a8aff91",
+              "point_count": 1334,
+              "polygon_count": 5,
+              "zone_count": 4
+            },
+            "definitions": {
+              "board_definition_digest": "191b3ae898089acd1530af9149fa0e9b655855c0fa30633c7a9fb6e28137a7db",
+              "native_zone_definition_digest": "760e07fbce43f68e3efaeca851811e368571ff4e8a60147393e70e4eebbea3f8",
+              "zone_count": 4
+            },
+            "independent_output_sha256": "b1bc32d197fcfcb286fa5a085c8aa9a423997ba52121651ce1389995466dae63",
+            "saved_input_sha256": "b1bc32d197fcfcb286fa5a085c8aa9a423997ba52121651ce1389995466dae63"
+          },
+          "saved_sha256": "b1bc32d197fcfcb286fa5a085c8aa9a423997ba52121651ce1389995466dae63"
+        },
+        {
+          "stage": 1,
+          "request": {
+            "observed_revision": "d95e399f41ba5ecf2edad451c5a76607e95bb5d6212047b2938ff557d7a04275",
+            "outline": null,
+            "zones": [
+              {
+                "kind": "update",
+                "source_uuid": "62bd13d6-f3dd-4481-b81a-55c8a21bdfa7",
+                "patch": {
+                  "name": "JSON patched zone",
+                  "net": {
+                    "net_id": "1a8369a1680060b2d8b880756c5740b7129477f8574e855988b4d0233cbf1015",
+                    "name": "VCC"
+                  },
+                  "layers": [
+                    "F.Cu",
+                    "B.Cu"
+                  ],
+                  "polygon": null,
+                  "priority": 7,
+                  "clearance_nm": 300000,
+                  "min_thickness_nm": 150000,
+                  "connection": "pth_thermal",
+                  "thermal_gap_nm": 350000,
+                  "thermal_spoke_width_nm": 400000,
+                  "island_removal": "below_area",
+                  "min_island_area_nm2": 2000000000000
+                }
+              }
+            ],
+            "refill": "all"
+          },
+          "native_creation_ids": {
+            "created": "62bd13d6-f3dd-4481-b81a-55c8a21bdfa7"
+          },
+          "introduced_drc": 0,
+          "unchanged_drc": 5,
+          "unconnected": 2,
+          "pad_count": 2,
+          "pad_clusters_preserved": true,
+          "stale_request_refused": true,
+          "verification": {
+            "copper": {
+              "digest": "b30c7bed1c96d73b96543bdb430a0ea1519ed07f716f5161b0a658b5801eb142",
+              "point_count": 1312,
+              "polygon_count": 5,
+              "zone_count": 4
+            },
+            "definitions": {
+              "board_definition_digest": "7837df7799454751449df456ffbad4d08a16c254d978a3d5e2867815e45bb7fe",
+              "native_zone_definition_digest": "d036f698a749ad079626e58f1ad4cd5d2f832deddb6894b50612c36759d7c765",
+              "zone_count": 4
+            },
+            "independent_output_sha256": "7d66cc69f5c35339016aec90cbe4fafced8fd73b43f0e9227e96d3b494dc4dd1",
+            "saved_input_sha256": "7d66cc69f5c35339016aec90cbe4fafced8fd73b43f0e9227e96d3b494dc4dd1"
+          },
+          "saved_sha256": "7d66cc69f5c35339016aec90cbe4fafced8fd73b43f0e9227e96d3b494dc4dd1"
+        },
+        {
+          "stage": 2,
+          "request": {
+            "observed_revision": "a28ddf69d9112f0ee19df7f23134e3dca8022cdc1813fd1c747aa13c42ddca19",
+            "outline": null,
+            "zones": [
+              {
+                "kind": "delete",
+                "source_uuid": "62bd13d6-f3dd-4481-b81a-55c8a21bdfa7"
+              }
+            ],
+            "refill": "all"
+          },
+          "native_creation_ids": {
+            "created": "62bd13d6-f3dd-4481-b81a-55c8a21bdfa7"
+          },
+          "introduced_drc": 0,
+          "unchanged_drc": 5,
+          "unconnected": 2,
+          "pad_count": 2,
+          "pad_clusters_preserved": true,
+          "stale_request_refused": true,
+          "verification": {
+            "copper": {
+              "digest": "ae670083f17b49a83ae634e348412d81850aa5fc681ee6c706e7acdfabb43502",
+              "point_count": 924,
+              "polygon_count": 3,
+              "zone_count": 3
+            },
+            "definitions": {
+              "board_definition_digest": "94f6d0a3c16f6bb83c0d6000f1c0a73f8801cc8afe3b30abcd8fc1e5bfdc5e54",
+              "native_zone_definition_digest": "905f332c21c85ec72157484b2bf77e09869cd2c97b503fa8da613c27c68a8477",
+              "zone_count": 3
+            },
+            "independent_output_sha256": "a3e0f56965e1657c3eee2b3f555bc29d3c14e4ba1acf8d316a00a9e641bfe24e",
+            "saved_input_sha256": "a3e0f56965e1657c3eee2b3f555bc29d3c14e4ba1acf8d316a00a9e641bfe24e"
+          },
+          "saved_sha256": "a3e0f56965e1657c3eee2b3f555bc29d3c14e4ba1acf8d316a00a9e641bfe24e"
+        }
+      ],
+      "restored_baseline": true,
+      "independent_saved_intent": {
+        "records": [
+          {
+            "file": "stage-0.kicad_pcb",
+            "sha256": "b1bc32d197fcfcb286fa5a085c8aa9a423997ba52121651ce1389995466dae63",
+            "mutations": [
+              {
+                "kind": "create",
+                "uuid": "62bd13d6-f3dd-4481-b81a-55c8a21bdfa7",
+                "fields": {
+                  "name": "JSON concave zone",
+                  "net": "GND",
+                  "layers": [
+                    0,
+                    4
+                  ],
+                  "polygon": {
+                    "exterior": {
+                      "points": [
+                        {
+                          "x_nm": 10000000,
+                          "y_nm": 30000000
+                        },
+                        {
+                          "x_nm": 35000000,
+                          "y_nm": 30000000
+                        },
+                        {
+                          "x_nm": 35000000,
+                          "y_nm": 60000000
+                        },
+                        {
+                          "x_nm": 25000000,
+                          "y_nm": 60000000
+                        },
+                        {
+                          "x_nm": 25000000,
+                          "y_nm": 50000000
+                        },
+                        {
+                          "x_nm": 20000000,
+                          "y_nm": 50000000
+                        },
+                        {
+                          "x_nm": 20000000,
+                          "y_nm": 60000000
+                        },
+                        {
+                          "x_nm": 10000000,
+                          "y_nm": 60000000
+                        }
+                      ]
+                    },
+                    "holes": [
+                      {
+                        "points": [
+                          {
+                            "x_nm": 12000000,
+                            "y_nm": 32000000
+                          },
+                          {
+                            "x_nm": 16000000,
+                            "y_nm": 32000000
+                          },
+                          {
+                            "x_nm": 16000000,
+                            "y_nm": 36000000
+                          },
+                          {
+                            "x_nm": 12000000,
+                            "y_nm": 36000000
+                          }
+                        ]
+                      },
+                      {
+                        "points": [
+                          {
+                            "x_nm": 27000000,
+                            "y_nm": 40000000
+                          },
+                          {
+                            "x_nm": 31000000,
+                            "y_nm": 40000000
+                          },
+                          {
+                            "x_nm": 31000000,
+                            "y_nm": 44000000
+                          },
+                          {
+                            "x_nm": 27000000,
+                            "y_nm": 44000000
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  "priority": 3,
+                  "clearance_nm": 200000,
+                  "min_thickness_nm": 200000,
+                  "connection": 1,
+                  "thermal_gap_nm": 500000,
+                  "thermal_spoke_width_nm": 500000,
+                  "island_removal": 2,
+                  "min_island_area_nm2": 10000000000000
+                }
+              }
+            ]
+          },
+          {
+            "file": "stage-1.kicad_pcb",
+            "sha256": "7d66cc69f5c35339016aec90cbe4fafced8fd73b43f0e9227e96d3b494dc4dd1",
+            "mutations": [
+              {
+                "kind": "update",
+                "uuid": "62bd13d6-f3dd-4481-b81a-55c8a21bdfa7",
+                "fields": {
+                  "name": "JSON patched zone",
+                  "net": "VCC",
+                  "layers": [
+                    0,
+                    2
+                  ],
+                  "priority": 7,
+                  "clearance_nm": 300000,
+                  "min_thickness_nm": 150000,
+                  "connection": 3,
+                  "thermal_gap_nm": 350000,
+                  "thermal_spoke_width_nm": 400000,
+                  "island_removal": 2,
+                  "min_island_area_nm2": 2000000000000
+                }
+              }
+            ]
+          },
+          {
+            "file": "stage-2.kicad_pcb",
+            "sha256": "a3e0f56965e1657c3eee2b3f555bc29d3c14e4ba1acf8d316a00a9e641bfe24e",
+            "mutations": [
+              {
+                "kind": "delete",
+                "uuid": "62bd13d6-f3dd-4481-b81a-55c8a21bdfa7",
+                "fields": null
+              }
+            ]
+          }
+        ],
+        "exact_intent": true,
+        "read_only": true
+      },
+      "cleanup": {
+        "closed": true,
+        "owned_pid": 90633,
+        "source_unchanged": true
+      }
+    },
+    "cm5": {
+      "directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-json-zone-requests-cm5",
+      "pid": 85964,
+      "stages": [
+        {
+          "stage": 0,
+          "request": {
+            "observed_revision": "0ae73478fafa1e5e7eb1f2b46c2166321656a7b2d174cde9536395c8e45c8f56",
+            "outline": null,
+            "zones": [
+              {
+                "kind": "update",
+                "source_uuid": "2a1e1815-500f-4664-a2ef-ed3623186aa5",
+                "patch": {
+                  "name": null,
+                  "net": null,
+                  "layers": null,
+                  "polygon": null,
+                  "priority": null,
+                  "clearance_nm": 160000,
+                  "min_thickness_nm": null,
+                  "connection": null,
+                  "thermal_gap_nm": null,
+                  "thermal_spoke_width_nm": null,
+                  "island_removal": null,
+                  "min_island_area_nm2": null
+                }
+              }
+            ],
+            "refill": "all"
+          },
+          "native_creation_ids": {},
+          "introduced_drc": 0,
+          "unchanged_drc": 171,
+          "unconnected": 0,
+          "pad_count": 633,
+          "pad_clusters_preserved": true,
+          "stale_request_refused": true,
+          "verification": {
+            "copper": {
+              "digest": "9b68b4ce25a25ac8b1a33777048c402c31c58e4f563c44664a985b40e7518292",
+              "point_count": 90184,
+              "polygon_count": 31,
+              "zone_count": 14
+            },
+            "definitions": {
+              "board_definition_digest": "142ec7c0e5da4892bb378fccb7505233cdf1910295168cb1d8bcad89c46aa719",
+              "native_zone_definition_digest": "a262f6e63a721b8a199a3d9247aea3531b9b4ad5e9bdef6c06188716321f2950",
+              "zone_count": 14
+            },
+            "independent_output_sha256": "75291b9ca219894603c7f4605dae2b14b9767b00fe358efa23e5544580ab24b0",
+            "saved_input_sha256": "18836d75fea0ce30a4831fde20b22ea1a86ba4e9691968f3bc2dd195c3f80aea"
+          },
+          "saved_sha256": "18836d75fea0ce30a4831fde20b22ea1a86ba4e9691968f3bc2dd195c3f80aea"
+        },
+        {
+          "stage": 1,
+          "request": {
+            "observed_revision": "a4b17ccd2c806c3a2ff95655b815b891e7e0efbe781eb952faf27c2e70a75345",
+            "outline": null,
+            "zones": [
+              {
+                "kind": "update",
+                "source_uuid": "2a1e1815-500f-4664-a2ef-ed3623186aa5",
+                "patch": {
+                  "name": null,
+                  "net": null,
+                  "layers": null,
+                  "polygon": null,
+                  "priority": null,
+                  "clearance_nm": 150000,
+                  "min_thickness_nm": null,
+                  "connection": null,
+                  "thermal_gap_nm": null,
+                  "thermal_spoke_width_nm": null,
+                  "island_removal": null,
+                  "min_island_area_nm2": null
+                }
+              }
+            ],
+            "refill": "all"
+          },
+          "native_creation_ids": {},
+          "introduced_drc": 0,
+          "unchanged_drc": 171,
+          "unconnected": 0,
+          "pad_count": 633,
+          "pad_clusters_preserved": true,
+          "stale_request_refused": true,
+          "verification": {
+            "copper": {
+              "digest": "91fd28db41462086498e5e6b9b6a708074d86e2483a85bbed58ccd57d038b635",
+              "point_count": 90184,
+              "polygon_count": 31,
+              "zone_count": 14
+            },
+            "definitions": {
+              "board_definition_digest": "cb78c3a30b1bea6ed773be6d85d7ea69e883fe9938faadf3019f27310152c9e9",
+              "native_zone_definition_digest": "1b4334382a449a595d4bbe18fa779dceeadc2d0e8cf45649207e937004cf8bf0",
+              "zone_count": 14
+            },
+            "independent_output_sha256": "02e2620d190d5147fc54585dc14fd77e56df9ee3df9b4d53b66e4f57bee0435f",
+            "saved_input_sha256": "70a50f30b7487c8d84e929cb4259ca61c42117254936312a1422062a72b56f45"
+          },
+          "saved_sha256": "70a50f30b7487c8d84e929cb4259ca61c42117254936312a1422062a72b56f45"
+        }
+      ],
+      "restored_baseline": true,
+      "independent_saved_intent": {
+        "records": [
+          {
+            "file": "stage-0.kicad_pcb",
+            "sha256": "18836d75fea0ce30a4831fde20b22ea1a86ba4e9691968f3bc2dd195c3f80aea",
+            "mutations": [
+              {
+                "kind": "update",
+                "uuid": "2a1e1815-500f-4664-a2ef-ed3623186aa5",
+                "fields": {
+                  "clearance_nm": 160000
+                }
+              }
+            ]
+          },
+          {
+            "file": "stage-1.kicad_pcb",
+            "sha256": "70a50f30b7487c8d84e929cb4259ca61c42117254936312a1422062a72b56f45",
+            "mutations": [
+              {
+                "kind": "update",
+                "uuid": "2a1e1815-500f-4664-a2ef-ed3623186aa5",
+                "fields": {
+                  "clearance_nm": 150000
+                }
+              }
+            ]
+          }
+        ],
+        "exact_intent": true,
+        "read_only": true
+      },
+      "cleanup": {
+        "closed": true,
+        "owned_pid": 85964,
+        "source_unchanged": true
+      }
+    }
+  },
+  "quality": {
+    "passed": 442,
+    "failed": 0,
+    "ignored": 15,
+    "format": true,
+    "clippy_warnings_denied": true,
+    "capability_matrix": true
+  },
+  "scope": "Typed geometry compilation and zone-only native execution/refill; excludes public MCP, combined outline/zone execution, teardrop regeneration and source recovery.",
+  "failed_attempts": [
+    {
+      "directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-json-zone-requests",
+      "failure": {
+        "reason": "revision digest must be 64 hexadecimal characters at line 1 column 94"
+      },
+      "cleanup": {
+        "closed": true,
+        "owned_pid": 78540,
+        "source_unchanged": true
+      }
+    },
+    {
+      "directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-json-zone-requests-bound",
+      "failure": {
+        "reason": "JSON zone edit regressed DRC/connectivity: BaselineDelta { introduced: [DrcViolation { identity: Uuids { rule_type: \"isolated_copper\", uuids: [\"43703ca9-1ff2-4900-826e-f87125327708\"] }, rule_type: \"isolated_copper\", severity: \"warning\", description: \"Isolated copper fill\", items: [DrcItem { uuid: Some(\"43703ca9-1ff2-4900-826e-f87125327708\"), description: \"填充区 'JSON concave zone' [GND]在 F.Cu 和 In1.Cu 上, 优先级 3\", position: Some(Position { x: 10.0, y: 30.0 }) }] }, DrcViolation { identity: Uuids { rule_type: \"isolated_copper\", uuids: [\"43703ca9-1ff2-4900-826e-f87125327708\"] }, rule_type: \"isolated_copper\", severity: \"warning\", description: \"Isolated copper fill\", items: [DrcItem { uuid: Some(\"43703ca9-1ff2-4900-826e-f87125327708\"), description: \"填充区 'JSON concave zone' [GND]在 F.Cu 和 In1.Cu 上, 优先级 3\", position: Some(Position { x: 10.0, y: 30.0 }) }] }], resolved: [], unchanged: [DrcViolation { identity: Uuids { rule_type: \"isolated_copper\", uuids: [\"80000000-0000-4000-8000-000000000001\"] }, rule_type: \"isolated_copper\", severity: \"warning\", description: \"Isolated copper fill\", items: [DrcItem { uuid: Some(\"80000000-0000-4000-8000-000000000001\"), description: \"填充区 'template' [GND]在 F.Cu 上, 优先级 0\", position: Some(Position { x: 40.0, y: 30.0 }) }] }, DrcViolation { identity: Uuids { rule_type: \"isolated_copper\", uuids: [\"80000000-0000-4000-8000-000000000002\"] }, rule_type: \"isolated_copper\", severity: \"warning\", description: \"Isolated copper fill\", items: [DrcItem { uuid: Some(\"80000000-0000-4000-8000-000000000002\"), description: \"填充区 'locked retained' [GND]在 F.Cu 上, 优先级 0\", position: Some(Position { x: 60.0, y: 30.0 }) }] }, DrcViolation { identity: Uuids { rule_type: \"isolated_copper\", uuids: [\"80000000-0000-4000-8000-000000000003\"] }, rule_type: \"isolated_copper\", severity: \"warning\", description: \"Isolated copper fill\", items: [DrcItem { uuid: Some(\"80000000-0000-4000-8000-000000000003\"), description: \"填充区 'hatched retained' [GND]在 F.Cu 上, 优先级 0\", position: Some(Position { x: 75.0, y: 30.0 }) }] }, DrcViolation { identity: Uuids { rule_type: \"track_dangling\", uuids: [\"40000000-0000-4000-8000-000000000001\"] }, rule_type: \"track_dangling\", severity: \"warning\", description: \"Track has unconnected end\", items: [DrcItem { uuid: Some(\"40000000-0000-4000-8000-000000000001\"), description: \"走线 [GND] (F.Cu), 长度: 5.0000 mm\", position: Some(Position { x: 10.0, y: 10.0 }) }] }, DrcViolation { identity: Uuids { rule_type: \"track_dangling\", uuids: [\"40000000-0000-4000-8000-000000000002\"] }, rule_type: \"track_dangling\", severity: \"warning\", description: \"Track has unconnected end\", items: [DrcItem { uuid: Some(\"40000000-0000-4000-8000-000000000002\"), description: \"走线 [VCC] (In1.Cu), 长度: 5.0000 mm\", position: Some(Position { x: 30.0, y: 10.0 }) }] }] }"
+      },
+      "cleanup": {
+        "closed": true,
+        "owned_pid": 80034,
+        "source_unchanged": true
+      }
+    },
+    {
+      "directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-json-zone-requests-connected",
+      "failure": {
+        "reason": "invalid_observed_pad: pad parent does not match requested footprint"
+      },
+      "cleanup": {
+        "closed": true,
+        "owned_pid": 81827,
+        "source_unchanged": true
+      }
+    }
+  ],
+  "saved_island_settings_probe": [
+    {
+      "mode": 0,
+      "requested_area": 2000000000000,
+      "saved_area": 10000000000000
+    },
+    {
+      "mode": 1,
+      "requested_area": 2000000000000,
+      "saved_area": 10000000000000
+    },
+    {
+      "mode": 2,
+      "requested_area": 2000000000000,
+      "saved_area": 2000000000000
+    }
+  ]
+}

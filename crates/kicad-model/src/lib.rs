@@ -1,3 +1,4 @@
+pub mod geometry;
 pub use outline::{OutlineEdge, OutlineEdit, OutlineLoop, OutlinePoint};
 pub mod copper_route;
 pub mod outline;

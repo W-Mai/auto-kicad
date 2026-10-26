@@ -26,7 +26,8 @@ impl CopperLayer {
             .expect("CopperLayer contains only validated copper values")
     }
 
-    pub(crate) fn native(self) -> board_types::BoardLayer {
+    /// Return the validated copper-only protocol enum.
+    pub fn native(self) -> board_types::BoardLayer {
         self.0
     }
 }

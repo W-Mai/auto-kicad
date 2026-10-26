@@ -1,3 +1,5 @@
+pub mod geometry;
+mod geometry_native;
 pub mod refill_verification;
 pub mod zone_edits;
 use kicad_engine::{
