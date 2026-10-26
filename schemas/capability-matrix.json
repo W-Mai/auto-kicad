@@ -1,7 +1,7 @@
 {
   "schema_version": "1",
   "product": "auto-kicad",
-  "source_revision": "3fb03ba+verified-footprint-transforms",
+  "source_revision": "aa72c88+verified-copper-routes",
   "supported_kicad_family": "10.x",
   "advertised_tools": {
     "always": [
@@ -299,7 +299,7 @@
         "1 through 64 unique existing board net IDs",
         "same editor, document, stackup and source evidence",
         "preferences and saved minima remain distinct; missing fields remain unavailable",
-        "read-only inspection; plan and approval integration pending"
+        "read-only inspection; route plans independently bind rule evidence"
       ],
       "evidence": {
         "fixture": "owned-four-layer-board-through-production-stdio",
@@ -308,6 +308,32 @@
         ],
         "command": "cargo run -p auto-kicad --example check-routing-rule-inspection -- /absolute/auto-kicad /absolute/new-output",
         "record": "docs/acceptance/routing-rule-inspection.md"
+      }
+    },
+    {
+      "id": "pcb.copper_route.write",
+      "domain": "pcb",
+      "mode": "write",
+      "status": "verified",
+      "mcp_tools": [
+        "kicad_plan_change",
+        "kicad_preview_change",
+        "kicad_commit_change"
+      ],
+      "constraints": [
+        "explicit pad, straight-track endpoint or through-via anchors on one observed net",
+        "canonical enabled copper layers; 16 legs, 128 segments and 15 vias per route; 256 batch copper objects",
+        "source rule/native evidence, disposable reconciliation, exact approval and saved/reloaded verification",
+        "complete original native preservation, same-net connectivity and no introduced DRC",
+        "zones and unsupported copper reject; synthetic MCP acceptance does not establish populated-project acceptance"
+      ],
+      "evidence": {
+        "fixture": "synthetic-4-layer-smd-track-via-anchors",
+        "tested_versions": [
+          "10.0.7"
+        ],
+        "command": "cargo run -p auto-kicad --example check-copper-route-mcp -- SERVER NEW_OUTPUT_DIR",
+        "record": "docs/acceptance/copper-route-mcp.md"
       }
     }
   ]

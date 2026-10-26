@@ -1,3 +1,5 @@
+pub mod copper_route;
+pub use copper_route::BoardRouteRequest;
 mod existing_footprint;
 mod existing_item_edit;
 mod footprint_authoring;
@@ -97,6 +99,15 @@ pub struct Capability {
 }
 
 pub trait DiscoveryService: Send + Sync {
+    fn copper_route_evidence(
+        &self,
+        _endpoint: &str,
+        _source: &LiveBoardObservation,
+        _kinds: &[OperationKind],
+    ) -> Result<copper_route::RouteEvidence, String> {
+        Err("complete copper route evidence is unavailable".into())
+    }
+
     fn routing_rule_inspection(
         &self,
         _endpoint: &str,
@@ -168,6 +179,15 @@ pub trait DiscoveryService: Send + Sync {
 pub struct IpcDiscoveryService;
 
 impl DiscoveryService for IpcDiscoveryService {
+    fn copper_route_evidence(
+        &self,
+        endpoint: &str,
+        source: &LiveBoardObservation,
+        kinds: &[OperationKind],
+    ) -> Result<copper_route::RouteEvidence, String> {
+        copper_route::prepare(endpoint, source, kinds)
+    }
+
     fn routing_rule_inspection(
         &self,
         endpoint: &str,
@@ -528,6 +548,7 @@ fn validate_shadow_operation_kinds(operations: &[Operation]) -> Result<(), Strin
             operation.kind,
             OperationKind::AddBoardGraphicSegments { .. }
                 | OperationKind::AddBoardOutline { .. }
+                | OperationKind::AddCopperRoute { .. }
                 | OperationKind::AddStraightTrack { .. }
                 | OperationKind::AddThroughVia { .. }
                 | OperationKind::MoveExistingFootprint { .. }
@@ -581,6 +602,7 @@ fn operation_matches_board(operation: &Operation, observed: &StableId) -> bool {
         }
         OperationKind::AddBoardGraphicSegments { board, .. }
         | OperationKind::AddBoardOutline { board, .. }
+        | OperationKind::AddCopperRoute { board, .. }
         | OperationKind::AddStraightTrack { board, .. }
         | OperationKind::AddThroughVia { board, .. } => {
             board == observed && operation.targets == vec![board.clone()]
@@ -615,6 +637,14 @@ fn bind_shadow_operations(
     operations: &[Operation],
     shadow: &ProjectSnapshot,
 ) -> Result<Vec<Operation>, String> {
+    bind_shadow_operations_with_source(operations, shadow, None)
+}
+
+fn bind_shadow_operations_with_source(
+    operations: &[Operation],
+    shadow: &ProjectSnapshot,
+    original: Option<&ProjectSnapshot>,
+) -> Result<Vec<Operation>, String> {
     let shadow_board = shadow
         .board
         .document_id
@@ -625,9 +655,15 @@ fn bind_shadow_operations(
         .first()
         .and_then(|operation| operation.targets.first())
         .ok_or_else(|| "shadow operation has no source board target".to_owned())?;
-    let source = shadow
-        .in_board_scope(shadow.project_id.clone(), template_board.clone())
-        .map_err(|e| e.to_string())?;
+    let source = if copper_route::contains_route(operations) {
+        original
+            .ok_or("route shadow requires its original observation")?
+            .clone()
+    } else {
+        shadow
+            .in_board_scope(shadow.project_id.clone(), template_board.clone())
+            .map_err(|e| e.to_string())?
+    };
     if operations[0].kind.footprint_placements().is_empty()
         && !matches!(
             operations[0].kind,
@@ -666,6 +702,7 @@ fn bind_shadow_operations(
             | OperationKind::PlaceConnectedFootprints { board, .. }
             | OperationKind::AddBoardGraphicSegments { board, .. }
             | OperationKind::AddBoardOutline { board, .. }
+            | OperationKind::AddCopperRoute { board, .. }
             | OperationKind::AddStraightTrack { board, .. }
             | OperationKind::AddThroughVia { board, .. }
             | OperationKind::MoveExistingFootprint { board, .. }
@@ -689,6 +726,24 @@ fn bind_shadow_operations(
                 OperationKind::PlaceConnectedFootprints {
                     board: shadow_board.clone(),
                     assembly: assembly.clone(),
+                }
+            }
+            OperationKind::AddCopperRoute {
+                intent,
+                rule_evidence,
+                native_evidence,
+                ..
+            } => {
+                let mut intent = intent.clone();
+                intent.start = copper_route::rebind_anchor(&intent.start, &source, shadow_board)?;
+                intent.end = copper_route::rebind_anchor(&intent.end, &source, shadow_board)?;
+                intent.net = rebind_net(&intent.net);
+                intent.observed_revision = shadow.revision().map_err(|e| e.to_string())?;
+                OperationKind::AddCopperRoute {
+                    board: shadow_board.clone(),
+                    intent,
+                    rule_evidence: rule_evidence.clone(),
+                    native_evidence: native_evidence.clone(),
                 }
             }
             OperationKind::AddStraightTrack { intent, .. } => {
@@ -841,7 +896,9 @@ fn shadow_graphic_segments(
             } => {
                 graphics.extend(expand_board_outline(*top_left, *bottom_right, *width_nm));
             }
-            OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. } => {}
+            OperationKind::AddCopperRoute { .. }
+            | OperationKind::AddStraightTrack { .. }
+            | OperationKind::AddThroughVia { .. } => {}
             OperationKind::MoveExistingFootprint { .. }
             | OperationKind::EditExistingItems { .. }
             | OperationKind::DeleteExistingItems { .. }
@@ -995,6 +1052,24 @@ fn apply_shadow_operations(
     BoardGraphicsCommitOutcome,
 > {
     let unknown = |reason: String| BoardGraphicsCommitOutcome::Unknown { reason };
+    if copper_route::contains_route(operations) {
+        let mut client = launcher
+            .connect_owned()
+            .map_err(|e| unknown(e.to_string()))?;
+        let endpoint = launcher
+            .current_identity()
+            .map_err(|e| unknown(e.to_string()))?
+            .endpoint
+            .clone();
+        return copper_route::execute(
+            &mut client,
+            observation,
+            operations,
+            &endpoint,
+            copper_route::ExecutionContext::Preview,
+        )
+        .map(|snapshot| (snapshot, Vec::new()));
+    }
     if let [operation] = operations
         && !operation.kind.footprint_placements().is_empty()
     {
@@ -1186,9 +1261,11 @@ pub fn validate_disposable_shadow(
         None,
         source_board.parent().unwrap_or(server_root),
         &library_settings::capture(),
+        None,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn validate_disposable_shadow_bound(
     server_root: &std::path::Path,
     source_board: &std::path::Path,
@@ -1197,6 +1274,7 @@ fn validate_disposable_shadow_bound(
     expected_source: Option<&ProjectSnapshot>,
     source_project: &std::path::Path,
     library_settings: &library_settings::SharedLibrarySettings,
+    routing_rules: Option<&kicad_adapter::routing_rules::RoutingRuleEvidence>,
 ) -> ShadowValidationOutcome {
     static PREVIEW_EDITOR: Mutex<()> = Mutex::new(());
     let Ok(_preview_guard) = PREVIEW_EDITOR.try_lock() else {
@@ -1347,7 +1425,11 @@ fn validate_disposable_shadow_bound(
             );
         }
     };
-    let bound_operations = match bind_shadow_operations(operations, &observation.snapshot) {
+    let mut bound_operations = match if copper_route::contains_route(operations) {
+        bind_shadow_operations_with_source(operations, &observation.snapshot, expected_source)
+    } else {
+        bind_shadow_operations(operations, &observation.snapshot)
+    } {
         Ok(operations) => operations,
         Err(reason) => {
             return cleanup_shadow(
@@ -1358,6 +1440,49 @@ fn validate_disposable_shadow_bound(
             );
         }
     };
+    if copper_route::contains_route(&bound_operations) {
+        let reconcile = (|| -> Result<(), String> {
+            let rules = routing_rules.ok_or("source routing rule evidence is missing")?;
+            let endpoint = launcher
+                .current_identity()
+                .map_err(|e| e.to_string())?
+                .endpoint
+                .clone();
+            let mut kinds = bound_operations
+                .iter()
+                .map(|op| op.kind.clone())
+                .collect::<Vec<_>>();
+            let actual = copper_route::prepare(&endpoint, &observation, &kinds)?;
+            if !rules.equivalent_preview_rules(&actual.rules) {
+                return Err("saved/live routing rules differ in preview; save/reload source settings and create a new plan".into());
+            }
+            for op in &bound_operations {
+                if let OperationKind::AddCopperRoute {
+                    native_evidence, ..
+                } = &op.kind
+                    && *native_evidence != actual.native_digest
+                {
+                    return Err(
+                        "preview native objects or connectivity differ from the source evidence"
+                            .into(),
+                    );
+                }
+            }
+            copper_route::bind(&mut kinds, &actual)?;
+            for (op, kind) in bound_operations.iter_mut().zip(kinds) {
+                op.kind = kind;
+            }
+            Ok(())
+        })();
+        if let Err(reason) = reconcile {
+            return cleanup_shadow(
+                &mut launcher,
+                source_board,
+                &source_before,
+                ShadowValidationOutcome::rejected(reason),
+            );
+        }
+    }
     if validate_shadow_operations(&observation, &bound_operations).is_err() {
         return cleanup_shadow(
             &mut launcher,
@@ -1651,6 +1776,7 @@ pub struct PlanBoardGraphicsRequest {
     pub assembly: Option<BoardAssemblyRequest>,
     pub track: Option<BoardTrackRequest>,
     pub via: Option<BoardViaRequest>,
+    pub route: Option<BoardRouteRequest>,
     pub batch: Option<Vec<BoardBatchItemRequest>>,
     pub request_id: String,
 }
@@ -1758,6 +1884,7 @@ pub struct BoardBatchItemRequest {
     pub outline: Option<BoardOutlineRequest>,
     pub track: Option<BoardTrackRequest>,
     pub via: Option<BoardViaRequest>,
+    pub route: Option<BoardRouteRequest>,
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -1802,7 +1929,7 @@ pub struct BoardRoutingEndpointRequest {
     pub footprint_placement_id: String,
 }
 
-#[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct BoardRoutingNetRequest {
     pub net_id: String,
@@ -1811,6 +1938,8 @@ pub struct BoardRoutingNetRequest {
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 pub struct BoardTrackRequest {
+    #[serde(default)]
+    pub layer: Option<String>,
     pub source_uuid: String,
     pub start_x_nm: i64,
     pub start_y_nm: i64,
@@ -1958,7 +2087,24 @@ fn board_operation_kind(
     outline: Option<BoardOutlineRequest>,
     track: Option<BoardTrackRequest>,
     via: Option<BoardViaRequest>,
+    route: Option<BoardRouteRequest>,
 ) -> Result<OperationKind, ErrorData> {
+    if let Some(route) = route {
+        if segments.is_some() || outline.is_some() || track.is_some() || via.is_some() {
+            return Err(ErrorData::invalid_params(
+                "route is exclusive with other operation fields",
+                None,
+            ));
+        }
+        return Ok(OperationKind::AddCopperRoute {
+            board: board.clone(),
+            intent: route
+                .into_model()
+                .map_err(|e| ErrorData::invalid_params(e, None))?,
+            rule_evidence: digest_bytes(b"unbound"),
+            native_evidence: digest_bytes(b"unbound"),
+        });
+    }
     let kind = match (segments, outline, track, via) {
         (Some(segments), None, None, None) => OperationKind::AddBoardGraphicSegments {
             board: board.clone(),
@@ -1998,7 +2144,7 @@ fn board_operation_kind(
                 unit: kicad_model::Unit::Nanometres,
                 space: kicad_model::DocumentSpace::Board,
             };
-            let intent = match (track.start_pad, track.end_pad, track.net) {
+            let mut intent = match (track.start_pad, track.end_pad, track.net) {
                 (Some(start_pad), Some(end_pad), Some(net)) => {
                     StraightTrackIntent::new_endpoint_bound(
                         source_uuid,
@@ -2034,6 +2180,9 @@ fn board_operation_kind(
                 _ => StraightTrackIntent::new(source_uuid, start, end, track.width_nm),
             }
             .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
+            intent.layer = track.layer.as_deref().unwrap_or("F.Cu").parse().map_err(
+                |error: kicad_model::ModelError| ErrorData::invalid_params(error.to_string(), None),
+            )?;
             OperationKind::AddStraightTrack {
                 board: board.clone(),
                 intent,
@@ -2075,7 +2224,7 @@ fn board_operation_kind(
         }
         _ => {
             return Err(ErrorData::invalid_params(
-                "exactly one of segments, outline, track, or via is required per batch item",
+                "exactly one of segments, outline, track, via, or route is required per batch item",
                 None,
             ));
         }
@@ -2092,6 +2241,7 @@ fn board_operation_kinds(
         request.outline.is_some(),
         request.track.is_some(),
         request.via.is_some(),
+        request.route.is_some(),
     ]
     .into_iter()
     .filter(|present| *present)
@@ -2107,6 +2257,7 @@ fn board_operation_kinds(
                     item.outline.clone(),
                     item.track.clone(),
                     item.via.clone(),
+                    item.route.clone(),
                 )
             })
             .collect::<Result<Vec<_>, _>>()
@@ -2124,11 +2275,12 @@ fn board_operation_kinds(
                 request.outline.clone(),
                 request.track.clone(),
                 request.via.clone(),
+                request.route.clone(),
             )
             .map(|kind| (vec![kind], false))
         }
         _ => Err(ErrorData::invalid_params(
-            "exactly one of segments, outline, footprint, track, or via is required; use a non-empty batch instead",
+            "exactly one of segments, outline, footprint, track, via, or route is required; use a non-empty batch instead",
             None,
         )),
     }
@@ -2368,6 +2520,7 @@ struct StoredChangeSession {
     board_path: std::path::PathBuf,
     project_dir: std::path::PathBuf,
     source_files: ShadowSourceFingerprint,
+    routing_evidence: Option<copper_route::RouteEvidence>,
     execution_state: StoredExecutionState,
     shadow_validation: Option<ShadowValidationOutcome>,
     validation_evidence_hash: Option<String>,
@@ -2465,6 +2618,20 @@ impl ShadowValidationService for IpcShadowValidationService {
                 }
             }
         }
+        let routing = if copper_route::contains_route(operations) {
+            let kinds = operations
+                .iter()
+                .map(|op| op.kind.clone())
+                .collect::<Vec<_>>();
+            match copper_route::prepare(endpoint, source, &kinds)
+                .and_then(|e| copper_route::matches(operations, &e).map(|()| e))
+            {
+                Ok(evidence) => Some(evidence),
+                Err(reason) => return ShadowValidationOutcome::rejected(reason),
+            }
+        } else {
+            None
+        };
         let fingerprint = shadow_source_fingerprint(&source.board_path);
         let (export, path) = match export_live_shadow(&self.server_root, endpoint, source) {
             Ok(export) => export,
@@ -2478,7 +2645,25 @@ impl ShadowValidationService for IpcShadowValidationService {
             Some(&source.snapshot),
             &source.project_dir,
             &self.library_settings,
+            routing.as_ref().map(|e| &e.rules),
         );
+        if let Some(prior) = routing {
+            let kinds = operations
+                .iter()
+                .map(|op| op.kind.clone())
+                .collect::<Vec<_>>();
+            let stable = copper_route::prepare(endpoint, source, &kinds).and_then(|current| {
+                copper_route::matches(operations, &current)?;
+                if current.rules != prior.rules || current.native_digest != prior.native_digest {
+                    return Err("routing evidence changed during preview".into());
+                }
+                Ok(())
+            });
+            if let Err(reason) = stable {
+                outcome.state = ShadowValidationState::Rejected;
+                outcome.reason = Some(reason);
+            }
+        }
         if shadow_source_fingerprint(&source.board_path) != fingerprint
             || IpcDiscoveryService
                 .live_board_observation(endpoint, None)
@@ -2637,6 +2822,7 @@ impl IpcBoardGraphicsExecutionService {
                     | OperationKind::PlaceConnectedFootprints { .. }
                     | OperationKind::AddBoardGraphicSegments { .. }
                     | OperationKind::AddBoardOutline { .. }
+                    | OperationKind::AddCopperRoute { .. }
                     | OperationKind::AddStraightTrack { .. }
                     | OperationKind::AddThroughVia { .. }
                     | OperationKind::MoveExistingFootprint { .. }
@@ -2778,6 +2964,18 @@ impl IpcBoardGraphicsExecutionService {
         if observation.instance_token.as_str() != expected_token || &revision != expected_revision {
             return BoardGraphicsCommitOutcome::Rejected {
                 reason: "live identity or revision is stale".into(),
+            };
+        }
+        if copper_route::contains_route(operations) {
+            return match copper_route::execute(
+                &mut client,
+                &observation,
+                operations,
+                endpoint,
+                copper_route::ExecutionContext::Source,
+            ) {
+                Ok(_) => BoardGraphicsCommitOutcome::CommittedAndSaved,
+                Err(outcome) => outcome,
             };
         }
         if let [operation] = operations
@@ -2989,6 +3187,48 @@ const RECOVERY_TOOLS: [&str; 3] = [
 ];
 
 impl Server {
+    fn invalidate_route_approval(&self, plan_id: &str) {
+        if let Some(stored) = self.sessions.lock().expect("session lock").get_mut(plan_id)
+            && copper_route::contains_route(&stored.session.plan.operations)
+        {
+            stored.approval_hash = None;
+            stored.validation_evidence_hash = None;
+            stored.session.approval_hash = None;
+            stored.session.state = kicad_engine::SessionState::Rejected;
+        }
+    }
+
+    fn verify_route_source(
+        &self,
+        stored: &StoredChangeSession,
+        source: &LiveBoardObservation,
+    ) -> Result<(), String> {
+        if !copper_route::contains_route(&stored.session.plan.operations) {
+            return Ok(());
+        }
+        if source.snapshot != stored.session.snapshot
+            || source.instance_token.as_str() != stored.session.plan.instance_token
+            || source.board_path != stored.board_path
+            || source.project_dir != stored.project_dir
+        {
+            return Err("route source observation changed since planning".into());
+        }
+        let kinds = stored
+            .session
+            .plan
+            .operations
+            .iter()
+            .map(|op| op.kind.clone())
+            .collect::<Vec<_>>();
+        let current = self
+            .discovery
+            .copper_route_evidence(&stored.endpoint, source, &kinds)?;
+        copper_route::matches(&stored.session.plan.operations, &current)?;
+        if stored.routing_evidence.as_ref() != Some(&current) {
+            return Err("stored routing evidence changed".into());
+        }
+        Ok(())
+    }
     pub fn with_state_dir(mut self, directory: &std::path::Path) -> std::io::Result<Self> {
         self.execution_store = Some(Arc::new(recovery::ExecutionStore::open(directory)?));
         for name in RECOVERY_TOOLS {
@@ -3149,6 +3389,12 @@ impl Server {
                     id: "base.get_version",
                     domain: "base",
                     mode: "read",
+                    status: "verified",
+                },
+                Capability {
+                    id: "pcb.copper_route.write",
+                    domain: "pcb",
+                    mode: "write",
                     status: "verified",
                 },
                 Capability {
@@ -3765,7 +4011,8 @@ impl Server {
                 || arguments.segments.is_some()
                 || arguments.outline.is_some()
                 || arguments.track.is_some()
-                || arguments.via.is_some())
+                || arguments.via.is_some()
+                || arguments.route.is_some())
         {
             return Err(ErrorData::invalid_params(
                 "deletion requires its own plan",
@@ -3781,7 +4028,8 @@ impl Server {
                 || arguments.segments.is_some()
                 || arguments.outline.is_some()
                 || arguments.track.is_some()
-                || arguments.via.is_some())
+                || arguments.via.is_some()
+                || arguments.route.is_some())
         {
             return Err(ErrorData::invalid_params(
                 "footprint flip requires its own plan",
@@ -3796,7 +4044,8 @@ impl Server {
                 || arguments.segments.is_some()
                 || arguments.outline.is_some()
                 || arguments.track.is_some()
-                || arguments.via.is_some())
+                || arguments.via.is_some()
+                || arguments.route.is_some())
         {
             return Err(ErrorData::invalid_params(
                 "existing item edits require their own plan",
@@ -3816,6 +4065,7 @@ impl Server {
                 || arguments.outline.is_some()
                 || arguments.track.is_some()
                 || arguments.via.is_some()
+                || arguments.route.is_some()
             {
                 return Err(ErrorData::invalid_params(
                     "assembly requires its own plan",
@@ -3842,6 +4092,7 @@ impl Server {
                 || arguments.outline.is_some()
                 || arguments.track.is_some()
                 || arguments.via.is_some()
+                || arguments.route.is_some()
             {
                 return Err(ErrorData::invalid_params(
                     "footprint placement requires its own plan",
@@ -3868,7 +4119,8 @@ impl Server {
                 || arguments.segments.is_some()
                 || arguments.outline.is_some()
                 || arguments.track.is_some()
-                || arguments.via.is_some())
+                || arguments.via.is_some()
+                || arguments.route.is_some())
         {
             return Err(ErrorData::invalid_params(
                 "existing footprint movement requires its own plan",
@@ -3888,7 +4140,7 @@ impl Server {
             .document_id
             .clone()
             .ok_or_else(|| ErrorData::internal_error("board identity is unavailable", None))?;
-        let (kinds, is_batch) = if let Some(assembly) = assembly {
+        let (mut kinds, is_batch) = if let Some(assembly) = assembly {
             (
                 vec![OperationKind::PlaceConnectedFootprints {
                     board: board.clone(),
@@ -4045,6 +4297,7 @@ impl Server {
                 || arguments.outline.is_some()
                 || arguments.track.is_some()
                 || arguments.via.is_some()
+                || arguments.route.is_some()
             {
                 return Err(ErrorData::invalid_params(
                     "existing footprint movement requires its own plan",
@@ -4137,6 +4390,20 @@ impl Server {
             )
         } else {
             board_operation_kinds(&arguments, &board)?
+        };
+        let routing_evidence = if kinds
+            .iter()
+            .any(|kind| matches!(kind, OperationKind::AddCopperRoute { .. }))
+        {
+            let evidence = self
+                .discovery
+                .copper_route_evidence(&arguments.endpoint, &observation, &kinds)
+                .map_err(|e| ErrorData::invalid_params(e, None))?;
+            copper_route::bind(&mut kinds, &evidence)
+                .map_err(|e| ErrorData::invalid_params(e, None))?;
+            Some(evidence)
+        } else {
+            None
         };
         let base_revision = snapshot
             .revision()
@@ -4233,6 +4500,7 @@ impl Server {
             plan_id.to_string(),
             StoredChangeSession {
                 session,
+                routing_evidence: routing_evidence.clone(),
                 endpoint: arguments.endpoint,
                 board_filename: observation.board_filename,
                 source_files: shadow_source_fingerprint(&observation.board_path),
@@ -4251,6 +4519,7 @@ impl Server {
                 "plan_id": plan_id,
                 "plan_hash": plan_hash,
                 "footprint_sources": footprint_sources,
+                "routing_evidence": routing_evidence,
                 "state": "planned"
             }),
         )
@@ -4298,10 +4567,15 @@ impl Server {
             || source.project_dir != stored.project_dir
             || shadow_source_fingerprint(&stored.board_path) != stored.source_files
         {
+            self.invalidate_route_approval(&arguments.plan_id);
             return Err(ErrorData::invalid_params(
                 "source changed since planning",
                 None,
             ));
+        }
+        if let Err(reason) = self.verify_route_source(&stored, &source) {
+            self.invalidate_route_approval(&arguments.plan_id);
+            return Err(ErrorData::invalid_params(reason, None));
         }
         let outcome = shadow_validation.validate(
             &stored.endpoint,
@@ -4309,6 +4583,10 @@ impl Server {
             &stored.session.plan.operations,
             Duration::from_secs(30),
         );
+        if let Err(reason) = self.verify_route_source(&stored, &source) {
+            self.invalidate_route_approval(&arguments.plan_id);
+            return Err(ErrorData::invalid_params(reason, None));
+        }
         let shadow_ok = matches!(outcome.state, ShadowValidationState::Committed);
         stored.shadow_validation = Some(outcome.clone());
         if shadow_ok {
@@ -4441,6 +4719,7 @@ impl Server {
         }
         let writer = self.acquire_project_writer(&stored.project_dir)?;
         if shadow_source_fingerprint(&stored.board_path) != stored.source_files {
+            self.invalidate_route_approval(&arguments.plan_id);
             return Err(ErrorData::invalid_params(
                 "source files changed since planning",
                 None,
@@ -4459,6 +4738,16 @@ impl Server {
                 None,
             ));
         }
+        if copper_route::contains_route(&stored.session.plan.operations) {
+            let current = self
+                .discovery
+                .live_board_observation(&stored.endpoint, None)
+                .and_then(|source| self.verify_route_source(&stored, &source));
+            if let Err(reason) = current {
+                self.invalidate_route_approval(&arguments.plan_id);
+                return Err(ErrorData::invalid_params(reason, None));
+            }
+        }
         let engine = Engine::new(
             stored.session.snapshot.clone(),
             stored.session.plan.instance_token.clone(),
@@ -4472,7 +4761,7 @@ impl Server {
             let rules = stored.board_path.with_extension("kicad_dru");
             if rules.exists() { sources.push(rules); }
             writer.begin("pcb", &arguments.plan_hash, &arguments.approval_hash,
-                json!({"plan": stored.session.plan, "validation_evidence_hash": stored.validation_evidence_hash, "source_files": stored.source_files}), &sources)
+                json!({"plan": stored.session.plan, "validation_evidence_hash": stored.validation_evidence_hash, "source_files": stored.source_files, "routing_evidence": stored.routing_evidence}), &sources)
         }).transpose().map_err(|e| ErrorData::internal_error(format!("execution record unavailable: {e}"), None))?;
 
         let mut sessions = self.sessions.lock().expect("session lock");
@@ -5870,7 +6159,7 @@ mod tests {
         }
     }
 
-    fn fresh_shadow_observation() -> LiveBoardObservation {
+    pub(super) fn fresh_shadow_observation() -> LiveBoardObservation {
         let mut source = fake_live_source();
         observe_live_board(
             &mut source,
@@ -7148,6 +7437,7 @@ mod tests {
 
     fn plan_request(_snapshot: ProjectSnapshot, request_id: &str) -> PlanBoardGraphicsRequest {
         PlanBoardGraphicsRequest {
+            route: None,
             endpoint: "ipc:///tmp/kicad/api.sock".into(),
             source_run_id: "run".into(),
             segments: Some(serde_json::to_value(vec![graphic("g1")]).unwrap()),
@@ -7167,6 +7457,7 @@ mod tests {
 
     fn batch_outline() -> BoardBatchItemRequest {
         BoardBatchItemRequest {
+            route: None,
             segments: None,
             outline: Some(BoardOutlineRequest {
                 top_left_x_nm: 0,
@@ -7182,9 +7473,11 @@ mod tests {
 
     fn batch_track(source_uuid: &str) -> BoardBatchItemRequest {
         BoardBatchItemRequest {
+            route: None,
             segments: None,
             outline: None,
             track: Some(BoardTrackRequest {
+                layer: None,
                 source_uuid: source_uuid.into(),
                 start_x_nm: 1_000_000,
                 start_y_nm: 2_000_000,
@@ -7201,6 +7494,7 @@ mod tests {
 
     fn batch_via(source_uuid: &str) -> BoardBatchItemRequest {
         BoardBatchItemRequest {
+            route: None,
             segments: None,
             outline: None,
             track: None,
@@ -7715,7 +8009,7 @@ mod tests {
         let matrix = &structured["data"]["capability_matrix"];
         assert_eq!(matrix["schema_version"], "1");
         assert_eq!(matrix["product"], "auto-kicad");
-        assert_eq!(matrix["capabilities"].as_array().unwrap().len(), 14);
+        assert_eq!(matrix["capabilities"].as_array().unwrap().len(), 15);
         assert_eq!(
             matrix["capabilities"]
                 .as_array()
@@ -7763,6 +8057,49 @@ mod tests {
         assert!(structured["project_revision"].as_str().is_some());
     }
 
+    #[test]
+    fn single_track_layer_preserves_legacy_operation_and_copper_domain() {
+        let board = StableId::new("board").unwrap();
+        let base = json!({"source_uuid":"track", "start_x_nm":0, "start_y_nm":0,
+            "end_x_nm":1000000, "end_y_nm":0, "width_nm":250000});
+        for (layer, expected) in [
+            (None, "F.Cu"),
+            (Some("B.Cu"), "B.Cu"),
+            (Some("In1.Cu"), "In1.Cu"),
+        ] {
+            let mut request = base.clone();
+            if let Some(layer) = layer {
+                request["layer"] = json!(layer);
+            }
+            let track = serde_json::from_value(request).unwrap();
+            let OperationKind::AddStraightTrack { intent, .. } =
+                board_operation_kind(&board, None, None, Some(track), None, None).unwrap()
+            else {
+                panic!("legacy operation family changed");
+            };
+            assert_eq!(intent.layer.to_string(), expected);
+            let encoded = serde_json::to_value(&intent).unwrap();
+            assert_eq!(encoded.get("layer").is_none(), expected == "F.Cu");
+            let decoded: StraightTrackIntent = serde_json::from_value(encoded).unwrap();
+            assert_eq!(decoded, intent);
+        }
+        for invalid in ["F.Mask", "In01.Cu", "In31.Cu"] {
+            let mut request = base.clone();
+            request["layer"] = json!(invalid);
+            assert!(
+                board_operation_kind(
+                    &board,
+                    None,
+                    None,
+                    Some(serde_json::from_value(request).unwrap()),
+                    None,
+                    None
+                )
+                .is_err()
+            );
+        }
+    }
+
     #[tokio::test]
     async fn plan_rejects_coordinate_only_routing_requests() {
         let server = Server::with_discovery(Arc::new(FakeDiscovery {
@@ -7771,6 +8108,7 @@ mod tests {
         let mut request = plan_request(project_snapshot(true), "req_track");
         request.segments = None;
         request.track = Some(BoardTrackRequest {
+            layer: None,
             source_uuid: "track-1".into(),
             start_x_nm: 1_000_000,
             start_y_nm: 2_000_000,
@@ -7822,6 +8160,7 @@ mod tests {
         assert!(board_operation_kinds(&request, &board).is_err());
 
         request.batch = Some(vec![BoardBatchItemRequest {
+            route: None,
             segments: None,
             outline: Some(batch_outline().outline.unwrap()),
             track: Some(batch_track("track-1").track.unwrap()),
@@ -7830,6 +8169,7 @@ mod tests {
         assert!(board_operation_kinds(&request, &board).is_err());
 
         request.batch = Some(vec![BoardBatchItemRequest {
+            route: None,
             segments: None,
             outline: None,
             track: None,
@@ -7881,6 +8221,7 @@ mod tests {
         }));
         let mut request = plan_request(project_snapshot(true), "req_mixed");
         request.track = Some(BoardTrackRequest {
+            layer: None,
             source_uuid: "track-1".into(),
             start_x_nm: 0,
             start_y_nm: 0,
@@ -7897,11 +8238,9 @@ mod tests {
             .await
             .unwrap_err();
 
-        assert!(
-            error
-                .message
-                .contains("exactly one of segments, outline, footprint, track, or via is required")
-        );
+        assert!(error.message.contains(
+            "exactly one of segments, outline, footprint, track, via, or route is required"
+        ));
         assert!(server.sessions.lock().unwrap().is_empty());
     }
 

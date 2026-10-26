@@ -1,0 +1,110 @@
+{
+  "production_stdio": true,
+  "kicad_version": "10.0.7",
+  "tracks_added": 16,
+  "vias_added": 4,
+  "front_smd_inner_transition": true,
+  "non_default_netclass": true,
+  "explicit_width_differs_from_preference": true,
+  "selected_back_track": true,
+  "drift_cases": [
+    "custom_rule_presence",
+    "saved_minimum",
+    "saved_netclass"
+  ],
+  "anchor_kinds": [
+    "pad",
+    "track_end",
+    "via"
+  ],
+  "layers": [
+    "F.Cu",
+    "In1.Cu",
+    "B.Cu"
+  ],
+  "invalid_paths_rejected": true,
+  "rule_drift_invalidates_approval": true,
+  "restored_rules_cannot_replay_approval": true,
+  "invalid_approval_rejected": true,
+  "replay_rejected": true,
+  "scope": "synthetic route MCP acceptance; populated-copy gate remains open",
+  "native": {
+    "native_footprints_preserved": true,
+    "reopened_revision": "sha256:ec538396353b4c1f72321dc1abc32c1ec32d49299785031eb5b21969db0d25b6",
+    "same_process_reload": true,
+    "source_pid": 21486
+  },
+  "cleanup": {
+    "original_unchanged": true,
+    "owned_source_closed": true,
+    "shadow_cleaned": true
+  },
+  "output_directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-route-mcp-expanded",
+  "real_project_profile": false,
+  "baseline_unconnected": 7,
+  "final_route_unconnected": 2,
+  "introduced_drc": 0,
+  "custom_rule_introduced_drc": 14,
+  "preview_source_unchanged": true,
+  "preview_cleaned": true,
+  "normalized_snapshot_matches": true,
+  "quality": {
+    "passed": 400,
+    "ignored": 15,
+    "fmt": true,
+    "clippy_warnings_as_errors": true,
+    "capability_matrix": true
+  },
+  "regressions": [
+    {
+      "test": "tests::live_mcp_saved_routing_lifecycle_uses_two_editors",
+      "exit_code": 0,
+      "elapsed_seconds": 12.31
+    },
+    {
+      "test": "tests::live_mcp_source_bound_footprint_lifecycle_uses_two_editors",
+      "exit_code": 0,
+      "elapsed_seconds": 18.33
+    },
+    {
+      "test": "tests::live_mcp_connected_assembly_lifecycle_uses_two_editors",
+      "exit_code": 101,
+      "elapsed_seconds": 60.36
+    },
+    {
+      "test": "tests::live_mcp_connected_assembly_lifecycle_uses_two_editors",
+      "exit_code": 0,
+      "elapsed_seconds": 19.7
+    },
+    {
+      "test": "tests::existing_footprint_acceptance::live_existing_footprint_stdio_lifecycle",
+      "exit_code": 0,
+      "elapsed_seconds": 52.72
+    },
+    {
+      "test": "tests::existing_item_edit_acceptance::live_existing_item_stdio_lifecycle",
+      "exit_code": 0,
+      "elapsed_seconds": 29.27
+    },
+    {
+      "test": "tests::footprint_flip_acceptance::live_existing_footprint_flip_stdio_lifecycle",
+      "exit_code": 0,
+      "elapsed_seconds": 117.82
+    },
+    {
+      "test": "tests::item_deletion_acceptance::live_item_deletion_stdio_lifecycle",
+      "exit_code": 0,
+      "elapsed_seconds": 30.21
+    }
+  ],
+  "regression_output_directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-route-regressions",
+  "restart": {
+    "restart_replay_rejected": true,
+    "capability_verified": true,
+    "schema_route_present": true,
+    "durable_rules_and_native_evidence": true,
+    "response": {
+      "rpc_error": "{\"code\": -32602, \"message\": \"unknown plan_id\"}"
+    }
+  }
+}

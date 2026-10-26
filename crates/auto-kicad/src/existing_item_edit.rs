@@ -3,10 +3,10 @@ use kicad_engine::{ExistingItemChange, expected_existing_item_edit, preserves_pa
 use kicad_ipc::{ExistingBoardItemSet, ExistingItemUpdate, FootprintInstanceTemplate};
 
 pub(super) struct Evidence {
-    items: ExistingBoardItemSet,
-    footprints: Vec<FootprintInstanceTemplate>,
-    clusters: Vec<Vec<String>>,
-    digest: RevisionDigest,
+    pub(super) items: ExistingBoardItemSet,
+    pub(super) footprints: Vec<FootprintInstanceTemplate>,
+    pub(super) clusters: Vec<Vec<String>>,
+    pub(super) digest: RevisionDigest,
 }
 
 pub(super) fn capture(
