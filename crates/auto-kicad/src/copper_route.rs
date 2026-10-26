@@ -391,11 +391,7 @@ pub(super) fn execute(
             .map_err(|e| unknown(e.to_string()))?;
         if !before
             .items
-            .matches_saved(
-                &actual
-                    .without(&new_ids)
-                    .map_err(|e| unknown(e.to_string()))?,
-            )
+            .matches_after_additions(&actual, &new_ids)
             .map_err(|e| unknown(e.to_string()))?
         {
             return Err(unknown(

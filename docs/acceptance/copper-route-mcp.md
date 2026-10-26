@@ -25,6 +25,8 @@ The output retains every MCP request/response, native before/after evidence, DRC
 
 The complete offline quality gate passed 400 tests with 15 environment-dependent tests ignored, format, Clippy warnings-as-errors and the capability matrix. Seven real KiCad regressions passed: legacy track/via creation, single-footprint placement, connected assembly, footprint move/rotate, field editing, flipping and deletion. The assembly regression initially timed out during editor startup before mutation; cleanup succeeded and a single retry passed. Both attempt logs are retained. A separate fresh stdio process refused a prior route approval with `unknown plan_id`, advertised the route schema/capability and retained complete rule/native evidence in durable execution records.
 
+The full 256-copper plus 100-graphic batch, including Edge.Cuts, is verified separately by [maximum-batch preservation acceptance](copper-route-boundary.md).
+
 ## Boundaries
 
 Zones and unsupported native copper reject because complete preservation cannot yet be established for them. Curved route creation, blind/buried/microvias, differential pairs, length tuning and automatic routing are unsupported. Populated-board routing and live stackup-drift acceptance are recorded in [the populated-copy evidence](populated-copper-route.md). General outlines, zone refill, schematic editing/synchronization and manufacturing delivery remain outside this capability.

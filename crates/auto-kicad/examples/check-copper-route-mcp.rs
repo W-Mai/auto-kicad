@@ -5,9 +5,14 @@ use serde_json::json;
 use std::{env, fs, path::PathBuf, process::Command};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = env::args().skip(1).collect::<Vec<_>>();
-    if args.len() != 2 {
-        return Err("usage: check-copper-route-mcp SERVER NEW_OUTPUT_DIR".into());
+    if !(args.len() == 2 || (args.len() == 3 && args[2] == "--boundary")) {
+        return Err("usage: check-copper-route-mcp SERVER NEW_OUTPUT_DIR [--boundary]".into());
     }
+    let script = if args.len() == 3 {
+        "check-route-boundary.py"
+    } else {
+        "check-copper-route-mcp.py"
+    };
     let binary = fs::canonicalize(&args[0])?;
     let output = PathBuf::from(&args[1]);
     fs::create_dir(&output)?;
@@ -44,13 +49,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ipc.save_board(&identity.board_filename)?;
         editor.reload_owned()?;
         let original_items = ipc.capture_existing_board_items(&identity.board_filename)?;
+        let original_observation =
+            IpcDiscoveryService.live_board_observation(&identity.endpoint, None)?;
         let original_footprints =
             ipc.capture_footprint_instance_templates(&identity.board_filename)?;
         let status = Command::new("python3")
             .env("PYTHONDONTWRITEBYTECODE", "1")
             .arg(
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .join("../../scripts/check-copper-route-mcp.py"),
+                    .join("../../scripts")
+                    .join(script),
             )
             .arg(&identity.endpoint)
             .arg(copy.board_path())
@@ -79,6 +87,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Err("original complete footprint changed".into());
             }
         }
+        let original_json = serde_json::to_value(&original_observation.snapshot)?;
+        let reopened_json = serde_json::to_value(&reopened.snapshot)?;
+        let mut added_ids = Vec::new();
+        for (container, collection, key) in [
+            ("native_routing", "tracks", "source_uuid"),
+            ("native_routing", "vias", "source_uuid"),
+            ("board", "graphics", "graphic_id"),
+        ] {
+            let original = original_json[container][collection]
+                .as_array()
+                .ok_or("missing original items")?;
+            for item in reopened_json[container][collection]
+                .as_array()
+                .ok_or("missing saved items")?
+            {
+                if !original.iter().any(|old| old[key] == item[key]) {
+                    added_ids.push(
+                        item[key]
+                            .as_str()
+                            .ok_or("missing created identity")?
+                            .to_owned(),
+                    );
+                }
+            }
+        }
+        if !original_items.matches_after_additions(
+            &ipc.capture_existing_board_items(&identity.board_filename)?,
+            &added_ids,
+        )? {
+            return Err("original complete board items changed".into());
+        }
         fs::create_dir(output.join("result"))?;
         for ext in ["kicad_pcb", "kicad_pro"] {
             fs::copy(
@@ -98,7 +137,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fs::write(
             output.join("native.json"),
             serde_json::to_vec_pretty(
-                &json!({"source_pid":identity.pid,"same_process_reload":true,"native_footprints_preserved":true,"reopened_revision":reopened.snapshot.revision()?.to_string()}),
+                &json!({"source_pid":identity.pid,"same_process_reload":true,"native_footprints_preserved":true,"native_original_items_preserved":true,"added_items":added_ids.len(),"reopened_revision":reopened.snapshot.revision()?.to_string()}),
             )?,
         )?;
         Ok(())

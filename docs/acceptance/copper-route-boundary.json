@@ -1,0 +1,36 @@
+{
+  "passed": true,
+  "production_stdio": true,
+  "kicad_version": "10.0.7",
+  "tracks_added": 256,
+  "graphics_added": 100,
+  "edge_cuts_added": 4,
+  "excessive_copper_rejected": true,
+  "unrelated_normalized_state_preserved": true,
+  "protected_files_preserved": true,
+  "output_directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-route-boundary-compact",
+  "real_project_profile": false,
+  "baseline_unconnected": 7,
+  "final_unconnected": 5,
+  "introduced_drc": 0,
+  "native": {
+    "added_items": 356,
+    "native_footprints_preserved": true,
+    "native_original_items_preserved": true,
+    "reopened_revision": "sha256:025f5963d4be14fda0e10b8341443c21a305225e1096e2899a4f91492541a3ed",
+    "same_process_reload": true,
+    "source_pid": 2362
+  },
+  "cleanup": {
+    "original_unchanged": true,
+    "owned_source_closed": true,
+    "shadow_cleaned": true
+  },
+  "quality": {
+    "passed": 401,
+    "ignored": 15,
+    "fmt": true,
+    "clippy_warnings_as_errors": true,
+    "capability_matrix": true
+  }
+}

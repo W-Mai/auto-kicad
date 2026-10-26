@@ -122,7 +122,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .collect::<Vec<_>>();
         let after = ipc.capture_existing_board_items(&identity.board_filename)?;
         if before_reload != after_reload
-            || !baseline.matches_saved(&after.without(&ids)?)?
+            || !baseline.matches_after_additions(&after, &ids)?
             || ipc.instance_token().cloned() != token
             || fs::read(copy.project_path())? != protected
         {

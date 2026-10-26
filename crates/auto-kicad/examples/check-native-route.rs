@@ -288,7 +288,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .collect::<Vec<_>>();
         let after = ipc.capture_existing_board_items(&identity.board_filename)?;
         if !created_routing_matches_reloaded(&saved, &reloaded)
-            || !baseline.matches_saved(&after.without(&ids)?)?
+            || !baseline.matches_after_additions(&after, &ids)?
             || fs::read(copy.project_path())? != protected[1]
             || ipc.instance_token() != Some(&source.instance_token)
         {
@@ -303,7 +303,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err(format!(
                 "saved route preservation failed: routing={} existing={} project={} token={}",
                 saved == reloaded,
-                baseline.matches_saved(&after.without(&ids)?)?,
+                baseline.matches_after_additions(&after, &ids)?,
                 fs::read(copy.project_path())? == protected[1],
                 ipc.instance_token() == Some(&source.instance_token)
             )

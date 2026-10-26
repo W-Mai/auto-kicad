@@ -372,6 +372,31 @@ impl ExistingBoardItemSet {
         Ok(self.persistent_evidence()? == actual.persistent_evidence()?)
     }
 
+    /// Verify exact additions and preservation of every original persistent payload.
+    /// Added identities must come from independently verified creation receipts.
+    /// This comparison grants no deletion permission and does not validate new payloads.
+    pub fn matches_after_additions(
+        &self,
+        actual: &Self,
+        added_ids: &[String],
+    ) -> Result<bool, IpcError> {
+        let added = super::existing_items::identifiers(added_ids, actual.items.len())?;
+        if added
+            .iter()
+            .any(|id| self.items.contains_key(id) || !actual.items.contains_key(id))
+        {
+            return Err(invalid(
+                "added identity overlaps original items or is missing",
+            ));
+        }
+        if actual.items.len() != self.items.len() + added.len() {
+            return Ok(false);
+        }
+        let mut surviving = actual.clone();
+        surviving.items.retain(|id, _| !added.contains(id));
+        self.matches_saved(&surviving)
+    }
+
     /// Derive an expected result solely from the observed payloads and explicit intent.
     pub fn updated(&self, changes: &[ExistingItemUpdate]) -> Result<Self, IpcError> {
         let ids = changes
@@ -613,6 +638,53 @@ mod tests {
         };
         v.layer = protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_Edge_Cuts);
         assert!(locked.without(&["graphic".into()]).is_err());
+    }
+
+    #[test]
+    fn additive_preservation_is_exact_and_independent_of_deletion_policy() {
+        let before = fixture();
+        let mut after = before.clone();
+        let mut ids = Vec::new();
+        for n in 0..356 {
+            let id = format!("added-{n}");
+            let mut item = before.items[if n < 256 { "track" } else { "graphic" }].clone();
+            match &mut item {
+                NativeItem::Track(v) => v.id.as_mut().unwrap().value = id.clone(),
+                NativeItem::Graphic(v) => {
+                    v.id.as_mut().unwrap().value = id.clone();
+                    v.layer = protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_Edge_Cuts);
+                }
+                _ => unreachable!(),
+            }
+            after.items.insert(id.clone(), item);
+            ids.push(id);
+        }
+        assert!(before.matches_after_additions(&after, &ids).unwrap());
+        assert!(after.without(&ids).is_err());
+        assert!(after.without(&ids[256..257]).is_err());
+        for invalid in [
+            vec![],
+            vec![ids[0].clone(), ids[0].clone()],
+            vec!["track".into()],
+            vec!["missing".into()],
+        ] {
+            assert!(before.matches_after_additions(&after, &invalid).is_err());
+        }
+        assert!(!before.matches_after_additions(&after, &ids[..355]).unwrap());
+        let mut changed = after.clone();
+        changed.items.remove("via");
+        assert!(!before.matches_after_additions(&changed, &ids).unwrap());
+        let mut changed = after.clone();
+        let NativeItem::Track(v) = changed.items.get_mut("track").unwrap() else {
+            unreachable!()
+        };
+        v.special_fields.mut_unknown_fields().add_varint(1001, 99);
+        assert!(!before.matches_after_additions(&changed, &ids).unwrap());
+        let NativeItem::Track(v) = after.items.get_mut("track").unwrap() else {
+            unreachable!()
+        };
+        v.parent = MessageField::none();
+        assert!(before.matches_after_additions(&after, &ids).unwrap());
     }
 
     #[test]
