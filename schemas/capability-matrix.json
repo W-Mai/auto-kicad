@@ -286,6 +286,29 @@
         "requires output collision policy and distribution decision"
       ],
       "evidence": null
+    },
+    {
+      "id": "pcb.routing_rules.inspect",
+      "domain": "pcb",
+      "mode": "read",
+      "status": "verified",
+      "mcp_tools": [
+        "kicad_inspect_project"
+      ],
+      "constraints": [
+        "1 through 64 unique existing board net IDs",
+        "same editor, document, stackup and source evidence",
+        "preferences and saved minima remain distinct; missing fields remain unavailable",
+        "read-only inspection; plan and approval integration pending"
+      ],
+      "evidence": {
+        "fixture": "owned-four-layer-board-through-production-stdio",
+        "tested_versions": [
+          "10.0.7"
+        ],
+        "command": "cargo run -p auto-kicad --example check-routing-rule-inspection -- /absolute/auto-kicad /absolute/new-output",
+        "record": "docs/acceptance/routing-rule-inspection.md"
+      }
     }
   ]
 }

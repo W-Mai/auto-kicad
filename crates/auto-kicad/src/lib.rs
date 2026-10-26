@@ -3,6 +3,7 @@ mod existing_item_edit;
 mod footprint_authoring;
 mod library_settings;
 pub mod recovery;
+pub mod routing_rules;
 
 use kicad_adapter::{
     BoardGraphicsCommitOutcome, BoardGraphicsExecutor, DiscoveryInput, DisposablePcbLifecycle,
@@ -96,6 +97,15 @@ pub struct Capability {
 }
 
 pub trait DiscoveryService: Send + Sync {
+    fn routing_rule_inspection(
+        &self,
+        _endpoint: &str,
+        _source: &LiveBoardObservation,
+        _net_ids: &[String],
+    ) -> Result<routing_rules::RoutingRuleInspection, String> {
+        Err("native routing rule observation is unavailable".into())
+    }
+
     fn item_deletion_evidence(
         &self,
         _endpoint: &str,
@@ -158,6 +168,15 @@ pub trait DiscoveryService: Send + Sync {
 pub struct IpcDiscoveryService;
 
 impl DiscoveryService for IpcDiscoveryService {
+    fn routing_rule_inspection(
+        &self,
+        endpoint: &str,
+        source: &LiveBoardObservation,
+        net_ids: &[String],
+    ) -> Result<routing_rules::RoutingRuleInspection, String> {
+        routing_rules::inspect(endpoint, source, net_ids)
+    }
+
     fn item_deletion_evidence(
         &self,
         endpoint: &str,
@@ -2918,6 +2937,7 @@ pub struct SchematicAuditRequest {
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 pub struct InspectProjectRequest {
+    pub routing_rules: Option<routing_rules::RoutingRulesRequest>,
     pub endpoint: String,
     pub footprint_source: Option<FootprintSourceRequest>,
     pub project_dir: Option<String>,
@@ -3127,6 +3147,12 @@ impl Server {
                 Capability {
                     id: "base.get_version",
                     domain: "base",
+                    mode: "read",
+                    status: "verified",
+                },
+                Capability {
+                    id: "pcb.routing_rules.inspect",
+                    domain: "pcb",
                     mode: "read",
                     status: "verified",
                 },
@@ -3441,7 +3467,7 @@ impl Server {
 
     #[tool(
         name = "kicad_inspect_project",
-        description = "Read open KiCad documents, or durable project history with an empty endpoint."
+        description = "Read open KiCad documents and optional routing rules for existing net IDs, or durable project history with an empty endpoint."
     )]
     pub async fn kicad_inspect_project(
         &self,
@@ -3451,6 +3477,16 @@ impl Server {
             .request_id
             .unwrap_or_else(|| "req_inspect_project".to_owned());
         let project_dir = arguments.project_dir.as_deref().map(std::path::Path::new);
+        if let Some(query) = &arguments.routing_rules {
+            routing_rules::validate_selection(&query.net_ids)
+                .map_err(|reason| ErrorData::invalid_params(reason, None))?;
+            if arguments.endpoint.is_empty() {
+                return Err(ErrorData::invalid_params(
+                    "routing rules require a live board endpoint",
+                    None,
+                ));
+            }
+        }
         if arguments.footprint_source.is_some() && arguments.endpoint.is_empty() {
             return Err(ErrorData::invalid_params(
                 "footprint source lookup requires a live board endpoint",
@@ -3507,6 +3543,16 @@ impl Server {
                     .snapshot
                     .revision()
                     .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+                if let Some(query) = &arguments.routing_rules {
+                    data["routing_rules"] = match self.discovery.routing_rule_inspection(
+                        &arguments.endpoint,
+                        &pcb,
+                        &query.net_ids,
+                    ) {
+                        Ok(observed) => json!({"status":"observed", "observation":observed}),
+                        Err(reason) => json!({"status":"unavailable", "reason":reason}),
+                    };
+                }
                 if let Some(query) = &arguments.footprint_source {
                     let identifier = kicad_model::FootprintLibraryIdentifier {
                         nickname: query.library_nickname.clone(),
@@ -3530,6 +3576,9 @@ impl Server {
             Err(reason) => {
                 data["pcb"] = Value::Null;
                 data["pcb_observation_error"] = json!(reason);
+                if arguments.routing_rules.is_some() {
+                    data["routing_rules"] = json!({"status":"unavailable", "reason":reason});
+                }
             }
         }
         if self.execution_store.is_some() {
@@ -7665,7 +7714,7 @@ mod tests {
         let matrix = &structured["data"]["capability_matrix"];
         assert_eq!(matrix["schema_version"], "1");
         assert_eq!(matrix["product"], "auto-kicad");
-        assert_eq!(matrix["capabilities"].as_array().unwrap().len(), 13);
+        assert_eq!(matrix["capabilities"].as_array().unwrap().len(), 14);
         assert_eq!(
             matrix["capabilities"]
                 .as_array()

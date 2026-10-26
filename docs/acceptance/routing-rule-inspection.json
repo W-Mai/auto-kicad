@@ -1,0 +1,28 @@
+{
+  "kicad_version": "10.0.7",
+  "production_stdio": true,
+  "net_count": 2,
+  "exact_saved_minima": true,
+  "preferred_width_distinct_from_minimum": true,
+  "invalid_selections_rejected": true,
+  "unknown_net_unavailable": true,
+  "duplicate_json_unavailable": true,
+  "missing_constraints_explicit": true,
+  "custom_rule_digest_changed": true,
+  "restored_evidence_equal": true,
+  "source_unchanged": true,
+  "cleanup": {
+    "original_unchanged": true,
+    "owned_editor_closed": true,
+    "shadow_cleaned": true
+  },
+  "scope": "read-only production stdio rule inspection; no routing plan or approval integration",
+  "quality": {
+    "passed": 388,
+    "ignored": 15,
+    "format": true,
+    "clippy_warnings_as_errors": true,
+    "capability_matrix": true,
+    "final_binary_capability_schema": true
+  }
+}
