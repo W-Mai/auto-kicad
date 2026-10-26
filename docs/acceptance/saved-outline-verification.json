@@ -1,0 +1,601 @@
+{
+  "kicad_version": "10.0.7",
+  "cases": [
+    {
+      "case": "valid",
+      "accepted": true,
+      "result": {
+        "Ok": {
+          "native": {
+            "kicad_version": "10.0.7",
+            "board_sha256": "0ba2ea295ba8525b0bb8da307fc3072a9364b52e83def98a7ace478e880f0e4c",
+            "project_sha256": "8419222138158c81918c3658150733feb0854bc37dc5a0b980afe94399a18f38",
+            "edge_count": 15,
+            "outer_count": 2,
+            "holes": [
+              2,
+              0
+            ],
+            "filled_areas_nm2": [
+              1.0976095439544028e+16,
+              300000000000000.0
+            ],
+            "bounds_nm": [
+              -30000000,
+              0,
+              180000000,
+              80000000
+            ],
+            "point_count": 276,
+            "chaining_epsilon_nm": 1,
+            "exact_endpoint_chains": true,
+            "inferred_outline": false
+          },
+          "topology_drc": {
+            "parser_version": "kicad-drc-v1",
+            "schema": "https://schemas.kicad.org/drc.v1.json",
+            "kicad_version": "10.0.7",
+            "source": "board.kicad_pcb",
+            "ignored_checks": 5,
+            "unconnected_items": 0,
+            "violations": [
+              {
+                "identity": {
+                  "Uuids": {
+                    "rule_type": "track_dangling",
+                    "uuids": [
+                      "40000000-0000-4000-8000-000000000001"
+                    ]
+                  }
+                },
+                "rule_type": "track_dangling",
+                "severity": "warning",
+                "description": "Track has unconnected end",
+                "items": [
+                  {
+                    "uuid": "40000000-0000-4000-8000-000000000001",
+                    "description": "\u8d70\u7ebf [GND] (F.Cu), \u957f\u5ea6: 5.0000 mm",
+                    "position": {
+                      "x": 10.0,
+                      "y": 10.0
+                    }
+                  }
+                ]
+              },
+              {
+                "identity": {
+                  "Uuids": {
+                    "rule_type": "track_dangling",
+                    "uuids": [
+                      "40000000-0000-4000-8000-000000000002"
+                    ]
+                  }
+                },
+                "rule_type": "track_dangling",
+                "severity": "warning",
+                "description": "Track has unconnected end",
+                "items": [
+                  {
+                    "uuid": "40000000-0000-4000-8000-000000000002",
+                    "description": "\u8d70\u7ebf [VCC] (In1.Cu), \u957f\u5ea6: 5.0000 mm",
+                    "position": {
+                      "x": 30.0,
+                      "y": 10.0
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "source_preserved": true,
+      "temporary_snapshots_cleaned": true
+    },
+    {
+      "case": "closed-shapes",
+      "accepted": true,
+      "result": {
+        "Ok": {
+          "native": {
+            "kicad_version": "10.0.7",
+            "board_sha256": "5b781e1307d1225fbf72fe3839bfc6674cacbcc0f78980647b1faa3e8eb6e414",
+            "project_sha256": "8419222138158c81918c3658150733feb0854bc37dc5a0b980afe94399a18f38",
+            "edge_count": 17,
+            "outer_count": 2,
+            "holes": [
+              4,
+              0
+            ],
+            "filled_areas_nm2": [
+              1.0952095439544028e+16,
+              300000000000000.0
+            ],
+            "bounds_nm": [
+              -30000000,
+              0,
+              180000000,
+              80000000
+            ],
+            "point_count": 283,
+            "chaining_epsilon_nm": 1,
+            "exact_endpoint_chains": true,
+            "inferred_outline": false
+          },
+          "topology_drc": {
+            "parser_version": "kicad-drc-v1",
+            "schema": "https://schemas.kicad.org/drc.v1.json",
+            "kicad_version": "10.0.7",
+            "source": "board.kicad_pcb",
+            "ignored_checks": 5,
+            "unconnected_items": 0,
+            "violations": [
+              {
+                "identity": {
+                  "Uuids": {
+                    "rule_type": "track_dangling",
+                    "uuids": [
+                      "40000000-0000-4000-8000-000000000001"
+                    ]
+                  }
+                },
+                "rule_type": "track_dangling",
+                "severity": "warning",
+                "description": "Track has unconnected end",
+                "items": [
+                  {
+                    "uuid": "40000000-0000-4000-8000-000000000001",
+                    "description": "\u8d70\u7ebf [GND] (F.Cu), \u957f\u5ea6: 5.0000 mm",
+                    "position": {
+                      "x": 10.0,
+                      "y": 10.0
+                    }
+                  }
+                ]
+              },
+              {
+                "identity": {
+                  "Uuids": {
+                    "rule_type": "track_dangling",
+                    "uuids": [
+                      "40000000-0000-4000-8000-000000000002"
+                    ]
+                  }
+                },
+                "rule_type": "track_dangling",
+                "severity": "warning",
+                "description": "Track has unconnected end",
+                "items": [
+                  {
+                    "uuid": "40000000-0000-4000-8000-000000000002",
+                    "description": "\u8d70\u7ebf [VCC] (In1.Cu), \u957f\u5ea6: 5.0000 mm",
+                    "position": {
+                      "x": 30.0,
+                      "y": 10.0
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "source_preserved": true,
+      "temporary_snapshots_cleaned": true
+    },
+    {
+      "case": "valid-major-arc",
+      "accepted": true,
+      "result": {
+        "Ok": {
+          "native": {
+            "kicad_version": "10.0.7",
+            "board_sha256": "222f2313d83cb49601efb25e7c294af82361597ef6f75403bfe15c46890927b4",
+            "project_sha256": "8419222138158c81918c3658150733feb0854bc37dc5a0b980afe94399a18f38",
+            "edge_count": 2,
+            "outer_count": 1,
+            "holes": [
+              0
+            ],
+            "filled_areas_nm2": [
+              284258801808526.0
+            ],
+            "bounds_nm": [
+              -9013149,
+              0,
+              10013149,
+              19013149
+            ],
+            "point_count": 97,
+            "chaining_epsilon_nm": 1,
+            "exact_endpoint_chains": true,
+            "inferred_outline": false
+          },
+          "topology_drc": {
+            "parser_version": "kicad-drc-v1",
+            "schema": "https://schemas.kicad.org/drc.v1.json",
+            "kicad_version": "10.0.7",
+            "source": "board.kicad_pcb",
+            "ignored_checks": 5,
+            "unconnected_items": 0,
+            "violations": [
+              {
+                "identity": {
+                  "Uuids": {
+                    "rule_type": "copper_edge_clearance",
+                    "uuids": [
+                      "6cb46972-7a94-4977-a940-6eed582b0bff",
+                      "40000000-0000-4000-8000-000000000001"
+                    ]
+                  }
+                },
+                "rule_type": "copper_edge_clearance",
+                "severity": "error",
+                "description": "\u7535\u8def\u677f\u8fb9\u7f18\u95f4\u8ddd\u8fdd\u89c4 (<\u7535\u8def\u677f\u914d\u7f6e> \u4e2d\u7684 \"\u677f\u8fb9\" \u7ea6\u675f \u95f4\u8ddd 0.5000 mm; \u5b9e\u9645 0.0000 mm)",
+                "items": [
+                  {
+                    "uuid": "6cb46972-7a94-4977-a940-6eed582b0bff",
+                    "description": "Edge.Cuts \u4e0a\u7684 \u5f27\u7ebf",
+                    "position": {
+                      "x": 0.5,
+                      "y": 9.5
+                    }
+                  },
+                  {
+                    "uuid": "40000000-0000-4000-8000-000000000001",
+                    "description": "\u8d70\u7ebf [GND] (F.Cu), \u957f\u5ea6: 5.0000 mm",
+                    "position": {
+                      "x": 10.0,
+                      "y": 10.0
+                    }
+                  }
+                ]
+              },
+              {
+                "identity": {
+                  "Uuids": {
+                    "rule_type": "track_dangling",
+                    "uuids": [
+                      "40000000-0000-4000-8000-000000000001"
+                    ]
+                  }
+                },
+                "rule_type": "track_dangling",
+                "severity": "warning",
+                "description": "Track has unconnected end",
+                "items": [
+                  {
+                    "uuid": "40000000-0000-4000-8000-000000000001",
+                    "description": "\u8d70\u7ebf [GND] (F.Cu), \u957f\u5ea6: 5.0000 mm",
+                    "position": {
+                      "x": 10.0,
+                      "y": 10.0
+                    }
+                  }
+                ]
+              },
+              {
+                "identity": {
+                  "Uuids": {
+                    "rule_type": "track_dangling",
+                    "uuids": [
+                      "40000000-0000-4000-8000-000000000002"
+                    ]
+                  }
+                },
+                "rule_type": "track_dangling",
+                "severity": "warning",
+                "description": "Track has unconnected end",
+                "items": [
+                  {
+                    "uuid": "40000000-0000-4000-8000-000000000002",
+                    "description": "\u8d70\u7ebf [VCC] (In1.Cu), \u957f\u5ea6: 5.0000 mm",
+                    "position": {
+                      "x": 30.0,
+                      "y": 10.0
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      },
+      "source_preserved": true,
+      "temporary_snapshots_cleaned": true
+    },
+    {
+      "case": "disabled-topology-rule",
+      "accepted": false,
+      "result": {
+        "Err": {
+          "InvalidInput": {
+            "message": "saved project must enable invalid_outline as error"
+          }
+        }
+      },
+      "source_preserved": true,
+      "temporary_snapshots_cleaned": true
+    },
+    {
+      "case": "open",
+      "accepted": false,
+      "result": {
+        "Err": {
+          "ProcessFailed": {
+            "status": 2,
+            "stdout": "",
+            "stderr": "./src/common/stdpbase.cpp(59): assert \"\"traits\"\" failed in Get(): create wxApp before calling this\noutline endpoints do not form exact unbranched closed chains\n"
+          }
+        }
+      },
+      "source_preserved": true,
+      "temporary_snapshots_cleaned": true
+    },
+    {
+      "case": "one-nm-gap",
+      "accepted": false,
+      "result": {
+        "Err": {
+          "ProcessFailed": {
+            "status": 2,
+            "stdout": "",
+            "stderr": "./src/common/stdpbase.cpp(59): assert \"\"traits\"\" failed in Get(): create wxApp before calling this\noutline endpoints do not form exact unbranched closed chains\n"
+          }
+        }
+      },
+      "source_preserved": true,
+      "temporary_snapshots_cleaned": true
+    },
+    {
+      "case": "straight-crossing",
+      "accepted": false,
+      "result": {
+        "Err": {
+          "ProcessFailed": {
+            "status": 2,
+            "stdout": "",
+            "stderr": "./src/common/stdpbase.cpp(59): assert \"\"traits\"\" failed in Get(): create wxApp before calling this\nnative boundary construction rejected\n"
+          }
+        }
+      },
+      "source_preserved": true,
+      "temporary_snapshots_cleaned": true
+    },
+    {
+      "case": "arc-line-crossing",
+      "accepted": false,
+      "result": {
+        "Err": {
+          "InvalidInput": {
+            "message": "native DRC rejected final board outline"
+          }
+        }
+      },
+      "source_preserved": true,
+      "temporary_snapshots_cleaned": true
+    },
+    {
+      "case": "circle-circle-crossing",
+      "accepted": false,
+      "result": {
+        "Err": {
+          "InvalidInput": {
+            "message": "native DRC rejected final board outline"
+          }
+        }
+      },
+      "source_preserved": true,
+      "temporary_snapshots_cleaned": true
+    },
+    {
+      "case": "circle-circle-tangent",
+      "accepted": false,
+      "result": {
+        "Err": {
+          "InvalidInput": {
+            "message": "native DRC rejected final board outline"
+          }
+        }
+      },
+      "source_preserved": true,
+      "temporary_snapshots_cleaned": true
+    },
+    {
+      "case": "empty",
+      "accepted": false,
+      "result": {
+        "Err": {
+          "ProcessFailed": {
+            "status": 2,
+            "stdout": "",
+            "stderr": "./src/common/stdpbase.cpp(59): assert \"\"traits\"\" failed in Get(): create wxApp before calling this\noutline count is empty or exceeds bound\n"
+          }
+        }
+      },
+      "source_preserved": true,
+      "temporary_snapshots_cleaned": true
+    },
+    {
+      "case": "zero-area-arcs",
+      "accepted": false,
+      "result": {
+        "Err": {
+          "ProcessFailed": {
+            "status": 2,
+            "stdout": "",
+            "stderr": "./src/common/stdpbase.cpp(59): assert \"\"traits\"\" failed in Get(): create wxApp before calling this\noutline endpoints do not form exact unbranched closed chains\n"
+          }
+        }
+      },
+      "source_preserved": true,
+      "temporary_snapshots_cleaned": true
+    },
+    {
+      "case": "major-arc-span",
+      "accepted": false,
+      "result": {
+        "Err": {
+          "ProcessFailed": {
+            "status": 2,
+            "stdout": "",
+            "stderr": "./src/common/stdpbase.cpp(59): assert \"\"traits\"\" failed in Get(): create wxApp before calling this\nnative curve span exceeds bound\n"
+          }
+        }
+      },
+      "source_preserved": true,
+      "temporary_snapshots_cleaned": true
+    }
+  ],
+  "live_acceptance": {
+    "arcs": 2,
+    "baseline_unconnected": 0,
+    "compiled_from_serialized_intent": true,
+    "compiler_stale_open_locked_rejected": true,
+    "created": [
+      "c2dfcf0e-8309-40dc-8bfe-24673a079166",
+      "72681e89-b5aa-4899-b280-afdacf0289ae",
+      "a54652a0-6435-4dfa-a3ad-cf4749e24ea1",
+      "753fd9ca-7219-459c-a758-2190a9e2cceb",
+      "60fb6d74-ec3b-4556-943a-584e35572795",
+      "c29e4509-3789-4340-ab8d-cb15d0a44ff0",
+      "ce595284-e5b6-4bf8-946b-cbaed8a48c57",
+      "776f9791-4369-452e-bbae-99525a37b703",
+      "1b75e603-3ab3-4e8b-8cb1-4327bff3455d",
+      "6d025e5b-a3a1-484d-a198-a1bcc10e9f0b",
+      "d032acd8-4cec-4b89-ba2b-1c3165a437ad",
+      "c7cab5c5-1e6d-414f-92ca-c8e4e2f5c465",
+      "b62f9553-4137-40bc-b2e7-d3c58c0216ab",
+      "c0253c0b-0a41-419d-9d13-621faa661961"
+    ],
+    "final_unconnected": 0,
+    "introduced_drc": 0,
+    "kicad_version": "10.0.7",
+    "locked_wrong_layer_missing_duplicate_removals_rejected": true,
+    "native_maximum_cancelled": 512,
+    "oversized_rejected": 513,
+    "pid": 23167,
+    "project_preserved": true,
+    "removed": [
+      "30000000-0000-4000-8000-000000000001",
+      "30000000-0000-4000-8000-000000000002",
+      "30000000-0000-4000-8000-000000000003",
+      "30000000-0000-4000-8000-000000000004"
+    ],
+    "same_process_reload": true,
+    "saved_receipts_exact": true,
+    "scope": "native outline primitives and exact replacement; not general topology planning or MCP acceptance",
+    "unrelated_native_payloads_preserved": true
+  },
+  "cleanup": {
+    "original_unchanged": true,
+    "owned_editor_closed": true,
+    "pid": 23167
+  },
+  "live_topology": {
+    "native": {
+      "kicad_version": "10.0.7",
+      "board_sha256": "ac3460150719effd50fa4a8ad91accc4115695048f02bb0ff39e49279831f4f2",
+      "project_sha256": "8419222138158c81918c3658150733feb0854bc37dc5a0b980afe94399a18f38",
+      "edge_count": 15,
+      "outer_count": 2,
+      "holes": [
+        2,
+        0
+      ],
+      "filled_areas_nm2": [
+        1.0976095439544028e+16,
+        300000000000000.0
+      ],
+      "bounds_nm": [
+        -30000000,
+        0,
+        180000000,
+        80000000
+      ],
+      "point_count": 276,
+      "chaining_epsilon_nm": 1,
+      "exact_endpoint_chains": true,
+      "inferred_outline": false
+    },
+    "topology_drc": {
+      "parser_version": "kicad-drc-v1",
+      "schema": "https://schemas.kicad.org/drc.v1.json",
+      "kicad_version": "10.0.7",
+      "source": "board.kicad_pcb",
+      "ignored_checks": 5,
+      "unconnected_items": 0,
+      "violations": [
+        {
+          "identity": {
+            "Uuids": {
+              "rule_type": "track_dangling",
+              "uuids": [
+                "40000000-0000-4000-8000-000000000001"
+              ]
+            }
+          },
+          "rule_type": "track_dangling",
+          "severity": "warning",
+          "description": "Track has unconnected end",
+          "items": [
+            {
+              "uuid": "40000000-0000-4000-8000-000000000001",
+              "description": "\u8d70\u7ebf [GND] (F.Cu), \u957f\u5ea6: 5.0000 mm",
+              "position": {
+                "x": 10.0,
+                "y": 10.0
+              }
+            }
+          ]
+        },
+        {
+          "identity": {
+            "Uuids": {
+              "rule_type": "track_dangling",
+              "uuids": [
+                "40000000-0000-4000-8000-000000000002"
+              ]
+            }
+          },
+          "rule_type": "track_dangling",
+          "severity": "warning",
+          "description": "Track has unconnected end",
+          "items": [
+            {
+              "uuid": "40000000-0000-4000-8000-000000000002",
+              "description": "\u8d70\u7ebf [VCC] (In1.Cu), \u957f\u5ea6: 5.0000 mm",
+              "position": {
+                "x": 30.0,
+                "y": 10.0
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "temporary_arc_arithmetic_validation": {
+    "known_circle_cases": 3960,
+    "major_arc_regression": true,
+    "passed": true,
+    "temporary_script_removed": true
+  },
+  "quality": {
+    "passed": 417,
+    "failed": 0,
+    "ignored": 15,
+    "format": true,
+    "clippy_warnings_denied": true,
+    "capability_matrix": true
+  },
+  "evidence_scope": "native saved candidate verification and owned-editor integration; not production MCP or final project-profile acceptance",
+  "artifact_sha256": {
+    "m4-saved-outline-check-tangency/result.json": "463fb6c5e674ec09d731f3205e6b79616e5c079122196c70bbf5eb283216e794",
+    "m4-outline-verified-live/result/board.kicad_pcb": "ac3460150719effd50fa4a8ad91accc4115695048f02bb0ff39e49279831f4f2",
+    "m4-outline-verified-live/result/board.kicad_pro": "8419222138158c81918c3658150733feb0854bc37dc5a0b980afe94399a18f38",
+    "m4-outline-verified-live/native-topology.json": "b92b534a26b4dbb5ccadbf21166cefbbf8c0f3349b6c3a823943735d3f94385a",
+    "m4-outline-verified-live/intent-native-check.json": "63b7cffa77b12c27182d2d71dbe3bf27317c642e6c854d6fe89e73cc3ac1324a",
+    "m4-outline-verified-live/cleanup.json": "70b05ffb49e1fe3ad68b99dc1cd4af3ca25eb7698c299bd4e2f01d1f5191c52a"
+  }
+}

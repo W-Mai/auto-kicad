@@ -24,3 +24,5 @@ An independent bundled-Python parser loads the saved result and compares every c
 Offline quality passed 414 tests with 15 environment-dependent tests ignored, format validation, warnings-denied Clippy and capability validation. Architecture tests cover request serialization, revision/lock/source checks, exact straight-edge geometry, valid 512-edge closure, excess counts and unchanged arc controls with mandatory native verification.
 
 This acceptance covers backend request compilation and native execution on a synthetic fixture. General curve/retained-boundary validation, public geometry MCP requests, source approval/recovery, zoned-board refill and final real-project profile acceptance remain unfinished. The existing public rectangular-outline workflow is unchanged.
+
+[Saved-candidate verification](saved-outline-verification.md) checks complete retained/new boundaries with native parsing, exact arc envelopes and absolute topology DRC. The compiler alone still cannot authorize native creation or source execution.

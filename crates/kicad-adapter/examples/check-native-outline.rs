@@ -198,6 +198,27 @@ fn main() -> Result<(), Error> {
         {
             return Err("outline replacement altered unrelated content".into());
         }
+        let topology = kicad_checks::outline::check_saved_outline(
+            copy.board_path(),
+            &kicad_checks::DrcPolicy {
+                allowed_root: copy
+                    .board_path()
+                    .parent()
+                    .ok_or("missing board parent")?
+                    .to_path_buf(),
+                timeout: Duration::from_secs(60),
+            },
+        )
+        .map_err(|e| format!("native topology check failed: {e:?}"))?;
+        if topology.outer_count() != 2 || topology.hole_counts().iter().sum::<usize>() != 2 {
+            return Err(
+                "native topology differs from intended outer boundaries and cutouts".into(),
+            );
+        }
+        fs::write(
+            output.join("native-topology.json"),
+            serde_json::to_vec_pretty(&topology)?,
+        )?;
         let after_drc = drc(copy.board_path())?;
         let delta = compare_drc(&baseline_drc, &after_drc);
         fs::write(

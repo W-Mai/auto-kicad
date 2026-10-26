@@ -1,3 +1,5 @@
+pub mod outline;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -144,6 +146,15 @@ fn run_pcb_drc_with_executable(
     policy: &DrcPolicy,
     executable: &Path,
 ) -> CheckResult {
+    run_pcb_drc_with_options(board_path, policy, executable, false)
+}
+
+fn run_pcb_drc_with_options(
+    board_path: &Path,
+    policy: &DrcPolicy,
+    executable: &Path,
+    include_exclusions: bool,
+) -> CheckResult {
     let board_path = match confined_board_path(board_path, &policy.allowed_root) {
         Ok(path) => path,
         Err(failure) => return CheckResult::Failed(failure),
@@ -198,6 +209,9 @@ fn run_pcb_drc_with_executable(
         .arg(&board_path)
         .stdout(Stdio::from(stdout_file))
         .stderr(Stdio::from(stderr_file));
+    if include_exclusions {
+        command.arg("--severity-all");
+    }
     #[cfg(unix)]
     unsafe {
         command.pre_exec(|| {
@@ -246,7 +260,18 @@ fn run_pcb_drc_with_executable(
     if !matches!(status.code(), Some(0 | 5)) {
         return CheckResult::Failed(classify_process_failure(status, stdout, stderr));
     }
-    let report = match fs::read_to_string(&report_path) {
+    let report = match File::open(&report_path).and_then(|file| {
+        const LIMIT: u64 = 32 * 1024 * 1024;
+        if file.metadata()?.len() > LIMIT {
+            return Err(io::Error::other("DRC report exceeds 32 MiB bound"));
+        }
+        let mut report = String::new();
+        file.take(LIMIT + 1).read_to_string(&mut report)?;
+        if report.len() as u64 > LIMIT {
+            return Err(io::Error::other("DRC report grew beyond 32 MiB bound"));
+        }
+        Ok(report)
+    }) {
         Ok(report) => report,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
             return CheckResult::Failed(CheckFailure::ReportMissing);
