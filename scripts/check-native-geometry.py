@@ -27,6 +27,7 @@ for zone in observed['zones']:
     decoded = zones[zone['id']]
     assert sorted(native_layer(layer) for layer in zone['layers']) == sorted(int(layer) for layer in decoded.GetLayerSet().Seq())
     assert zone['filled'] == bool(decoded.IsFilled())
+    assert zone['text_locked'] == bool(decoded.IsLocked())
     assert zone['outline_polygons'] == decoded.Outline().OutlineCount()
     if decoded.IsLocked():
         locked.append(dict(id=zone['id'], native_locked=zone['native_locked'], live_text_locked=True))
@@ -36,7 +37,7 @@ for zone in observed['zones']:
         assert layer['nodes'] == polygons.TotalVertices(), (zone['id'], layer, polygons.TotalVertices())
         filled += layer['polygons']
 result = dict(passed=True, native_text_zone_ids_match=True, native_text_shape_ids_match=True,
-    zone_layers_and_fill_polygons_match=True, zone_count=len(zones), shape_count=len(native_shapes),
+    zone_layers_and_fill_polygons_match=True, all_live_text_locks_match=True, zone_count=len(zones), shape_count=len(native_shapes),
     filled_polygons=filled, locked_zones=locked, scope='read-only native protocol evidence; not zone editing, refill or MCP acceptance')
 (output / 'result.json').write_text(json.dumps(result,indent=2))
 print(json.dumps(result,indent=2))

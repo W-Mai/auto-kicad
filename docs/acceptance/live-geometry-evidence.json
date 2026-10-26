@@ -1,0 +1,42 @@
+{
+  "passed": true,
+  "native_text_zone_ids_match": true,
+  "native_text_shape_ids_match": true,
+  "zone_layers_and_fill_polygons_match": true,
+  "all_live_text_locks_match": true,
+  "zone_count": 14,
+  "shape_count": 70,
+  "filled_polygons": 31,
+  "locked_zones": [
+    {
+      "id": "f9c2f127-515b-4e2f-b007-625a8e1a09e6",
+      "native_locked": 0,
+      "live_text_locked": true
+    }
+  ],
+  "scope": "read-only native protocol evidence; not zone editing, refill or MCP acceptance",
+  "original_files_unchanged": true,
+  "owned_editor_closed": true,
+  "working_copy_removed": true,
+  "source_pid": 31390,
+  "kicad_version": "10.0.7",
+  "live_structure_digest": "1962bd1817286cb4b2fb684ccb0d2679f2d671864973de8ee961636719c56ca7",
+  "live_text_bytes": 3276590,
+  "live_text_lock_parser": true,
+  "injected_live_lock_drift_rejected": true,
+  "injected_version_token_drift_rejected": true,
+  "source_sha256": "123e209e6245cbcc344c1c70b425dcb44a12cd0a2d05f00a39d3f2e7ff307ffa",
+  "artifacts": {
+    "native.json": "448dd81397675c631064b3ae94110622a2ad16288aa940b39f87b5dd45bfb3b5",
+    "live.kicad_pcb": "1abc2ad5aa00c92c66503e94e7944bc004f0e40d4b211385bd757a19097af4ff",
+    "geometry.pb": "2118f31fd9345fb3479bd937537373628541b61a6a3a479a316a2bb80d919107"
+  },
+  "quality": {
+    "passed": 408,
+    "failed": 0,
+    "ignored": 15,
+    "format": true,
+    "clippy_warnings_denied": true,
+    "capability_matrix": true
+  }
+}
