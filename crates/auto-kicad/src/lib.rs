@@ -2142,6 +2142,7 @@ fn expected_board_effect(kind: &OperationKind) -> &'static str {
         OperationKind::PlaceConnectedFootprints { .. } => {
             "place source-bound footprints and connect their pads atomically"
         }
+        OperationKind::AddCopperRoute { .. } => "add explicit copper route",
         OperationKind::AddStraightTrack { .. } => "add straight copper track",
         OperationKind::AddThroughVia { .. } => "add through via",
         OperationKind::MoveExistingFootprint { .. } => "move or rotate existing footprint",

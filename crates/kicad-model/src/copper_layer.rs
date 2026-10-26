@@ -10,6 +10,9 @@ pub struct CopperLayer(BoardLayer);
 impl CopperLayer {
     pub const FRONT: Self = Self(BoardLayer::FrontCopper);
     pub const BACK: Self = Self(BoardLayer::BackCopper);
+    pub fn is_front(&self) -> bool {
+        *self == Self::FRONT
+    }
     pub fn board_layer(self) -> BoardLayer {
         self.0
     }
@@ -32,6 +35,46 @@ impl CopperLayer {
         }
         Ok(())
     }
+}
+
+/// Enabled copper identities in native layer-set order.
+pub fn enabled_copper_layers(
+    stackup: &ObservedBoardStackup,
+) -> Result<Vec<CopperLayer>, ModelError> {
+    stackup.validate()?;
+    let mut layers = Vec::new();
+    for layer in &stackup.layers {
+        if !layer.enabled {
+            continue;
+        }
+        let copper = match layer.layer {
+            ObservedStackupLayerIdentity::FrontCopper => CopperLayer::FRONT,
+            ObservedStackupLayerIdentity::BackCopper => CopperLayer::BACK,
+            ObservedStackupLayerIdentity::InnerCopper(i) => {
+                CopperLayer::try_from(BoardLayer::InnerCopper(i))?
+            }
+            _ => continue,
+        };
+        layers.push(copper);
+    }
+    layers.sort_by_key(|l| match l.board_layer() {
+        BoardLayer::FrontCopper => 0,
+        BoardLayer::BackCopper => 1,
+        BoardLayer::InnerCopper(i) => i + 1,
+        _ => unreachable!(),
+    });
+    if !(2..=32).contains(&layers.len())
+        || layers[..2] != [CopperLayer::FRONT, CopperLayer::BACK]
+        || layers[2..]
+            .iter()
+            .enumerate()
+            .any(|(i, l)| l.board_layer() != BoardLayer::InnerCopper(i as u8 + 1))
+    {
+        return Err(ModelError::InvalidRoutingObservation(
+            "enabled copper stackup must contain both outer layers and consecutive inner layers",
+        ));
+    }
+    Ok(layers)
 }
 
 impl Default for CopperLayer {

@@ -1,5 +1,9 @@
+pub mod copper_route;
+pub use copper_route::{
+    CopperRouteIntent, RouteLeg, RoutePoint, RouteTrackEnd, RouteVia, RoutingAnchor,
+};
 mod copper_layer;
-pub use copper_layer::CopperLayer;
+pub use copper_layer::{CopperLayer, enabled_copper_layers};
 use std::collections::BTreeSet;
 use std::fmt::{Display, Formatter};
 
@@ -1091,6 +1095,8 @@ pub struct RoutingEndpointRef {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StraightTrackIntent {
+    #[serde(default, skip_serializing_if = "CopperLayer::is_front")]
+    pub layer: CopperLayer,
     pub source_uuid: StableId,
     pub start: Coordinate,
     pub end: Coordinate,
@@ -1111,6 +1117,7 @@ impl StraightTrackIntent {
         width_nm: i64,
     ) -> Result<Self, ModelError> {
         let intent = Self {
+            layer: CopperLayer::FRONT,
             source_uuid,
             start,
             end,
@@ -1143,6 +1150,7 @@ impl StraightTrackIntent {
             ));
         }
         let intent = Self {
+            layer: CopperLayer::FRONT,
             source_uuid,
             start,
             end,
@@ -1545,7 +1553,15 @@ impl ObservedVia {
         )?;
         let allow_through_via_placeholder = self.via_type == ViaType::Through
             && self.pad_stack.stack_type == PadStackType::FrontInnerBack
-            && self.pad_stack.layers == [BoardLayer::FrontCopper, BoardLayer::BackCopper]
+            && self.pad_stack.layers.contains(&BoardLayer::FrontCopper)
+            && self.pad_stack.layers.contains(&BoardLayer::BackCopper)
+            && self.pad_stack.primary_drill.as_ref().is_some_and(|drill| {
+                matches!(
+                    (drill.start_layer, drill.end_layer),
+                    (BoardLayer::FrontCopper, BoardLayer::BackCopper)
+                        | (BoardLayer::BackCopper, BoardLayer::FrontCopper)
+                )
+            })
             && self.pad_stack.copper_shapes.len() == 3;
         self.pad_stack.validate(allow_through_via_placeholder)?;
         validate_routing_net(board_id, self.net.as_ref())?;

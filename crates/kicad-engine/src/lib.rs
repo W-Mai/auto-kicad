@@ -1,3 +1,5 @@
+pub mod copper_route;
+pub use copper_route::{CompiledCopperRoute, compile_copper_route};
 mod item_deletion;
 pub use item_deletion::{ExistingItemKind, ExistingItemTarget, expected_item_deletion};
 mod footprint_flip;
@@ -160,6 +162,12 @@ pub enum OperationKind {
         bottom_right: Coordinate,
         width_nm: i64,
     },
+    AddCopperRoute {
+        board: StableId,
+        intent: kicad_model::CopperRouteIntent,
+        rule_evidence: RevisionDigest,
+        native_evidence: RevisionDigest,
+    },
     AddStraightTrack {
         board: StableId,
         intent: StraightTrackIntent,
@@ -263,6 +271,7 @@ impl Operation {
                 .collect(),
             OperationKind::AddBoardGraphicSegments { board, .. }
             | OperationKind::AddBoardOutline { board, .. }
+            | OperationKind::AddCopperRoute { board, .. }
             | OperationKind::AddStraightTrack { board, .. }
             | OperationKind::AddThroughVia { board, .. } => vec![board],
             OperationKind::DeleteExistingItems { board, targets, .. } => std::iter::once(board)
@@ -335,6 +344,47 @@ impl ChangePlan {
                 || !keys.insert(operation.idempotency_key.clone())
             {
                 return Err(EngineError::DuplicateIdempotencyKey);
+            }
+        }
+        let has_route = self
+            .operations
+            .iter()
+            .any(|op| matches!(op.kind, OperationKind::AddCopperRoute { .. }));
+        if has_route
+            && self.operations.iter().any(|op| {
+                !matches!(
+                    op.kind,
+                    OperationKind::AddCopperRoute { .. }
+                        | OperationKind::AddStraightTrack { .. }
+                        | OperationKind::AddThroughVia { .. }
+                        | OperationKind::AddBoardGraphicSegments { .. }
+                        | OperationKind::AddBoardOutline { .. }
+                )
+            })
+        {
+            return Err(EngineError::InvalidPlan(
+                "route batches may only add board copper and graphics",
+            ));
+        }
+        let mut copper_count = 0;
+        for op in &self.operations {
+            copper_count += match &op.kind {
+                OperationKind::AddCopperRoute { intent, .. } => {
+                    intent
+                        .validate()
+                        .map_err(|e| EngineError::Serialization(e.to_string()))?;
+                    intent
+                        .legs
+                        .iter()
+                        .map(|leg| leg.points.len() - 1)
+                        .sum::<usize>()
+                        + intent.vias.len()
+                }
+                OperationKind::AddStraightTrack { .. } | OperationKind::AddThroughVia { .. } => 1,
+                _ => 0,
+            };
+            if copper_count > kicad_model::copper_route::MAX_BATCH_COPPER {
+                return Err(EngineError::InvalidPlan("batch copper count exceeds 256"));
             }
         }
         let existing: BTreeSet<StableId> = snapshot
@@ -429,6 +479,7 @@ impl ChangePlan {
                     | OperationKind::PlaceConnectedFootprints { .. }
                     | OperationKind::AddBoardGraphicSegments { .. }
                     | OperationKind::AddBoardOutline { .. }
+                    | OperationKind::AddCopperRoute { .. }
                     | OperationKind::AddStraightTrack { .. }
                     | OperationKind::AddThroughVia { .. }
                     | OperationKind::MoveExistingFootprint { .. }
@@ -557,6 +608,19 @@ impl ChangePlan {
                         return Err(EngineError::TargetAlreadyExists(segment.graphic_id.clone()));
                     }
                 }
+                OperationKind::AddCopperRoute { board, intent, .. } => {
+                    let route = compile_copper_route(snapshot, board, intent)?;
+                    for id in route
+                        .tracks
+                        .iter()
+                        .map(|t| &t.source_uuid)
+                        .chain(route.vias.iter().map(|v| &v.source_uuid))
+                    {
+                        if !routing_ids.insert(id.clone()) {
+                            return Err(EngineError::TargetAlreadyExists(id.clone()));
+                        }
+                    }
+                }
                 OperationKind::AddStraightTrack { board, intent } => {
                     if snapshot.board.document_id.as_ref() != Some(board) {
                         return Err(EngineError::ScopeMismatch);
@@ -657,6 +721,7 @@ impl ChangePlan {
                 }
             }
         }
+        copper_route::validate_additive_board_identities(snapshot, &self.operations)?;
         Ok(())
     }
 }
@@ -975,6 +1040,28 @@ fn apply_operations(
                     *width_nm,
                 ));
             }
+            OperationKind::AddCopperRoute { board, intent, .. } => {
+                let (tracks, vias) = intent
+                    .primitives()
+                    .map_err(|e| EngineError::Serialization(e.to_string()))?;
+                let expanded = tracks
+                    .into_iter()
+                    .map(|intent| OperationKind::AddStraightTrack {
+                        board: board.clone(),
+                        intent,
+                    })
+                    .chain(vias.into_iter().map(|intent| OperationKind::AddThroughVia {
+                        board: board.clone(),
+                        intent,
+                    }))
+                    .map(|kind| {
+                        let mut operation = op.clone();
+                        operation.kind = kind;
+                        operation
+                    })
+                    .collect::<Vec<_>>();
+                snapshot = apply_operations(snapshot, &expanded)?;
+            }
             OperationKind::AddStraightTrack { board, intent } => {
                 let mut routing = snapshot.native_routing.take().unwrap_or_else(|| {
                     ObservedBoardRouting::new(board.clone(), vec![], vec![])
@@ -988,7 +1075,7 @@ fn apply_operations(
                         end: intent.end,
                     },
                     width_nm: intent.width_nm,
-                    layer: BoardLayer::FrontCopper,
+                    layer: intent.layer.board_layer(),
                     lock_state: LockState::Unlocked,
                     net: intent
                         .net
@@ -1035,11 +1122,14 @@ fn apply_operations(
                     position: intent.position,
                     pad_stack: ObservedViaPadStack {
                         stack_type: PadStackType::FrontInnerBack,
-                        layers: vec![
-                            BoardLayer::FrontCopper,
-                            BoardLayer::InnerCopper(1),
-                            BoardLayer::BackCopper,
-                        ],
+                        layers: match &snapshot.native_stackup {
+                            Some(stackup) => kicad_model::enabled_copper_layers(stackup)
+                                .map_err(|e| EngineError::Serialization(e.to_string()))?
+                                .into_iter()
+                                .map(|layer| layer.board_layer())
+                                .collect(),
+                            None => vec![BoardLayer::FrontCopper, BoardLayer::BackCopper],
+                        },
                         primary_drill: Some(ObservedViaDrill {
                             start_layer: BoardLayer::FrontCopper,
                             end_layer: BoardLayer::BackCopper,
@@ -1308,6 +1398,23 @@ pub fn validate_routing_track_binding(
     {
         return Err(EngineError::InvalidPlan(
             "routing pads and net do not match",
+        ));
+    }
+    if let Some(stackup) = &snapshot.native_stackup {
+        intent
+            .layer
+            .require_enabled_on(stackup)
+            .map_err(|e| EngineError::Serialization(e.to_string()))?;
+    } else if !intent.layer.is_front() {
+        return Err(EngineError::InvalidPlan(
+            "selected copper layer requires a stackup observation",
+        ));
+    }
+    if !copper_route::pad_accepts_layer(start_pad, intent.layer)
+        || !copper_route::pad_accepts_layer(end_pad, intent.layer)
+    {
+        return Err(EngineError::InvalidPlan(
+            "track layer is not available on both pads",
         ));
     }
     let start = pad_board_position(start_placement, start_pad)?;
@@ -1593,7 +1700,7 @@ mod tests {
             space: DocumentSpace::Board,
         }
     }
-    fn observed_routing_snapshot(
+    pub(super) fn observed_routing_snapshot(
         side: BoardSide,
     ) -> (
         ProjectSnapshot,

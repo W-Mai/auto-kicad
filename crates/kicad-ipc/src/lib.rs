@@ -1,3 +1,4 @@
+mod copper_connectivity;
 mod copper_layer;
 pub use copper_layer::CopperLayer;
 mod existing_item_updates;
@@ -265,6 +266,7 @@ pub struct CreateTrack {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CreateThroughVia {
+    pub copper_layers: Vec<CopperLayer>,
     pub position_x_nm: i64,
     pub position_y_nm: i64,
     pub pad_diameter_nm: i64,
@@ -3694,11 +3696,20 @@ fn observed_via(item: &Any) -> Result<ObservedVia, IpcError> {
         ));
     }
     let allow_through_via_placeholder = stack_type == ObservedPadStackType::FrontInnerBack
-        && layers
-            == [
-                ObservedBoardLayer::FrontCopper,
-                ObservedBoardLayer::BackCopper,
-            ]
+        && layers.contains(&ObservedBoardLayer::FrontCopper)
+        && layers.contains(&ObservedBoardLayer::BackCopper)
+        && pad_stack.drill.as_ref().is_some_and(|drill| {
+            matches!(
+                (drill.start_layer.enum_value(), drill.end_layer.enum_value()),
+                (
+                    Ok(board_types::BoardLayer::BL_F_Cu),
+                    Ok(board_types::BoardLayer::BL_B_Cu)
+                ) | (
+                    Ok(board_types::BoardLayer::BL_B_Cu),
+                    Ok(board_types::BoardLayer::BL_F_Cu)
+                )
+            )
+        })
         && value.type_.enum_value() == Ok(board_types::ViaType::VT_THROUGH);
     let mut copper_shapes = pad_stack
         .copper_layers
@@ -4572,22 +4583,46 @@ fn create_track_item(track: &CreateTrack) -> Result<Any, IpcError> {
     })
 }
 
+fn validate_through_via_layers(layers: &[CopperLayer]) -> Result<(), IpcError> {
+    if !(2..=32).contains(&layers.len())
+        || layers[..2] != [CopperLayer::FRONT, CopperLayer::BACK]
+        || layers[2..]
+            .iter()
+            .enumerate()
+            .any(|(i, layer)| CopperLayer::inner(i as u8 + 1).as_ref() != Ok(layer))
+    {
+        return Err(IpcError::InvalidObservedRouting(
+            "through via requires ordered F.Cu/B.Cu and consecutive enabled inner layers",
+        ));
+    }
+    Ok(())
+}
+
+impl CreateThroughVia {
+    pub fn validate(&self) -> Result<(), IpcError> {
+        let via = self;
+        validate_through_via_layers(&via.copper_layers)?;
+        if via.pad_diameter_nm <= 0 || via.drill_diameter_nm <= 0 {
+            return Err(IpcError::InvalidObservedRouting(
+                "via pad and drill diameters must be positive",
+            ));
+        }
+        if via.net.as_ref().is_some_and(|net| net.name.is_empty()) {
+            return Err(IpcError::InvalidObservedRouting(
+                "via net name must not be empty",
+            ));
+        }
+        if via.drill_diameter_nm > via.pad_diameter_nm {
+            return Err(IpcError::InvalidObservedRouting(
+                "via drill diameter must not exceed pad diameter",
+            ));
+        }
+        Ok(())
+    }
+}
+
 fn create_through_via_item(via: &CreateThroughVia) -> Result<Any, IpcError> {
-    if via.pad_diameter_nm <= 0 || via.drill_diameter_nm <= 0 {
-        return Err(IpcError::InvalidObservedRouting(
-            "via pad and drill diameters must be positive",
-        ));
-    }
-    if via.net.as_ref().is_some_and(|net| net.name.is_empty()) {
-        return Err(IpcError::InvalidObservedRouting(
-            "via net name must not be empty",
-        ));
-    }
-    if via.drill_diameter_nm > via.pad_diameter_nm {
-        return Err(IpcError::InvalidObservedRouting(
-            "via drill diameter must not exceed pad diameter",
-        ));
-    }
+    via.validate()?;
     let circle = |layer| board_types::PadStackLayer {
         layer: protobuf::EnumOrUnknown::new(layer),
         shape: protobuf::EnumOrUnknown::new(board_types::PadStackShape::PSS_CIRCLE),
@@ -4606,10 +4641,11 @@ fn create_through_via_item(via: &CreateThroughVia) -> Result<Any, IpcError> {
         }),
         pad_stack: MessageField::some(board_types::PadStack {
             type_: protobuf::EnumOrUnknown::new(board_types::PadStackType::PST_FRONT_INNER_BACK),
-            layers: vec![
-                protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Cu),
-                protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_B_Cu),
-            ],
+            layers: via
+                .copper_layers
+                .iter()
+                .map(|layer| protobuf::EnumOrUnknown::new(layer.native()))
+                .collect(),
             drill: MessageField::some(board_types::DrillProperties {
                 start_layer: protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Cu),
                 end_layer: protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_B_Cu),
@@ -4811,6 +4847,11 @@ fn created_through_via_receipt(
             "created via drill size is missing",
         ))?;
     let observed = CreateThroughVia {
+        copper_layers: stack
+            .layers
+            .iter()
+            .map(|layer| routing_copper_layer(layer).and_then(CopperLayer::try_from))
+            .collect::<Result<Vec<_>, _>>()?,
         position_x_nm: position.x_nm,
         position_y_nm: position.y_nm,
         pad_diameter_nm: pad_size.x_nm,
@@ -4829,16 +4870,9 @@ fn created_through_via_receipt(
             "created via net does not match the request",
         ));
     }
-    let expected_layers = [
-        board_types::BoardLayer::BL_F_Cu,
-        board_types::BoardLayer::BL_B_Cu,
-    ];
-    let exact_copper_layers = stack.layers.len() == expected_layers.len()
-        && stack
-            .layers
-            .iter()
-            .zip(expected_layers)
-            .all(|(actual, expected)| actual.enum_value() == Ok(expected));
+    validate_through_via_layers(&requested.copper_layers)?;
+    let expected_layers = &requested.copper_layers;
+    let exact_copper_layers = observed.copper_layers == *expected_layers;
     let expected_copper_layers = [
         (board_types::BoardLayer::BL_F_Cu, requested.pad_diameter_nm),
         (board_types::BoardLayer::BL_In1_Cu, 0),
@@ -8437,6 +8471,7 @@ mod tests {
     #[test]
     fn create_through_via_uses_kicad_compatible_pad_stack() {
         let requested = CreateThroughVia {
+            copper_layers: vec![crate::CopperLayer::FRONT, crate::CopperLayer::BACK],
             position_x_nm: 10,
             position_y_nm: 20,
             pad_diameter_nm: 600,
@@ -8494,6 +8529,7 @@ mod tests {
     #[test]
     fn create_through_via_validates_receipt_and_updates_token() {
         let requested = CreateThroughVia {
+            copper_layers: vec![crate::CopperLayer::FRONT, crate::CopperLayer::BACK],
             position_x_nm: 10,
             position_y_nm: 20,
             pad_diameter_nm: 600,
@@ -8520,8 +8556,66 @@ mod tests {
     }
 
     #[test]
+    fn through_via_receipt_requires_the_requested_full_copper_span() {
+        for inner in [0, 2, 4, 30] {
+            let mut layers = vec![CopperLayer::FRONT, CopperLayer::BACK];
+            layers.extend((1..=inner).map(|i| CopperLayer::inner(i).unwrap()));
+            let request = CreateThroughVia {
+                copper_layers: layers.clone(),
+                position_x_nm: 10,
+                position_y_nm: 20,
+                pad_diameter_nm: 600,
+                drill_diameter_nm: 300,
+                net: None,
+            };
+            let item =
+                canonical_created_through_via(create_through_via_item(&request).unwrap(), "via");
+            assert!(observed_via(&item).is_ok());
+            let response =
+                create_items_response_with_results("new", vec![create_item_result(item.clone())]);
+            let mut client = routing_client(response);
+            assert_eq!(
+                client
+                    .create_through_via("main.kicad_pcb", &request)
+                    .unwrap()
+                    .via
+                    .copper_layers,
+                layers
+            );
+            let mut native = board_types::Via::parse_from_bytes(&item.value).unwrap();
+            native.pad_stack.as_mut().unwrap().layers.pop();
+            let malformed = Any {
+                type_url: VIA_TYPE_URL.into(),
+                value: native.write_to_bytes().unwrap(),
+                ..Default::default()
+            };
+            let mut client = routing_client(create_items_response_with_results(
+                "new",
+                vec![create_item_result(malformed)],
+            ));
+            assert!(
+                client
+                    .create_through_via("main.kicad_pcb", &request)
+                    .is_err()
+            );
+        }
+        for layers in [
+            vec![],
+            vec![CopperLayer::FRONT, CopperLayer::FRONT],
+            vec![
+                CopperLayer::FRONT,
+                CopperLayer::BACK,
+                CopperLayer::inner(2).unwrap(),
+            ],
+        ] {
+            assert!(validate_through_via_layers(&layers).is_err());
+        }
+    }
+
+    #[test]
     fn created_via_receipt_requires_canonical_two_layer_shapes() {
         let requested = CreateThroughVia {
+            copper_layers: vec![crate::CopperLayer::FRONT, crate::CopperLayer::BACK],
             position_x_nm: 10,
             position_y_nm: 20,
             pad_diameter_nm: 600,
@@ -8575,6 +8669,7 @@ mod tests {
     #[test]
     fn created_via_receipt_reports_the_exact_mismatched_field() {
         let requested = CreateThroughVia {
+            copper_layers: vec![crate::CopperLayer::FRONT, crate::CopperLayer::BACK],
             position_x_nm: 10,
             position_y_nm: 20,
             pad_diameter_nm: 500,

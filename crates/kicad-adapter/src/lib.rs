@@ -1556,11 +1556,18 @@ pub fn prepare_bound_native_batch(
     if operations.is_empty() {
         return Err(reject("operation batch is empty"));
     }
+    kicad_engine::copper_route::validate_additive_board_identities(snapshot, operations)
+        .map_err(|e| reject(&e.to_string()))?;
     for operation in operations {
         if operation.targets.as_slice() != [board.clone()] {
             return Err(reject("operation target differs from observed board"));
         }
         let operation_board = match &operation.kind {
+            OperationKind::AddCopperRoute { board, intent, .. } => {
+                kicad_engine::compile_copper_route(snapshot, board, intent)
+                    .map_err(|e| reject(&e.to_string()))?;
+                board
+            }
             OperationKind::AddStraightTrack { board, intent } => {
                 intent.validate().map_err(|e| reject(&e.to_string()))?;
                 validate_routing_track_binding(snapshot, board, intent)
@@ -1581,6 +1588,23 @@ pub fn prepare_bound_native_batch(
             return Err(reject("operation board differs from observation"));
         }
     }
+    let via_layers = if operations.iter().any(|op| {
+        matches!(
+            op.kind,
+            OperationKind::AddThroughVia { .. } | OperationKind::AddCopperRoute { .. }
+        )
+    }) {
+        match snapshot.native_stackup.as_ref() {
+            Some(stackup) => kicad_model::enabled_copper_layers(stackup)
+                .map_err(|e| reject(&e.to_string()))?
+                .into_iter()
+                .map(native_copper_layer)
+                .collect(),
+            None => vec![kicad_ipc::CopperLayer::FRONT, kicad_ipc::CopperLayer::BACK],
+        }
+    } else {
+        Vec::new()
+    };
     let mut graphics = Vec::new();
     let mut tracks = Vec::new();
     let mut vias = Vec::new();
@@ -1625,9 +1649,34 @@ pub fn prepare_bound_native_batch(
                         }),
                 );
             }
+            OperationKind::AddCopperRoute { board, intent, .. } => {
+                let route = kicad_engine::compile_copper_route(snapshot, board, intent)
+                    .map_err(|e| reject(&e.to_string()))?;
+                tracks.extend(route.tracks.into_iter().map(|track| CreateTrack {
+                    layer: native_copper_layer(track.layer),
+                    start_x_nm: track.start.x,
+                    start_y_nm: track.start.y,
+                    end_x_nm: track.end.x,
+                    end_y_nm: track.end.y,
+                    width_nm: track.width_nm,
+                    net: Some(CreateNetIdentity {
+                        name: intent.net.name.clone(),
+                    }),
+                }));
+                vias.extend(route.vias.into_iter().map(|via| CreateThroughVia {
+                    copper_layers: via_layers.clone(),
+                    position_x_nm: via.position.x,
+                    position_y_nm: via.position.y,
+                    pad_diameter_nm: via.size_nm,
+                    drill_diameter_nm: via.drill_nm,
+                    net: Some(CreateNetIdentity {
+                        name: intent.net.name.clone(),
+                    }),
+                }));
+            }
             OperationKind::AddStraightTrack { intent, .. } => {
                 tracks.push(CreateTrack {
-                    layer: kicad_ipc::CopperLayer::FRONT,
+                    layer: native_copper_layer(intent.layer),
                     start_x_nm: intent.start.x,
                     start_y_nm: intent.start.y,
                     end_x_nm: intent.end.x,
@@ -1640,6 +1689,7 @@ pub fn prepare_bound_native_batch(
             }
             OperationKind::AddThroughVia { intent, .. } => {
                 vias.push(CreateThroughVia {
+                    copper_layers: via_layers.clone(),
                     position_x_nm: intent.position.x,
                     position_y_nm: intent.position.y,
                     pad_diameter_nm: intent.size_nm,
@@ -1657,6 +1707,9 @@ pub fn prepare_bound_native_batch(
         }
     }
 
+    if tracks.len() + vias.len() > kicad_model::copper_route::MAX_BATCH_COPPER {
+        return Err(reject("batch copper count exceeds 256"));
+    }
     Ok(NativePcbBatch {
         graphics,
         tracks,
@@ -1973,7 +2026,8 @@ impl BoardGraphicsExecutor {
                 .iter()
                 .any(|value| value.unsigned_abs() > MAX_BOARD_POSITION_NM as u64)
         }) || vias.iter().any(|via| {
-            via.pad_diameter_nm <= 0
+            via.validate().is_err()
+                || via.pad_diameter_nm <= 0
                 || via.drill_diameter_nm <= 0
                 || via.drill_diameter_nm > via.pad_diameter_nm
                 || via.position_x_nm.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
@@ -2103,36 +2157,20 @@ impl BoardGraphicsExecutor {
                 message,
             );
         }
-        if snapshot.revision().ok().as_ref() != Some(expected_revision) {
-            return BoardGraphicsCommitOutcome::Rejected {
-                reason: "routing observation revision is stale".into(),
-            };
-        }
-        let board = match &operation.kind {
-            OperationKind::AddStraightTrack { board, intent } => {
-                if validate_routing_track_binding(snapshot, board, intent).is_err() {
-                    return BoardGraphicsCommitOutcome::Rejected {
-                        reason: "routing endpoint or net binding is stale or mismatched".into(),
-                    };
-                }
-                board
-            }
-            OperationKind::AddThroughVia { board, intent } => {
-                if validate_observed_routing_net(snapshot, intent.net.as_ref()).is_err() {
-                    return BoardGraphicsCommitOutcome::Rejected {
-                        reason: "routing net binding is stale or mismatched".into(),
-                    };
-                }
-                board
-            }
-            _ => {
-                return self.execute(ipc, &operation.kind, board_filename, message);
-            }
-        };
-        if snapshot.board.document_id.as_ref() != Some(board) {
-            return BoardGraphicsCommitOutcome::Rejected {
-                reason: "routing board identity does not match observation".into(),
-            };
+        if matches!(
+            operation.kind,
+            OperationKind::AddStraightTrack { .. }
+                | OperationKind::AddThroughVia { .. }
+                | OperationKind::AddCopperRoute { .. }
+        ) {
+            return self.execute_bound_batch(
+                ipc,
+                std::slice::from_ref(operation),
+                snapshot,
+                expected_revision,
+                board_filename,
+                message,
+            );
         }
         self.execute(ipc, &operation.kind, board_filename, message)
     }
@@ -2411,7 +2449,7 @@ impl BoardGraphicsExecutor {
                         };
                     }
                     RoutingRequest::Track(CreateTrack {
-                        layer: kicad_ipc::CopperLayer::FRONT,
+                        layer: native_copper_layer(intent.layer),
                         start_x_nm: intent.start.x,
                         start_y_nm: intent.start.y,
                         end_x_nm: intent.end.x,
@@ -2432,6 +2470,10 @@ impl BoardGraphicsExecutor {
                         };
                     }
                     RoutingRequest::Via(CreateThroughVia {
+                        copper_layers: vec![
+                            kicad_ipc::CopperLayer::FRONT,
+                            kicad_ipc::CopperLayer::BACK,
+                        ],
                         position_x_nm: intent.position.x,
                         position_y_nm: intent.position.y,
                         pad_diameter_nm: intent.size_nm,
@@ -2660,6 +2702,51 @@ pub fn verify_native_pcb_batch<I: BoardGraphicsIpc>(
     read_verified_native_routing(ipc, board_filename, receipt).map(|_| ())
 }
 
+/// Compare newly created routing across reload, accounting for native via serialization.
+/// Call only after both observations have passed exact creation-receipt validation.
+pub fn created_routing_matches_reloaded(
+    before: &IpcBoardRoutingItems,
+    after: &IpcBoardRoutingItems,
+) -> bool {
+    fn canonical(mut routing: IpcBoardRoutingItems) -> IpcBoardRoutingItems {
+        for via in &mut routing.vias {
+            if via.via_type != kicad_ipc::ObservedViaType::Through
+                || via.pad_stack.stack_type != IpcPadStackType::FrontInnerBack
+            {
+                continue;
+            }
+            let diameter = via
+                .pad_stack
+                .copper_shapes
+                .iter()
+                .find(|s| {
+                    s.layer == IpcBoardLayer::FrontCopper
+                        && s.shape == IpcPadShape::Circle
+                        && s.size_x_nm == s.size_y_nm
+                        && s.size_x_nm > 0
+                })
+                .map(|s| s.size_x_nm);
+            for shape in &mut via.pad_stack.copper_shapes {
+                if shape.shape != IpcPadShape::Circle {
+                    continue;
+                }
+                // The custom anchor is unused for a circular pad.
+                shape.custom_anchor_shape = None;
+                if shape.layer == IpcBoardLayer::InnerCopper(1)
+                    && shape.size_x_nm == 0
+                    && shape.size_y_nm == 0
+                    && let Some(size) = diameter
+                {
+                    shape.size_x_nm = size;
+                    shape.size_y_nm = size;
+                }
+            }
+        }
+        routing
+    }
+    canonical(before.clone()) == canonical(after.clone())
+}
+
 pub fn read_verified_native_routing<I: BoardGraphicsIpc>(
     ipc: &mut I,
     board_filename: &str,
@@ -2781,7 +2868,8 @@ fn normalized_track_geometry(
 }
 
 fn legacy_via_receipt_matches(receipt: &CreateThroughVia, requested: &CreateThroughVia) -> bool {
-    receipt.position_x_nm == requested.position_x_nm
+    receipt.copper_layers == requested.copper_layers
+        && receipt.position_x_nm == requested.position_x_nm
         && receipt.position_y_nm == requested.position_y_nm
         && receipt.pad_diameter_nm == requested.pad_diameter_nm
         && receipt.drill_diameter_nm == requested.drill_diameter_nm
@@ -2799,6 +2887,12 @@ fn observed_via_matches(
     expected_net: Option<&kicad_model::ObservedNetIdentity>,
 ) -> bool {
     let via = &receipt.via;
+    let mut expected_layers = via
+        .copper_layers
+        .iter()
+        .map(|layer| layer.as_observed())
+        .collect::<Vec<_>>();
+    expected_layers.sort();
     let pad_shapes = &observed.pad_stack.copper_shapes;
     let expected_pad_layers = [
         IpcBoardLayer::FrontCopper,
@@ -2838,7 +2932,7 @@ fn observed_via_matches(
         && net_matches
         && observed.via_type == kicad_ipc::ObservedViaType::Through
         && observed.pad_stack.stack_type == IpcPadStackType::FrontInnerBack
-        && observed.pad_stack.layers == vec![IpcBoardLayer::FrontCopper, IpcBoardLayer::BackCopper]
+        && observed.pad_stack.layers == expected_layers
         && exact_pad_shapes
         && drill.start_layer == IpcBoardLayer::FrontCopper
         && drill.end_layer == IpcBoardLayer::BackCopper
@@ -4933,6 +5027,7 @@ mod tests {
             net: None,
         }];
         let vias = vec![CreateThroughVia {
+            copper_layers: vec![kicad_ipc::CopperLayer::FRONT, kicad_ipc::CopperLayer::BACK],
             position_x_nm: 5,
             position_y_nm: 6,
             pad_diameter_nm: 200,
@@ -5051,11 +5146,42 @@ mod tests {
     }
 
     #[test]
+    fn created_route_reload_normalizes_only_unused_circle_fields_and_inner_placeholder() {
+        let before = IpcBoardRoutingItems {
+            tracks: vec![],
+            vias: vec![observed_via_for_test("via")],
+        };
+        let mut after = before.clone();
+        let diameter = after.vias[0].pad_stack.copper_shapes[0].size_x_nm;
+        for shape in &mut after.vias[0].pad_stack.copper_shapes {
+            shape.custom_anchor_shape = Some(kicad_ipc::ObservedPadShape::Rectangle);
+            if shape.layer == IpcBoardLayer::InnerCopper(1) {
+                shape.size_x_nm = diameter;
+                shape.size_y_nm = diameter;
+            }
+        }
+        assert!(created_routing_matches_reloaded(&before, &after));
+        let cases: [fn(&mut IpcVia); 5] = [
+            |v| v.position.x_nm += 1,
+            |v| v.pad_stack.copper_shapes[1].size_x_nm += 1,
+            |v| v.pad_stack.copper_shapes[0].offset_x_nm += 1,
+            |v| v.pad_stack.primary_drill.as_mut().unwrap().size_x_nm += 1,
+            |v| v.pad_stack.layers.push(IpcBoardLayer::InnerCopper(2)),
+        ];
+        for change in cases {
+            let mut invalid = after.clone();
+            change(&mut invalid.vias[0]);
+            assert!(!created_routing_matches_reloaded(&before, &invalid));
+        }
+    }
+
+    #[test]
     fn observed_via_match_requires_canonical_two_layer_shapes() {
         let receipt = CreatedThroughViaReceipt {
             request_index: 0,
             source_uuid: "via-uuid".into(),
             via: CreateThroughVia {
+                copper_layers: vec![kicad_ipc::CopperLayer::FRONT, kicad_ipc::CopperLayer::BACK],
                 position_x_nm: 5,
                 position_y_nm: 6,
                 pad_diameter_nm: 200,
@@ -5372,6 +5498,7 @@ mod tests {
         let operation = OperationKind::AddStraightTrack {
             board: StableId::new("board").unwrap(),
             intent: kicad_model::StraightTrackIntent {
+                layer: kicad_model::CopperLayer::FRONT,
                 source_uuid: StableId::new("track").unwrap(),
                 start: board_coordinate(1, 2),
                 end: board_coordinate(1, 2),
@@ -5434,6 +5561,7 @@ mod tests {
             source_uuid: "server-via".into(),
             lock_state: IpcLockState::Unlocked,
             via: CreateThroughVia {
+                copper_layers: vec![kicad_ipc::CopperLayer::FRONT, kicad_ipc::CopperLayer::BACK],
                 position_x_nm: 5,
                 position_y_nm: 6,
                 pad_diameter_nm: 200,

@@ -1,0 +1,46 @@
+{
+  "kicad_version": "10.0.7",
+  "tracks": 9,
+  "vias": 2,
+  "routes": 3,
+  "anchor_kinds": [
+    "pad",
+    "track_end",
+    "via"
+  ],
+  "layers": [
+    "F.Cu",
+    "In1.Cu",
+    "B.Cu"
+  ],
+  "baseline_unconnected": 3,
+  "final_unconnected": 0,
+  "introduced_drc": 0,
+  "partial_create_cancelled": true,
+  "same_process_reload": true,
+  "native_existing_items_preserved": true,
+  "native_footprints_preserved": true,
+  "all_route_items_and_anchors_connected": true,
+  "source_project_unchanged": true,
+  "scope": "native path primitive; no MCP approval binding",
+  "fixture": "synthetic 4-layer board with a back-side pad, existing track and through vias",
+  "cleanup": {
+    "original_unchanged": true,
+    "owned_editor_closed": true,
+    "shadow_cleaned": true
+  },
+  "native_output_directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-native-route-all-anchors",
+  "public_route_mcp_accepted": false,
+  "real_project_profile": false,
+  "quality": {
+    "passed": 395,
+    "ignored": 15,
+    "fmt": true,
+    "clippy_warnings_as_errors": true,
+    "capability_matrix": true
+  },
+  "legacy_mcp_regression": {
+    "passed": true,
+    "elapsed_seconds": 13.44
+  }
+}

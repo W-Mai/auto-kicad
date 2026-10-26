@@ -1995,6 +1995,7 @@ mod tests {
             net: None,
         }];
         let vias = [CreateThroughVia {
+            copper_layers: vec![kicad_ipc::CopperLayer::FRONT, kicad_ipc::CopperLayer::BACK],
             position_x_nm: 110_000_000,
             position_y_nm: 100_000_000,
             pad_diameter_nm: 800_000,

@@ -510,6 +510,7 @@ mod tests {
         v.special_fields.mut_unknown_fields().add_varint(1000, 42);
         let mut via = NativeItem::decode(
             &create_through_via_item(&CreateThroughVia {
+                copper_layers: vec![crate::CopperLayer::FRONT, crate::CopperLayer::BACK],
                 position_x_nm: 2_000_000,
                 position_y_nm: 2_000_000,
                 pad_diameter_nm: 600_000,
