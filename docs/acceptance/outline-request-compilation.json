@@ -1,0 +1,100 @@
+{
+  "arcs": 2,
+  "baseline_unconnected": 0,
+  "compiled_from_serialized_intent": true,
+  "compiler_stale_open_locked_rejected": true,
+  "created": [
+    "64cbca8c-4413-4ffa-9443-d4a0e4bfb24e",
+    "bac0c624-b293-4458-8927-3171835f86e3",
+    "79411fa8-31fc-4d44-b62b-5905a7ad2bfe",
+    "30a9dea8-dbc7-458e-8e9d-2190ee5d4b3f",
+    "e074aa51-7d77-42c1-8069-1e1b128809b3",
+    "2c7e0a68-548d-4c8c-bc14-7cfcf7cbd2ce",
+    "e56bc214-0491-4e9a-a149-bde0e0745412",
+    "e93e1426-b656-47f7-942b-920ca2e9a667",
+    "d5ba8fdd-239b-454b-b891-b41704092599",
+    "c0a47a9d-8229-4153-9fa2-39375abee798",
+    "56d9dd04-85dc-498e-8b58-dd114f569698",
+    "fe700be5-1b02-4e44-b9ce-1bfe6608166e",
+    "64aaba7a-1c43-4c7d-a166-4b6f3cbebce0",
+    "6c57361d-b781-4147-a043-9013ea6f61b5"
+  ],
+  "final_unconnected": 0,
+  "introduced_drc": 0,
+  "kicad_version": "10.0.7",
+  "locked_wrong_layer_missing_duplicate_removals_rejected": true,
+  "native_maximum_cancelled": 512,
+  "oversized_rejected": 513,
+  "pid": 64405,
+  "project_preserved": true,
+  "removed": [
+    "30000000-0000-4000-8000-000000000001",
+    "30000000-0000-4000-8000-000000000002",
+    "30000000-0000-4000-8000-000000000003",
+    "30000000-0000-4000-8000-000000000004"
+  ],
+  "same_process_reload": true,
+  "saved_receipts_exact": true,
+  "scope": "native outline primitives and exact replacement; not general topology planning or MCP acceptance",
+  "unrelated_native_payloads_preserved": true,
+  "original_unchanged": true,
+  "owned_editor_closed": true,
+  "independent_intent_check": {
+    "passed": true,
+    "primitives": 14,
+    "coordinates_widths_layers_match_serialized_intent": true
+  },
+  "negative_controls": {
+    "cases": [
+      {
+        "case": "open",
+        "expected": "invalid_outline",
+        "observed_types": [
+          "invalid_outline",
+          "track_dangling"
+        ],
+        "detected": true
+      },
+      {
+        "case": "self-intersection",
+        "expected": "invalid_outline",
+        "observed_types": [
+          "invalid_outline",
+          "track_dangling"
+        ],
+        "detected": true
+      },
+      {
+        "case": "copper-collision",
+        "expected": "copper_edge_clearance",
+        "observed_types": [
+          "copper_edge_clearance",
+          "track_dangling"
+        ],
+        "detected": true
+      }
+    ],
+    "original_result_unchanged": true,
+    "required_drc_checks_enabled": true,
+    "scope": "native CLI negative controls only; not MCP planning refusal"
+  },
+  "artifacts": {
+    "intent.json": "c833028ac0997388a73448fda0a1d1f732a34b02cf42de7023135f94cb88d871",
+    "compiled.json": "48386d76fcafe9b7420014a2507912a1c2818ec587f06ea024ce185e5a1e3fd9",
+    "intent-native-check.json": "63b7cffa77b12c27182d2d71dbe3bf27317c642e6c854d6fe89e73cc3ac1324a",
+    "result/board.kicad_pcb": "0ba2ea295ba8525b0bb8da307fc3072a9364b52e83def98a7ace478e880f0e4c",
+    "result/board.kicad_pro": "8419222138158c81918c3658150733feb0854bc37dc5a0b980afe94399a18f38",
+    "baseline-items.pb": "e5cf995423239863854f8ba45561f8c3b8d07c65aee56d347e98bfe93cd34d61",
+    "final-items.pb": "3444c503e7aa3971b8d37bd4a26329ac3c1a076c3dacf3e1be88d905a08977d2",
+    "baseline-drc.json": "06a74d7e750d9181bf815f6ef10910fff638ab760ca1f3acd167606a518659f5",
+    "final-drc.json": "06a74d7e750d9181bf815f6ef10910fff638ab760ca1f3acd167606a518659f5"
+  },
+  "quality": {
+    "passed": 414,
+    "failed": 0,
+    "ignored": 15,
+    "format": true,
+    "clippy_warnings_denied": true,
+    "capability_matrix": true
+  }
+}

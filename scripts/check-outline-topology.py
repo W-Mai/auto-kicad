@@ -28,6 +28,26 @@ def prepare(output,name,work):
     pcbnew.SaveBoard(str(candidate),board)
     shutil.copyfile(source.with_suffix('.kicad_pro'),candidate.with_suffix('.kicad_pro'))
 
+def verify_intent(output):
+    import pcbnew
+    board=pcbnew.LoadBoard(str(output/'result/board.kicad_pcb'))
+    drawings={str(item.m_Uuid.AsString()):item for item in board.GetDrawings()}
+    intent=json.loads((output/'intent.json').read_text())
+    ids=json.loads((output/'result.json').read_text())['created']
+    expected=[(edge,loop['width_nm']) for loop in intent['loops'] for edge in loop['edges']]
+    assert len(expected)==len(ids)
+    for uuid,(edge,width) in zip(ids,expected):
+        shape=drawings[uuid]
+        assert shape.GetLayer()==pcbnew.Edge_Cuts and shape.GetWidth()==width
+        assert shape.GetShape()==(pcbnew.SHAPE_T_ARC if edge['kind']=='arc' else pcbnew.SHAPE_T_SEGMENT)
+        points=[('start',shape.GetStart()),('end',shape.GetEnd())]
+        if edge['kind']=='arc': points.append(('mid',shape.GetArcMid()))
+        for key,actual in points:
+            assert (actual.x,actual.y)==(edge[key]['x_nm'],edge[key]['y_nm']),(uuid,key)
+    result=dict(passed=True,primitives=len(expected),coordinates_widths_layers_match_serialized_intent=True)
+    (output/'intent-native-check.json').write_text(json.dumps(result,indent=2)+'\n')
+    print(json.dumps(result))
+
 def main(output):
     source=output/'result/board.kicad_pcb'
     project=source.with_suffix('.kicad_pro')
@@ -36,6 +56,10 @@ def main(output):
     assert settings['rule_severities']['invalid_outline']=='error'
     assert settings['rule_severities']['copper_edge_clearance']=='error'
     assert settings['rules']['min_copper_edge_clearance']>0
+    if (output/'intent.json').is_file():
+        witness=subprocess.run([sys.executable,__file__,str(output),'verify-intent'],capture_output=True,text=True,timeout=30)
+        (output/'intent-native-check.log').write_text(witness.stdout+witness.stderr)
+        assert witness.returncode==0,witness.stderr
     checks=output/'topology-checks'
     checks.mkdir()
     records=[]
@@ -64,7 +88,10 @@ def main(output):
 
 if __name__=='__main__':
     output=Path(sys.argv[1]).resolve()
-    if len(sys.argv)==4:
+    if len(sys.argv)==3:
+        assert sys.argv[2]=='verify-intent'
+        verify_intent(output)
+    elif len(sys.argv)==4:
         assert sys.argv[2]=='prepare' and sys.argv[3] in CASES
         prepare(output,sys.argv[3],output/'topology-checks'/sys.argv[3])
     else:

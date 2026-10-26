@@ -1,7 +1,10 @@
 //! Verify typed outline replacement and retained native content in one owned editor.
 use kicad_adapter::lifecycle::{DisposablePcbLifecycle, OwnedPcbnewLauncher};
+use kicad_adapter::live_geometry::observe_live_geometry;
+use kicad_adapter::outline::{compile_outline_change, native_outline_primitives, outline_revision};
 use kicad_checks::{CheckResult, DrcPolicy, compare_drc, run_pcb_drc};
 use kicad_ipc::{CreatedOutlineReceipt, NativeBoardGeometry, OutlineGeometry, OutlinePrimitive};
+use kicad_model::{OutlineEdit, RevisionDigest, StableId};
 use serde_json::json;
 use std::{
     env, fs,
@@ -9,21 +12,11 @@ use std::{
     time::Duration,
 };
 type Error = Box<dyn std::error::Error>;
-fn point(x: i64, y: i64) -> (i64, i64) {
-    (x * 1_000_000, y * 1_000_000)
-}
 fn segment(a: (i64, i64), b: (i64, i64)) -> OutlinePrimitive {
     OutlinePrimitive {
         geometry: OutlineGeometry::Segment { start: a, end: b },
         width_nm: 50_000,
     }
-}
-fn polygon(points: &[(i64, i64)]) -> Vec<OutlinePrimitive> {
-    points
-        .iter()
-        .zip(points.iter().cycle().skip(1))
-        .map(|(&a, &b)| segment(point(a.0, a.1), point(b.0, b.1)))
-        .collect()
 }
 fn drc(board: &Path) -> Result<kicad_checks::DrcReport, Error> {
     match run_pcb_drc(
@@ -129,35 +122,49 @@ fn main() -> Result<(), Error> {
         {
             return Err("maximum native batch cancellation failed".into());
         }
-        let mut requested = vec![
-            segment(point(10, 0), point(90, 0)),
-            OutlinePrimitive {
-                geometry: OutlineGeometry::Arc {
-                    start: point(90, 0),
-                    mid: point(130, 40),
-                    end: point(90, 80),
-                },
-                width_nm: 50_000,
-            },
-            segment(point(90, 80), point(10, 80)),
-            OutlinePrimitive {
-                geometry: OutlineGeometry::Arc {
-                    start: point(10, 80),
-                    mid: point(-30, 40),
-                    end: point(10, 0),
-                },
-                width_nm: 50_000,
-            },
-        ];
-        requested.extend(polygon(&[(40, 30), (60, 30), (60, 50), (40, 50)]));
-        requested.extend(polygon(&[
-            (160, 0),
-            (180, 0),
-            (180, 10),
-            (170, 10),
-            (170, 20),
-            (160, 20),
-        ]));
+        let intent: OutlineEdit =
+            serde_json::from_str(include_str!("../../../scripts/fixtures/outline-edit.json"))?;
+        let observed = observe_live_geometry(&mut ipc, &identity.board_filename)?;
+        let revision = outline_revision(&observed)?;
+        let compiled = compile_outline_change(&intent, &revision, &observed)?;
+        if !compiled.requires_native_topology_check()
+            || compiled
+                .removed_ids()
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                != remove
+        {
+            return Err(
+                "compiled outline lost required native verification or exact removals".into(),
+            );
+        }
+        let mut stale = revision.as_str().to_owned();
+        stale.replace_range(..1, if stale.starts_with('0') { "1" } else { "0" });
+        if compile_outline_change(&intent, &RevisionDigest::new(stale)?, &observed).is_ok() {
+            return Err("stale outline revision accepted".into());
+        }
+        let mut invalid = intent.clone();
+        invalid.loops[0].edges.pop();
+        if compile_outline_change(&invalid, &revision, &observed).is_ok() {
+            return Err("open compiled outline accepted".into());
+        }
+        invalid = intent.clone();
+        invalid.remove_ids = vec![StableId::new("60000000-0000-4000-8000-000000000001")?];
+        if compile_outline_change(&invalid, &revision, &observed).is_ok() {
+            return Err("compiled locked removal accepted".into());
+        }
+        let requested = native_outline_primitives(&compiled);
+        fs::write(
+            output.join("intent.json"),
+            serde_json::to_vec_pretty(&intent)?,
+        )?;
+        fs::write(
+            output.join("compiled.json"),
+            serde_json::to_vec_pretty(
+                &json!({"revision":revision,"native_topology_required":true,"primitives":compiled.primitives().iter().map(|p|json!({"target_id":p.target_id,"edge":p.edge,"width_nm":p.width_nm})).collect::<Vec<_>>()}),
+            )?,
+        )?;
         let commit = ipc.begin_commit()?;
         let edits = (|| {
             ipc.delete_outline_items(&identity.board_filename, &geometry, &remove)?;
@@ -216,7 +223,7 @@ fn main() -> Result<(), Error> {
         )?;
         fs::write(output.join("final-items.pb"), actual.persistent_evidence()?)?;
         Ok(
-            json!({"kicad_version":version.full_version,"pid":identity.pid,"created":ids,"removed":remove,"arcs":2,"native_maximum_cancelled":512,"oversized_rejected":513,"locked_wrong_layer_missing_duplicate_removals_rejected":true,"unrelated_native_payloads_preserved":true,"saved_receipts_exact":true,"same_process_reload":true,"project_preserved":true,"introduced_drc":delta.introduced.len(),"baseline_unconnected":baseline_drc.unconnected_items,"final_unconnected":after_drc.unconnected_items,"scope":"native outline primitives and exact replacement; not general topology planning or MCP acceptance"}),
+            json!({"kicad_version":version.full_version,"pid":identity.pid,"created":ids,"removed":remove,"arcs":2,"compiled_from_serialized_intent":true,"compiler_stale_open_locked_rejected":true,"native_maximum_cancelled":512,"oversized_rejected":513,"locked_wrong_layer_missing_duplicate_removals_rejected":true,"unrelated_native_payloads_preserved":true,"saved_receipts_exact":true,"same_process_reload":true,"project_preserved":true,"introduced_drc":delta.introduced.len(),"baseline_unconnected":baseline_drc.unconnected_items,"final_unconnected":after_drc.unconnected_items,"scope":"native outline primitives and exact replacement; not general topology planning or MCP acceptance"}),
         )
     })();
     editor.close_owned(identity.pid)?;

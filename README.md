@@ -17,7 +17,7 @@ The server uses MCP over standard input/output. Configure an MCP client to launc
 
 Backend callers can read [complete native geometry and live board text](docs/acceptance/native-geometry-observation.md), including filled polygons and [bound live-text zone locks omitted by IPC](docs/acceptance/live-geometry-evidence.md). This read-only interface does not expose zone editing or refill through MCP.
 
-Native backend callers can [create segment/arc Edge.Cuts primitives and replace exact unlocked outline objects](docs/acceptance/native-outline-primitives.md), with complete receipts and saved verification. General outline planning and geometry authoring through MCP remain unfinished.
+Native backend callers can [create segment/arc Edge.Cuts primitives and replace exact unlocked outline objects](docs/acceptance/native-outline-primitives.md), with complete receipts and saved verification. [Serializable outline requests](docs/acceptance/outline-request-compilation.md) compile closed loops against native evidence; complete topology preview and geometry authoring through MCP remain unfinished.
 
 ## Board workflow
 

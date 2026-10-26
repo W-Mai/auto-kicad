@@ -60,6 +60,7 @@ pub mod library_catalog;
 pub mod library_table;
 pub mod lifecycle;
 pub mod live_geometry;
+pub mod outline;
 pub mod routing_rules;
 pub use footprint::{
     AllowlistedFootprint, DisabledFootprintRunner, DisposableFootprintContext,

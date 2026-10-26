@@ -1,4 +1,5 @@
 pub mod copper_route;
+pub mod outline;
 pub use copper_route::{CompiledCopperRoute, compile_copper_route};
 mod item_deletion;
 pub use item_deletion::{ExistingItemKind, ExistingItemTarget, expected_item_deletion};

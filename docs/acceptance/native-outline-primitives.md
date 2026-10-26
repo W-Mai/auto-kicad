@@ -21,4 +21,4 @@ After editor cleanup, `scripts/check-outline-topology.py` checks three closed co
 
 Offline quality passed 411 tests with 15 environment-dependent tests ignored, format validation, warnings-denied Clippy and capability validation. Architecture tests cover primitive bounds, exact receipts, retained unknown fields, disjoint identities and preservation without broadening existing deletion policy.
 
-This native interface is an implementation foundation. General outline request compilation, source revisions, preview/approval, protected-file and footprint evidence integration, zoned-board refill, general curve/topology acceptance and production geometry MCP lifecycle are unfinished. The synthetic board does not count toward the three-real-project gate.
+This native interface is an implementation foundation. [Outline request compilation and content revision binding](outline-request-compilation.md) have separate acceptance. Preview/approval, protected-file and footprint evidence integration, zoned-board refill, general curve/topology acceptance and production geometry MCP lifecycle are unfinished. The synthetic board does not count toward the three-real-project gate.
