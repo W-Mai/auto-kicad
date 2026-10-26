@@ -15,6 +15,8 @@ The installer copies the executable into `~/.local/lib/auto-kicad` and writes a 
 
 The server uses MCP over standard input/output. Configure an MCP client to launch the built executable. KiCad 10.0.7 is the verified protocol baseline. `kicad_inspect_project` can query [routing rules for existing net IDs](docs/acceptance/routing-rule-inspection.md), including effective netclass preferences and saved minima; native evidence details remain available to backend callers; [its read-only probe and boundaries](docs/acceptance/routing-rule-observation.md) are documented separately from routing support. Native track construction supports explicit copper layers with [receipt and saved-reload evidence](docs/acceptance/copper-layer-creation.md); public single-track requests accept an optional canonical `layer`, defaulting to F.Cu. [Explicit route requests](docs/acceptance/copper-route-mcp.md) bind native/rule evidence to preview and approval and support pad, track-end and via anchors. [Populated four-layer copy acceptance](docs/acceptance/populated-copper-route.md) verifies a SIM_VDD connection and rejection of approvals after unsaved stackup changes. Enable the KiCad IPC API and open the target PCB before using board tools. The endpoint identifies the editor instance; on macOS it is normally under `/tmp/kicad/`.
 
+Backend callers can read [complete native geometry and live board text](docs/acceptance/native-geometry-observation.md), including filled polygons and evidence of zone locks omitted by IPC. This read-only interface does not expose zone editing or refill through MCP.
+
 ## Board workflow
 
 1. Save the PCB and project settings in KiCad.

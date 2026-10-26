@@ -1,0 +1,39 @@
+{
+  "passed": true,
+  "native_text_zone_ids_match": true,
+  "native_text_shape_ids_match": true,
+  "zone_layers_and_fill_polygons_match": true,
+  "zone_count": 14,
+  "shape_count": 70,
+  "filled_polygons": 31,
+  "locked_zones": [
+    {
+      "id": "f9c2f127-515b-4e2f-b007-625a8e1a09e6",
+      "native_locked": 0,
+      "live_text_locked": true
+    }
+  ],
+  "scope": "read-only native protocol evidence; not zone editing, refill or MCP acceptance",
+  "original_files_unchanged": true,
+  "owned_editor_closed": true,
+  "working_copy_removed": true,
+  "kicad_version": "10.0.7",
+  "source_name": "CM5_MINIMA_3.kicad_pcb",
+  "source_sha256": "123e209e6245cbcc344c1c70b425dcb44a12cd0a2d05f00a39d3f2e7ff307ffa",
+  "source_pid": 64366,
+  "live_text_bytes": 3276590,
+  "stable_read": true,
+  "artifacts": {
+    "live.kicad_pcb": "c87357e71e0c432f12780b29b8b72cf3e1d031e3cb6040c90b50b4b774b762df",
+    "geometry.pb": "2d6b63a0d1084ff4065eb57fc84fd276e63cd26f2102c5077904978fb9104575",
+    "native.json": "0e441c7e42dd1773002c1b9cf1a3cc1482f12f2b98efbf50a4c1a60df1392ff6"
+  },
+  "quality": {
+    "passed": 405,
+    "failed": 0,
+    "ignored": 15,
+    "format": true,
+    "clippy_warnings_denied": true,
+    "capability_matrix": true
+  }
+}

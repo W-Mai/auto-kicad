@@ -1,3 +1,5 @@
+mod native_geometry;
+pub use native_geometry::{MAX_NATIVE_GEOMETRY_BYTES, NativeBoardGeometry};
 mod copper_connectivity;
 mod copper_layer;
 pub use copper_layer::CopperLayer;
@@ -16,7 +18,7 @@ pub use existing_items::{DeleteItemsReceipt, FootprintFlipAxis};
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
 
-use nng::options::{Options, RecvTimeout, SendTimeout};
+use nng::options::{Options, RecvMaxSize, RecvTimeout, SendTimeout};
 use nng::{Message as NngMessage, Protocol, Socket};
 use protobuf::well_known_types::any::Any;
 use protobuf::{Message, MessageField};
@@ -996,6 +998,8 @@ pub struct NngTransport {
 impl NngTransport {
     pub fn connect(config: ClientConfig) -> Result<Self, IpcError> {
         let socket = Socket::new(Protocol::Req0)?;
+        // Bound transport allocation before decoding native geometry or document strings.
+        socket.set_opt::<RecvMaxSize>(64 * 1024 * 1024)?;
         socket.dial(&config.endpoint)?;
         socket.set_opt::<RecvTimeout>(Some(config.timeout))?;
         socket.set_opt::<SendTimeout>(Some(config.timeout))?;
