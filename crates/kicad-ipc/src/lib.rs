@@ -1,3 +1,5 @@
+mod existing_item_updates;
+pub use existing_item_updates::{ExistingBoardItemSet, ExistingItemUpdate};
 include!(concat!(env!("OUT_DIR"), "/generated/mod.rs"));
 
 mod existing_items;

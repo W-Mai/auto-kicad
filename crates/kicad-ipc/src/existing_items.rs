@@ -29,7 +29,7 @@ fn invalid(reason: &'static str) -> IpcError {
     IpcError::InvalidObservedFootprint(reason)
 }
 
-fn identifiers(ids: &[String], limit: usize) -> Result<BTreeSet<String>, IpcError> {
+pub(super) fn identifiers(ids: &[String], limit: usize) -> Result<BTreeSet<String>, IpcError> {
     let unique: BTreeSet<_> = ids.iter().cloned().collect();
     if ids.is_empty()
         || ids.len() > limit
@@ -44,7 +44,7 @@ fn identifiers(ids: &[String], limit: usize) -> Result<BTreeSet<String>, IpcErro
 }
 
 impl<T: KiCadTransport> KiCadClient<T> {
-    fn bound_item_command<C: Message, R: Message>(
+    pub(super) fn bound_item_command<C: Message, R: Message>(
         &mut self,
         command_type: &'static str,
         response_type: &'static str,
@@ -60,7 +60,7 @@ impl<T: KiCadTransport> KiCadClient<T> {
         decode_any::<R>(&response, response_type)
     }
 
-    fn validate_item_reply(
+    pub(super) fn validate_item_reply(
         &mut self,
         header: MessageField<base_types::ItemHeader>,
         status: protobuf::EnumOrUnknown<base_types::ItemRequestStatus>,
