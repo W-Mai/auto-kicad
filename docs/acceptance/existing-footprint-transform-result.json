@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-26",
+  "passed": true,
+  "kicad_version": "10.0.6",
+  "fixture": "synthetic-four-footprint-asymmetric-front-back",
+  "transport": "production stdio executable and native IPC",
+  "live_test_seconds": 55.15,
+  "checks": {
+    "source_editor_reused": true,
+    "same_process_reload_verified": true,
+    "owned_editors_closed": true,
+    "fixture_cleaned": true
+  },
+  "accepted": [
+    "front translation",
+    "front rotation",
+    "back translation and rotation"
+  ],
+  "rejected": [
+    "locked move and rotation",
+    "track/via connected move and rotation",
+    "stale revision",
+    "wrong approval",
+    "consumed approval",
+    "foreign-net collision preview"
+  ],
+  "preserved": [
+    "complete native footprint payloads excluding transient board-container KIID",
+    "pad and footprint identities",
+    "symbol path",
+    "pad nets and local geometry",
+    "unrelated footprint and routing data",
+    "project/rules/schematic bytes"
+  ],
+  "drc": {
+    "baseline_violations": 6,
+    "final_violations": 6,
+    "introduced": 0,
+    "baseline_unconnected": 3,
+    "final_unconnected": 3
+  },
+  "fault_validation": "offline protocol/adapter and cleanup contracts; no deliberate live editor crash",
+  "counts_as_real_project_profile": false,
+  "installed_user_runtime_updated": false,
+  "source_files_sha256": {
+    "crates/auto-kicad/src/existing_footprint.rs": "ee7fa1c0dcd6ab07ee9b8632ca9e37c48d498b0af1a1b11403d079f2c539517a",
+    "crates/auto-kicad/src/lib.rs": "9e12ec553259b4cda3184daeb8c6a22ac65fd91bb0cbb5f2fa4028a8bceb4d21",
+    "crates/kicad-engine/src/footprint_edit.rs": "98acfe935b439e854293b07a1a6e7d83f782659dfd5dd454d088b9c6d344ea74",
+    "crates/kicad-engine/src/lib.rs": "45a425f57fd83d1b65905278ff69bc3b6419bbd3bcc8a4bcde454d42b1d971d7",
+    "crates/kicad-adapter/src/lib.rs": "7e7e5e10d53086246ed0c1745e9667da12d486d40616ddc08ab2948a51ffbff6",
+    "crates/kicad-ipc/src/footprint_transform.rs": "0927827ae51ba1e3dff4b677d45adf73175c6a9777bd489567e4dba9d73b179f",
+    "crates/kicad-ipc/src/lib.rs": "3d77a03d1aec4b51673b088834e3e4609e94615124efbb3c0d3c1b7a17f8f3fa",
+    "crates/auto-kicad/src/tests/existing_footprint_acceptance.rs": "129fb30d9892744ec9418cfaab2d73573a03f24071bc88999aa92666fe95cdfb",
+    "scripts/check-footprint-move.py": "57a0344f69c66ca1d78119cf805d79ebf16aa50318299846dd519c4017e5afeb"
+  },
+  "offline_quality": {
+    "command": "python3 scripts/quality.py",
+    "passed": 351,
+    "ignored_environment_dependent": 11,
+    "matrix_format_clippy": "passed"
+  },
+  "tested_stdio_binary_sha256": "dde409cb8ee9d4361ae5b7ccdb285c017600381d04e7541514e6669525a61e4f",
+  "source_hash_scope": "Final source including offline test additions; live-tested production transform path unchanged after the recorded run."
+}

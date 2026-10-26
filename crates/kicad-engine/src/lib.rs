@@ -1,3 +1,8 @@
+mod footprint_edit;
+pub use footprint_edit::{
+    FOOTPRINT_COPPER_TOLERANCE_NM, connected_footprint_copper, expected_footprint_move,
+};
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{Display, Formatter};
 
@@ -161,7 +166,14 @@ pub enum OperationKind {
         source_uuid: StableId,
         position: Coordinate,
         orientation_mdeg: i64,
+        #[serde(default = "default_footprint_copper_tolerance")]
+        copper_tolerance_nm: i64,
+        native_evidence: RevisionDigest,
     },
+}
+
+pub fn default_footprint_copper_tolerance() -> i64 {
+    FOOTPRINT_COPPER_TOLERANCE_NM
 }
 
 impl OperationKind {
@@ -540,7 +552,12 @@ impl ChangePlan {
                     source_uuid,
                     position,
                     orientation_mdeg,
+                    copper_tolerance_nm,
+                    ..
                 } => {
+                    if !(1..=FOOTPRINT_COPPER_TOLERANCE_NM).contains(copper_tolerance_nm) {
+                        return Err(EngineError::InvalidPlan("invalid copper tolerance"));
+                    }
                     if snapshot.board.document_id.as_ref() != Some(board) {
                         return Err(EngineError::ScopeMismatch);
                     }
@@ -1013,26 +1030,8 @@ fn apply_operations(
                         .map_err(|error| EngineError::Serialization(error.to_string()))?,
                 );
             }
-            OperationKind::MoveExistingFootprint {
-                placement_id,
-                position,
-                orientation_mdeg,
-                ..
-            } => {
-                let footprints =
-                    snapshot
-                        .native_footprints
-                        .as_mut()
-                        .ok_or(EngineError::InvalidPlan(
-                            "native footprint observation is required",
-                        ))?;
-                let placement = footprints
-                    .placements
-                    .iter_mut()
-                    .find(|placement| placement.placement_id == *placement_id)
-                    .ok_or_else(|| EngineError::TargetNotFound(placement_id.clone()))?;
-                placement.position = *position;
-                placement.orientation_mdeg = *orientation_mdeg;
+            OperationKind::MoveExistingFootprint { .. } => {
+                snapshot = expected_footprint_move(&snapshot, &op.kind)?;
             }
             _ => return Err(EngineError::UnsupportedOperation),
         }
@@ -1363,6 +1362,7 @@ fn validate_graphics(segments: &[BoardGraphicSegment]) -> Result<(), EngineError
 
 #[cfg(test)]
 mod tests {
+    mod footprint_edit;
     use super::*;
     use kicad_model::{
         Board, BoardSide, FootprintLibraryIdentifier, ObservedBoardFootprints, ObservedNetIdentity,
@@ -1959,6 +1959,8 @@ mod tests {
                 source_uuid: target.source_uuid.clone(),
                 position: board_coordinate(500, 600),
                 orientation_mdeg: 90_000,
+                copper_tolerance_nm: FOOTPRINT_COPPER_TOLERANCE_NM,
+                native_evidence: digest('a'),
             },
             targets: vec![
                 board,
@@ -1979,7 +1981,22 @@ mod tests {
             instance_token: "token".into(),
         };
         plan.validate(&original).unwrap();
+        let mut changed_evidence = plan.clone();
+        if let OperationKind::MoveExistingFootprint {
+            native_evidence, ..
+        } = &mut changed_evidence.operations[0].kind
+        {
+            *native_evidence = digest('b');
+        }
+        assert_ne!(plan.hash().unwrap(), changed_evidence.hash().unwrap());
         let expected = apply_operations(original.clone(), &plan.operations).unwrap();
+        expected
+            .native_footprints
+            .as_ref()
+            .unwrap()
+            .validate()
+            .unwrap();
+        assert_ne!(expected.revision().unwrap(), original.revision().unwrap());
         let moved = expected.native_footprints.unwrap().placements[0].clone();
         assert_eq!(moved.position, board_coordinate(500, 600));
         assert_eq!(moved.orientation_mdeg, 90_000);

@@ -1,5 +1,7 @@
 include!(concat!(env!("OUT_DIR"), "/generated/mod.rs"));
 
+mod footprint_transform;
+
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
 
@@ -304,6 +306,59 @@ impl FootprintInstanceTemplate {
     /// Immutable source bytes and association bound into authoring approval evidence.
     pub fn evidence(&self) -> (&[u8], Option<&FootprintAssociation>) {
         (&self.bytes, self.association.as_ref())
+    }
+
+    /// Serialized native fields excluding the board container's transient KIID.
+    pub fn persistent_evidence(&self) -> Result<Vec<u8>, IpcError> {
+        let mut instance = board_types::FootprintInstance::parse_from_bytes(&self.bytes)
+            .map_err(|_| IpcError::MalformedEnvelope)?;
+        instance.parent = MessageField::none();
+        instance
+            .write_to_bytes()
+            .map_err(|_| IpcError::MalformedEnvelope)
+    }
+
+    /// Compare a saved native instance with a rigid transform of this complete template.
+    pub fn matches_transform(
+        &self,
+        after: &Self,
+        x: i64,
+        y: i64,
+        angle: i64,
+    ) -> Result<bool, IpcError> {
+        let mut expected = board_types::FootprintInstance::parse_from_bytes(&self.bytes)
+            .map_err(|_| IpcError::MalformedEnvelope)?;
+        let mut actual = board_types::FootprintInstance::parse_from_bytes(&after.bytes)
+            .map_err(|_| IpcError::MalformedEnvelope)?;
+        let observed = footprint_instance_from_any(&Any {
+            type_url: FOOTPRINT_INSTANCE_TYPE_URL.into(),
+            value: after.bytes.clone(),
+            ..Default::default()
+        })?;
+        if observed.position_x_nm != x
+            || observed.position_y_nm != y
+            || observed.orientation_mdeg != angle
+        {
+            return Ok(false);
+        }
+        footprint_transform::transform(&mut expected, x, y, angle)?;
+        footprint_transform::transform(&mut actual, x, y, angle)?;
+        // KiCad regenerates the board container KIID on reload. Document path and
+        // instance token are verified by the caller; footprint and child KIIDs remain exact.
+        expected.parent = MessageField::none();
+        actual.parent = MessageField::none();
+        Ok(expected == actual)
+    }
+
+    /// Compare persisted fields, excluding the transient board-container KIID.
+    pub fn matches_saved_instance(&self, after: &Self) -> Result<bool, IpcError> {
+        let mut expected = board_types::FootprintInstance::parse_from_bytes(&self.bytes)
+            .map_err(|_| IpcError::MalformedEnvelope)?;
+        let mut actual = board_types::FootprintInstance::parse_from_bytes(&after.bytes)
+            .map_err(|_| IpcError::MalformedEnvelope)?;
+        expected.parent = MessageField::none();
+        actual.parent = MessageField::none();
+        Ok(expected == actual)
     }
 
     pub fn with_association(&self, association: FootprintAssociation) -> Result<Self, IpcError> {
@@ -1274,6 +1329,89 @@ impl<T: KiCadTransport> KiCadClient<T> {
         Ok(diagnostics)
     }
 
+    /// Report copper outside the supported pad/track/via observation model.
+    pub fn get_unsupported_move_copper(
+        &mut self,
+        board_filename: &str,
+    ) -> Result<Vec<String>, IpcError> {
+        let mut ids = self
+            .get_pcb_item_diagnostics(board_filename, &[PcbItemKind::Zone])?
+            .into_iter()
+            .map(|d| {
+                d.stable_id.ok_or(IpcError::InvalidObservedFootprint(
+                    "zone identity is unavailable",
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let command = editor_commands::GetItems {
+            header: MessageField::some(board_item_header(board_filename)),
+            types: [
+                enums::KiCadObjectType::KOT_PCB_SHAPE,
+                enums::KiCadObjectType::KOT_PCB_TEXT,
+                enums::KiCadObjectType::KOT_PCB_TEXTBOX,
+            ]
+            .into_iter()
+            .map(protobuf::EnumOrUnknown::new)
+            .collect(),
+            ..Default::default()
+        };
+        let request = command_request(
+            &self.config,
+            self.token.as_ref(),
+            GET_ITEMS_TYPE_URL,
+            command,
+        )?;
+        let response = self.transport.request(request)?;
+        response_status(&response)?;
+        let token = response_token(&response)?;
+        let mut response = decode_any::<editor_commands::GetItemsResponse>(
+            &response,
+            GET_ITEMS_RESPONSE_TYPE_URL,
+        )?;
+        if response.header.is_none()
+            && response.status.enum_value() == Ok(base_types::ItemRequestStatus::IRS_OK)
+        {
+            self.bind_headerless_board_items(&mut response, &token, board_filename)?;
+        }
+        validate_get_items_document(&response, board_filename)?;
+        if response.status.enum_value() != Ok(base_types::ItemRequestStatus::IRS_OK) {
+            return Err(IpcError::InvalidObservedFootprint(
+                "copper observation is unavailable",
+            ));
+        }
+        for item in response.items {
+            let (layer, id) = match item.type_url.as_str() {
+                "type.googleapis.com/kiapi.board.types.BoardGraphicShape" => {
+                    let value = board_types::BoardGraphicShape::parse_from_bytes(&item.value)
+                        .map_err(|_| IpcError::MalformedEnvelope)?;
+                    (value.layer, value.id)
+                }
+                "type.googleapis.com/kiapi.board.types.BoardText" => {
+                    let value = board_types::BoardText::parse_from_bytes(&item.value)
+                        .map_err(|_| IpcError::MalformedEnvelope)?;
+                    (value.layer, value.id)
+                }
+                "type.googleapis.com/kiapi.board.types.BoardTextBox" => {
+                    let value = board_types::BoardTextBox::parse_from_bytes(&item.value)
+                        .map_err(|_| IpcError::MalformedEnvelope)?;
+                    (value.layer, value.id)
+                }
+                _ => return Err(IpcError::UnknownPcbItemType(item.type_url)),
+            };
+            if footprint_transform::is_copper(layer)? {
+                ids.push(
+                    kiid_value(id.as_ref()).ok_or(IpcError::InvalidObservedFootprint(
+                        "copper graphic identity is unavailable",
+                    ))?,
+                );
+            }
+        }
+        self.token = Some(token);
+        ids.sort();
+        ids.dedup();
+        Ok(ids)
+    }
+
     pub fn capture_footprint_instance_templates(
         &mut self,
         board_filename: &str,
@@ -1491,15 +1629,12 @@ impl<T: KiCadTransport> KiCadClient<T> {
         let (bytes, _) = template.evidence();
         let mut instance = board_types::FootprintInstance::parse_from_bytes(bytes)
             .map_err(|_| IpcError::MalformedEnvelope)?;
-        instance.position = MessageField::some(base_types::Vector2 {
-            x_nm: position_x_nm,
-            y_nm: position_y_nm,
-            ..base_types::Vector2::default()
-        });
-        instance.orientation = MessageField::some(base_types::Angle {
-            value_degrees: orientation_mdeg as f64 / 1_000.0,
-            ..base_types::Angle::default()
-        });
+        footprint_transform::transform(
+            &mut instance,
+            position_x_nm,
+            position_y_nm,
+            orientation_mdeg,
+        )?;
         let command = editor_commands::UpdateItems {
             header: MessageField::some(board_item_header(board_filename)),
             items: vec![Any {
@@ -1558,6 +1693,20 @@ impl<T: KiCadTransport> KiCadClient<T> {
                 expected: FOOTPRINT_INSTANCE_TYPE_URL,
                 actual: item.type_url.clone(),
             });
+        }
+        let mut returned = board_types::FootprintInstance::parse_from_bytes(&item.value)
+            .map_err(|_| IpcError::MalformedEnvelope)?;
+        // Normalize equivalent angle representations before comparing all native fields.
+        footprint_transform::transform(
+            &mut returned,
+            position_x_nm,
+            position_y_nm,
+            orientation_mdeg,
+        )?;
+        if returned != instance {
+            return Err(IpcError::InvalidObservedFootprint(
+                "updated footprint children or metadata differ from the rigid transform",
+            ));
         }
         let footprint = footprint_instance_from_any(item)?;
         if footprint.source_uuid != source_uuid
@@ -5035,6 +5184,7 @@ fn decode_any<M: Message + Default>(
 
 #[cfg(test)]
 mod tests {
+    mod footprint_transform;
     use super::*;
     use protobuf::Enum;
 

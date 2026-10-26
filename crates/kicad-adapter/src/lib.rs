@@ -1,6 +1,6 @@
 use kicad_engine::{
     MAX_BOARD_POSITION_NM, MAX_GRAPHIC_BOUNDING_AREA_NM2, MAX_GRAPHIC_SPAN_NM, Operation,
-    OperationKind, expand_board_outline, pad_board_position, validate_observed_routing_net,
+    OperationKind, expand_board_outline, validate_observed_routing_net,
     validate_routing_track_binding,
 };
 use kicad_ipc::{
@@ -602,7 +602,9 @@ fn map_observed_pad(
         lock_state: map_lock_state(pad.lock_state),
         position: observed_pad_local_position(footprint, pad.position_x_nm, pad.position_y_nm)?,
         stack_type: map_pad_stack_type(pad.stack_type),
-        orientation_mdeg: pad.orientation_mdeg,
+        orientation_mdeg: (pad.orientation_mdeg.rem_euclid(360_000)
+            - footprint.orientation_mdeg.rem_euclid(360_000))
+        .rem_euclid(360_000),
         layers: pad.layers.into_iter().map(map_board_layer).collect(),
         copper_shapes,
         drill,
@@ -1469,6 +1471,9 @@ pub trait BoardGraphicsIpc {
         let _ = (board_filename, source_uuid);
         Err("pad observation is unsupported by this IPC adapter".into())
     }
+    fn read_unsupported_move_copper(&mut self, _filename: &str) -> Result<Vec<String>, String> {
+        Err("unsupported copper observation is unavailable".into())
+    }
     fn read_pcb_item_diagnostics(
         &mut self,
         board_filename: &str,
@@ -1493,131 +1498,28 @@ pub struct NativePcbBatch {
     pub vias: Vec<CreateThroughVia>,
 }
 
-const FOOTPRINT_COPPER_TOLERANCE_NM: f64 = 250_000.0;
-
-fn point_segment_distance_sq(px: f64, py: f64, ax: f64, ay: f64, bx: f64, by: f64) -> f64 {
-    let dx = bx - ax;
-    let dy = by - ay;
-    let length_sq = dx * dx + dy * dy;
-    let t = if length_sq == 0.0 {
-        0.0
-    } else {
-        (((px - ax) * dx + (py - ay) * dy) / length_sq).clamp(0.0, 1.0)
-    };
-    let qx = ax + t * dx;
-    let qy = ay + t * dy;
-    (px - qx) * (px - qx) + (py - qy) * (py - qy)
+fn connected_copper_ids(
+    snapshot: &ProjectSnapshot,
+    placement_id: &StableId,
+    tolerance_nm: i64,
+) -> Result<Vec<String>, String> {
+    kicad_engine::connected_footprint_copper(snapshot, placement_id, tolerance_nm)
+        .map(|ids| ids.iter().map(ToString::to_string).collect())
+        .map_err(|e| e.to_string())
 }
 
-fn connected_copper_ids(
-    snapshot: &kicad_model::ProjectSnapshot,
-    placement_id: &StableId,
-) -> Result<Vec<String>, String> {
-    let footprints = snapshot
-        .native_footprints
-        .as_ref()
-        .ok_or_else(|| "native footprint observation is missing".to_owned())?;
-    let placement = footprints
-        .placements
-        .iter()
-        .find(|placement| &placement.placement_id == placement_id)
-        .ok_or_else(|| "target footprint is missing from the observation".to_owned())?;
-    if placement.lock_state == LockState::Locked {
-        return Err("target_locked".into());
+fn read_move_footprints<I: BoardGraphicsIpc>(
+    ipc: &mut I,
+    board: &StableId,
+    filename: &str,
+) -> Result<ObservedBoardFootprints, String> {
+    let footprints = ipc.read_footprints(filename)?;
+    let mut observed = Vec::with_capacity(footprints.len());
+    for footprint in footprints {
+        let pads = ipc.read_footprint_pads(filename, &footprint.source_uuid)?;
+        observed.push(ObservedFootprintWithPads { footprint, pads });
     }
-    let routing = snapshot
-        .native_routing
-        .as_ref()
-        .ok_or_else(|| "native routing observation is missing".to_owned())?;
-    let mut affected = BTreeSet::new();
-    for pad in &placement.pads {
-        let board_position =
-            pad_board_position(placement, pad).map_err(|error| error.to_string())?;
-        let radius = pad
-            .copper_shapes
-            .iter()
-            .map(|shape| (shape.size.x_nm.max(shape.size.y_nm) as f64) / 2.0)
-            .fold(0.0, f64::max)
-            + FOOTPRINT_COPPER_TOLERANCE_NM;
-        let px = board_position.x as f64;
-        let py = board_position.y as f64;
-        for track in &routing.tracks {
-            if let Some(net) = &pad.net
-                && track
-                    .net
-                    .as_ref()
-                    .and_then(|track_net| track_net.net_id.as_ref())
-                    != Some(&net.net_id)
-            {
-                continue;
-            }
-            let layer_matches = pad.layers.contains(&track.layer);
-            if !layer_matches {
-                continue;
-            }
-            let width = track.width_nm as f64 / 2.0;
-            let hit = match track.geometry {
-                kicad_model::ObservedTrackGeometry::Segment { start, end } => {
-                    point_segment_distance_sq(
-                        px,
-                        py,
-                        start.x as f64,
-                        start.y as f64,
-                        end.x as f64,
-                        end.y as f64,
-                    ) <= (radius + width) * (radius + width)
-                }
-                kicad_model::ObservedTrackGeometry::Arc { start, mid, end } => {
-                    point_segment_distance_sq(
-                        px,
-                        py,
-                        start.x as f64,
-                        start.y as f64,
-                        mid.x as f64,
-                        mid.y as f64,
-                    ) <= (radius + width) * (radius + width)
-                        || point_segment_distance_sq(
-                            px,
-                            py,
-                            mid.x as f64,
-                            mid.y as f64,
-                            end.x as f64,
-                            end.y as f64,
-                        ) <= (radius + width) * (radius + width)
-                }
-            };
-            if hit {
-                affected.insert(track.source_uuid.to_string());
-            }
-        }
-        for via in &routing.vias {
-            if let Some(net) = &pad.net
-                && via.net.as_ref().and_then(|via_net| via_net.net_id.as_ref()) != Some(&net.net_id)
-            {
-                continue;
-            }
-            let layer_matches = via
-                .pad_stack
-                .layers
-                .iter()
-                .any(|layer| pad.layers.contains(layer));
-            if !layer_matches {
-                continue;
-            }
-            let dx = via.position.x as f64 - px;
-            let dy = via.position.y as f64 - py;
-            let via_radius = via
-                .pad_stack
-                .copper_shapes
-                .iter()
-                .map(|shape| (shape.size.x_nm.max(shape.size.y_nm) as f64) / 2.0)
-                .fold(0.0, f64::max);
-            if dx * dx + dy * dy <= (radius + via_radius) * (radius + via_radius) {
-                affected.insert(via.source_uuid.to_string());
-            }
-        }
-    }
-    Ok(affected.into_iter().collect())
+    board_footprint_observation(board.clone(), observed).map_err(|e| e.to_string())
 }
 
 pub fn prepare_bound_native_batch(
@@ -1861,6 +1763,10 @@ impl<T: KiCadTransport> BoardGraphicsIpc for KiCadClient<T> {
             .map_err(|error| error.to_string())
     }
 
+    fn read_unsupported_move_copper(&mut self, filename: &str) -> Result<Vec<String>, String> {
+        self.get_unsupported_move_copper(filename)
+            .map_err(|e| e.to_string())
+    }
     fn read_pcb_item_diagnostics(
         &mut self,
         board_filename: &str,
@@ -1887,6 +1793,8 @@ impl BoardGraphicsExecutor {
             source_uuid,
             position,
             orientation_mdeg,
+            copper_tolerance_nm,
+            ..
         } = &operation.kind
         else {
             return BoardGraphicsCommitOutcome::Rejected {
@@ -1902,7 +1810,7 @@ impl BoardGraphicsExecutor {
                 reason: "footprint transform observation identity is stale".into(),
             };
         }
-        let affected = match connected_copper_ids(snapshot, placement_id) {
+        let affected = match connected_copper_ids(snapshot, placement_id, *copper_tolerance_nm) {
             Ok(ids) => ids,
             Err(reason) => {
                 return BoardGraphicsCommitOutcome::Rejected { reason };
@@ -1916,7 +1824,7 @@ impl BoardGraphicsExecutor {
                 ),
             };
         }
-        let zones = match ipc.read_pcb_item_diagnostics(board_filename, &[PcbItemKind::Zone]) {
+        let zones = match ipc.read_unsupported_move_copper(board_filename) {
             Ok(items) => items,
             Err(reason) => {
                 return BoardGraphicsCommitOutcome::Rejected {
@@ -1926,21 +1834,35 @@ impl BoardGraphicsExecutor {
         };
         if !zones.is_empty() {
             return BoardGraphicsCommitOutcome::Rejected {
-                reason: "unsupported_copper_interaction: board contains zones".into(),
+                reason: "unsupported_copper_interaction: board contains zones or unsupported copper graphics".into(),
             };
         }
-        let before_footprints = match ipc.read_footprints(board_filename) {
-            Ok(items) => items,
-            Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
+        let expected = match kicad_engine::expected_footprint_move(snapshot, &operation.kind) {
+            Ok(expected) => expected,
+            Err(e) => {
+                return BoardGraphicsCommitOutcome::Rejected {
+                    reason: e.to_string(),
+                };
+            }
         };
-        let before_pads = match ipc.read_footprint_pads(board_filename, &source_uuid.to_string()) {
+        let before_footprints = match read_move_footprints(ipc, board, board_filename) {
             Ok(items) => items,
-            Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
+            Err(reason) => return BoardGraphicsCommitOutcome::Rejected { reason },
         };
         let before_routing = match ipc.read_board_routing(board_filename) {
             Ok(items) => items,
-            Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
+            Err(reason) => return BoardGraphicsCommitOutcome::Rejected { reason },
         };
+        if snapshot.native_footprints.as_ref() != Some(&before_footprints)
+            || board_routing_observation(board.clone(), before_routing.clone())
+                .ok()
+                .as_ref()
+                != snapshot.native_routing.as_ref()
+        {
+            return BoardGraphicsCommitOutcome::Rejected {
+                reason: "footprint or routing observation changed before update".into(),
+            };
+        }
         let commit = match ipc.begin_commit() {
             Ok(commit) => commit,
             Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
@@ -1972,7 +1894,7 @@ impl BoardGraphicsExecutor {
         if let Err(reason) = ipc.save_board(board_filename) {
             return BoardGraphicsCommitOutcome::Unknown { reason };
         }
-        let after_footprints = match ipc.read_footprints(board_filename) {
+        let after_footprints = match read_move_footprints(ipc, board, board_filename) {
             Ok(items) => items,
             Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
         };
@@ -1980,35 +1902,14 @@ impl BoardGraphicsExecutor {
             Ok(items) => items,
             Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
         };
-        let after_pads = match ipc.read_footprint_pads(board_filename, &source_uuid.to_string()) {
-            Ok(items) => items,
-            Err(reason) => return BoardGraphicsCommitOutcome::Unknown { reason },
-        };
-        if before_routing != after_routing {
+        if expected.native_footprints.as_ref() != Some(&after_footprints)
+            || board_routing_observation(board.clone(), after_routing)
+                .ok()
+                .as_ref()
+                != snapshot.native_routing.as_ref()
+        {
             return BoardGraphicsCommitOutcome::Unknown {
-                reason: "moving a footprint changed unrelated routing".into(),
-            };
-        }
-        if before_pads != after_pads {
-            return BoardGraphicsCommitOutcome::Unknown {
-                reason: "moving a footprint changed its pad definitions".into(),
-            };
-        }
-        let mut expected_footprints = before_footprints.clone();
-        let Some(expected_target) = expected_footprints
-            .iter_mut()
-            .find(|item| item.source_uuid == source_uuid.to_string())
-        else {
-            return BoardGraphicsCommitOutcome::Unknown {
-                reason: "target footprint disappeared after save".into(),
-            };
-        };
-        expected_target.position_x_nm = position.x;
-        expected_target.position_y_nm = position.y;
-        expected_target.orientation_mdeg = *orientation_mdeg;
-        if expected_footprints != after_footprints {
-            return BoardGraphicsCommitOutcome::Unknown {
-                reason: "saved footprint set differs outside the approved transform".into(),
+                reason: "saved footprint or routing set differs from the approved transform".into(),
             };
         }
         BoardGraphicsCommitOutcome::CommittedAndSaved
@@ -2229,6 +2130,24 @@ impl BoardGraphicsExecutor {
         board_filename: &str,
         message: &str,
     ) -> BoardGraphicsCommitOutcome {
+        if operations
+            .iter()
+            .any(|op| matches!(op.kind, OperationKind::MoveExistingFootprint { .. }))
+        {
+            let [operation] = operations else {
+                return BoardGraphicsCommitOutcome::Rejected {
+                    reason: "existing footprint movement requires its own transaction".into(),
+                };
+            };
+            return self.execute_bound(
+                ipc,
+                operation,
+                snapshot,
+                expected_revision,
+                board_filename,
+                message,
+            );
+        }
         let batch = match prepare_bound_native_batch(operations, snapshot, expected_revision) {
             Ok(batch) => batch,
             Err(outcome) => return outcome,
@@ -3414,7 +3333,7 @@ mod tests {
         assert_eq!(pad.kind, PadKind::PlatedThroughHole);
         assert_eq!(pad.lock_state, LockState::Unlocked);
         assert_eq!(pad.stack_type, PadStackType::FrontInnerBack);
-        assert_eq!(pad.orientation_mdeg, 45_000);
+        assert_eq!(pad.orientation_mdeg, 315_000);
         assert_eq!(
             pad.layers,
             [
@@ -4199,6 +4118,9 @@ mod tests {
     }
 
     struct FakeGraphicsIpc {
+        move_group: Option<ObservedFootprintWithPads>,
+        update_error: Option<String>,
+        corrupt_move: bool,
         begin: Result<String, String>,
         create: Result<(), String>,
         track: Result<(), String>,
@@ -4218,6 +4140,9 @@ mod tests {
     impl Default for FakeGraphicsIpc {
         fn default() -> Self {
             Self {
+                move_group: None,
+                update_error: None,
+                corrupt_move: false,
                 begin: Ok("c1".into()),
                 create: Ok(()),
                 track: Ok(()),
@@ -4237,6 +4162,68 @@ mod tests {
     }
 
     impl BoardGraphicsIpc for FakeGraphicsIpc {
+        fn read_unsupported_move_copper(&mut self, _: &str) -> Result<Vec<String>, String> {
+            Ok(vec![])
+        }
+
+        fn read_footprints(&mut self, _: &str) -> Result<Vec<IpcFootprintInstance>, String> {
+            Ok(vec![
+                self.move_group
+                    .as_ref()
+                    .ok_or("no move fixture")?
+                    .footprint
+                    .clone(),
+            ])
+        }
+        fn read_footprint_pads(&mut self, _: &str, _: &str) -> Result<Vec<IpcPad>, String> {
+            Ok(self
+                .move_group
+                .as_ref()
+                .ok_or("no move fixture")?
+                .pads
+                .clone())
+        }
+        fn read_pcb_item_diagnostics(
+            &mut self,
+            _: &str,
+            _: &[PcbItemKind],
+        ) -> Result<Vec<PcbItemDiagnostic>, String> {
+            Ok(vec![])
+        }
+        fn update_footprint_instance(
+            &mut self,
+            _: &str,
+            source: &str,
+            x: i64,
+            y: i64,
+            angle: i64,
+        ) -> Result<UpdatedFootprintInstanceReceipt, String> {
+            self.calls.push("update".into());
+            if let Some(error) = &self.update_error {
+                return Err(error.clone());
+            }
+            let group = self.move_group.as_mut().unwrap();
+            assert_eq!(
+                angle, group.footprint.orientation_mdeg,
+                "mock supports translation only"
+            );
+            for pad in &mut group.pads {
+                pad.position_x_nm += x - group.footprint.position_x_nm;
+                pad.position_y_nm += y - group.footprint.position_y_nm;
+                if self.corrupt_move {
+                    pad.number = "corrupt".into();
+                }
+            }
+            group.footprint.position_x_nm = x;
+            group.footprint.position_y_nm = y;
+            Ok(UpdatedFootprintInstanceReceipt {
+                footprint: group.footprint.clone(),
+                source_uuid: source.into(),
+                position_x_nm: x,
+                position_y_nm: y,
+                orientation_mdeg: angle,
+            })
+        }
         fn begin_commit(&mut self) -> Result<String, String> {
             self.calls.push("begin".into());
             self.begin.clone()
@@ -4407,6 +4394,106 @@ mod tests {
             board: StableId::new("board").unwrap(),
             segments: vec![graphic()],
         }
+    }
+
+    #[test]
+    fn footprint_batch_dispatch_preserves_transaction_and_postcondition_failures() {
+        let document = pcb();
+        let board = board_document_id(&document).unwrap();
+        let mut group = observed_footprint("fp", "pad");
+        group.footprint.lock_state = IpcLockState::Unlocked;
+        let empty = IpcBoardRoutingItems {
+            tracks: vec![],
+            vias: vec![],
+        };
+        let snapshot = live_board_observation(
+            version(),
+            document,
+            vec![],
+            board_footprint_observation(board.clone(), vec![group.clone()]).unwrap(),
+            board_routing_observation(board.clone(), empty.clone()).unwrap(),
+            native_stackup(&pcb()),
+            InstanceToken::new("token").unwrap(),
+        )
+        .unwrap()
+        .snapshot;
+        let target = &snapshot.native_footprints.as_ref().unwrap().placements[0];
+        let operation = Operation {
+            operation_id: StableId::new("move").unwrap(),
+            kind: OperationKind::MoveExistingFootprint {
+                board: board.clone(),
+                placement_id: target.placement_id.clone(),
+                source_uuid: target.source_uuid.clone(),
+                position: board_coordinate(13_000_000, 34_000_000),
+                orientation_mdeg: 90_000,
+                copper_tolerance_nm: kicad_engine::FOOTPRINT_COPPER_TOLERANCE_NM,
+                native_evidence: RevisionDigest::new("a".repeat(64)).unwrap(),
+            },
+            targets: vec![
+                board,
+                target.placement_id.clone(),
+                target.source_uuid.clone(),
+            ],
+            preconditions: vec![],
+            expected_effects: vec!["rigid transform".into()],
+            risk_class: kicad_engine::RiskClass::Medium,
+            idempotency_key: "move".into(),
+            source_run_id: "test".into(),
+        };
+        for fault in 0..6 {
+            let mut ipc = FakeGraphicsIpc {
+                move_group: Some(group.clone()),
+                routing_observed: Some(Ok(empty.clone())),
+                ..Default::default()
+            };
+            match fault {
+                1 => ipc.update_error = Some("immutable".into()),
+                2 => ipc.save = Err("save failed".into()),
+                3 => ipc.corrupt_move = true,
+                4 => {
+                    ipc.update_error = Some("timeout".into());
+                    ipc.drop = Err("drop failed".into());
+                }
+                5 => ipc.commit = Err("editor process exited".into()),
+                _ => {}
+            }
+            let outcome = BoardGraphicsExecutor::default().execute_bound_batch(
+                &mut ipc,
+                std::slice::from_ref(&operation),
+                &snapshot,
+                &snapshot.revision().unwrap(),
+                "board.kicad_pcb",
+                "move",
+            );
+            match fault {
+                0 => assert_eq!(outcome, BoardGraphicsCommitOutcome::CommittedAndSaved),
+                1 => {
+                    assert!(matches!(
+                        outcome,
+                        BoardGraphicsCommitOutcome::Rejected { .. }
+                    ));
+                    assert_eq!(ipc.calls.last().unwrap(), "drop:c1");
+                }
+                _ => assert!(
+                    matches!(outcome, BoardGraphicsCommitOutcome::Unknown { .. }),
+                    "{outcome:?}"
+                ),
+            }
+            assert_eq!(ipc.calls.iter().filter(|c| *c == "update").count(), 1);
+        }
+        let mut ipc = FakeGraphicsIpc::default();
+        assert!(matches!(
+            BoardGraphicsExecutor::default().execute_bound_batch(
+                &mut ipc,
+                &[operation.clone(), operation],
+                &snapshot,
+                &snapshot.revision().unwrap(),
+                "board.kicad_pcb",
+                "mixed"
+            ),
+            BoardGraphicsCommitOutcome::Rejected { .. }
+        ));
+        assert!(ipc.calls.is_empty());
     }
 
     #[test]

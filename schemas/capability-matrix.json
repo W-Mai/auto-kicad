@@ -1,7 +1,7 @@
 {
   "schema_version": "1",
   "product": "auto-kicad",
-  "source_revision": "9ca933e+guarded-recovery-corrections",
+  "source_revision": "3fb03ba+verified-footprint-transforms",
   "supported_kicad_family": "10.x",
   "advertised_tools": {
     "always": [
@@ -28,11 +28,19 @@
       "domain": "base",
       "mode": "read",
       "status": "verified",
-      "mcp_tools": ["kicad_capabilities"],
-      "constraints": ["local KiCad IPC endpoint", "token-bound session"],
+      "mcp_tools": [
+        "kicad_capabilities"
+      ],
+      "constraints": [
+        "local KiCad IPC endpoint",
+        "token-bound session"
+      ],
       "evidence": {
         "fixture": "live-kicad",
-        "tested_versions": ["10.0.4", "10.0.6"],
+        "tested_versions": [
+          "10.0.4",
+          "10.0.6"
+        ],
         "command": "cargo test -p kicad-ipc",
         "record": "crates/kicad-ipc/PROTO-PROVENANCE.md"
       }
@@ -42,11 +50,18 @@
       "domain": "project",
       "mode": "read",
       "status": "verified",
-      "mcp_tools": ["kicad_inspect_project"],
-      "constraints": ["open KiCad document", "supported PCB observation forms"],
+      "mcp_tools": [
+        "kicad_inspect_project"
+      ],
+      "constraints": [
+        "open KiCad document",
+        "supported PCB observation forms"
+      ],
       "evidence": {
         "fixture": "live-kicad-xlock",
-        "tested_versions": ["10.0.6"],
+        "tested_versions": [
+          "10.0.6"
+        ],
         "command": "cargo test -p auto-kicad --lib",
         "record": "crates/auto-kicad/src/lib.rs"
       }
@@ -82,11 +97,22 @@
       "domain": "pcb",
       "mode": "write",
       "status": "verified",
-      "mcp_tools": ["kicad_plan_change", "kicad_preview_change", "kicad_commit_change"],
-      "constraints": ["approval-bound plan", "disposable shadow preview", "bounded graphics/routing primitives"],
+      "mcp_tools": [
+        "kicad_plan_change",
+        "kicad_preview_change",
+        "kicad_commit_change"
+      ],
+      "constraints": [
+        "approval-bound plan",
+        "disposable shadow preview",
+        "bounded graphics/routing primitives"
+      ],
       "evidence": {
         "fixture": "disposable-pcb-copy",
-        "tested_versions": ["10.0.5", "10.0.6"],
+        "tested_versions": [
+          "10.0.5",
+          "10.0.6"
+        ],
         "command": "cargo test -p auto-kicad --lib",
         "record": "crates/auto-kicad/src/lib.rs"
       }
@@ -96,11 +122,21 @@
       "domain": "pcb",
       "mode": "write",
       "status": "verified",
-      "mcp_tools": ["kicad_plan_change", "kicad_preview_change", "kicad_commit_change"],
-      "constraints": ["closed server-owned footprint registry", "matching saved schematic", "source digest binding"],
+      "mcp_tools": [
+        "kicad_plan_change",
+        "kicad_preview_change",
+        "kicad_commit_change"
+      ],
+      "constraints": [
+        "closed server-owned footprint registry",
+        "matching saved schematic",
+        "source digest binding"
+      ],
       "evidence": {
         "fixture": "source-bound-r0603",
-        "tested_versions": ["10.0.6"],
+        "tested_versions": [
+          "10.0.6"
+        ],
         "command": "cargo test -p auto-kicad --lib",
         "record": "crates/auto-kicad/src/footprint_authoring.rs"
       }
@@ -110,11 +146,21 @@
       "domain": "pcb",
       "mode": "write",
       "status": "verified",
-      "mcp_tools": ["kicad_plan_change", "kicad_preview_change", "kicad_commit_change"],
-      "constraints": ["same schematic revision", "allowlisted sources", "same-net pad connections"],
+      "mcp_tools": [
+        "kicad_plan_change",
+        "kicad_preview_change",
+        "kicad_commit_change"
+      ],
+      "constraints": [
+        "same schematic revision",
+        "allowlisted sources",
+        "same-net pad connections"
+      ],
       "evidence": {
         "fixture": "connected-r0603-assembly",
-        "tested_versions": ["10.0.6"],
+        "tested_versions": [
+          "10.0.6"
+        ],
         "command": "cargo test -p auto-kicad --lib",
         "record": "crates/kicad-engine/src/lib.rs"
       }
@@ -124,11 +170,18 @@
       "domain": "pcb",
       "mode": "read",
       "status": "verified",
-      "mcp_tools": ["kicad_validate_project"],
-      "constraints": ["installed kicad-cli", "baseline is captured before mutation"],
+      "mcp_tools": [
+        "kicad_validate_project"
+      ],
+      "constraints": [
+        "installed kicad-cli",
+        "baseline is captured before mutation"
+      ],
       "evidence": {
         "fixture": "disposable-pcb-copy",
-        "tested_versions": ["10.0.6"],
+        "tested_versions": [
+          "10.0.6"
+        ],
         "command": "cargo test -p kicad-checks",
         "record": "crates/kicad-checks/src/lib.rs"
       }
@@ -138,11 +191,21 @@
       "domain": "schematic",
       "mode": "write",
       "status": "verified",
-      "mcp_tools": ["kicad_plan_schematic_change", "kicad_preview_schematic_change", "kicad_commit_schematic_change"],
-      "constraints": ["fixed two-resistor operation", "CLI netlist/ERC backend", "saved schematic artifact"],
+      "mcp_tools": [
+        "kicad_plan_schematic_change",
+        "kicad_preview_schematic_change",
+        "kicad_commit_schematic_change"
+      ],
+      "constraints": [
+        "fixed two-resistor operation",
+        "CLI netlist/ERC backend",
+        "saved schematic artifact"
+      ],
       "evidence": {
         "fixture": "empty-two-resistor-schematic",
-        "tested_versions": ["10.0.6"],
+        "tested_versions": [
+          "10.0.6"
+        ],
         "command": "cargo test -p auto-kicad --lib",
         "record": "crates/kicad-schematic/src/patch.rs"
       }
@@ -151,19 +214,28 @@
       "id": "pcb.edit_existing",
       "domain": "pcb",
       "mode": "write",
-      "status": "unavailable",
+      "status": "verified",
       "mcp_tools": [
         "kicad_plan_change",
         "kicad_preview_change",
         "kicad_commit_change"
       ],
       "constraints": [
-        "one existing footprint per operation",
-        "connected tracks and vias are rejected",
-        "zones and unobservable copper are rejected",
-        "implementation exists; complete MCP lifecycle acceptance pending"
+        "one unlocked existing footprint per operation; move/rotate only",
+        "current observed revision and complete native payload binding",
+        "connected tracks/vias, zones and unsupported copper reject",
+        "supported rigid child geometry; rectangles rotate in quarter turns",
+        "exact approval, saved reload, no introduced DRC or increased unconnected count",
+        "native acceptance on KiCad 10.0.6; other versions require validation"
       ],
-      "evidence": null
+      "evidence": {
+        "fixture": "synthetic-four-footprint-asymmetric-front-back",
+        "tested_versions": [
+          "10.0.6"
+        ],
+        "command": "cargo test -p auto-kicad --lib tests::existing_footprint_acceptance::live_existing_footprint_stdio_lifecycle -- --ignored --exact",
+        "record": "docs/acceptance/existing-footprint-transform.md"
+      }
     },
     {
       "id": "schematic.general_edit",
@@ -171,7 +243,9 @@
       "mode": "write",
       "status": "deferred",
       "mcp_tools": [],
-      "constraints": ["requires a verified general schematic backend"],
+      "constraints": [
+        "requires a verified general schematic backend"
+      ],
       "evidence": null
     },
     {
@@ -180,7 +254,9 @@
       "mode": "write",
       "status": "deferred",
       "mcp_tools": [],
-      "constraints": ["requires conflict-aware synchronization policy"],
+      "constraints": [
+        "requires conflict-aware synchronization policy"
+      ],
       "evidence": null
     },
     {
@@ -189,7 +265,9 @@
       "mode": "write",
       "status": "deferred",
       "mcp_tools": [],
-      "constraints": ["requires refill and saved readback evidence"],
+      "constraints": [
+        "requires refill and saved readback evidence"
+      ],
       "evidence": null
     },
     {
@@ -198,7 +276,9 @@
       "mode": "write",
       "status": "deferred",
       "mcp_tools": [],
-      "constraints": ["requires output collision policy and distribution decision"],
+      "constraints": [
+        "requires output collision policy and distribution decision"
+      ],
       "evidence": null
     }
   ]

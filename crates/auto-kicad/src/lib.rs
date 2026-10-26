@@ -1,3 +1,4 @@
+mod existing_footprint;
 mod footprint_authoring;
 pub mod recovery;
 
@@ -93,6 +94,14 @@ pub struct Capability {
 }
 
 pub trait DiscoveryService: Send + Sync {
+    fn footprint_move_evidence(
+        &self,
+        _endpoint: &str,
+        _source: &LiveBoardObservation,
+    ) -> Result<(Vec<String>, RevisionDigest), String> {
+        Err("complete footprint and copper evidence is unavailable".into())
+    }
+
     fn discover(
         &self,
         endpoint: &str,
@@ -120,6 +129,33 @@ pub trait DiscoveryService: Send + Sync {
 pub struct IpcDiscoveryService;
 
 impl DiscoveryService for IpcDiscoveryService {
+    fn footprint_move_evidence(
+        &self,
+        endpoint: &str,
+        source: &LiveBoardObservation,
+    ) -> Result<(Vec<String>, RevisionDigest), String> {
+        let config =
+            ClientConfig::new(endpoint, "auto-kicad-move-check").map_err(|e| e.to_string())?;
+        let mut client = KiCadClient::new(
+            NngTransport::connect(config.clone()).map_err(|e| e.to_string())?,
+            config,
+        );
+        let mut ids = client
+            .get_unsupported_move_copper(&source.board_filename)
+            .map_err(|e| e.to_string())?;
+        if client.instance_token() != Some(&source.instance_token) {
+            return Err("editor identity changed during copper observation".into());
+        }
+        let templates = client
+            .capture_footprint_instance_templates(&source.board_filename)
+            .map_err(|e| e.to_string())?;
+        if client.instance_token() != Some(&source.instance_token) {
+            return Err("editor identity changed during native footprint observation".into());
+        }
+        ids.sort();
+        Ok((ids, existing_footprint::footprint_evidence(&templates)?))
+    }
+
     fn discover(
         &self,
         endpoint: &str,
@@ -577,6 +613,8 @@ fn bind_shadow_operations(
                 source_uuid,
                 position,
                 orientation_mdeg,
+                copper_tolerance_nm,
+                native_evidence,
                 ..
             } => OperationKind::MoveExistingFootprint {
                 board: shadow_board.clone(),
@@ -584,6 +622,8 @@ fn bind_shadow_operations(
                 source_uuid: source_uuid.clone(),
                 position: *position,
                 orientation_mdeg: *orientation_mdeg,
+                copper_tolerance_nm: *copper_tolerance_nm,
+                native_evidence: native_evidence.clone(),
             },
             _ => {
                 return Err("shadow validation only accepts supported board operations".into());
@@ -833,22 +873,28 @@ fn apply_shadow_operations(
     if let [operation] = operations
         && matches!(operation.kind, OperationKind::MoveExistingFootprint { .. })
     {
+        let expected =
+            kicad_engine::expected_footprint_move(&observation.snapshot, &operation.kind)
+                .map_err(|e| unknown(e.to_string()))?;
         let mut client = launcher
             .connect_owned()
             .map_err(|e| unknown(e.to_string()))?;
-        let outcome = kicad_adapter::BoardGraphicsExecutor::default().execute_bound(
-            &mut client,
-            operation,
-            &observation.snapshot,
-            &revision,
-            &observation.board_filename,
-            "auto-kicad disposable shadow validation",
-        );
+        let endpoint = launcher
+            .current_identity()
+            .map_err(|e| unknown(e.to_string()))?
+            .endpoint
+            .clone();
+        let outcome = existing_footprint::execute(&mut client, observation, operation, &endpoint);
         return match outcome {
             kicad_adapter::BoardGraphicsCommitOutcome::CommittedAndSaved => {
                 drop(client);
                 let shadow = observe_owned_shadow(launcher).map_err(unknown)?;
-                Ok((shadow.snapshot, Vec::new()))
+                if shadow.snapshot.canonical() != expected {
+                    return Err(unknown(
+                        "moved shadow differs from the approved transform".into(),
+                    ));
+                }
+                Ok((expected, Vec::new()))
             }
             kicad_adapter::BoardGraphicsCommitOutcome::Rejected { reason } => {
                 Err(BoardGraphicsCommitOutcome::Rejected { reason })
@@ -1230,8 +1276,9 @@ fn validate_disposable_shadow_bound(
     };
     let delta = compare_drc(&baseline, &after);
     let introduced = delta.introduced.len();
+    let disconnected = after.unconnected_items > baseline.unconnected_items;
     let mut outcome = ShadowValidationOutcome {
-        state: if introduced == 0 {
+        state: if introduced == 0 && !disconnected {
             ShadowValidationState::Committed
         } else {
             ShadowValidationState::Rejected
@@ -1246,8 +1293,8 @@ fn validate_disposable_shadow_bound(
         source_unchanged: true,
         shadow_cleaned: false,
         prepared_footprints,
-        reason: (introduced != 0)
-            .then(|| format!("shadow DRC introduced {} violation(s)", introduced)),
+        reason: (introduced != 0 || disconnected)
+            .then(|| format!("shadow DRC introduced {introduced} violation(s); connectivity regressed: {disconnected}")),
     };
     outcome = cleanup_shadow(&mut launcher, source_board, &source_before, outcome);
     outcome
@@ -1345,9 +1392,11 @@ pub struct PlanBoardGraphicsRequest {
 pub struct BoardMoveExistingFootprintRequest {
     pub placement_id: String,
     pub source_uuid: String,
-    pub x_nm: i64,
-    pub y_nm: i64,
-    pub orientation_mdeg: i64,
+    pub observed_revision: String,
+    pub x_nm: Option<i64>,
+    pub y_nm: Option<i64>,
+    pub orientation_mdeg: Option<i64>,
+    pub copper_tolerance_nm: Option<i64>,
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
@@ -2357,6 +2406,11 @@ impl IpcBoardGraphicsExecutionService {
             };
         }
         if let [operation] = operations
+            && matches!(operation.kind, OperationKind::MoveExistingFootprint { .. })
+        {
+            return existing_footprint::execute(&mut client, &observation, operation, endpoint);
+        }
+        if let [operation] = operations
             && !operation.kind.footprint_placements().is_empty()
         {
             let result = (|| -> Result<(), BoardGraphicsCommitOutcome> {
@@ -2635,6 +2689,12 @@ impl Server {
             capabilities: vec![
                 Capability {
                     id: "pcb.native_authoring",
+                    domain: "pcb",
+                    mode: "write",
+                    status: "verified",
+                },
+                Capability {
+                    id: "pcb.edit_existing",
                     domain: "pcb",
                     mode: "write",
                     status: "verified",
@@ -3025,6 +3085,22 @@ impl Server {
         }
         let mut data = serde_json::to_value(&snapshot)
             .map_err(|error| ErrorData::internal_error(error.to_string(), None))?;
+        match self
+            .discovery
+            .live_board_observation(&arguments.endpoint, project_dir)
+        {
+            Ok(pcb) => {
+                let revision = pcb
+                    .snapshot
+                    .revision()
+                    .map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+                data["pcb"] = json!({"snapshot": pcb.snapshot, "revision": revision.to_string(), "instance_token": pcb.instance_token.as_str()});
+            }
+            Err(reason) => {
+                data["pcb"] = Value::Null;
+                data["pcb_observation_error"] = json!(reason);
+            }
+        }
         if self.execution_store.is_some() {
             data["execution_history"] = json!(execution_history);
             let recovery_history = if let Some(store) = &self.execution_store {
@@ -3270,7 +3346,7 @@ impl Server {
                 None,
             ));
         }
-        let snapshot = observation.snapshot;
+        let snapshot = observation.snapshot.clone();
         if !snapshot
             .capabilities
             .iter()
@@ -3300,20 +3376,87 @@ impl Server {
                 false,
             )
         } else if let Some(move_request) = &arguments.move_footprint {
-            let placement_id = StableId::new(move_request.placement_id.clone())
-                .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
-            let source_uuid = StableId::new(move_request.source_uuid.clone())
-                .map_err(|error| ErrorData::invalid_params(error.to_string(), None))?;
-            let position = kicad_model::Coordinate {
-                x: move_request.x_nm,
-                y: move_request.y_nm,
-                unit: kicad_model::Unit::Nanometres,
-                space: kicad_model::DocumentSpace::Board,
-            };
-            if move_request.orientation_mdeg < 0 || move_request.orientation_mdeg >= 360_000 {
+            if arguments.batch.is_some()
+                || arguments.segments.is_some()
+                || arguments.outline.is_some()
+                || arguments.track.is_some()
+                || arguments.via.is_some()
+            {
                 return Err(ErrorData::invalid_params(
-                    "orientation_mdeg must be in [0, 360000)",
+                    "existing footprint movement requires its own plan",
                     None,
+                ));
+            }
+            if snapshot
+                .revision()
+                .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?
+                .to_string()
+                != move_request.observed_revision
+            {
+                return Ok(self.rejected(arguments.request_id, "stale_plan"));
+            }
+            let placement_id = StableId::new(move_request.placement_id.clone())
+                .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+            let source_uuid = StableId::new(move_request.source_uuid.clone())
+                .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+            let target = snapshot
+                .native_footprints
+                .as_ref()
+                .and_then(|f| f.placements.iter().find(|p| p.placement_id == placement_id))
+                .ok_or_else(|| ErrorData::invalid_params("target_not_found", None))?;
+            if target.source_uuid != source_uuid {
+                return Ok(self.rejected(arguments.request_id, "target_identity_mismatch"));
+            }
+            let position = match (move_request.x_nm, move_request.y_nm) {
+                (Some(x), Some(y)) => kicad_model::Coordinate {
+                    x,
+                    y,
+                    ..target.position
+                },
+                (None, None) if move_request.orientation_mdeg.is_some() => target.position,
+                _ => {
+                    return Err(ErrorData::invalid_params(
+                        "provide both position coordinates or an orientation",
+                        None,
+                    ));
+                }
+            };
+            let orientation_mdeg = move_request
+                .orientation_mdeg
+                .unwrap_or(target.orientation_mdeg)
+                .rem_euclid(360_000);
+            let copper_tolerance_nm = move_request
+                .copper_tolerance_nm
+                .unwrap_or(kicad_engine::FOOTPRINT_COPPER_TOLERANCE_NM);
+            let affected = match kicad_engine::connected_footprint_copper(
+                &snapshot,
+                &placement_id,
+                copper_tolerance_nm,
+            ) {
+                Ok(affected) => affected,
+                Err(e) => return Ok(self.rejected(arguments.request_id, &e.to_string())),
+            };
+            if !affected.is_empty() {
+                return Ok(self.envelope_sync(arguments.request_id, None, json!({"reason": "connected_copper_requires_separate_edit", "target": placement_id, "affected_ids": affected})));
+            }
+            let (zones, native_evidence) = match self
+                .discovery
+                .footprint_move_evidence(&arguments.endpoint, &observation)
+            {
+                Ok(zones) => zones,
+                Err(e) => {
+                    return Ok(self.envelope_sync(
+                        arguments.request_id,
+                        None,
+                        json!({"reason": "unsupported_copper_interaction", "detail": e}),
+                    ));
+                }
+            };
+            if !zones.is_empty() {
+                return Ok(self.envelope_sync(
+                    arguments.request_id,
+                    None,
+                    json!({"reason": "unsupported_copper_interaction", "affected_ids": zones}),
                 ));
             }
             (
@@ -3322,7 +3465,9 @@ impl Server {
                     placement_id,
                     source_uuid,
                     position,
-                    orientation_mdeg: move_request.orientation_mdeg,
+                    orientation_mdeg,
+                    copper_tolerance_nm,
+                    native_evidence,
                 }],
                 false,
             )
@@ -6853,7 +6998,7 @@ mod tests {
                 .iter()
                 .find(|entry| entry["id"] == "pcb.edit_existing")
                 .unwrap()["status"],
-            "unavailable"
+            "verified"
         );
     }
 
@@ -7855,70 +8000,98 @@ mod tests {
 
     #[tokio::test]
     async fn rejected_shadow_does_not_enter_approval_or_execute_live_change() {
-        let shadow_calls = Arc::new(AtomicUsize::new(0));
-        let execution_calls = Arc::new(Mutex::new(0));
-        let server = Server::with_discovery_and_execution_and_shadow(
-            Arc::new(FakeDiscovery {
-                write_capability: true,
-            }),
-            Arc::new(FakeExecution {
-                outcome: BoardGraphicsCommitOutcome::CommittedAndSaved,
-                calls: execution_calls.clone(),
-            }),
-            Arc::new(FakeShadowValidation {
-                outcome: shadow_outcome(ShadowValidationState::Rejected),
-                calls: shadow_calls.clone(),
-            }),
-        );
-        let planned = server
-            .kicad_plan_change(Parameters(plan_request(
-                project_snapshot(true),
-                "req_shadow_rejected",
-            )))
-            .await
-            .unwrap();
-        let planned = match planned {
-            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
-            _ => panic!("plan call should complete"),
-        };
-        let plan_id = planned["data"]["plan_id"].as_str().unwrap().to_owned();
-        let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
-        let preview = server
-            .kicad_preview_change(Parameters(PreviewChangeRequest {
-                plan_id: plan_id.clone(),
-                plan_hash: plan_hash.clone(),
-                request_id: Some("req_shadow_rejected_preview".into()),
-            }))
-            .await
-            .unwrap();
-        let preview = match preview {
-            CallToolResponse::Complete(result) => result.structured_content.unwrap(),
-            _ => panic!("preview call should complete"),
-        };
-        assert_eq!(preview["ok"], false);
-        assert_eq!(preview["data"]["state"], "rejected");
-        assert_eq!(shadow_calls.load(AtomicOrdering::SeqCst), 1);
-        assert_eq!(*execution_calls.lock().unwrap(), 0);
-        assert_eq!(
-            server.sessions.lock().unwrap()[&plan_id].execution_state,
-            StoredExecutionState::Ready
-        );
-        assert!(
-            server.sessions.lock().unwrap()[&plan_id].session.state
-                != kicad_engine::SessionState::AwaitingApproval
-        );
-        assert!(
-            server
-                .kicad_commit_change(Parameters(CommitChangeRequest {
-                    plan_id,
+        for state in [
+            ShadowValidationState::Rejected,
+            ShadowValidationState::Unknown,
+        ] {
+            let shadow_calls = Arc::new(AtomicUsize::new(0));
+            let execution_calls = Arc::new(Mutex::new(0));
+            let server = Server::with_discovery_and_execution_and_shadow(
+                Arc::new(FakeDiscovery {
+                    write_capability: true,
+                }),
+                Arc::new(FakeExecution {
+                    outcome: BoardGraphicsCommitOutcome::CommittedAndSaved,
+                    calls: execution_calls.clone(),
+                }),
+                Arc::new(FakeShadowValidation {
+                    outcome: shadow_outcome(state.clone()),
+                    calls: shadow_calls.clone(),
+                }),
+            );
+            let planned = server
+                .kicad_plan_change(Parameters(plan_request(
+                    project_snapshot(true),
+                    "req_shadow_rejected",
+                )))
+                .await
+                .unwrap();
+            let planned = match planned {
+                CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+                _ => panic!("plan call should complete"),
+            };
+            let plan_id = planned["data"]["plan_id"].as_str().unwrap().to_owned();
+            let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
+            let preview = server
+                .kicad_preview_change(Parameters(PreviewChangeRequest {
+                    plan_id: plan_id.clone(),
                     plan_hash: plan_hash.clone(),
-                    approval_hash: plan_hash,
-                    validation_evidence_hash: String::new(),
-                    request_id: Some("req_shadow_rejected_commit".into()),
+                    request_id: Some("req_shadow_rejected_preview".into()),
                 }))
                 .await
-                .is_err()
+                .unwrap();
+            let preview = match preview {
+                CallToolResponse::Complete(result) => result.structured_content.unwrap(),
+                _ => panic!("preview call should complete"),
+            };
+            assert_eq!(preview["ok"], false);
+            assert_eq!(preview["data"]["state"], shadow_validation_state(&state));
+            assert!(preview["data"]["approval_hash"].is_null());
+            assert_eq!(shadow_calls.load(AtomicOrdering::SeqCst), 1);
+            assert_eq!(*execution_calls.lock().unwrap(), 0);
+            assert_eq!(
+                server.sessions.lock().unwrap()[&plan_id].execution_state,
+                StoredExecutionState::Ready
+            );
+            assert!(
+                server.sessions.lock().unwrap()[&plan_id].session.state
+                    != kicad_engine::SessionState::AwaitingApproval
+            );
+            assert!(
+                server
+                    .kicad_commit_change(Parameters(CommitChangeRequest {
+                        plan_id,
+                        plan_hash: plan_hash.clone(),
+                        approval_hash: plan_hash,
+                        validation_evidence_hash: String::new(),
+                        request_id: Some("req_shadow_rejected_commit".into()),
+                    }))
+                    .await
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn failed_shadow_cleanup_revokes_success_without_touching_source() {
+        let source = TempBoard::new();
+        let board = source.root.join("board.kicad_pcb");
+        std::fs::write(board.with_extension("kicad_pro"), "{}").unwrap();
+        let fingerprint = shadow_source_fingerprint(&board);
+        let mut launcher = OwnedPcbnewLauncher::new(&source.root.join("shadows")).unwrap();
+        let shadow = launcher.create_shadow(&board).unwrap();
+        std::fs::remove_dir_all(shadow.root()).unwrap();
+        let result = cleanup_shadow(
+            &mut launcher,
+            &board,
+            &fingerprint,
+            shadow_outcome(ShadowValidationState::Committed),
         );
+        assert_eq!(result.state, ShadowValidationState::Unknown);
+        assert!(result.source_unchanged);
+        assert!(!result.shadow_cleaned);
+        assert!(result.reason.unwrap().contains("cleanup"));
+        assert_eq!(shadow_source_fingerprint(&board), fingerprint);
     }
 
     #[tokio::test]
@@ -8139,5 +8312,6 @@ mod tests {
             .expect_err("unsupported tool must fail");
         assert!(error.to_string().contains("not found"));
     }
+    mod existing_footprint_acceptance;
     mod recovery_acceptance;
 }
