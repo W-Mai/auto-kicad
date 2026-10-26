@@ -1,0 +1,154 @@
+{
+  "kicad_version": "10.0.7",
+  "live_acceptance": {
+    "arcs": 2,
+    "baseline_unconnected": 0,
+    "compiled_from_serialized_intent": true,
+    "compiler_stale_open_locked_rejected": true,
+    "created": [
+      "08116b4d-e87f-4776-8b11-99ce3233532a",
+      "98b359f8-8f9b-4313-b896-e6f06e511480",
+      "a2ad9e71-486d-42bb-a7da-82c21ec55854",
+      "7766ee5b-e779-439f-9523-b88e82f2083f",
+      "93e017dd-d083-481b-bc3a-750b8ed0ce6f",
+      "2b645b78-77f4-4766-bcad-b534b12b367d",
+      "5c5ac64f-af08-48fb-bfc5-52461f3679a7",
+      "86386c7e-ca2d-469f-a728-57107233db75",
+      "9b9d67d3-7301-4ac1-bf8f-f9d82bd14067",
+      "0deb9a35-12cb-4e70-b687-ba33b7518a58",
+      "70bd4c6e-e12d-4d2a-9b67-b331ef957685",
+      "d1b0618c-54d9-42ed-b357-3ca32eb65156",
+      "d7be5e5f-b405-464e-98cc-344d31f325c9",
+      "c10561ec-2bd7-49fe-9c13-50e87b645e23"
+    ],
+    "final_unconnected": 0,
+    "full_arc_preflight_rejected_before_mutation": true,
+    "introduced_drc": 0,
+    "kicad_version": "10.0.7",
+    "locked_wrong_layer_missing_duplicate_removals_rejected": true,
+    "native_maximum_cancelled": 512,
+    "oversized_rejected": 513,
+    "pid": 90079,
+    "project_preserved": true,
+    "removed": [
+      "30000000-0000-4000-8000-000000000001",
+      "30000000-0000-4000-8000-000000000002",
+      "30000000-0000-4000-8000-000000000003",
+      "30000000-0000-4000-8000-000000000004"
+    ],
+    "same_process_reload": true,
+    "saved_receipts_exact": true,
+    "scope": "native outline primitives and exact replacement; not general topology planning or MCP acceptance",
+    "unrelated_native_payloads_preserved": true,
+    "valid_major_arc_saved_reloaded_and_cleaned": true
+  },
+  "major_arc": {
+    "bounds_nm": [
+      0,
+      0,
+      215000000,
+      104000000
+    ],
+    "created": [
+      "f74cce87-bad5-4013-b6ff-fd32238538ba",
+      "e11ab4d7-46f6-49ca-bcbb-c4d71d4f922b"
+    ],
+    "introduced_drc": 0,
+    "nonpreserving_midpoint_rejected_and_cancelled": true,
+    "rejected_full_envelopes": 3,
+    "rejected_requests_preserved_native_live_and_saved_board": true,
+    "same_process_reload": true,
+    "saved_receipts_exact": true,
+    "unrelated_native_payloads_preserved": true
+  },
+  "restoration": {
+    "native_items_equal": true,
+    "native_zones_equal": true,
+    "saved_board_equal": true,
+    "saved_project_equal": true
+  },
+  "major_arc_independent_intent": {
+    "passed": true,
+    "primitives": 2,
+    "coordinates_widths_layers_match_serialized_intent": true,
+    "reversed_arc_endpoint_pairs": 1
+  },
+  "replacement_independent_intent": {
+    "passed": true,
+    "primitives": 14,
+    "coordinates_widths_layers_match_serialized_intent": true,
+    "reversed_arc_endpoint_pairs": 0
+  },
+  "negative_controls": {
+    "cases": [
+      {
+        "case": "open",
+        "expected": "invalid_outline",
+        "observed_types": [
+          "invalid_outline",
+          "track_dangling"
+        ],
+        "detected": true
+      },
+      {
+        "case": "self-intersection",
+        "expected": "invalid_outline",
+        "observed_types": [
+          "invalid_outline",
+          "track_dangling"
+        ],
+        "detected": true
+      },
+      {
+        "case": "copper-collision",
+        "expected": "copper_edge_clearance",
+        "observed_types": [
+          "copper_edge_clearance",
+          "track_dangling"
+        ],
+        "detected": true
+      }
+    ],
+    "original_result_unchanged": true,
+    "required_drc_checks_enabled": true,
+    "scope": "native CLI negative controls only; not MCP planning refusal"
+  },
+  "cleanup": {
+    "original_unchanged": true,
+    "owned_editor_closed": true,
+    "pid": 90079
+  },
+  "quality": {
+    "passed": 422,
+    "failed": 0,
+    "ignored": 15,
+    "format": true,
+    "clippy_warnings_denied": true,
+    "capability_matrix": true
+  },
+  "geometry_architecture_cases": {
+    "known_circle_sweeps": 3960,
+    "reversal_checked": true,
+    "scales_and_translations": 3
+  },
+  "temporary_independent_oracle": {
+    "cases": 1200,
+    "accepted": 580,
+    "rejected": 620,
+    "seed": 20261027,
+    "temporary_files_removed": true
+  },
+  "scope": "shared pre-IPC envelopes and native saved verification; no public general-geometry MCP acceptance",
+  "artifact_sha256": {
+    "result/board.kicad_pcb": "b8bbc6ab551f76b6be4ca76e22d1a404c3bdcd1584789499634f811dfc51cf66",
+    "result/board.kicad_pro": "8419222138158c81918c3658150733feb0854bc37dc5a0b980afe94399a18f38",
+    "native-topology.json": "e789620031bcd899491b6f592a80827a509b5e67a606a1b684ee1f86450851a5",
+    "intent-native-check.json": "e4da8396049ddc5baeb0c90120a19526ef5b8473ce528ce0caaa8741fc169a83",
+    "cleanup.json": "3c15a208725c774f2b41be236985d499702d42205960893a678c353f63ad5264",
+    "major-arc/result/board.kicad_pcb": "7711805abdabfbcd3f2e675137b196bc88423748d16184c0a1b9d553d894622b",
+    "major-arc/result/board.kicad_pro": "8419222138158c81918c3658150733feb0854bc37dc5a0b980afe94399a18f38",
+    "major-arc/native-topology.json": "25f1f33abb10cd8b2c5c4004cb6839976bb736b703048e1cfa02a95ddc69f252",
+    "major-arc/intent-native-check.json": "050ec850b6b78d095d954caae7a79c6e427ebb4bd2b01eb95e86b1898dc502d4",
+    "major-arc/restoration.json": "4e6d7a0753aa4a214e5075184d66fe23761f9a7a32bb0c87c553a2e1fee846a6"
+  }
+}

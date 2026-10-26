@@ -5,6 +5,7 @@ members = [
     "crates/kicad-checks",
     "crates/kicad-ipc",
     "crates/kicad-engine",
+    "crates/kicad-geometry",
     "crates/kicad-model",
     "crates/kicad-schematic",
     "crates/runtime",

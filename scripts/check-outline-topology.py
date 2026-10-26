@@ -36,15 +36,22 @@ def verify_intent(output):
     ids=json.loads((output/'result.json').read_text())['created']
     expected=[(edge,loop['width_nm']) for loop in intent['loops'] for edge in loop['edges']]
     assert len(expected)==len(ids)
+    reversed_arcs=0
     for uuid,(edge,width) in zip(ids,expected):
         shape=drawings[uuid]
         assert shape.GetLayer()==pcbnew.Edge_Cuts and shape.GetWidth()==width
         assert shape.GetShape()==(pcbnew.SHAPE_T_ARC if edge['kind']=='arc' else pcbnew.SHAPE_T_SEGMENT)
-        points=[('start',shape.GetStart()),('end',shape.GetEnd())]
-        if edge['kind']=='arc': points.append(('mid',shape.GetArcMid()))
-        for key,actual in points:
-            assert (actual.x,actual.y)==(edge[key]['x_nm'],edge[key]['y_nm']),(uuid,key)
-    result=dict(passed=True,primitives=len(expected),coordinates_widths_layers_match_serialized_intent=True)
+        xy=lambda p:(p.x,p.y)
+        point=lambda key:(edge[key]['x_nm'],edge[key]['y_nm'])
+        endpoints=(xy(shape.GetStart()),xy(shape.GetEnd()))
+        requested=(point('start'),point('end'))
+        if edge['kind']=='arc':
+            assert xy(shape.GetArcMid())==point('mid'),(uuid,'mid')
+            assert endpoints==requested or endpoints==requested[::-1],(uuid,'endpoints')
+            reversed_arcs+=int(endpoints!=requested)
+        else:
+            assert endpoints==requested,(uuid,'endpoints')
+    result=dict(passed=True,primitives=len(expected),coordinates_widths_layers_match_serialized_intent=True,reversed_arc_endpoint_pairs=reversed_arcs)
     (output/'intent-native-check.json').write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps(result))
 

@@ -4,7 +4,7 @@ use kicad_adapter::live_geometry::observe_live_geometry;
 use kicad_adapter::outline::{compile_outline_change, native_outline_primitives, outline_revision};
 use kicad_checks::{CheckResult, DrcPolicy, compare_drc, run_pcb_drc};
 use kicad_ipc::{CreatedOutlineReceipt, NativeBoardGeometry, OutlineGeometry, OutlinePrimitive};
-use kicad_model::{OutlineEdit, RevisionDigest, StableId};
+use kicad_model::{OutlineEdge, OutlineEdit, OutlineLoop, OutlinePoint, RevisionDigest, StableId};
 use serde_json::json;
 use std::{
     env, fs,
@@ -106,6 +106,218 @@ fn main() -> Result<(), Error> {
                 return Err("invalid outline removal accepted".into());
             }
         }
+        let saved_before_preflight = fs::read(copy.board_path())?;
+        let text_before_preflight = ipc.live_board_text(&identity.board_filename)?;
+        let arc = |start, mid, end| OutlinePrimitive {
+            geometry: OutlineGeometry::Arc { start, mid, end },
+            width_nm: 50_000,
+        };
+        let rejected = [
+            vec![arc((0, 0), (100_000_000, 9_000_000), (1_000_000, 0))],
+            vec![arc((0, 0), (1_000_000_000, 1), (1, 0))],
+            vec![
+                arc((0, 0), (100_000_000, 20_000_000), (1_000_000, 0)),
+                arc(
+                    (500_000_000, 0),
+                    (600_000_000, 20_000_000),
+                    (501_000_000, 0),
+                ),
+            ],
+        ];
+        for batch in rejected {
+            if !matches!(
+                ipc.create_outline_primitives(&identity.board_filename, &batch),
+                Err(kicad_ipc::IpcError::InvalidBoardGraphic(_))
+            ) {
+                return Err(
+                    "invalid complete arc envelope was not rejected before native mutation".into(),
+                );
+            }
+        }
+        if ipc.capture_board_geometry(&identity.board_filename)? != geometry
+            || ipc.live_board_text(&identity.board_filename)? != text_before_preflight
+            || fs::read(copy.board_path())? != saved_before_preflight
+        {
+            return Err("rejected arc requests changed the board".into());
+        }
+        let nonpreserving = ipc.begin_commit()?;
+        let altered_midpoint = ipc.create_outline_primitives(
+            &identity.board_filename,
+            &[arc(
+                (210_000_000, 100_000_000),
+                (220_000_000, 109_000_000),
+                (211_000_000, 100_000_000),
+            )],
+        );
+        ipc.drop_commit(&nonpreserving)?;
+        let cancelled_geometry = ipc.capture_board_geometry(&identity.board_filename)?;
+        let cancelled_text = ipc.live_board_text(&identity.board_filename)?;
+        if !matches!(
+            altered_midpoint,
+            Err(kicad_ipc::IpcError::InvalidBoardGraphic(_))
+        ) || cancelled_geometry != geometry
+            || cancelled_text != text_before_preflight
+        {
+            return Err(format!(
+                "nonpreserving midpoint cancellation: result={altered_midpoint:?}, native_unchanged={}, text_unchanged={}",
+                cancelled_geometry == geometry, cancelled_text == text_before_preflight
+            ).into());
+        }
+        let point = |x_nm, y_nm| OutlinePoint { x_nm, y_nm };
+        let a = point(213_000_000, 104_000_000);
+        let m = point(210_000_000, 95_000_000);
+        let b = point(207_000_000, 104_000_000);
+        let major_intent = OutlineEdit {
+            remove_ids: vec![],
+            loops: vec![OutlineLoop {
+                loop_id: StableId::new("major-arc")?,
+                width_nm: 50_000,
+                edges: vec![
+                    OutlineEdge::Arc {
+                        start: a,
+                        mid: m,
+                        end: b,
+                    },
+                    OutlineEdge::Segment { start: b, end: a },
+                ],
+            }],
+        };
+        let observed = observe_live_geometry(&mut ipc, &identity.board_filename)?;
+        let major_compiled =
+            compile_outline_change(&major_intent, &outline_revision(&observed)?, &observed)?;
+        let major_commit = ipc.begin_commit()?;
+        let major_receipts = match ipc.create_outline_primitives(
+            &identity.board_filename,
+            &native_outline_primitives(&major_compiled),
+        ) {
+            Ok(receipts) => receipts,
+            Err(error) => {
+                ipc.drop_commit(&major_commit)?;
+                return Err(error.into());
+            }
+        };
+        ipc.commit_changes(&major_commit, "Create bounded major-arc boundary")?;
+        ipc.save_board(&identity.board_filename)?;
+        editor.reload_owned()?;
+        let major_geometry = ipc.capture_board_geometry(&identity.board_filename)?;
+        verify_created(&major_receipts, &major_geometry)?;
+        let major_items = ipc.capture_existing_board_items(&identity.board_filename)?;
+        let major_ids = major_receipts
+            .iter()
+            .map(|r| r.source_uuid.clone())
+            .collect::<Vec<_>>();
+        if !baseline.matches_after_additions(&major_items, &major_ids)? {
+            return Err("major-arc acceptance changed unrelated items".into());
+        }
+        let major_topology = kicad_checks::outline::check_saved_outline(
+            copy.board_path(),
+            &DrcPolicy {
+                allowed_root: copy
+                    .board_path()
+                    .parent()
+                    .ok_or("missing board parent")?
+                    .to_path_buf(),
+                timeout: Duration::from_secs(60),
+            },
+        )
+        .map_err(|e| format!("major-arc saved verification failed: {e:?}"))?;
+        let major_drc = drc(copy.board_path())?;
+        if major_topology.outer_count() != 2
+            || major_topology.hole_counts().iter().sum::<usize>() != 1
+            || major_topology.bounds_nm() != [0, 0, 215_000_000, 104_000_000]
+            || !compare_drc(&baseline_drc, &major_drc).introduced.is_empty()
+            || major_drc.unconnected_items != baseline_drc.unconnected_items
+        {
+            return Err(format!("major-arc native boundary or DRC mismatch: topology={major_topology:?}, delta={:?}, unconnected={}", compare_drc(&baseline_drc, &major_drc), major_drc.unconnected_items).into());
+        }
+        let major_output = output.join("major-arc");
+        fs::create_dir(&major_output)?;
+        fs::create_dir(major_output.join("result"))?;
+        fs::copy(
+            copy.board_path(),
+            major_output.join("result/board.kicad_pcb"),
+        )?;
+        fs::copy(
+            copy.project_path(),
+            major_output.join("result/board.kicad_pro"),
+        )?;
+        fs::write(
+            major_output.join("intent.json"),
+            serde_json::to_vec_pretty(&major_intent)?,
+        )?;
+        fs::write(
+            major_output.join("native-topology.json"),
+            serde_json::to_vec_pretty(&major_topology)?,
+        )?;
+        fs::write(
+            major_output.join("result.json"),
+            serde_json::to_vec_pretty(&json!({
+                "created":major_ids,"saved_receipts_exact":true,"same_process_reload":true,
+                "unrelated_native_payloads_preserved":true,"introduced_drc":0,"bounds_nm":major_topology.bounds_nm(),
+                "rejected_full_envelopes":3,"nonpreserving_midpoint_rejected_and_cancelled":true,"rejected_requests_preserved_native_live_and_saved_board":true,
+            }))?,
+        )?;
+        let remove_major = ipc.begin_commit()?;
+        if let Err(error) =
+            ipc.delete_outline_items(&identity.board_filename, &major_geometry, &major_ids)
+        {
+            ipc.drop_commit(&remove_major)?;
+            return Err(error.into());
+        }
+        ipc.commit_changes(&remove_major, "Remove verified major-arc test boundary")?;
+        ipc.save_board(&identity.board_filename)?;
+        editor.reload_owned()?;
+        let restored_items = ipc.capture_existing_board_items(&identity.board_filename)?;
+        let restored_geometry = ipc.capture_board_geometry(&identity.board_filename)?;
+        let restored_board = fs::read(copy.board_path())?;
+        let restored_project = fs::read(copy.project_path())?;
+        let restoration = json!({
+            "native_items_equal":restored_items.persistent_evidence()? == baseline.persistent_evidence()?,
+            "native_zones_equal":restored_geometry.zones() == geometry.zones(),
+            "saved_board_equal":restored_board == saved_before_preflight,
+            "saved_project_equal":restored_project == protected,
+        });
+        fs::write(
+            major_output.join("restoration.json"),
+            serde_json::to_vec_pretty(&restoration)?,
+        )?;
+        if restoration
+            .as_object()
+            .unwrap()
+            .values()
+            .any(|value| value != &json!(true))
+        {
+            fs::write(
+                major_output.join("before-items.pb"),
+                baseline.persistent_evidence()?,
+            )?;
+            fs::write(
+                major_output.join("after-items.pb"),
+                restored_items.persistent_evidence()?,
+            )?;
+            fs::write(
+                major_output.join("before-geometry.txt"),
+                format!("{geometry:#?}"),
+            )?;
+            fs::write(
+                major_output.join("after-geometry.txt"),
+                format!("{restored_geometry:#?}"),
+            )?;
+            fs::write(
+                major_output.join("before.kicad_pcb"),
+                &saved_before_preflight,
+            )?;
+            fs::write(major_output.join("after.kicad_pcb"), restored_board)?;
+            fs::write(major_output.join("before.kicad_pro"), &protected)?;
+            fs::write(major_output.join("after.kicad_pro"), restored_project)?;
+            return Err(format!(
+                "major-arc cleanup failed to restore exact fixture state: {restoration}"
+            )
+            .into());
+        }
+        // Reload assigns a new transient board parent; persistent shape fields were checked above.
+        // Bind subsequent same-document comparisons and deletion to the fresh observation.
+        let geometry = restored_geometry;
         let maximum = (0..512)
             .map(|i| segment((i * 100_000, 100_000_000), ((i + 1) * 100_000, 100_000_000)))
             .collect::<Vec<_>>();
@@ -244,7 +456,7 @@ fn main() -> Result<(), Error> {
         )?;
         fs::write(output.join("final-items.pb"), actual.persistent_evidence()?)?;
         Ok(
-            json!({"kicad_version":version.full_version,"pid":identity.pid,"created":ids,"removed":remove,"arcs":2,"compiled_from_serialized_intent":true,"compiler_stale_open_locked_rejected":true,"native_maximum_cancelled":512,"oversized_rejected":513,"locked_wrong_layer_missing_duplicate_removals_rejected":true,"unrelated_native_payloads_preserved":true,"saved_receipts_exact":true,"same_process_reload":true,"project_preserved":true,"introduced_drc":delta.introduced.len(),"baseline_unconnected":baseline_drc.unconnected_items,"final_unconnected":after_drc.unconnected_items,"scope":"native outline primitives and exact replacement; not general topology planning or MCP acceptance"}),
+            json!({"kicad_version":version.full_version,"pid":identity.pid,"created":ids,"removed":remove,"arcs":2,"compiled_from_serialized_intent":true,"compiler_stale_open_locked_rejected":true,"full_arc_preflight_rejected_before_mutation":true,"valid_major_arc_saved_reloaded_and_cleaned":true,"native_maximum_cancelled":512,"oversized_rejected":513,"locked_wrong_layer_missing_duplicate_removals_rejected":true,"unrelated_native_payloads_preserved":true,"saved_receipts_exact":true,"same_process_reload":true,"project_preserved":true,"introduced_drc":delta.introduced.len(),"baseline_unconnected":baseline_drc.unconnected_items,"final_unconnected":after_drc.unconnected_items,"scope":"native outline primitives and exact replacement; not general topology planning or MCP acceptance"}),
         )
     })();
     editor.close_owned(identity.pid)?;
@@ -263,6 +475,12 @@ fn main() -> Result<(), Error> {
             &json!({"pid":identity.pid,"owned_editor_closed":true,"original_unchanged":true}),
         )?,
     )?;
+    if let Err(error) = &result {
+        fs::write(
+            output.join("failure.json"),
+            serde_json::to_vec_pretty(&json!({"error":error.to_string()}))?,
+        )?;
+    }
     let evidence = result?;
     fs::write(
         output.join("result.json"),
@@ -271,9 +489,14 @@ fn main() -> Result<(), Error> {
     let script =
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../scripts/check-outline-topology.py");
     let status=std::process::Command::new("/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3.9")
-        .env("PYTHONDONTWRITEBYTECODE","1").arg(script).arg(&output).status()?;
+        .env("PYTHONDONTWRITEBYTECODE","1").arg(&script).arg(&output).status()?;
     if !status.success() {
         return Err("native outline DRC negative controls failed".into());
+    }
+    let status=std::process::Command::new("/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3.9")
+        .env("PYTHONDONTWRITEBYTECODE","1").arg(&script).arg(output.join("major-arc")).arg("verify-intent").status()?;
+    if !status.success() {
+        return Err("independent major-arc intent check failed".into());
     }
     fs::remove_dir(output.join("work"))?;
     println!("{evidence}");

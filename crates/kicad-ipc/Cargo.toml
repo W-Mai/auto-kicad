@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+kicad-geometry = { path = "../kicad-geometry" }
 nng = "1.0"
 protobuf = "3.7"
 

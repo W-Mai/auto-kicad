@@ -3,8 +3,7 @@ use crate::*;
 use std::collections::BTreeSet;
 
 const SHAPE: &str = "type.googleapis.com/kiapi.board.types.BoardGraphicShape";
-const MAX_COORD: i64 = 2_000_000_000;
-const MAX_SPAN: i64 = 1_000_000_000;
+const MAX_COORD: i64 = kicad_geometry::MAX_COORDINATE_NM;
 const MAX_PRIMITIVES: usize = 512;
 type Point = (i64, i64);
 
@@ -36,39 +35,23 @@ fn vector((x_nm, y_nm): Point) -> MessageField<base_types::Vector2> {
     })
 }
 impl OutlinePrimitive {
-    fn points(&self) -> Vec<Point> {
-        match self.geometry {
-            OutlineGeometry::Segment { start, end } => vec![start, end],
-            OutlineGeometry::Arc { start, mid, end } => vec![start, mid, end],
-        }
-    }
-    /// Validate primitive coordinates; closed-loop topology and copper clearance belong to planning.
-    pub fn validate(&self) -> Result<(), IpcError> {
+    fn validated_bounds(&self) -> Result<kicad_geometry::Bounds, IpcError> {
         if !(1..=MAX_COORD).contains(&self.width_nm) {
             return Err(invalid("outline width exceeds native bounds"));
         }
-        let points = self.points();
-        if points.iter().any(|&(x, y)| {
-            !(-MAX_COORD..=MAX_COORD).contains(&x) || !(-MAX_COORD..=MAX_COORD).contains(&y)
-        }) {
-            return Err(invalid("outline coordinates exceed native bounds"));
+        let bounds = match self.geometry {
+            OutlineGeometry::Segment { start, end } => kicad_geometry::segment_bounds(start, end),
+            OutlineGeometry::Arc { start, mid, end } => kicad_geometry::arc_bounds(start, mid, end),
         }
-        if points.iter().collect::<BTreeSet<_>>().len() != points.len() {
-            return Err(invalid("outline control points must differ"));
-        }
-        if let OutlineGeometry::Arc {
-            start: (ax, ay),
-            mid: (bx, by),
-            end: (cx, cy),
-        } = self.geometry
-        {
-            let cross = (i128::from(bx) - i128::from(ax)) * (i128::from(cy) - i128::from(ay))
-                - (i128::from(by) - i128::from(ay)) * (i128::from(cx) - i128::from(ax));
-            if cross == 0 {
-                return Err(invalid("outline arc points must not be collinear"));
-            }
-        }
-        Ok(())
+        .map_err(|error| invalid(error.message()))?;
+        bounds
+            .check_outline_span()
+            .map_err(|error| invalid(error.message()))?;
+        Ok(bounds)
+    }
+    /// Validate full primitive bounds; closed-loop topology and copper clearance still require preview.
+    pub fn validate(&self) -> Result<(), IpcError> {
+        self.validated_bounds().map(|_| ())
     }
     fn native(&self) -> Result<board_types::BoardGraphicShape, IpcError> {
         self.validate()?;
@@ -140,20 +123,30 @@ fn validate_requests(primitives: &[OutlinePrimitive]) -> Result<(), IpcError> {
     if primitives.is_empty() || primitives.len() > MAX_PRIMITIVES {
         return Err(invalid("outline batch must contain 1..512 primitives"));
     }
-    let (mut min_x, mut min_y, mut max_x, mut max_y) = (i64::MAX, i64::MAX, i64::MIN, i64::MIN);
+    let mut bounds: Option<kicad_geometry::Bounds> = None;
     for primitive in primitives {
-        primitive.validate()?;
-        for (x, y) in primitive.points() {
-            min_x = min_x.min(x);
-            max_x = max_x.max(x);
-            min_y = min_y.min(y);
-            max_y = max_y.max(y);
-        }
+        let envelope = primitive.validated_bounds()?;
+        bounds = Some(bounds.map_or(envelope, |all| all.union(envelope)));
     }
-    if max_x - min_x > MAX_SPAN || max_y - min_y > MAX_SPAN {
-        return Err(invalid("outline control-point span exceeds bound"));
+    bounds
+        .expect("nonempty validated batch")
+        .check_outline_span()
+        .map_err(|error| invalid(error.message()))
+}
+
+fn exact_undirected_geometry(
+    actual: &Option<base_types::graphic_shape::Geometry>,
+    expected: &Option<base_types::graphic_shape::Geometry>,
+) -> bool {
+    if actual == expected {
+        return true;
     }
-    Ok(())
+    if let Some(base_types::graphic_shape::Geometry::Arc(expected)) = expected {
+        let mut reversed = expected.clone();
+        std::mem::swap(&mut reversed.start, &mut reversed.end);
+        return actual == &Some(base_types::graphic_shape::Geometry::Arc(reversed));
+    }
+    false
 }
 fn receipts(
     reply: &editor_commands::CreateItemsResponse,
@@ -208,7 +201,10 @@ fn receipts(
                 .ok_or(invalid("outline receipt stroke missing"))?;
             if native.layer != expected.layer
                 || native.locked != expected.locked
-                || shape.geometry != expected.shape.as_ref().unwrap().geometry
+                || !exact_undirected_geometry(
+                    &shape.geometry,
+                    &expected.shape.as_ref().unwrap().geometry,
+                )
                 || stroke.width.as_ref().map(|w| w.value_nm) != Some(request.width_nm)
                 || stroke.style.enum_value() != Ok(enums::StrokeLineStyle::SLS_SOLID)
                 || attrs.fill.as_ref().map(|f| f.fill_type.enum_value())
@@ -326,6 +322,46 @@ mod tests {
             width_nm: 50_000,
         }
     }
+    struct NoRequests;
+    impl KiCadTransport for NoRequests {
+        fn request(&mut self, _: ApiRequest) -> Result<ApiResponse, IpcError> {
+            panic!("invalid envelope reached transport")
+        }
+    }
+    #[test]
+    fn invalid_full_envelopes_never_reach_the_transport() {
+        let arc = |start, mid, end| OutlinePrimitive {
+            geometry: OutlineGeometry::Arc { start, mid, end },
+            width_nm: 50_000,
+        };
+        let mut ipc = KiCadClient::new(
+            NoRequests,
+            ClientConfig::new("unused", "bounds-test").unwrap(),
+        );
+        ipc.token = Some(InstanceToken::new("bound-token").unwrap());
+        for batch in [
+            vec![arc((0, 0), (100_000_000, 9_000_000), (1_000_000, 0))],
+            vec![arc((0, 0), (1_000_000_000, 1), (1, 0))],
+            vec![
+                arc((0, 0), (100_000_000, 20_000_000), (1_000_000, 0)),
+                arc(
+                    (500_000_000, 0),
+                    (600_000_000, 20_000_000),
+                    (501_000_000, 0),
+                ),
+            ],
+        ] {
+            assert!(matches!(
+                ipc.create_outline_primitives("board.kicad_pcb", &batch),
+                Err(IpcError::InvalidBoardGraphic(_))
+            ));
+        }
+        assert!(
+            arc((0, 0), (10_000_000, 9_000_000), (1_000_000, 0))
+                .validate()
+                .is_ok()
+        );
+    }
     #[test]
     fn outline_bounds_reject_degenerate_or_oversized_native_inputs() {
         assert!(validate_requests(&vec![segment(); 512]).is_ok());
@@ -366,6 +402,27 @@ mod tests {
             }])
             .is_err()
         );
+    }
+    #[test]
+    fn arc_receipts_only_allow_exact_endpoint_order_reversal() {
+        let request = OutlinePrimitive {
+            geometry: OutlineGeometry::Arc {
+                start: (3, 4),
+                mid: (0, -5),
+                end: (-3, 4),
+            },
+            width_nm: 1,
+        };
+        let expected = request.native().unwrap().shape.unwrap().geometry;
+        let mut reversed = expected.clone();
+        if let Some(base_types::graphic_shape::Geometry::Arc(ref mut arc)) = reversed {
+            std::mem::swap(&mut arc.start, &mut arc.end);
+        }
+        assert!(exact_undirected_geometry(&reversed, &expected));
+        if let Some(base_types::graphic_shape::Geometry::Arc(ref mut arc)) = reversed {
+            arc.mid.as_mut().unwrap().x_nm += 1;
+        }
+        assert!(!exact_undirected_geometry(&reversed, &expected));
     }
     #[test]
     fn outline_receipts_bind_geometry_and_preserve_all_native_fields() {

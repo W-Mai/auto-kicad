@@ -32,7 +32,7 @@ use sha2::{Digest, Sha256};
 pub const MAX_OPERATIONS: usize = 100;
 pub const MAX_GRAPHIC_SPAN_NM: i128 = 10_000_000;
 pub const MAX_GRAPHIC_BOUNDING_AREA_NM2: i128 = 100_000_000_000_000;
-pub const MAX_BOARD_POSITION_NM: i64 = 2_000_000_000;
+pub const MAX_BOARD_POSITION_NM: i64 = kicad_geometry::MAX_COORDINATE_NM;
 pub const MAX_FOOTPRINT_ORIENTATION_MDEG: i64 = 360_000;
 
 /// A logical pad in an assembly, resolved to a native pad only after creation.

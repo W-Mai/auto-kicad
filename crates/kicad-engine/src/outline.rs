@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const MAX_OUTLINE_LOOPS: usize = 32;
 pub const MAX_OUTLINE_PRIMITIVES: usize = 512;
 pub const MAX_OUTLINE_REMOVALS: usize = 100;
-pub const MAX_OUTLINE_SPAN_NM: i64 = 1_000_000_000;
+pub const MAX_OUTLINE_SPAN_NM: i64 = kicad_geometry::MAX_OUTLINE_SPAN_NM;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OutlineSourceGeometry {
@@ -41,7 +41,7 @@ impl CompiledOutlineEdit {
     pub fn primitives(&self) -> &[CompiledOutlinePrimitive] {
         &self.primitives
     }
-    /// Existing boundaries, arc intersections/extrema, hole topology and copper need native preview.
+    /// Existing boundaries, arc intersections, hole topology and copper need native preview.
     pub fn requires_native_topology_check(&self) -> bool {
         true
     }
@@ -52,14 +52,6 @@ fn invalid(reason: &'static str) -> EngineError {
 fn id(id: &StableId) -> Result<(), EngineError> {
     if id.as_str().trim().is_empty() || id.as_str().len() > 128 || id.as_str().contains('\0') {
         return Err(invalid("outline identity must be nonempty and bounded"));
-    }
-    Ok(())
-}
-fn point(p: OutlinePoint) -> Result<(), EngineError> {
-    if p.x_nm.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
-        || p.y_nm.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
-    {
-        return Err(invalid("outline coordinate exceeds bounds"));
     }
     Ok(())
 }
@@ -142,7 +134,7 @@ pub fn compile_outline_edit(
     let mut loop_ids = BTreeSet::new();
     let mut primitives = Vec::new();
     let mut segments = Vec::new();
-    let (mut min_x, mut min_y, mut max_x, mut max_y) = (i64::MAX, i64::MAX, i64::MIN, i64::MIN);
+    let mut bounds: Option<kicad_geometry::Bounds> = None;
     for (loop_index, boundary) in intent.loops.iter().enumerate() {
         id(&boundary.loop_id)?;
         if !loop_ids.insert(&boundary.loop_id)
@@ -162,13 +154,17 @@ pub fn compile_outline_edit(
                 return Err(invalid("outline primitive count exceeds bound"));
             }
             let points = edge.control_points();
-            for &p in &points {
-                point(p)?;
-                min_x = min_x.min(p.x_nm);
-                max_x = max_x.max(p.x_nm);
-                min_y = min_y.min(p.y_nm);
-                max_y = max_y.max(p.y_nm);
+            let point = |p: OutlinePoint| (p.x_nm, p.y_nm);
+            let envelope = match *edge {
+                OutlineEdge::Segment { start, end } => {
+                    kicad_geometry::segment_bounds(point(start), point(end))
+                }
+                OutlineEdge::Arc { start, mid, end } => {
+                    kicad_geometry::arc_bounds(point(start), point(mid), point(end))
+                }
             }
+            .map_err(|error| invalid(error.message()))?;
+            bounds = Some(bounds.map_or(envelope, |all| all.union(envelope)));
             if points.iter().collect::<BTreeSet<_>>().len() != points.len() {
                 return Err(invalid("outline edge repeats a control point"));
             }
@@ -202,10 +198,10 @@ pub fn compile_outline_edit(
             return Err(invalid("straight outline loop has zero area"));
         }
     }
-    if !primitives.is_empty()
-        && (max_x - min_x > MAX_OUTLINE_SPAN_NM || max_y - min_y > MAX_OUTLINE_SPAN_NM)
-    {
-        return Err(invalid("outline control-point span exceeds bound"));
+    if let Some(bounds) = bounds {
+        bounds
+            .check_outline_span()
+            .map_err(|error| invalid(error.message()))?;
     }
     for (i, &(left_loop, left_index, a, b)) in segments.iter().enumerate() {
         for &(right_loop, right_index, c, d) in &segments[i + 1..] {
@@ -255,6 +251,45 @@ mod tests {
     }
     fn compile(intent: &OutlineEdit) -> Result<CompiledOutlineEdit, EngineError> {
         compile_outline_edit(intent, &revision(), &revision(), &[])
+    }
+    fn arc_loop(start: (i64, i64), mid: (i64, i64), end: (i64, i64)) -> OutlineEdit {
+        let p = |(x_nm, y_nm)| OutlinePoint { x_nm, y_nm };
+        OutlineEdit {
+            remove_ids: vec![],
+            loops: vec![OutlineLoop {
+                loop_id: StableId::new("arc").unwrap(),
+                width_nm: 50_000,
+                edges: vec![
+                    OutlineEdge::Arc {
+                        start: p(start),
+                        mid: p(mid),
+                        end: p(end),
+                    },
+                    OutlineEdge::Segment {
+                        start: p(end),
+                        end: p(start),
+                    },
+                ],
+            }],
+        }
+    }
+    #[test]
+    fn compiler_enforces_full_sweeps_instead_of_only_control_points() {
+        let valid = arc_loop((0, 0), (10_000_000, 9_000_000), (1_000_000, 0));
+        assert!(compile(&valid).is_ok());
+        assert!(compile(&arc_loop((0, 0), (100_000_000, 9_000_000), (1_000_000, 0))).is_err());
+        assert!(compile(&arc_loop((0, 0), (1_000_000_000, 1), (1, 0))).is_err());
+        let mut combined = arc_loop((0, 0), (100_000_000, 20_000_000), (1_000_000, 0));
+        let mut second = arc_loop(
+            (500_000_000, 0),
+            (600_000_000, 20_000_000),
+            (501_000_000, 0),
+        )
+        .loops
+        .remove(0);
+        second.loop_id = StableId::new("second").unwrap();
+        combined.loops.push(second);
+        assert!(compile(&combined).is_err());
     }
     #[test]
     fn compiler_requires_exact_closed_simple_straight_boundaries() {
