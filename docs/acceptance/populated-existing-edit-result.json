@@ -1,0 +1,63 @@
+{
+  "passed": true,
+  "selection": {
+    "estimated_foreign_copper_clearance_nm": 5943596,
+    "length_nm": 3000000,
+    "candidate_count": 33,
+    "source_uuid": "dea21f20-013f-4e49-ad48-49237371b09e",
+    "net": "GND",
+    "layer": "FrontCopper",
+    "before_width_nm": 200000,
+    "after_width_nm": 250000,
+    "geometry": {
+      "Segment": {
+        "end": {
+          "space": "Board",
+          "unit": "Nanometres",
+          "x": 91500000,
+          "y": 99500000
+        },
+        "start": {
+          "space": "Board",
+          "unit": "Nanometres",
+          "x": 91500000,
+          "y": 96500000
+        }
+      }
+    }
+  },
+  "footprints": 38,
+  "pads": 201,
+  "tracks": 80,
+  "vias": 0,
+  "protected_files_unchanged": true,
+  "source_isolation_verified": true,
+  "source_before_sha256": "dd25f77c79e00472b1d22e663df4444e667ac8d3ecb1bc16e31cfa4dfe834a41",
+  "source_after_sha256": "27463c039cc2c49551ff7a18d6687fa119898b576801574864ced4a97b86ee22",
+  "date": "2026-10-26",
+  "backend": "KiCad 10.0.6",
+  "transport": "built production stdio MCP and native IPC",
+  "source_profile": "populated partially routed PawChrona native prototype",
+  "copper_layers": 4,
+  "original_source_unchanged": true,
+  "saved_reload_matches": true,
+  "cleanup": {
+    "owned_editor_closed": true,
+    "owned_shadow_cleaned": true,
+    "result_retained": true
+  },
+  "baseline_drc": {
+    "violations": 49,
+    "unconnected_items": 43
+  },
+  "final_drc": {
+    "violations": 49,
+    "unconnected_items": 43,
+    "introduced": 0
+  },
+  "original_saved_pcb_sha256": "93cfe373b11299ee576b717bb4827d5e80cdcee99c206daae0ef87e1f3ecb90a",
+  "final_three_project_gate_complete": false,
+  "installed_mcp_replaced": false,
+  "offline_tests_passed": 367,
+  "offline_tests_ignored": 15
+}

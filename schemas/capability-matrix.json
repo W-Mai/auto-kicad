@@ -231,7 +231,7 @@
         "deletion is high risk; only observed tracks/arcs, through vias, Dwgs.User segments and free unassociated footprints; surviving pad connections remain intact"
       ],
       "evidence": {
-        "fixture": "synthetic-native-footprint-and-connected-item-edits",
+        "fixture": "native-footprint-and-item-edits-with-populated-copy",
         "tested_versions": [
           "10.0.6"
         ],

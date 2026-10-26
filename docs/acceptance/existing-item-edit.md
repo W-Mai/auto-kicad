@@ -53,3 +53,5 @@ env CARGO_TARGET_DIR=/tmp/auto-kicad-edit-target CARGO_INCREMENTAL=0 CARGO_PROFI
 ```
 
 Run `python3 scripts/quality.py` for matrix validation, formatting, warnings-denied Clippy and the offline workspace suite. Remove the temporary target after all build/test processes exit. The installed user MCP binary is not changed by this acceptance command.
+
+[Populated-board copy acceptance](populated-existing-edit.md) additionally verifies an actual route-width edit on the saved 38-footprint, 201-pad prototype, with complete preservation and no DRC/connectivity regression. Its result retains unresolved baseline violations and does not complete the three-project delivery gate.
