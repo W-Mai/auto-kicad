@@ -1,4 +1,6 @@
 //! Complete live board text and independently observed zone locks.
+mod filled_copper;
+pub use filled_copper::FilledCopperEvidence;
 use kicad_ipc::{
     DocumentQuery, KiCadClient, KiCadTransport, MAX_NATIVE_GEOMETRY_BYTES, NativeBoardGeometry,
     base_types::LockedState,
@@ -196,6 +198,45 @@ fn filled_polygon(node: &Node, points: &mut usize) -> Result<(), String> {
     }
     if !layer || !pts {
         return Err("incomplete derived fill polygon".into());
+    }
+    Ok(())
+}
+
+// KiCad 10.0.7 can materialize an empty defaults map while filling hatched zones.
+// Only this direct empty container has no settings; every nonempty form remains exact.
+fn feed_refill_setup(hash: &mut Sha256, text: &str, setup: &Node) -> Result<(), String> {
+    let fields = items(setup)?;
+    let mut kept = Vec::new();
+    let mut seen = false;
+    for field in &fields[1..] {
+        if tag(field)? == "zone_defaults" {
+            if seen {
+                return Err("duplicate setup zone defaults".into());
+            }
+            seen = true;
+            if items(field)?.len() == 1 {
+                continue;
+            }
+        }
+        kept.push(field);
+    }
+    hash.update([0]);
+    hash.update(((kept.len() + 1) as u64).to_be_bytes());
+    feed_structure(hash, text, &fields[0]);
+    for field in kept {
+        feed_structure(hash, text, field);
+    }
+    Ok(())
+}
+
+fn require_unique_setup(fields: &[Node]) -> Result<(), String> {
+    if fields
+        .iter()
+        .filter(|n| tag(n).ok() == Some("setup"))
+        .count()
+        > 1
+    {
+        return Err("duplicate board setup".into());
     }
     Ok(())
 }
@@ -532,11 +573,12 @@ impl LiveBoardText {
         })
     }
 
-    /// Hash every board definition while omitting only direct zone fill results.
+    /// Hash board definitions excluding direct zone fill results and an empty setup zone-defaults container.
     /// This preserves all unknown definition fields and does not verify the omitted copper.
     pub fn refill_definition_digest(&self) -> Result<String, String> {
         let root = self.cst.nodes.first().ok_or("missing native board root")?;
         let fields = items(root)?;
+        require_unique_setup(&fields[1..])?;
         let mut hash = Sha256::new();
         hash.update([0]);
         hash.update((fields.len() as u64).to_be_bytes());
@@ -545,6 +587,8 @@ impl LiveBoardText {
         for node in &fields[1..] {
             if tag(node)? == "zone" {
                 feed_zone_definition(&mut hash, self.raw_text(), node, &mut points)?;
+            } else if tag(node)? == "setup" {
+                feed_refill_setup(&mut hash, self.raw_text(), node)?;
             } else {
                 feed_structure(&mut hash, self.raw_text(), node);
             }
@@ -557,6 +601,7 @@ impl LiveBoardText {
     pub fn closed_refill_definitions(&self) -> Result<ClosedRefillDefinitionEvidence, String> {
         let root = self.cst.nodes.first().ok_or("missing native board root")?;
         let fields = items(root)?;
+        require_unique_setup(&fields[1..])?;
         let mut hash = Sha256::new();
         let mut ids = Vec::new();
         let mut points = 0;
@@ -565,6 +610,7 @@ impl LiveBoardText {
         feed_structure(&mut hash, self.raw_text(), &fields[0]);
         for node in &fields[1..] {
             match tag(node)? {
+                "setup" => feed_refill_setup(&mut hash, self.raw_text(), node)?,
                 "zone" => feed_zone_definition(&mut hash, self.raw_text(), node, &mut points)?,
                 "dimension" => feed_closed_dimension(&mut hash, self.raw_text(), node, &mut ids)?,
                 "footprint" => feed_closed_footprint(&mut hash, self.raw_text(), node, &mut ids)?,
@@ -826,6 +872,48 @@ mod tests {
             digest(&nested).unwrap(),
             digest(&nested.replace("(fill yes)", "(fill)")).unwrap()
         );
+    }
+
+    #[test]
+    fn refill_normalizes_only_one_empty_direct_setup_defaults_container() {
+        let parse = |body: &str| LiveBoardText::parse(&board(body)).unwrap();
+        let base = parse("(setup (unknown keep))");
+        let empty = parse("(setup (zone_defaults) (unknown keep))");
+        assert_eq!(
+            base.refill_definition_digest(),
+            empty.refill_definition_digest()
+        );
+        assert_eq!(
+            base.closed_refill_definitions(),
+            empty.closed_refill_definitions()
+        );
+        assert_ne!(base.structure_digest(), empty.structure_digest());
+        for body in [
+            "(setup (zone_defaults (property (layer F.Cu) (hatch_position (xy 1 2)))) (unknown keep))",
+            "(setup (zone_defaults (future value)) (unknown keep))",
+            "(setup (zone_defaults) (unknown changed))",
+            "(setup (unknown (zone_defaults)))",
+            "(setup (unknown keep)) (zone_defaults)",
+        ] {
+            let changed = parse(body);
+            assert_ne!(
+                base.refill_definition_digest(),
+                changed.refill_definition_digest()
+            );
+            assert_ne!(
+                base.closed_refill_definitions(),
+                changed.closed_refill_definitions()
+            );
+        }
+        for body in [
+            "(setup (zone_defaults) (zone_defaults))",
+            "(setup (zone_defaults (future value)) (zone_defaults))",
+            "(setup) (setup (zone_defaults))",
+        ] {
+            let ambiguous = parse(body);
+            assert!(ambiguous.refill_definition_digest().is_err());
+            assert!(ambiguous.closed_refill_definitions().is_err());
+        }
     }
 
     use super::*;

@@ -1,3 +1,5 @@
+mod zone_refill;
+pub use zone_refill::{UncertainZoneFill, ZoneFillAttempt, ZoneFillDispatchReceipt};
 mod native_zones;
 pub use native_zones::{MAX_ZONE_MUTATIONS, SolidZonePatch, SolidZonePayload, SolidZoneReceipt};
 mod native_outline;
@@ -1004,6 +1006,8 @@ impl NngTransport {
         let socket = Socket::new(Protocol::Req0)?;
         // Bound transport allocation before decoding native geometry or document strings.
         socket.set_opt::<RecvMaxSize>(64 * 1024 * 1024)?;
+        // Mutations must never be retransmitted automatically after an uncertain outcome.
+        socket.set_opt::<nng::options::protocol::reqrep::ResendTime>(None)?;
         socket.dial(&config.endpoint)?;
         socket.set_opt::<RecvTimeout>(Some(config.timeout))?;
         socket.set_opt::<SendTimeout>(Some(config.timeout))?;
@@ -1025,6 +1029,7 @@ impl KiCadTransport for NngTransport {
 }
 
 pub struct KiCadClient<T> {
+    native_commit_open: bool,
     transport: T,
     config: ClientConfig,
     token: Option<InstanceToken>,
@@ -1036,6 +1041,7 @@ impl<T: KiCadTransport> KiCadClient<T> {
             transport,
             config,
             token: None,
+            native_commit_open: false,
         }
     }
 
@@ -1071,6 +1077,7 @@ impl<T: KiCadTransport> KiCadClient<T> {
             BEGIN_COMMIT_TYPE_URL,
             &editor_commands::BeginCommit::default(),
         )?;
+        self.native_commit_open = true;
         let response = self.transport.request(request)?;
         response_status(&response)?;
         let token = response_token(&response)?;
@@ -1256,6 +1263,7 @@ impl<T: KiCadTransport> KiCadClient<T> {
             END_COMMIT_RESPONSE_TYPE_URL,
         )?;
         self.token = Some(token);
+        self.native_commit_open = false;
         Ok(())
     }
 

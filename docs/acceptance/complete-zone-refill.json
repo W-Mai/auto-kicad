@@ -1,0 +1,267 @@
+{
+  "kicad_version": "10.0.7",
+  "profiles": {
+    "cm5": {
+      "directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-refill-cm5",
+      "result": {
+        "cancellation_tested": false,
+        "complete_definitions_preserved": true,
+        "full_copper_equivalence": true,
+        "independent_cli_preserved": true,
+        "kicad_version": "10.0.7",
+        "locked_zone_count": 1,
+        "native_reload_preserved": true,
+        "pid": 24698,
+        "repeated_fill_preserved": true,
+        "scope": "native dispatch plus full definition/copper verification; GUI cancellation, DRC delta, teardrop regeneration and MCP acceptance remain separate",
+        "settled_project_unchanged": true,
+        "unfilled_negative_control_rejected": true,
+        "zone_count": 14
+      },
+      "content": {
+        "definitions": {
+          "board_definition_digest": "1de5664394c65ef743e908e62ed02c52a9e2ad98f75b079d182fc0b91b1300ad",
+          "native_zone_definition_digest": "1b4334382a449a595d4bbe18fa779dceeadc2d0e8cf45649207e937004cf8bf0",
+          "zone_count": 14
+        },
+        "copper": {
+          "digest": "91fd28db41462086498e5e6b9b6a708074d86e2483a85bbed58ccd57d038b635",
+          "zone_count": 14,
+          "polygon_count": 31,
+          "point_count": 90184
+        },
+        "saved_input_sha256": "dab13ac7bc8b6d23bcfaa4e15b66245f74bf40c084d953def17fc111d4676fc7",
+        "independent_output_sha256": "9351116b76b2c5fc9bcb951e8604864d63bfc37465e3eef61619f13f2b2271ec"
+      },
+      "cleanup": {
+        "owned_editor_closed": true,
+        "owned_pid": 24698,
+        "source_files_unchanged": true
+      }
+    },
+    "disconnected_islands": {
+      "directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-refill-islands",
+      "result": {
+        "cancellation_tested": false,
+        "complete_definitions_preserved": true,
+        "full_copper_equivalence": true,
+        "independent_cli_preserved": true,
+        "kicad_version": "10.0.7",
+        "locked_zone_count": 0,
+        "native_reload_preserved": true,
+        "pid": 25551,
+        "repeated_fill_preserved": true,
+        "scope": "native dispatch plus full definition/copper verification; GUI cancellation, DRC delta, teardrop regeneration and MCP acceptance remain separate",
+        "settled_project_unchanged": true,
+        "unfilled_negative_control_rejected": true,
+        "zone_count": 2
+      },
+      "content": {
+        "definitions": {
+          "board_definition_digest": "4d13ee9089a5552afe49a064aefda55530694032f74b453e561d637d008e91f3",
+          "native_zone_definition_digest": "1800d92ae8864e1cbcb178005755caa43341ce50ebc5f60a973f216665a5a346",
+          "zone_count": 2
+        },
+        "copper": {
+          "digest": "a956eb8929f20c624233b3e988eeb8c30acdda6eee2e74a8a00ce1aec4ca319a",
+          "zone_count": 2,
+          "polygon_count": 3,
+          "point_count": 48
+        },
+        "saved_input_sha256": "35ae8fd1fd73c9303f652b9bff30679d3cbcd77b24d30f59a699f7651e12c495",
+        "independent_output_sha256": "35ae8fd1fd73c9303f652b9bff30679d3cbcd77b24d30f59a699f7651e12c495"
+      },
+      "cleanup": {
+        "owned_editor_closed": true,
+        "owned_pid": 25551,
+        "source_files_unchanged": true
+      }
+    },
+    "hatched_locked": {
+      "directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-refill-hatched-verified",
+      "result": {
+        "cancellation_tested": false,
+        "complete_definitions_preserved": true,
+        "full_copper_equivalence": true,
+        "independent_cli_preserved": true,
+        "kicad_version": "10.0.7",
+        "locked_zone_count": 1,
+        "native_reload_preserved": true,
+        "pid": 43122,
+        "repeated_fill_preserved": true,
+        "scope": "native dispatch plus full definition/copper verification; GUI cancellation, DRC delta, teardrop regeneration and MCP acceptance remain separate",
+        "settled_project_unchanged": true,
+        "unfilled_negative_control_rejected": true,
+        "zone_count": 3
+      },
+      "content": {
+        "definitions": {
+          "board_definition_digest": "f819ab7d18a1f9421aa90dfc8f50b7d050e8d0b2768908f90b31f1d4b9e2e095",
+          "native_zone_definition_digest": "905f332c21c85ec72157484b2bf77e09869cd2c97b503fa8da613c27c68a8477",
+          "zone_count": 3
+        },
+        "copper": {
+          "digest": "ae670083f17b49a83ae634e348412d81850aa5fc681ee6c706e7acdfabb43502",
+          "zone_count": 3,
+          "polygon_count": 3,
+          "point_count": 924
+        },
+        "saved_input_sha256": "92b7b83ddab45f13e749c49ece721764e4918416a1ca37ebecb4f8f5fbcd71df",
+        "independent_output_sha256": "92b7b83ddab45f13e749c49ece721764e4918416a1ca37ebecb4f8f5fbcd71df"
+      },
+      "cleanup": {
+        "owned_editor_closed": true,
+        "owned_pid": 43122,
+        "source_files_unchanged": true
+      }
+    },
+    "no_zones": {
+      "directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-refill-no-zones",
+      "result": {
+        "cancellation_tested": false,
+        "complete_definitions_preserved": true,
+        "full_copper_equivalence": true,
+        "independent_cli_preserved": true,
+        "kicad_version": "10.0.7",
+        "locked_zone_count": 0,
+        "native_reload_preserved": true,
+        "pid": 44636,
+        "repeated_fill_preserved": true,
+        "scope": "native dispatch plus full definition/copper verification; GUI cancellation, DRC delta, teardrop regeneration and MCP acceptance remain separate",
+        "settled_project_unchanged": true,
+        "unfilled_negative_control_rejected": false,
+        "zone_count": 0
+      },
+      "content": {
+        "definitions": {
+          "board_definition_digest": "74e787c46dd7e0708f264540f357a923dd1d24ff5e94bb8907556389beffcce4",
+          "native_zone_definition_digest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "zone_count": 0
+        },
+        "copper": {
+          "digest": "ae79bcdd9bd569a5d1aa3b109729251f4fab6e0f3d2bccc48f9924e8f18483bc",
+          "zone_count": 0,
+          "polygon_count": 0,
+          "point_count": 0
+        },
+        "saved_input_sha256": "bc992321a24608bb75861667c96e66c08cf540c486f9e0e8989db14e14ed7b2c",
+        "independent_output_sha256": "bc992321a24608bb75861667c96e66c08cf540c486f9e0e8989db14e14ed7b2c"
+      },
+      "cleanup": {
+        "owned_editor_closed": true,
+        "owned_pid": 44636,
+        "source_files_unchanged": true
+      }
+    },
+    "empty_copper": {
+      "directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-refill-blocked-empty",
+      "result": {
+        "cancellation_tested": false,
+        "complete_definitions_preserved": true,
+        "full_copper_equivalence": true,
+        "independent_cli_preserved": true,
+        "kicad_version": "10.0.7",
+        "locked_zone_count": 1,
+        "native_reload_preserved": true,
+        "pid": 47070,
+        "repeated_fill_preserved": true,
+        "scope": "native dispatch plus full definition/copper verification; GUI cancellation, DRC delta, teardrop regeneration and MCP acceptance remain separate",
+        "settled_project_unchanged": true,
+        "unfilled_negative_control_rejected": true,
+        "zone_count": 4
+      },
+      "content": {
+        "definitions": {
+          "board_definition_digest": "c4e03ebbfbe43fda1af0a6a02d12513101932826e880423b7a2728606d4be7e8",
+          "native_zone_definition_digest": "dd821c9517fde90843c1fd036776155875869dc2f7749c1418a891fc79515997",
+          "zone_count": 4
+        },
+        "copper": {
+          "digest": "86bab837103c752c7ce29d187c44a84139e0f0a406b6f4e97cf38507779372c9",
+          "zone_count": 4,
+          "polygon_count": 0,
+          "point_count": 0
+        },
+        "saved_input_sha256": "861f1efcce241ed243971391411452fdf8afe559446681c601637304ae931edf",
+        "independent_output_sha256": "861f1efcce241ed243971391411452fdf8afe559446681c601637304ae931edf"
+      },
+      "cleanup": {
+        "owned_editor_closed": true,
+        "owned_pid": 47070,
+        "source_files_unchanged": true
+      }
+    },
+    "fully_isolated_retained": {
+      "directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-refill-empty",
+      "result": {
+        "cancellation_tested": false,
+        "complete_definitions_preserved": true,
+        "full_copper_equivalence": true,
+        "independent_cli_preserved": true,
+        "kicad_version": "10.0.7",
+        "locked_zone_count": 1,
+        "native_reload_preserved": true,
+        "pid": 45511,
+        "repeated_fill_preserved": true,
+        "scope": "native dispatch plus full definition/copper verification; GUI cancellation, DRC delta, teardrop regeneration and MCP acceptance remain separate",
+        "settled_project_unchanged": true,
+        "unfilled_negative_control_rejected": true,
+        "zone_count": 3
+      },
+      "content": {
+        "definitions": {
+          "board_definition_digest": "5908b7e90846930fbb033ebac98e3c7d6695d77146e171b0b60f3cc961e669ac",
+          "native_zone_definition_digest": "4971debbdd77f6a59716b380c88981e0f2998e0bde2e124e65e8b35cde69a569",
+          "zone_count": 3
+        },
+        "copper": {
+          "digest": "ae670083f17b49a83ae634e348412d81850aa5fc681ee6c706e7acdfabb43502",
+          "zone_count": 3,
+          "polygon_count": 3,
+          "point_count": 924
+        },
+        "saved_input_sha256": "f2fc67099509223d98a1ba0f81fe0207d5d68def2349204f18279c9ce5eb1c98",
+        "independent_output_sha256": "f2fc67099509223d98a1ba0f81fe0207d5d68def2349204f18279c9ce5eb1c98"
+      },
+      "cleanup": {
+        "owned_editor_closed": true,
+        "owned_pid": 45511,
+        "source_files_unchanged": true
+      }
+    }
+  },
+  "actual_timeout": {
+    "directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-refill-actual-timeout",
+    "result": {
+      "action_sent": true,
+      "active_transaction_dispatch_refused": true,
+      "complete_definitions_preserved": true,
+      "eventual_filled_zones": 13,
+      "kicad_version": "10.0.7",
+      "no_subsequent_save_reload_rollback_or_retry": true,
+      "outcome": "uncertain",
+      "pid": 29015,
+      "read_only_polls": 1,
+      "reason": "connection_unavailable: Timed out",
+      "receive_timeout_ms": 1,
+      "request_count": 1,
+      "saved_files_unchanged": true,
+      "scope": "actual transport timeout after accepted native request; not GUI cancellation or completed source recovery",
+      "timeout_elapsed_ms": 1
+    },
+    "cleanup": {
+      "closed": true,
+      "owned_pid": 29015,
+      "source_unchanged": true
+    }
+  },
+  "quality": {
+    "passed": 439,
+    "failed": 0,
+    "ignored": 15,
+    "format": true,
+    "clippy_warnings_denied": true,
+    "capability_matrix": true
+  },
+  "evidence_scope": "Native fixed dispatch, actual transport timeout and complete definition/copper equivalence; excludes GUI cancellation, source recovery, full DRC delta, teardrop regeneration and public MCP lifecycle."
+}
