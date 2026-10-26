@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-26",
+  "backend_configuration": "installed KiCad 10.0",
+  "read_only": true,
+  "effective_libraries": 157,
+  "table_evidence_records": 3,
+  "project_table_absent": true,
+  "sources": [
+    {
+      "identifier": {
+        "entry_name": "SOIC-8_3.9x4.9mm_P1.27mm",
+        "nickname": "Package_SO"
+      },
+      "scope": "Global",
+      "method": "library_table",
+      "source_size": 4582,
+      "source_digest": "074ecb2092b24fa4b4b9cdd7c926fc587b0d7d6d21e7341e57935fd42d36894f"
+    },
+    {
+      "identifier": {
+        "entry_name": "QFN-32-1EP_5x5mm_P0.5mm_EP3.65x3.65mm_ThermalVias",
+        "nickname": "Package_DFN_QFN"
+      },
+      "scope": "Global",
+      "method": "library_table",
+      "source_size": 11457,
+      "source_digest": "56c6b6c9ab1fd7147bc603b6a946acc32e7cdea0a6cf4a14e42fee11ada2d0a6"
+    }
+  ],
+  "source_config_modified": false,
+  "editors_launched": 0,
+  "native_placement_verified": false,
+  "mcp_integration_verified": false,
+  "offline_tests_passed": 377,
+  "offline_tests_ignored": 15,
+  "format_passed": true,
+  "clippy_warnings_denied_passed": true
+}
