@@ -8313,5 +8313,6 @@ mod tests {
         assert!(error.to_string().contains("not found"));
     }
     mod existing_footprint_acceptance;
+    mod existing_item_protocol;
     mod recovery_acceptance;
 }

@@ -1,0 +1,31 @@
+{
+  "clusters": [
+    [
+      "20000000-0000-4000-8000-000000000001",
+      "20000000-0000-4000-8000-000000000002"
+    ],
+    [
+      "20000000-0000-4000-8000-000000000003"
+    ]
+  ],
+  "delete_committed": "NeedsSavedVerification { ids: [\"30000000-0000-4000-8000-000000000005\"] }",
+  "delete_dropped": "NeedsSavedVerification { ids: [\"40000000-0000-4000-8000-000000000001\"] }",
+  "fixture_cleaned": true,
+  "kicad_version": "10.0.6",
+  "owned_editor_closed": true,
+  "passed": true,
+  "source_pid": 21710,
+  "source_reused": true,
+  "transport": "native IPC, not MCP",
+  "date": "2026-10-26",
+  "flip_round_trips": [
+    "top_bottom",
+    "left_right"
+  ],
+  "offline_tests_passed": 355,
+  "offline_tests_ignored": 12,
+  "live_tests_passed": 1,
+  "live_seconds": 5.32,
+  "mcp_acceptance": false,
+  "real_project_profile": false
+}

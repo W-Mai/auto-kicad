@@ -1,6 +1,8 @@
 include!(concat!(env!("OUT_DIR"), "/generated/mod.rs"));
 
+mod existing_items;
 mod footprint_transform;
+pub use existing_items::{DeleteItemsReceipt, FootprintFlipAxis};
 
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
@@ -5184,6 +5186,7 @@ fn decode_any<M: Message + Default>(
 
 #[cfg(test)]
 mod tests {
+    mod existing_items;
     mod footprint_transform;
     use super::*;
     use protobuf::Enum;

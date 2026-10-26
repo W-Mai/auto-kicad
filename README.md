@@ -111,6 +111,8 @@ Each result contains `replay.html` with interactive playback and seeking, `event
 
 Two PawChrona pet-collar native replays produced identical route geometry: 38 components, 201 preserved pads, 58 connections and 80 copper segments. Unconnected items decreased from 101 to 43 with zero introduced DRC violations. This is partial routing: zones, vias, differential pairs, impedance and power-current requirements remain outside the algorithm. Existing input violations are retained; the result is not a manufacturing release.
 
+Native IPC flip, exact-set deletion receipts and pad connectivity primitives have a separate [protocol acceptance record](docs/acceptance/existing-item-protocol.md). This verification does not enable those operations through MCP.
+
 ## Installed-server acceptance
 
 `scripts/check-codex.py` uses the local Codex app-server protocol to initialize the registered `auto-kicad` server and verify tool discovery. It starts no model turn. This check was verified with Codex CLI 0.162.1.
