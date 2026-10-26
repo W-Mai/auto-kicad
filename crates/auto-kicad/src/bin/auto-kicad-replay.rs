@@ -235,6 +235,7 @@ fn main() -> Result<()> {
             let commit = client.begin_commit()?;
             for points in route.points.windows(2) {
                 let track = CreateTrack {
+                    layer: kicad_ipc::CopperLayer::FRONT,
                     start_x_nm: points[0][0],
                     start_y_nm: points[0][1],
                     end_x_nm: points[1][0],

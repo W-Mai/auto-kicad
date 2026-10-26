@@ -1,3 +1,5 @@
+mod copper_layer;
+pub use copper_layer::CopperLayer;
 mod existing_item_updates;
 mod footprint_creation;
 mod routing_rules;
@@ -252,6 +254,7 @@ pub struct CreateNetIdentity {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CreateTrack {
+    pub layer: CopperLayer,
     pub start_x_nm: i64,
     pub start_y_nm: i64,
     pub end_x_nm: i64,
@@ -4549,7 +4552,7 @@ fn create_track_item(track: &CreateTrack) -> Result<Any, IpcError> {
             value_nm: track.width_nm,
             ..base_types::Distance::default()
         }),
-        layer: protobuf::EnumOrUnknown::new(board_types::BoardLayer::BL_F_Cu),
+        layer: protobuf::EnumOrUnknown::new(track.layer.native()),
         net: track
             .net
             .as_ref()
@@ -4691,6 +4694,7 @@ fn created_track_receipt(
         .map_err(|_| IpcError::MalformedEnvelope)?;
     let id = routing_kiid(track.id.as_ref())?;
     let observed = CreateTrack {
+        layer: CopperLayer::try_from(routing_copper_layer(&track.layer)?)?,
         start_x_nm: track
             .start
             .as_ref()
@@ -4729,10 +4733,7 @@ fn created_track_receipt(
         && observed.end_x_nm == requested.end_x_nm
         && observed.end_y_nm == requested.end_y_nm
         && observed.width_nm == requested.width_nm;
-    if !geometry_matches
-        || !net_matches
-        || track.layer.enum_value() != Ok(board_types::BoardLayer::BL_F_Cu)
-    {
+    if !geometry_matches || !net_matches || observed.layer != requested.layer {
         return Err(IpcError::InvalidObservedRouting(
             "created track does not match the request",
         ));

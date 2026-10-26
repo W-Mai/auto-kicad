@@ -1,0 +1,41 @@
+{
+  "baseline_unconnected": 2,
+  "disabled_layer_rejected": true,
+  "exact_native_receipts": true,
+  "existing_native_items_preserved": true,
+  "final_unconnected": 1,
+  "introduced_drc": 0,
+  "kicad_version": "10.0.7",
+  "layers": [
+    "F.Cu",
+    "In1.Cu",
+    "In2.Cu",
+    "B.Cu"
+  ],
+  "new_tracks": [
+    "ddcd984d-142d-4bc4-8c33-7c5899b46a2d",
+    "2626e4b2-7d29-46a7-9207-31de8bc79483",
+    "be04053c-c911-44c3-8182-a1cc6679d008",
+    "3892dbfc-d95a-4d7f-9982-2a693bba7666"
+  ],
+  "project_bytes_preserved": true,
+  "same_process_reload": true,
+  "cleanup": {
+    "original_unchanged": true,
+    "owned_editor_closed": true,
+    "shadow_cleaned": true
+  },
+  "scope": "native selected-layer track primitive; public MCP requests remain front copper; no whole-route authoring acceptance",
+  "quality": {
+    "passed": 387,
+    "ignored": 15,
+    "format": true,
+    "clippy_warnings_as_errors": true,
+    "capability_matrix": true
+  },
+  "legacy_stdio_mcp_regression": {
+    "test": "tests::live_mcp_saved_routing_lifecycle_uses_two_editors",
+    "passed": true,
+    "elapsed_seconds": 13.51
+  }
+}

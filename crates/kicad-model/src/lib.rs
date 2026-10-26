@@ -1,3 +1,5 @@
+mod copper_layer;
+pub use copper_layer::CopperLayer;
 use std::collections::BTreeSet;
 use std::fmt::{Display, Formatter};
 

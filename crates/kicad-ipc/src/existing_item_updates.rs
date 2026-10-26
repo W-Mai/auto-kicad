@@ -488,6 +488,7 @@ mod tests {
         };
         let mut track = NativeItem::decode(
             &create_track_item(&CreateTrack {
+                layer: CopperLayer::FRONT,
                 start_x_nm: 1_000_000,
                 start_y_nm: 2_000_000,
                 end_x_nm: 3_000_000,

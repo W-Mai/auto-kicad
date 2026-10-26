@@ -1986,6 +1986,7 @@ mod tests {
             },
         ];
         let tracks = [CreateTrack {
+            layer: kicad_ipc::CopperLayer::FRONT,
             start_x_nm: 100_000_000,
             start_y_nm: 100_000_000,
             end_x_nm: 120_000_000,

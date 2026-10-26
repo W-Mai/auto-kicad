@@ -42,6 +42,18 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+/// Convert a validated domain copper layer to its native protocol identity.
+pub fn native_copper_layer(layer: kicad_model::CopperLayer) -> kicad_ipc::CopperLayer {
+    match layer.board_layer() {
+        BoardLayer::FrontCopper => kicad_ipc::CopperLayer::FRONT,
+        BoardLayer::BackCopper => kicad_ipc::CopperLayer::BACK,
+        BoardLayer::InnerCopper(index) => {
+            kicad_ipc::CopperLayer::inner(index).expect("domain copper indices are bounded")
+        }
+        _ => unreachable!("domain CopperLayer excludes non-copper values"),
+    }
+}
+
 pub mod bindings;
 pub mod footprint;
 pub mod library_catalog;
@@ -1615,6 +1627,7 @@ pub fn prepare_bound_native_batch(
             }
             OperationKind::AddStraightTrack { intent, .. } => {
                 tracks.push(CreateTrack {
+                    layer: kicad_ipc::CopperLayer::FRONT,
                     start_x_nm: intent.start.x,
                     start_y_nm: intent.start.y,
                     end_x_nm: intent.end.x,
@@ -2398,6 +2411,7 @@ impl BoardGraphicsExecutor {
                         };
                     }
                     RoutingRequest::Track(CreateTrack {
+                        layer: kicad_ipc::CopperLayer::FRONT,
                         start_x_nm: intent.start.x,
                         start_y_nm: intent.start.y,
                         end_x_nm: intent.end.x,
@@ -2708,7 +2722,8 @@ pub fn read_verified_native_routing<I: BoardGraphicsIpc>(
 }
 
 fn legacy_track_receipt_matches(receipt: &CreateTrack, requested: &CreateTrack) -> bool {
-    receipt.start_x_nm == requested.start_x_nm
+    receipt.layer == requested.layer
+        && receipt.start_x_nm == requested.start_x_nm
         && receipt.start_y_nm == requested.start_y_nm
         && receipt.end_x_nm == requested.end_x_nm
         && receipt.end_y_nm == requested.end_y_nm
@@ -2746,7 +2761,7 @@ fn observed_track_matches(
     });
     normalized_track_geometry(start.x_nm, start.y_nm, end.x_nm, end.y_nm) == requested
         && observed.width_nm == receipt.track.width_nm
-        && observed.layer == IpcBoardLayer::FrontCopper
+        && observed.layer == receipt.track.layer.as_observed()
         && net_matches
 }
 
@@ -4909,6 +4924,7 @@ mod tests {
             layer: IpcBoardGraphicLayer::EdgeCuts,
         }];
         let tracks = vec![CreateTrack {
+            layer: kicad_ipc::CopperLayer::FRONT,
             start_x_nm: 1,
             start_y_nm: 2,
             end_x_nm: 3,
@@ -4970,6 +4986,7 @@ mod tests {
                 "board.kicad_pcb",
                 &[],
                 &[CreateTrack {
+                    layer: kicad_ipc::CopperLayer::FRONT,
                     start_x_nm: 1,
                     start_y_nm: 2,
                     end_x_nm: 3,
@@ -5384,6 +5401,7 @@ mod tests {
             source_uuid: "server-track".into(),
             lock_state: IpcLockState::Unlocked,
             track: CreateTrack {
+                layer: kicad_ipc::CopperLayer::FRONT,
                 start_x_nm: 1,
                 start_y_nm: 2,
                 end_x_nm: 3,
