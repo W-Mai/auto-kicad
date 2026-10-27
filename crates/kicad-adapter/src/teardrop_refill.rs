@@ -57,6 +57,11 @@ impl TeardropRefillObservation {
         text.validate_native_zones(&native)?;
         Ok(crate::live_geometry::LiveGeometryEvidence { native, text })
     }
+    pub(crate) fn generated_ids(&self) -> impl Iterator<Item = &str> {
+        self.identities
+            .iter()
+            .map(|identity| identity.native_uuid())
+    }
     pub fn generated_count(&self) -> usize {
         self.identities.len()
     }

@@ -1,5 +1,6 @@
 pub mod copper_route;
 pub mod geometry;
+pub mod geometry_plan;
 pub mod outline;
 pub use copper_route::{CompiledCopperRoute, compile_copper_route};
 mod item_deletion;
@@ -337,7 +338,21 @@ impl ChangePlan {
         if self.operations.is_empty() {
             return Err(EngineError::InvalidPlan("operation list must not be empty"));
         }
-        if self.operations.len() > MAX_OPERATIONS {
+        let geometry = if self
+            .operations
+            .iter()
+            .any(|op| matches!(op.kind, OperationKind::EditGeometry { .. }))
+        {
+            Some(geometry_plan::geometry_plan(&self.operations)?)
+        } else {
+            None
+        };
+        let internal_refill = usize::from(
+            geometry
+                .as_ref()
+                .is_some_and(|plan| !plan.additions.is_empty()),
+        );
+        if self.operations.len().saturating_sub(internal_refill) > MAX_OPERATIONS {
             return Err(EngineError::OperationLimitExceeded);
         }
         if self.source_run_id.is_empty() || self.instance_token.is_empty() {
@@ -355,21 +370,12 @@ impl ChangePlan {
                 return Err(EngineError::DuplicateIdempotencyKey);
             }
         }
-        if self
-            .operations
-            .iter()
-            .any(|op| matches!(op.kind, OperationKind::EditGeometry { .. }))
-            && self.operations.len() != 1
-        {
-            return Err(EngineError::InvalidPlan(
-                "geometry requires an exclusive operation",
-            ));
-        }
         let has_route = self
             .operations
             .iter()
             .any(|op| matches!(op.kind, OperationKind::AddCopperRoute { .. }));
         if has_route
+            && geometry.is_none()
             && self.operations.iter().any(|op| {
                 !matches!(
                     op.kind,
@@ -901,17 +907,7 @@ impl Engine {
         plan: &ChangePlan,
         after: &ProjectSnapshot,
     ) -> Result<(), EngineError> {
-        if !matches!(
-            plan.operations.as_slice(),
-            [Operation {
-                kind: OperationKind::EditGeometry { .. },
-                ..
-            }]
-        ) {
-            return Err(EngineError::InvalidPlan(
-                "observed transition requires exclusive native geometry",
-            ));
-        }
+        geometry_plan::geometry_plan(&plan.operations)?;
         if after.project_id != self.snapshot.project_id
             || after.board.document_id != self.snapshot.board.document_id
             || after.kicad_version != self.snapshot.kicad_version
@@ -2032,6 +2028,35 @@ mod tests {
             "board",
             "geometry",
         );
+        let addition = op(
+            OperationKind::AddBoardGraphicSegments {
+                board: id("board"),
+                segments: vec![graphic("new-graphic", 0, 0, 1_000_000, 1_000_000)],
+            },
+            "board",
+            "addition",
+        );
+        let composite = plan(&engine, vec![addition.clone(), operation.clone()]);
+        composite.validate(engine.snapshot()).unwrap();
+        let shape = geometry_plan::geometry_plan(&composite.operations).unwrap();
+        assert_eq!(shape.additions.len(), 1);
+        assert!(geometry_plan::geometry_plan(&[operation.clone(), addition.clone()]).is_err());
+        assert!(geometry_plan::geometry_plan(&[operation.clone(), operation.clone()]).is_err());
+        let mut foreign = addition.clone();
+        if let OperationKind::AddBoardGraphicSegments { board, .. } = &mut foreign.kind {
+            *board = id("other");
+        }
+        assert!(geometry_plan::geometry_plan(&[foreign, operation.clone()]).is_err());
+        let mut no_refill = operation.clone();
+        if let OperationKind::EditGeometry { request, .. } = &mut no_refill.kind {
+            request.refill = kicad_model::geometry::RefillMode::None;
+        }
+        assert!(geometry_plan::geometry_plan(&[addition, no_refill]).is_err());
+        let mut native_composite = engine.begin_session(composite).unwrap();
+        assert!(engine.preview_session(&mut native_composite).is_err());
+        engine
+            .preview_observed_session(&mut native_composite, engine.snapshot().clone())
+            .unwrap();
         let mut session = engine
             .begin_session(plan(&engine, vec![operation.clone()]))
             .unwrap();

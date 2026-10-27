@@ -33,7 +33,10 @@ fn net_ids(kinds: &[OperationKind]) -> Result<Vec<String>, String> {
     Ok(ids)
 }
 
-fn minimums(kinds: &[OperationKind], limits: &SavedRoutingConstraints) -> Result<(), String> {
+pub(super) fn minimums(
+    kinds: &[OperationKind],
+    limits: &SavedRoutingConstraints,
+) -> Result<(), String> {
     let track = |width| {
         if limits.min_track_width_nm.is_some_and(|min| width < min) {
             Err("track width is below the saved global minimum".to_owned())
@@ -176,7 +179,7 @@ pub(super) fn rebind_anchor(
     }
 }
 
-fn verify_components(
+pub(super) fn verify_components(
     client: &mut KiCadClient<NngTransport>,
     source: &LiveBoardObservation,
     operations: &[Operation],

@@ -18,6 +18,7 @@ pub struct PreparedGeometryChange {
     compiled: CompiledGeometryChange,
     observation: GeometryObservation,
     zones: Option<PreparedSolidZoneEdits>,
+    pub(crate) additions: Option<crate::geometry_additions::PreparedGeometryAdditions>,
 }
 
 /// Immutable complete observation; native preparation cannot substitute unbound net/layer context.
@@ -223,6 +224,51 @@ fn observe_context_inner<T: KiCadTransport>(
 }
 
 impl PreparedGeometryChange {
+    /// Compose only additive definitions with complete whole-board refill.
+    pub fn with_additions<T: KiCadTransport>(
+        mut self,
+        client: &mut KiCadClient<T>,
+        batch: crate::NativePcbBatch,
+    ) -> Result<Self, String> {
+        let request = self.compiled.request();
+        if self.additions.is_some()
+            || self.observation.generated().is_none()
+            || request.outline.is_some()
+            || !request.zones.is_empty()
+            || request.refill != kicad_model::geometry::RefillMode::All
+        {
+            return Err(
+                "additive geometry requires an exclusive complete refill-only preparation".into(),
+            );
+        }
+        self.additions = Some(crate::geometry_additions::PreparedGeometryAdditions::new(
+            client,
+            &self.observation,
+            &self.observation.filename,
+            batch,
+        )?);
+        Ok(self)
+    }
+
+    /// Bind an already allocated source identity set before beginning the native transaction.
+    pub fn with_addition_identities(
+        mut self,
+        identities: crate::additive_identities::AdditiveCreationIdentities,
+    ) -> Result<Self, String> {
+        let additions = self.additions.as_mut().ok_or("missing additive batch")?;
+        if additions.identities.is_some() {
+            return Err("additive identities are already bound".into());
+        }
+        identities.validate_batch(&additions.batch)?;
+        identities.validate_namespace(
+            self.observation
+                .generated()
+                .ok_or("missing complete observation")?,
+        )?;
+        additions.identities = Some(identities);
+        Ok(self)
+    }
+
     pub(crate) fn before(&self) -> &LiveGeometryEvidence {
         &self.observation.live
     }
@@ -272,6 +318,7 @@ impl PreparedGeometryChange {
             compiled,
             observation: observation.clone(),
             zones,
+            additions: None,
         })
     }
 }
@@ -279,12 +326,18 @@ impl PreparedGeometryChange {
 /// Receipts are bound to one immutable request and constructed only by its native executor.
 #[derive(Clone, Debug)]
 pub struct GeometryMutationReceipts {
-    request: GeometryRequest,
+    pub(crate) request: GeometryRequest,
+    pub(crate) additions: Option<crate::NativePcbBatchReceipt>,
+    pub(crate) additive_batch: Option<crate::NativePcbBatch>,
     zones: crate::zone_edits::SolidZoneMutationReceipts,
     outlines: Vec<kicad_ipc::CreatedOutlineReceipt>,
     deleted_outlines: Option<kicad_ipc::DeleteItemsReceipt>,
 }
 impl GeometryMutationReceipts {
+    pub fn additions(&self) -> Option<&crate::NativePcbBatchReceipt> {
+        self.additions.as_ref()
+    }
+
     pub fn zones(&self) -> &crate::zone_edits::SolidZoneMutationReceipts {
         &self.zones
     }
@@ -346,8 +399,15 @@ impl PreparedGeometryChange {
                     .map_err(|e| e.to_string())?;
             }
         }
+        let additions = self
+            .additions
+            .as_ref()
+            .map(|a| a.apply(client, filename))
+            .transpose()?;
         Ok(GeometryMutationReceipts {
             request: self.compiled.request().clone(),
+            additions,
+            additive_batch: self.additions.as_ref().map(|a| a.batch.clone()),
             zones,
             outlines,
             deleted_outlines,
@@ -424,6 +484,12 @@ impl PreparedGeometryChange {
     ) -> Result<(), String> {
         use kicad_ipc::DeleteItemsReceipt;
         use std::collections::BTreeSet;
+        if self.additions.is_some()
+            || receipts.additions.is_some()
+            || receipts.additive_batch.is_some()
+        {
+            return Err("additive definitions require stable native receipt verification".into());
+        }
         if &receipts.request != self.compiled.request() {
             return Err("geometry receipts belong to a different request".into());
         }

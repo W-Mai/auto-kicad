@@ -3,11 +3,127 @@ use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
 impl LiveBoardText {
+    pub(crate) fn identity_namespace<'a>(
+        text: &str,
+        derived: impl Iterator<Item = &'a str>,
+    ) -> Result<BTreeMap<String, usize>, String> {
+        fn counts(node: &Node, result: &mut BTreeMap<String, usize>) -> Result<(), String> {
+            if let Node::List { items: fields, .. } = node {
+                if fields.first().and_then(|n| atom(n).ok()) == Some("uuid") {
+                    *result.entry(scalar(node)?.into()).or_default() += 1;
+                } else {
+                    for child in fields {
+                        counts(child, result)?;
+                    }
+                }
+            }
+            Ok(())
+        }
+
+        preflight(text)?;
+        let cst = parse_one(text).map_err(|e| e.to_string())?;
+        let mut result = BTreeMap::new();
+        counts(cst.nodes.first().ok_or("missing board root")?, &mut result)?;
+        for id in derived {
+            *result.entry(id.to_owned()).or_default() += 1;
+        }
+        if result.values().any(|count| *count != 1) {
+            return Err("complete native identity namespace contains duplicates".into());
+        }
+        Ok(result)
+    }
+
+    /// Check the complete native identity namespace, including generated IDs absent from text.
+    pub(crate) fn verify_additive_identity_namespace<'a>(
+        before: &str,
+        after: &str,
+        identities: &BTreeMap<String, &'static str>,
+        before_derived: impl Iterator<Item = &'a str>,
+        after_derived: impl Iterator<Item = &'a str>,
+    ) -> Result<(), String> {
+        let old_ids = Self::identity_namespace(before, before_derived)?;
+        let new_ids = Self::identity_namespace(after, after_derived)?;
+        for id in identities.keys() {
+            if old_ids.contains_key(id) || new_ids.get(id) != Some(&1) {
+                return Err("created identity is preexisting, duplicated or absent".into());
+            }
+        }
+        Ok(())
+    }
+
+    /// Remove only receipt-proven new direct objects; every retained field stays byte-lexically exact.
+    pub(crate) fn without_created_additions(
+        &self,
+        before: &Self,
+        identities: &BTreeMap<String, &'static str>,
+    ) -> Result<Self, String> {
+        Self::verify_additive_identity_namespace(
+            before.raw_text(),
+            self.raw_text(),
+            identities,
+            std::iter::empty(),
+            std::iter::empty(),
+        )?;
+        let root = self.cst.nodes.first().ok_or("missing board root")?;
+        let mut kept = Vec::new();
+        let mut seen = BTreeSet::new();
+        for node in &items(root)?[1..] {
+            let Node::List { span, .. } = node else {
+                return Err("unexpected board scalar".into());
+            };
+            if matches!(tag(node)?, "segment" | "via" | "gr_line")
+                && let Some(uuid) = unique_form(node, "uuid")?
+            {
+                let id = scalar(uuid)?;
+                if let Some(kind) = identities.get(id) {
+                    if tag(node)? != *kind
+                        || !matches!(*kind, "segment" | "via" | "gr_line")
+                        || !seen.insert(id.to_owned())
+                    {
+                        return Err(
+                            "creation projection targets an unexpected direct record".into()
+                        );
+                    }
+                    if *kind == "gr_line"
+                        && !matches!(
+                            scalar(unique_form(node, "layer")?.ok_or("graphic layer missing")?)?,
+                            "Dwgs.User" | "Edge.Cuts"
+                        )
+                    {
+                        return Err(
+                            "creation projection targets an unsupported graphic layer".into()
+                        );
+                    }
+                    continue;
+                }
+            }
+            kept.push(&self.raw_text()[span.start..span.end]);
+        }
+        if seen.len() != identities.len() {
+            return Err("creation projection did not find every direct record".into());
+        }
+        Self::parse(&format!("(kicad_pcb {})", kept.join(" ")))
+    }
+
     pub(crate) fn project_created_geometry(
         &self,
         identities: &BTreeMap<String, String>,
     ) -> Result<Self, String> {
         let root = self.cst.nodes.first().ok_or("missing board root")?;
+        fn collect_ids(node: &Node, ids: &mut BTreeSet<String>) -> Result<(), String> {
+            if let Node::List { items: fields, .. } = node {
+                if fields.first().and_then(|n| atom(n).ok()) == Some("uuid") {
+                    ids.insert(scalar(node)?.into());
+                } else {
+                    for field in fields {
+                        collect_ids(field, ids)?;
+                    }
+                }
+            }
+            Ok(())
+        }
+        let mut all_original_ids = BTreeSet::new();
+        collect_ids(root, &mut all_original_ids)?;
         let mut rest = Vec::new();
         let mut geometry = BTreeMap::new();
         let mut seen = BTreeSet::new();
@@ -25,7 +141,14 @@ impl LiveBoardText {
             let mut text = self.raw_text()[span.start..span.end].to_owned();
             if matches!(
                 tag(node)?,
-                "zone" | "gr_line" | "gr_arc" | "gr_circle" | "gr_rect" | "gr_poly"
+                "zone"
+                    | "gr_line"
+                    | "gr_arc"
+                    | "gr_circle"
+                    | "gr_rect"
+                    | "gr_poly"
+                    | "segment"
+                    | "via"
             ) {
                 let uuid = unique_form(node, "uuid")?.ok_or("candidate geometry lacks UUID")?;
                 let original = scalar(uuid)?;
@@ -33,10 +156,17 @@ impl LiveBoardText {
                     return Err("candidate geometry identity repeats".into());
                 }
                 let id = if let Some(alias) = identities.get(original) {
-                    if tag(node)? != "zone"
-                        && scalar(
-                            unique_form(node, "layer")?.ok_or("created outline lacks layer")?,
-                        )? != "Edge.Cuts"
+                    if !matches!(tag(node)?, "zone" | "segment" | "via")
+                        && !matches!(
+                            (
+                                tag(node)?,
+                                scalar(
+                                    unique_form(node, "layer")?
+                                        .ok_or("created graphic lacks layer")?
+                                )?
+                            ),
+                            (_, "Edge.Cuts") | ("gr_line", "Dwgs.User")
+                        )
                     {
                         return Err(
                             "candidate creation mapping targets a non-outline graphic".into()
@@ -64,7 +194,7 @@ impl LiveBoardText {
         if seen.len() != identities.len()
             || aliases
                 .iter()
-                .any(|alias| original_ids.contains(alias.as_str()))
+                .any(|alias| all_original_ids.contains(alias.as_str()))
         {
             return Err("candidate mapping is missing or aliases an original identity".into());
         }
@@ -79,6 +209,109 @@ mod tests {
     fn parse(s: &str) -> LiveBoardText {
         LiveBoardText::parse(&format!("(kicad_pcb (version 20260206) {s})")).unwrap()
     }
+    #[test]
+    fn additive_projection_preserves_every_unedited_field_and_rejects_identity_substitution() {
+        let original = r#"(footprint (uuid fp) (pad (uuid pad) (future 7)))
+            (segment (uuid old) (future 8)) (zone (uuid zone) (future 9))"#;
+        let created = r#"(segment (uuid new-track) (width 0.25))
+            (via (uuid new-via) (size 0.6)) (gr_line (uuid new-graphic) (layer "Dwgs.User"))"#;
+        let before = parse(original);
+        let after = parse(&format!("{original} {created}"));
+        let ids = BTreeMap::from([
+            ("new-track".into(), "segment"),
+            ("new-via".into(), "via"),
+            ("new-graphic".into(), "gr_line"),
+        ]);
+        let full_before = format!(
+            "(kicad_pcb (version 20260206) {original} (zone (attr (teardrop (type padvia)))))"
+        );
+        let full_after = format!(
+            "(kicad_pcb (version 20260206) {original} {created} (zone (attr (teardrop (type padvia)))))"
+        );
+        assert!(
+            LiveBoardText::verify_additive_identity_namespace(
+                &full_before,
+                &full_after,
+                &ids,
+                ["generated-before"].into_iter(),
+                ["generated-after"].into_iter(),
+            )
+            .is_ok()
+        );
+        for (old, new) in [
+            ("new-track", "generated-after"),
+            ("generated-before", "new-track"),
+            ("generated-before", "pad"),
+        ] {
+            assert!(
+                LiveBoardText::verify_additive_identity_namespace(
+                    &full_before,
+                    &full_after,
+                    &ids,
+                    [old].into_iter(),
+                    [new].into_iter(),
+                )
+                .is_err()
+            );
+        }
+        assert_eq!(
+            before.structure_digest(),
+            after
+                .without_created_additions(&before, &ids)
+                .unwrap()
+                .structure_digest()
+        );
+        let changed = parse(&format!(
+            "{} {created}",
+            original.replace("future 7", "future 70")
+        ));
+        assert_ne!(
+            before.structure_digest(),
+            changed
+                .without_created_additions(&before, &ids)
+                .unwrap()
+                .structure_digest()
+        );
+        for bad in [
+            format!("{original} {created} (footprint (uuid other) (pad (uuid new-via)))"),
+            format!(
+                "{original} {}",
+                created.replace("(via (uuid", "(zone (uuid")
+            ),
+            format!("{original} {}", created.replace("Dwgs.User", "F.Cu")),
+            format!("{original} {}", created.replace("new-track", "missing")),
+        ] {
+            assert!(
+                parse(&bad)
+                    .without_created_additions(&before, &ids)
+                    .is_err()
+            );
+        }
+        for id in ["pad", "fp", "old", "zone"] {
+            assert!(
+                after
+                    .without_created_additions(&before, &BTreeMap::from([(id.into(), "segment")]))
+                    .is_err()
+            );
+        }
+        let aliases = ids
+            .keys()
+            .enumerate()
+            .map(|(i, id)| (id.clone(), format!("created:{i}")))
+            .collect();
+        let projected = after.project_created_geometry(&aliases).unwrap();
+        let changed = parse(&format!(
+            "{original} {}",
+            created.replace("width 0.25", "width 0.26")
+        ))
+        .project_created_geometry(&aliases)
+        .unwrap();
+        assert_ne!(
+            projected.refill_definition_digest().unwrap(),
+            changed.refill_definition_digest().unwrap()
+        );
+    }
+
     #[test]
     fn candidate_projection_maps_only_explicit_direct_identities() {
         let first = r#"(gr_line (uuid old) (layer "Edge.Cuts") (future 1))

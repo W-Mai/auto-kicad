@@ -52,13 +52,14 @@ pub struct PrivateDrcEvidence {
     native_settings: Vec<NativeSettingEvidence>,
     native_settings_after: Vec<NativeSettingEvidence>,
     environment_sha256: String,
+    connectivity: Option<kicad_checks::connectivity::ClosedConnectivityEvidence>,
 }
 
 fn sha(bytes: &[u8]) -> String {
     digest_bytes(bytes).to_string()
 }
 
-fn read(path: &Path, required: bool) -> Result<Option<Vec<u8>>, String> {
+pub(super) fn read(path: &Path, required: bool) -> Result<Option<Vec<u8>>, String> {
     let mut options = fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -215,6 +216,7 @@ pub(super) fn run(
     observed: &TeardropRefillObservation,
     expected: &NativeDrcLibraries,
     timeout: Duration,
+    connectivity_required: bool,
 ) -> Result<(kicad_checks::CompleteDrcReport, PrivateDrcEvidence), String> {
     if &libraries(client, source, Some(expected))? != expected {
         return Err("DRC library source or native environment changed".into());
@@ -262,6 +264,20 @@ pub(super) fn run(
         fs::write(path.with_extension("kicad_dru"), bytes).map_err(|e| e.to_string())?;
     }
     fs::write(work.0.join("fp-lib-table"), expected.table()).map_err(|e| e.to_string())?;
+    let connectivity = if connectivity_required {
+        Some(
+            kicad_checks::connectivity::check_saved_connectivity(
+                &path,
+                &kicad_checks::DrcPolicy {
+                    allowed_root: work.0.clone(),
+                    timeout,
+                },
+            )
+            .map_err(|e| format!("private DRC connectivity failed: {e:?}"))?,
+        )
+    } else {
+        None
+    };
     let report = kicad_checks::run_pcb_drc_complete(
         &path,
         &kicad_checks::DrcPolicy {
@@ -270,6 +286,17 @@ pub(super) fn run(
         },
     )
     .map_err(|e| format!("private generated DRC failed: {e:?}"))?;
+    if let Some(proof) = &connectivity {
+        proof
+            .verify_saved_inputs(
+                &path,
+                &kicad_checks::DrcPolicy {
+                    allowed_root: work.0.clone(),
+                    timeout,
+                },
+            )
+            .map_err(|e| format!("private DRC connectivity input changed: {e:?}"))?;
+    }
     let settings_after = native_settings(source)?;
     for (label, changed) in [
         (
@@ -333,8 +360,32 @@ pub(super) fn run(
             native_settings: settings,
             native_settings_after: settings_after,
             environment_sha256: env,
+            connectivity,
         },
     ))
+}
+
+impl PrivateDrcEvidence {
+    pub(super) fn connectivity_for(
+        &self,
+        live: &kicad_adapter::copper_connectivity::VerifiedCopperConnectivity,
+    ) -> Result<&kicad_checks::connectivity::ClosedConnectivityEvidence, String> {
+        let proof = self
+            .connectivity
+            .as_ref()
+            .ok_or("private DRC has no native connectivity evidence")?;
+        let raw = |digest: &str| digest.strip_prefix("sha256:").unwrap_or(digest).to_owned();
+        if raw(self.snapshot.input_sha256()) != live.closed().board_sha256()
+            || raw(&self.project_input_sha256) != live.closed().project_sha256()
+            || raw(self.snapshot.snapshot_sha256()) != proof.board_sha256()
+            || raw(&self.project_snapshot_sha256) != proof.project_sha256()
+        {
+            return Err(
+                "private DRC connectivity input is not bound to the live saved source".into(),
+            );
+        }
+        Ok(proof)
+    }
 }
 
 #[cfg(test)]

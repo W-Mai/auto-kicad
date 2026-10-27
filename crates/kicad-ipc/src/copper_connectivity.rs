@@ -20,7 +20,7 @@ fn members(items: &[Any], source: &str, net: &str) -> Result<BTreeSet<String>, I
                     .map_err(|_| IpcError::MalformedEnvelope)?;
                 let id = kiid_value(value.id.as_ref())
                     .ok_or(invalid("connected copper identity is missing"))?;
-                if value.net.as_ref().map(|n| n.name.as_str()) != Some(net) {
+                if value.net.as_ref().map(|n| n.name.as_str()).unwrap_or("") != net {
                     return Err(invalid("connected copper has a different or missing net"));
                 }
                 id
@@ -54,9 +54,26 @@ impl<T: KiCadTransport> KiCadClient<T> {
         source: &str,
         net: &str,
     ) -> Result<BTreeSet<String>, IpcError> {
-        if [filename, source, net]
-            .iter()
-            .any(|s| s.is_empty() || s.len() > 4096 || s.contains('\0'))
+        if net.is_empty() {
+            return Err(invalid("copper component query requires a named net"));
+        }
+        self.observed_copper_component(filename, source, net)?
+            .ok_or(invalid("native copper component is empty or oversized"))
+    }
+
+    /// Observe a source, including netless items. None means an empty reply, not proof of existence.
+    /// Callers must bind the complete source set and independently verify physical membership.
+    pub fn observed_copper_component(
+        &mut self,
+        filename: &str,
+        source: &str,
+        net: &str,
+    ) -> Result<Option<BTreeSet<String>>, IpcError> {
+        if filename.is_empty()
+            || source.is_empty()
+            || [filename, source, net]
+                .iter()
+                .any(|s| s.len() > 4096 || s.contains('\0'))
         {
             return Err(invalid(
                 "copper component query requires bounded identities",
@@ -86,7 +103,11 @@ impl<T: KiCadTransport> KiCadClient<T> {
             },
         )?;
         self.validate_item_reply(response.header, response.status, filename)?;
-        let component = members(&response.items, source, net)?;
+        let component = if response.items.is_empty() {
+            None
+        } else {
+            Some(members(&response.items, source, net)?)
+        };
         if self.require_current_board(&token, filename)? != document {
             return Err(invalid(
                 "copper component document changed during observation",
@@ -133,6 +154,15 @@ mod tests {
         ] {
             assert!(members(&items, "a", "GND").is_err());
         }
+        let mut netless = item("a", "");
+        let mut native = board_types::Track::parse_from_bytes(&netless.value).unwrap();
+        native.net = None.into();
+        netless.value = native.write_to_bytes().unwrap();
+        assert_eq!(
+            members(&[netless.clone()], "a", "").unwrap(),
+            BTreeSet::from(["a".into()])
+        );
+        assert!(members(&[netless], "a", "GND").is_err());
         let mut unknown = item("a", "GND");
         unknown.type_url = "unknown".into();
         assert!(members(&[unknown], "a", "GND").is_err());

@@ -7,7 +7,8 @@ import sys
 import time
 from stdio_rpc import Rpc
 
-mode, endpoint, real_endpoint, board_arg, output_arg, binary, control_arg = sys.argv[1:]
+mode, endpoint, real_endpoint, board_arg, output_arg, binary, control_arg = sys.argv[1:8]
+operation_mode = sys.argv[8] if len(sys.argv) == 9 else "geometry"
 board, output, control = Path(board_arg), Path(output_arg), Path(control_arg)
 transcript = []
 children = []
@@ -41,9 +42,15 @@ def prepare(rpc, ep, label):
         operation = dict(segments=[dict(graphic_id='pending-marker-probe',
                          start=dict(x=1000000, y=1000000, unit="Nanometres", space="Board"), end=dict(x=2000000, y=1000000, unit="Nanometres", space="Board"),
                          width_nm=100000, layer='DwgsUser')])
+    elif operation_mode == 'additive':
+        net = next(n for n in geometry['nets'] if n['name'] == 'GND')
+        operation = dict(via=dict(source_uuid='recovery-via', x_nm=55000000, y_nm=25000000,
+                                 pad_diameter_nm=600000, drill_diameter_nm=300000, net=dict(net_id=net['net_id'], name=net['name'])))
     else:
         operation = dict(geometry=request)
     plan = call(rpc, 'kicad_plan_change', dict(endpoint=ep, source_run_id=label, request_id=label, **operation))
+    if operation_mode == 'additive':
+        assert plan['geometry_evidence']['additions']
     params = dict(plan_id=plan['plan_id'], plan_hash=plan['plan_hash'], request_id=label)
     preview = call(rpc, 'kicad_preview_change', params)
     assert preview['state'] == 'awaiting_approval', preview
@@ -69,6 +76,11 @@ try:
         (output / 'stage-0.kicad_pcb').write_bytes(board.read_bytes())
         (output / 'result.json').write_text(json.dumps(dict(passed=True, kicad_version="10.0.7", stages=[dict(stage=0, native_creation_ids={}, outline_creation_ids=[], candidate=result['candidate'])], outcome=committed), indent=2))
     else:
+        probes = []
+        for state_name in ['state', 'other-state']:
+            other = start(output / state_name)
+            next_approval, _ = prepare(other, real_endpoint, state_name)
+            probes.append((other, next_approval))
         (control / 'arm').write_text(mode)
         if mode == 'interrupt_before_write':
             rpc.send(dict(jsonrpc='2.0', id=900000, method='tools/call', params=dict(name='kicad_commit_change', arguments=approval)))
@@ -93,9 +105,7 @@ try:
         assert json.loads(marker.read_text())['attempt_id'] == record['attempt_id']
         retained = board.read_bytes()
         (output / 'fault-result.kicad_pcb').write_bytes(retained)
-        for state_name in ['state', 'other-state']:
-            other = start(output / state_name)
-            next_approval, _ = prepare(other, real_endpoint, state_name)
+        for other, next_approval in probes:
             rejected = call(other, 'kicad_commit_change', next_approval, reject=True)
             assert 'guarded recovery before further project writes' in json.dumps(rejected), rejected
             assert board.read_bytes() == retained and marker.exists()

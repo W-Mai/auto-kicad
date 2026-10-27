@@ -65,7 +65,7 @@ fn invalid(message: impl ToString) -> CheckFailure {
         message: message.to_string(),
     }
 }
-fn bounded_file(path: &Path, limit: u64) -> Result<Vec<u8>, CheckFailure> {
+pub(crate) fn bounded_file(path: &Path, limit: u64) -> Result<Vec<u8>, CheckFailure> {
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(unix)]

@@ -1,6 +1,7 @@
 mod complete_drc;
 pub use complete_drc::CompleteDrcReport;
 
+pub mod connectivity;
 pub mod outline;
 pub mod refill;
 

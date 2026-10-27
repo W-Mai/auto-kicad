@@ -1,4 +1,7 @@
+pub mod additive_identities;
+pub mod copper_connectivity;
 pub mod geometry;
+pub mod geometry_additions;
 pub mod geometry_candidate;
 mod geometry_native;
 mod geometry_summary;
@@ -1444,6 +1447,22 @@ pub trait BoardGraphicsIpc {
         board_filename: &str,
         via: &CreateThroughVia,
     ) -> Result<CreatedThroughViaReceipt, String>;
+    fn create_track_with_identity(
+        &mut self,
+        _filename: &str,
+        _track: &CreateTrack,
+        _id: &str,
+    ) -> Result<CreatedTrackReceipt, String> {
+        Err("explicit track identity creation is unavailable".into())
+    }
+    fn create_through_via_with_identity(
+        &mut self,
+        _filename: &str,
+        _via: &CreateThroughVia,
+        _id: &str,
+    ) -> Result<CreatedThroughViaReceipt, String> {
+        Err("explicit via identity creation is unavailable".into())
+    }
     fn commit_changes(&mut self, commit: &str, message: &str) -> Result<(), String>;
     fn drop_commit(&mut self, commit: &str) -> Result<(), String>;
     fn save_board(&mut self, board_filename: &str) -> Result<(), String>;
@@ -1758,6 +1777,25 @@ impl<T: KiCadTransport> BoardGraphicsIpc for KiCadClient<T> {
     ) -> Result<CreatedThroughViaReceipt, String> {
         KiCadClient::create_through_via(self, board_filename, via)
             .map_err(|error| error.to_string())
+    }
+
+    fn create_track_with_identity(
+        &mut self,
+        filename: &str,
+        track: &CreateTrack,
+        id: &str,
+    ) -> Result<CreatedTrackReceipt, String> {
+        KiCadClient::create_track_with_identity(self, filename, track, id)
+            .map_err(|e| e.to_string())
+    }
+    fn create_through_via_with_identity(
+        &mut self,
+        filename: &str,
+        via: &CreateThroughVia,
+        id: &str,
+    ) -> Result<CreatedThroughViaReceipt, String> {
+        KiCadClient::create_through_via_with_identity(self, filename, via, id)
+            .map_err(|e| e.to_string())
     }
 
     fn commit_changes(&mut self, commit: &str, message: &str) -> Result<(), String> {
@@ -2084,6 +2122,25 @@ impl BoardGraphicsExecutor {
         tracks: &[CreateTrack],
         vias: &[CreateThroughVia],
     ) -> Result<NativePcbBatchReceipt, String> {
+        self.create_native_batch_with_identities(ipc, board_filename, graphics, tracks, vias, None)
+    }
+
+    pub fn create_native_batch_with_identities<I: BoardGraphicsIpc>(
+        &self,
+        ipc: &mut I,
+        board_filename: &str,
+        graphics: &[IpcBoardGraphicSegment],
+        tracks: &[CreateTrack],
+        vias: &[CreateThroughVia],
+        identities: Option<&crate::additive_identities::AdditiveCreationIdentities>,
+    ) -> Result<NativePcbBatchReceipt, String> {
+        if let Some(ids) = identities {
+            ids.validate_batch(&NativePcbBatch {
+                graphics: graphics.to_vec(),
+                tracks: tracks.to_vec(),
+                vias: vias.to_vec(),
+            })?;
+        }
         self.validate_native_batch(board_filename, graphics, tracks, vias)?;
         let graphic_receipts = if graphics.is_empty() {
             Vec::new()
@@ -2104,11 +2161,18 @@ impl BoardGraphicsExecutor {
             }
         };
         let mut track_receipts = Vec::with_capacity(tracks.len());
-        for track in tracks {
-            match ipc.create_track(board_filename, track) {
+        for (index, track) in tracks.iter().enumerate() {
+            let created = match identities {
+                Some(ids) => {
+                    ipc.create_track_with_identity(board_filename, track, ids.track(index))
+                }
+                None => ipc.create_track(board_filename, track),
+            };
+            match created {
                 Ok(receipt)
                     if receipt.request_index == 0
-                        && legacy_track_receipt_matches(&receipt.track, track) =>
+                        && legacy_track_receipt_matches(&receipt.track, track)
+                        && identities.is_none_or(|ids| receipt.source_uuid == ids.track(index)) =>
                 {
                     track_receipts.push(receipt);
                 }
@@ -2119,10 +2183,19 @@ impl BoardGraphicsExecutor {
             }
         }
         let mut via_receipts = Vec::with_capacity(vias.len());
-        for via in vias {
-            match ipc.create_through_via(board_filename, via) {
+        for (index, via) in vias.iter().enumerate() {
+            let created = match identities {
+                Some(ids) => {
+                    ipc.create_through_via_with_identity(board_filename, via, ids.via(index))
+                }
+                None => ipc.create_through_via(board_filename, via),
+            };
+            match created {
                 Ok(receipt) => {
-                    if receipt.request_index == 0 && legacy_via_receipt_matches(&receipt.via, via) {
+                    if receipt.request_index == 0
+                        && legacy_via_receipt_matches(&receipt.via, via)
+                        && identities.is_none_or(|ids| receipt.source_uuid == ids.via(index))
+                    {
                         via_receipts.push(receipt);
                     } else {
                         return Err(format!(

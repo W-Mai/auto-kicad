@@ -1,3 +1,4 @@
+mod creation_identity;
 mod native_environment;
 mod zone_refill;
 pub use zone_refill::{UncertainZoneFill, ZoneFillAttempt, ZoneFillDispatchReceipt};
@@ -8730,6 +8731,55 @@ mod tests {
         assert_eq!(receipt.via, requested);
         assert_eq!(client.instance_token().unwrap().as_str(), "new-token");
         assert_eq!(client.transport.requests.len(), 1);
+    }
+
+    #[test]
+    fn explicit_creation_requires_exact_identity_before_adopting_receipts() {
+        const ID: &str = "cbd35a90-4973-8a85-bb96-43d89266c117";
+        let requested = CreateThroughVia {
+            copper_layers: vec![CopperLayer::FRONT, CopperLayer::BACK],
+            position_x_nm: 10,
+            position_y_nm: 20,
+            pad_diameter_nm: 600,
+            drill_diameter_nm: 300,
+            net: None,
+        };
+        for returned in [ID, "another-identity"] {
+            let item = canonical_created_through_via(
+                create_through_via_item(&requested).unwrap(),
+                returned,
+            );
+            let mut client = routing_client(create_items_response_with_results(
+                "new",
+                vec![create_item_result(item)],
+            ));
+            client.token = Some(InstanceToken::new("prior").unwrap());
+            let result = client.create_through_via_with_identity("main.kicad_pcb", &requested, ID);
+            assert_eq!(result.is_ok(), returned == ID);
+            assert_eq!(
+                client.instance_token().unwrap().as_str(),
+                if returned == ID { "new" } else { "prior" }
+            );
+            let request = editor_commands::CreateItems::parse_from_bytes(
+                &client.transport.requests[0].message.as_ref().unwrap().value,
+            )
+            .unwrap();
+            let payload = board_types::Via::parse_from_bytes(&request.items[0].value).unwrap();
+            assert_eq!(payload.id.as_ref().unwrap().value, ID);
+        }
+        let mut client = footprint_client(ApiResponse::default());
+        for invalid in [
+            "",
+            "00000000-0000-0000-0000-000000000000",
+            "cbd35a90-4973-8a85-bb96-43d89266c11X",
+        ] {
+            assert!(
+                client
+                    .create_through_via_with_identity("main.kicad_pcb", &requested, invalid)
+                    .is_err()
+            );
+        }
+        assert!(client.transport.requests.is_empty());
     }
 
     #[test]

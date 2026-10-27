@@ -5,10 +5,19 @@ use serde_json::json;
 use std::{env, fs, path::PathBuf, process::Command};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = env::args().skip(1).collect::<Vec<_>>();
-    if !(args.len() == 2 || (args.len() == 3 && args[2] == "--boundary")) {
-        return Err("usage: check-copper-route-mcp SERVER NEW_OUTPUT_DIR [--boundary]".into());
+    if !(args.len() == 2
+        || (args.len() == 3 && args[2] == "--boundary")
+        || (args.len() == 4 && args[2] == "--zoned"))
+    {
+        return Err(
+            "usage: check-copper-route-mcp SERVER NEW_OUTPUT_DIR [--boundary | --zoned SOURCE_PCB]"
+                .into(),
+        );
     }
-    let script = if args.len() == 3 {
+    let zoned = args.len() == 4;
+    let script = if zoned {
+        "check-zoned-additive-mcp.py"
+    } else if args.len() == 3 {
         "check-route-boundary.py"
     } else {
         "check-copper-route-mcp.py"
@@ -36,6 +45,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         board.with_extension("kicad_pro"),
         serde_json::to_vec_pretty(&project)?,
     )?;
+    let provided = if zoned {
+        let source = fs::canonicalize(&args[3])?;
+        let pcb = fs::read(&source)?;
+        let pro = fs::read(source.with_extension("kicad_pro"))?;
+        fs::write(&board, &pcb)?;
+        fs::write(board.with_extension("kicad_pro"), &pro)?;
+        Some((source, pcb, pro))
+    } else {
+        None
+    };
     let original = [
         fs::read(&board)?,
         fs::read(board.with_extension("kicad_pro"))?,
@@ -43,9 +62,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut editor = OwnedPcbnewLauncher::new(&output.join("work"))?;
     let copy = editor.create_shadow(&board)?;
     let identity = editor.launch(&copy)?;
+    fs::write(
+        output.join("owned-editor.json"),
+        serde_json::to_vec_pretty(&json!({"pid":identity.pid,"endpoint":identity.endpoint}))?,
+    )?;
     let result: Result<(), Box<dyn std::error::Error>> = (|| {
         let mut ipc = editor.connect_owned()?;
         ipc.get_version()?;
+        if zoned {
+            ipc = match ipc.request_zone_refill(&identity.board_filename) {
+                kicad_ipc::ZoneFillAttempt::Returned { client, .. } => client,
+                kicad_ipc::ZoneFillAttempt::NotDispatched { reason, .. } => {
+                    return Err(reason.into());
+                }
+                kicad_ipc::ZoneFillAttempt::Uncertain(reader) => {
+                    return Err(reader.reason().into());
+                }
+            };
+        }
         ipc.save_board(&identity.board_filename)?;
         editor.reload_owned()?;
         let original_items = ipc.capture_existing_board_items(&identity.board_filename)?;
@@ -142,6 +176,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
         Ok(())
     })();
+    // Preserve saved evidence even when the native result is uncertain; never save or reload here.
+    let retained = output.join("retained");
+    fs::create_dir(&retained)?;
+    for extension in ["kicad_pcb", "kicad_pro", "kicad_dru"] {
+        let path = copy.board_path().with_extension(extension);
+        if path.is_file() {
+            fs::copy(&path, retained.join(format!("board.{extension}")))?;
+        }
+    }
     editor.close_owned(identity.pid)?;
     editor.cleanup()?;
     if original
@@ -158,6 +201,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &json!({"owned_source_closed":true,"shadow_cleaned":true,"original_unchanged":true}),
         )?,
     )?;
+    if let Some((source, pcb, pro)) = provided
+        && (fs::read(&source)? != pcb || fs::read(source.with_extension("kicad_pro"))? != pro)
+    {
+        return Err("provided zoned source changed".into());
+    }
     result?;
     fs::remove_dir(output.join("work"))?;
     println!("Production stdio copper-route acceptance passed");

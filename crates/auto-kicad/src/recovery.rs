@@ -290,6 +290,16 @@ fn read_records(root: &Path, project: &Path, limit: usize) -> io::Result<Vec<Exe
 }
 
 impl ProjectWriter {
+    /// Ordinary writers reject pending recovery before source preflight; recovery uses its own checks.
+    pub fn ensure_ready(&self) -> io::Result<()> {
+        if pending_geometry(&self.project)?.is_some() {
+            return Err(invalid(
+                "geometry outcome requires guarded recovery before further project writes",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn begin(
         &self,
         domain: &str,
@@ -298,11 +308,7 @@ impl ProjectWriter {
         evidence: Value,
         sources: &[PathBuf],
     ) -> io::Result<ExecutionAttempt> {
-        if pending_geometry(&self.project)?.is_some() {
-            return Err(invalid(
-                "geometry outcome requires guarded recovery before further project writes",
-            ));
-        }
+        self.ensure_ready()?;
         if read_records(&self.records, &self.project, usize::MAX)?
             .iter()
             .any(|record| record.approval_hash == approval_hash && record.state != "rejected")
@@ -990,6 +996,7 @@ mod tests {
             let other = ExecutionStore::open(&f.root.join("other-state")).unwrap();
             for store in [&f.store, &other] {
                 let writer = store.acquire(&f.project).unwrap();
+                assert!(writer.ensure_ready().is_err());
                 for domain in ["pcb", "schematic"] {
                     assert!(
                         writer

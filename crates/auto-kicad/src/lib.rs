@@ -4,6 +4,8 @@ mod existing_footprint;
 mod existing_item_edit;
 mod footprint_authoring;
 mod geometry;
+mod geometry_additive;
+mod geometry_connectivity;
 mod geometry_drc;
 pub use geometry::{GeometryExecution, GeometryPlanningEvidence};
 mod library_settings;
@@ -102,6 +104,15 @@ pub struct Capability {
 }
 
 pub trait DiscoveryService: Send + Sync {
+    fn geometry_additive_planning(
+        &self,
+        _endpoint: &str,
+        _source: &LiveBoardObservation,
+        _kinds: &[OperationKind],
+    ) -> Result<Option<geometry::GeometryPlanningEvidence>, String> {
+        Ok(None)
+    }
+
     fn geometry_planning(
         &self,
         _endpoint: &str,
@@ -199,6 +210,15 @@ pub trait DiscoveryService: Send + Sync {
 pub struct IpcDiscoveryService;
 
 impl DiscoveryService for IpcDiscoveryService {
+    fn geometry_additive_planning(
+        &self,
+        endpoint: &str,
+        source: &LiveBoardObservation,
+        kinds: &[OperationKind],
+    ) -> Result<Option<geometry::GeometryPlanningEvidence>, String> {
+        geometry_additive::prepare(endpoint, source, kinds)
+    }
+
     fn geometry_planning(
         &self,
         endpoint: &str,
@@ -3359,9 +3379,21 @@ impl Server {
                 return Err("geometry source identity changed since planning".into());
             }
             let request = geometry::request(&stored.session.plan.operations)?;
-            let current = self
-                .discovery
-                .geometry_planning(&stored.endpoint, source, request)?;
+            let shape = kicad_engine::geometry_plan::geometry_plan(&stored.session.plan.operations)
+                .map_err(|e| e.to_string())?;
+            let current = if shape.additions.is_empty() {
+                self.discovery
+                    .geometry_planning(&stored.endpoint, source, request)?
+            } else {
+                let kinds = shape
+                    .additions
+                    .iter()
+                    .map(|op| op.kind.clone())
+                    .collect::<Vec<_>>();
+                self.discovery
+                    .geometry_additive_planning(&stored.endpoint, source, &kinds)?
+                    .ok_or("zoned additive source no longer has complete refill evidence")?
+            };
             geometry::matches(&stored.session.plan.operations, &current)?;
             if stored.geometry_evidence.as_ref() != Some(&current) {
                 return Err("stored geometry evidence changed".into());
@@ -3423,7 +3455,11 @@ impl Server {
     ) -> Result<Option<recovery::ProjectWriter>, ErrorData> {
         self.execution_store
             .as_ref()
-            .map(|store| store.acquire(project))
+            .map(|store| {
+                let writer = store.acquire(project)?;
+                writer.ensure_ready()?;
+                Ok::<_, std::io::Error>(writer)
+            })
             .transpose()
             .map_err(|e| ErrorData::internal_error(format!("project write unavailable: {e}"), None))
     }
@@ -4361,7 +4397,7 @@ impl Server {
             .document_id
             .clone()
             .ok_or_else(|| ErrorData::internal_error("board identity is unavailable", None))?;
-        let geometry_evidence = arguments
+        let mut geometry_evidence = arguments
             .geometry
             .as_ref()
             .map(|request| {
@@ -4634,9 +4670,34 @@ impl Server {
         } else {
             board_operation_kinds(&arguments, &board)?
         };
-        let routing_evidence = if kinds
-            .iter()
-            .any(|kind| matches!(kind, OperationKind::AddCopperRoute { .. }))
+        if geometry_evidence.is_none() {
+            geometry_evidence = self
+                .discovery
+                .geometry_additive_planning(&arguments.endpoint, &observation, &kinds)
+                .map_err(|e| ErrorData::invalid_params(e, None))?;
+            if let Some(evidence) = &geometry_evidence {
+                let additions = evidence.additions.as_ref().ok_or_else(|| {
+                    ErrorData::internal_error("missing prepared additive evidence", None)
+                })?;
+                kinds = additions.kinds.clone();
+                kinds.push(OperationKind::EditGeometry {
+                    board: board.clone(),
+                    request: kicad_model::geometry::GeometryRequest {
+                        observed_revision: evidence.context.revision.clone(),
+                        outline: None,
+                        zones: Vec::new(),
+                        refill: kicad_model::geometry::RefillMode::All,
+                    },
+                    context: evidence.context.clone(),
+                    source_evidence: evidence.source_evidence.clone(),
+                });
+            }
+        }
+        let is_batch = is_batch || kinds.len() > 1;
+        let routing_evidence = if geometry_evidence.is_none()
+            && kinds
+                .iter()
+                .any(|kind| matches!(kind, OperationKind::AddCopperRoute { .. }))
         {
             let evidence = self
                 .discovery

@@ -56,9 +56,12 @@ fn python(scripts: &Path, name: &str, args: &[&str]) -> Result<(), Box<dyn std::
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = env::args().skip(1).collect::<Vec<_>>();
-    if args.len() != 4 {
-        return Err("usage: check-geometry-recovery SERVER RELAY SOURCE NEW_OUTPUT".into());
+    if !(args.len() == 4 || (args.len() == 5 && args[4] == "--additive")) {
+        return Err(
+            "usage: check-geometry-recovery SERVER RELAY SOURCE NEW_OUTPUT [--additive]".into(),
+        );
     }
+    let additive = args.len() == 5;
     let binary = fs::canonicalize(&args[0])?;
     let relay_binary = fs::canonicalize(&args[1])?;
     let source = fs::canonicalize(&args[2])?;
@@ -146,6 +149,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     case.to_str().ok_or("path")?,
                     binary.to_str().ok_or("path")?,
                     control.to_str().ok_or("path")?,
+                    if additive { "additive" } else { "geometry" },
                 ],
             );
             relay.stop()?;
@@ -212,6 +216,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 normal.to_str().ok_or("path")?,
                 binary.to_str().ok_or("path")?,
                 normal.to_str().ok_or("path")?,
+                "geometry",
             ],
         )?;
         let before = observe_live_geometry(&mut client, &identity.board_filename)?;
@@ -234,7 +239,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fs::write(
             output.join("result.json"),
             serde_json::to_vec_pretty(
-                &json!({"passed":true,"kicad_version":"10.0.7","cases":cases,"subsequent_geometry_commit":true,"same_process_final_reload":true,"source_pids":pids}),
+                &json!({"passed":true,"kicad_version":"10.0.7","cases":cases,"subsequent_geometry_commit":true,"same_process_final_reload":true,"source_pids":pids,"additive_faults":additive}),
             )?,
         )?;
         Ok(())

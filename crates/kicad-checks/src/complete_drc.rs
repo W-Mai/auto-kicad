@@ -1,3 +1,4 @@
+mod connectivity;
 use crate::{DrcReport, ParseError, RawViolation, normalize_violation};
 use serde::{Serialize, de};
 use serde_json::value::RawValue;

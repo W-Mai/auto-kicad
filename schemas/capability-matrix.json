@@ -272,7 +272,7 @@
       "status": "deferred",
       "mcp_tools": [],
       "constraints": [
-        "General zone authoring beyond the bounded solid-zone geometry family; hatched-zone editing and teardrop regeneration remain unverified"
+        "General zone authoring beyond the bounded solid-zone geometry family and hatched-zone editing remain deferred"
       ],
       "evidence": null
     },
@@ -325,15 +325,15 @@
         "canonical enabled copper layers; 16 legs, 128 segments and 15 vias per route; 256 batch copper objects",
         "source rule/native evidence, disposable reconciliation, exact approval and saved/reloaded verification",
         "complete original native preservation, same-net connectivity and no introduced DRC",
-        "zones and unsupported copper reject; populated prototype acceptance does not establish manufacturing readiness"
+        "zoned additive batches require complete refill/native/closed connectivity and shared creation identities; unsupported copper rejects"
       ],
       "evidence": {
-        "fixture": "synthetic-4-layer-and-populated-pawchrona-copy",
+        "fixture": "ordinary-and-teardrop-enabled-populated-zoned-copies; prior PawChrona routing retained separately",
         "tested_versions": [
           "10.0.7"
         ],
-        "command": "cargo run -p auto-kicad --example check-route-copy -- SOURCE.kicad_pcb SERVER NEW_OUTPUT_DIR STACKUP_PROBE ROUTE_PROFILE.json",
-        "record": "docs/acceptance/populated-copper-route.md"
+        "command": "cargo run -p auto-kicad --example check-copper-route-mcp -- SERVER NEW_OUTPUT_DIR --zoned SOURCE.kicad_pcb",
+        "record": "docs/acceptance/zoned-additive-mcp.md"
       }
     },
     {
@@ -375,7 +375,7 @@
         "saved source/shadow baseline and complete native/text/copper correspondence",
         "no introduced DRC or split original pad connectivity; complete candidate DRC correspondence",
         "uncertain execution blocks project writes until matching guarded recovery",
-        "teardrop regeneration, GUI cancellation and combined maximum-size MCP qualification remain unverified"
+        "generated teardrop regeneration is verified; GUI cancellation and combined maximum-size zoned MCP qualification remain unverified"
       ],
       "evidence": {
         "fixture": "mixed-geometry-and-settled-cm5-copy",

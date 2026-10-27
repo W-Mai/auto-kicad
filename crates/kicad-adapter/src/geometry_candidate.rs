@@ -171,6 +171,30 @@ impl GeometryCandidateEvidence {
         )
     }
 
+    /// Verify receipt-bound additive definitions and all copper against saved reload and independent refill.
+    pub fn capture_generated_additions(
+        prepared: &PreparedGeometryChange,
+        receipts: &GeometryMutationReceipts,
+        before_fill: &crate::geometry_additions::VerifiedAdditiveGeometryDefinitions,
+        filled: &crate::teardrop_refill::TeardropRefillObservation,
+        reloaded: &crate::teardrop_refill::TeardropRefillObservation,
+        independent: &ClosedRefillResult,
+    ) -> Result<Self, String> {
+        let before_fill = before_fill.verify_binding(prepared, receipts)?;
+        crate::teardrop_refill::VerifiedTeardropRefill::verify(
+            before_fill,
+            filled,
+            reloaded,
+            independent,
+        )?;
+        Self::from_verified(
+            prepared,
+            receipts,
+            &reloaded.authored_geometry()?,
+            Some(reloaded),
+        )
+    }
+
     fn from_verified(
         prepared: &PreparedGeometryChange,
         receipts: &GeometryMutationReceipts,
@@ -203,6 +227,42 @@ impl GeometryCandidateEvidence {
                 });
             }
         }
+        if let Some(additions) = &receipts.additions {
+            for (kind, ids) in [
+                (
+                    "graphic",
+                    additions
+                        .graphics
+                        .iter()
+                        .map(|g| g.graphic_id.clone())
+                        .collect::<Vec<_>>(),
+                ),
+                (
+                    "track",
+                    additions
+                        .tracks
+                        .iter()
+                        .map(|t| t.source_uuid.clone())
+                        .collect::<Vec<_>>(),
+                ),
+                (
+                    "via",
+                    additions
+                        .vias
+                        .iter()
+                        .map(|v| v.source_uuid.clone())
+                        .collect::<Vec<_>>(),
+                ),
+            ] {
+                for (index, native_uuid) in ids.into_iter().enumerate() {
+                    creations.push(GeometryCreationIdentity {
+                        kind: kind.into(),
+                        logical_id: index.to_string(),
+                        native_uuid,
+                    });
+                }
+            }
+        }
         let identities = creation_map(&creations)?;
         let generated_before = prepared
             .generated_before()
@@ -222,7 +282,16 @@ impl GeometryCandidateEvidence {
             .map(|g| g.content_digest())
             .transpose()?;
         Ok(Self {
-            intent_digest: canonical_intent(prepared.compiled().request())?,
+            intent_digest: match &prepared.additions {
+                Some(additions) => digest(
+                    &serde_json::to_vec(&(
+                        canonical_intent(prepared.compiled().request())?,
+                        additions.intent(),
+                    ))
+                    .map_err(|e| e.to_string())?,
+                ),
+                None => canonical_intent(prepared.compiled().request())?,
+            },
             before,
             after,
             creations,
@@ -251,9 +320,15 @@ impl GeometryCandidateEvidence {
             || self.before != source.before
             || self.after != source.after
         {
-            return Err(
-                "geometry candidate intent, original content or complete result differs".into(),
-            );
+            return Err(format!(
+                "geometry candidate differs: intent={}, baseline={}, native_definitions={}, board_definitions={}, copper={}, generated={}",
+                self.intent_digest != source.intent_digest,
+                self.before != source.before,
+                self.after.native_definitions != source.after.native_definitions,
+                self.after.board_definitions != source.after.board_definitions,
+                self.after.copper != source.after.copper,
+                self.after.generated_digest != source.after.generated_digest,
+            ));
         }
         let keyed = |items: &[GeometryCreationIdentity]| {
             items
