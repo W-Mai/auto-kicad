@@ -11,6 +11,7 @@ use kiutils_sexpr::{Atom, Node, Span, parse_one};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+pub mod identities;
 mod netlist;
 mod patch;
 
@@ -87,6 +88,7 @@ pub struct RawSheetPin {
 pub struct RawSymbol {
     pub source_uuid: String,
     pub lib_id: String,
+    pub lib_name: Option<String>,
     pub position: Position,
     pub unit: u32,
     pub body_style: Option<u32>,
@@ -753,6 +755,7 @@ fn parse_sheet_pin(items: &[Node]) -> Result<RawSheetPin, SchematicParseError> {
 fn parse_symbol(items: &[Node]) -> Result<RawSymbol, SchematicParseError> {
     let mut source_uuid = None;
     let mut lib_id = None;
+    let mut lib_name = None;
     let mut position = None;
     let mut unit = None;
     let mut body_style = None;
@@ -773,6 +776,7 @@ fn parse_symbol(items: &[Node]) -> Result<RawSymbol, SchematicParseError> {
         match list_tag(values) {
             Some("uuid") => source_uuid = Some(required_value(values, "symbol uuid")?.to_owned()),
             Some("lib_id") => lib_id = Some(required_value(values, "lib_id")?.to_owned()),
+            Some("lib_name") => lib_name = Some(required_value(values, "lib_name")?.to_owned()),
             Some("at") => position = Some(parse_position(values)?),
             Some("unit") => unit = Some(parse_u32(required_value(values, "unit")?, "unit")?),
             Some("body_style") => {
@@ -812,6 +816,7 @@ fn parse_symbol(items: &[Node]) -> Result<RawSymbol, SchematicParseError> {
     Ok(RawSymbol {
         source_uuid: source_uuid.ok_or(SchematicParseError::MissingField("symbol uuid"))?,
         lib_id: lib_id.ok_or(SchematicParseError::MissingField("lib_id"))?,
+        lib_name,
         position: position.ok_or(SchematicParseError::MissingField("at"))?,
         unit: unit.ok_or(SchematicParseError::MissingField("unit"))?,
         body_style,

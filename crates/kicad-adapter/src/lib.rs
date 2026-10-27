@@ -3131,6 +3131,7 @@ mod tests {
         let symbol = RawSymbol {
             source_uuid: "symbol-uuid".to_owned(),
             lib_id: "Device:R".to_owned(),
+            lib_name: None,
             position: Position {
                 x: 1.0,
                 y: 2.0,

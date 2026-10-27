@@ -19,6 +19,8 @@ Backend callers can read [complete native geometry and live board text](docs/acc
 
 Native backend callers can [create segment/arc Edge.Cuts primitives and replace exact unlocked outline objects](docs/acceptance/native-outline-primitives.md), with complete receipts and saved verification. [Complete arc envelopes](docs/acceptance/outline-preflight.md) reject unsafe geometry before IPC creation. [Serializable outline requests](docs/acceptance/outline-request-compilation.md) compile closed loops against native evidence; [complete saved boundary verification](docs/acceptance/saved-outline-verification.md) combines native geometry and absolute topology DRC. The `geometry` MCP family applies these definitions through saved-copy preview and exact candidate approval.
 
+Backend callers can resolve [hierarchical schematic instances and multi-unit component identities](docs/acceptance/schematic-identities.md) against a native CLI netlist. This read-only identity model retains per-instance annotations and embedded library names; it does not enable general schematic authoring or PCB synchronization.
+
 ## Board workflow
 
 1. Save the PCB and project settings in KiCad.

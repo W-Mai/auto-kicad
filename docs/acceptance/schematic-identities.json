@@ -1,0 +1,50 @@
+{
+  "kicad_version": "10.0.7",
+  "scope": "read-only instance and component/unit identity resolution; no editing or pin/ERC proof",
+  "inputs": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-backend-context",
+  "input_manifest_sha256": "fe5bd0d0eb6b24df10f409120954000d58e608c34f97d0e87bee83fbbaa619c1",
+  "profiles": [
+    {
+      "name": "ecc83",
+      "physical_files": 1,
+      "sheet_instances": 1,
+      "source_units": 26,
+      "native_components": 15
+    },
+    {
+      "name": "multichannel",
+      "physical_files": 2,
+      "sheet_instances": 5,
+      "source_units": 169,
+      "native_components": 114
+    }
+  ],
+  "original_and_copy_inputs_unchanged": true,
+  "gui_launched": false,
+  "artifacts": {
+    "result.json": "d6cfd6a99cce2db87591529392605fbf26ac7c8ab9b470314a8e263426de7dbf",
+    "quality.log": "0f80070027da7ee230ca8bb23aee47509fc18c9f618818ccbbff4783b0a9f3da",
+    "fixed-circuit-regression.log": "6ee73fbe042c6a0ecc5c3ab5f34994c21c0b990a5410167fe3eeee7da71cdd62",
+    "ecc83-identities.txt": "ba6dd22140f8e069a1589e9b19653f46daa550ee2962a89335b5a42d618bc7d8",
+    "multichannel-identities.txt": "08d8faf4db2d6362785fc4e12713a1373e38ba3c08040329642df8751c3b01dd",
+    "source/crates/kicad-schematic/examples/check-schematic-identities.rs": "cf551c05acfab7621141e8e858de9c94f978edd6eb7dfe31e957f7da37aa0d44",
+    "source/crates/kicad-schematic/src/identities.rs": "aa19cd9b4df184ff9522794257c2477fb48802c258c2c61d46b2a838f14bd24c",
+    "source/crates/kicad-schematic/src/lib.rs": "e0f4134c90e4f9ebc924db7287c6293c02aaa21ff489df5c71905d14fb2798ed",
+    "source/crates/kicad-adapter/src/lib.rs": "fa694fc9b04eb833510febf0e215cf307602b4403b6191e220059d70bdf149c1"
+  },
+  "evidence_root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-schematic-identities",
+  "quality": {
+    "passed": 487,
+    "failed": 0,
+    "ignored": 15,
+    "format": true,
+    "all_target_clippy_warnings_denied": true,
+    "capability_matrix": true
+  },
+  "existing_cli_mcp_regression": {
+    "passed": 1,
+    "failed": 0,
+    "elapsed_seconds": 4.82,
+    "test": "tests::production_cli_binds_fixed_circuit_footprints_without_editor"
+  }
+}
