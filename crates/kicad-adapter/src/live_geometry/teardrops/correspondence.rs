@@ -1,7 +1,7 @@
 //! Complete generated correspondence and identity-only compilation for private DRC copies.
 use super::*;
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct GeneratedZoneCorrespondence {
     identities: Vec<TeardropIdentity>,
 }
@@ -9,6 +9,17 @@ impl GeneratedZoneCorrespondence {
     pub(crate) fn from_bound(identities: Vec<TeardropIdentity>) -> Self {
         Self { identities }
     }
+    /// Complete generated content independent of transient native identities.
+    pub fn content_digest(&self) -> Result<String, String> {
+        let mut content = self.identities.clone();
+        for item in &mut content {
+            item.native_uuid.clear();
+        }
+        Ok(hash_bytes(
+            &serde_json::to_vec(&content).map_err(|e| e.to_string())?,
+        ))
+    }
+
     /// Mapping requires every generated field to agree. This says nothing about ordinary objects or approval.
     pub fn equivalent_to(&self, other: &Self) -> Result<BTreeMap<String, String>, String> {
         if self.identities.len() != other.identities.len() {
@@ -183,6 +194,7 @@ mod tests {
         changed[0].native_uuid = "bbbbbbbb-0000-4000-8000-000000000001".into();
         let b = GeneratedZoneCorrespondence::from_bound(changed.clone());
         assert_eq!(a.equivalent_to(&b).unwrap()[ID], changed[0].native_uuid);
+        assert_eq!(a.content_digest().unwrap(), b.content_digest().unwrap());
         for field in 0..8 {
             let mut changed = changed.clone();
             match field {

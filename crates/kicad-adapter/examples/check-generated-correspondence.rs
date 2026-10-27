@@ -1,11 +1,13 @@
 //! Compare generated candidates and identity-bound DRC on two sequential owned editors.
 use kicad_adapter::{
+    geometry::observe_generated_context,
+    geometry_candidate::GeometryCandidateEvidence,
     lifecycle::{DisposablePcbLifecycle, OwnedPcbnewLauncher},
     live_geometry::GeneratedZoneCorrespondence,
     teardrop_refill::{TeardropRefillObservation, VerifiedTeardropRefill},
 };
 use kicad_checks::{DrcPolicy, refill::refill_closed_copy};
-use kicad_ipc::{SolidZonePatch, ZoneFillAttempt, board_types};
+use kicad_ipc::{ZoneFillAttempt, board_types};
 use protobuf::Message;
 use serde_json::{Value, json};
 use std::{
@@ -17,6 +19,7 @@ use std::{
 };
 type Error = Box<dyn std::error::Error>;
 struct Candidate {
+    typed: GeometryCandidateEvidence,
     generated: GeneratedZoneCorrespondence,
     authored: String,
     ordinary: Vec<Vec<u8>>,
@@ -72,19 +75,57 @@ fn candidate(source: &Path, root: &Path) -> Result<Candidate, Error> {
         client.save_board(&identity.board_filename)?;
         editor.reload_owned()?;
         let protected = fs::read(copy.project_path())?;
-        let initial = TeardropRefillObservation::capture(&mut client, &identity.board_filename)?;
-        let transaction = client.begin_commit()?;
-        let patch = SolidZonePatch {
-            clearance_nm: Some(250_000),
-            ..Default::default()
-        };
-        client.update_solid_zones(
-            &identity.board_filename,
-            initial.native(),
-            &[("80000000-0000-4000-8000-000000000001".into(), patch)],
+        let board_id = kicad_model::StableId::new("generated-candidate-board")?;
+        let context = observe_generated_context(&mut client, &identity.board_filename, &board_id)?;
+        fs::write(
+            root.join("inspection.json"),
+            serde_json::to_vec_pretty(&context.summary()?)?,
         )?;
-        client.commit_changes(&transaction, "Verify generated candidate correspondence")?;
+        let request: kicad_model::geometry::GeometryRequest = serde_json::from_value(json!({
+            "observed_revision":context.context().revision.to_string(),
+            "outline":null,
+            "zones":[{"kind":"update","source_uuid":"80000000-0000-4000-8000-000000000001",
+                      "patch":{"clearance_nm":250000}}],
+            "refill":"all"
+        }))?;
+        let mut forbidden = serde_json::to_value(&request)?;
+        let generated_id = context
+            .generated()
+            .ok_or("complete observation missing")?
+            .native()
+            .zones()
+            .iter()
+            .find(|(_, z)| z.type_.enum_value() == Ok(board_types::ZoneType::ZT_TEARDROP))
+            .ok_or("generated fixture missing")?
+            .0;
+        forbidden["zones"][0]["source_uuid"] = json!(generated_id);
+        if context.prepare(&serde_json::from_value(forbidden)?).is_ok() {
+            return Err("generated region accepted as an authored mutation target".into());
+        }
+        let prepared = context.prepare(&request)?;
+        let transaction = client.begin_commit()?;
+        let receipts = prepared.apply_in_transaction(&mut client, &identity.board_filename)?;
+        client.commit_changes(&transaction, "Verify typed geometry with generated regions")?;
+        let mutated = TeardropRefillObservation::capture(&mut client, &identity.board_filename)?;
+        prepared.verify_generated_definitions(&mutated, &receipts)?;
+        if prepared
+            .verify_definitions(&mutated.authored_geometry()?, &receipts)
+            .is_ok()
+        {
+            return Err("ordinary definition verifier accepted omitted generated content".into());
+        }
+        client.save_board(&identity.board_filename)?;
+        editor.reload_owned()?;
         let before = TeardropRefillObservation::capture(&mut client, &identity.board_filename)?;
+        if prepared
+            .verify_generated_definitions(&before, &receipts)
+            .is_ok()
+        {
+            return Err(
+                "same-document mutation verification accepted reloaded generated identities".into(),
+            );
+        }
+        prepared.verify_generated_definitions_after_reload(&before, &receipts)?;
         client = match client.request_zone_refill(&identity.board_filename) {
             ZoneFillAttempt::Returned { client, .. } => client,
             _ => return Err("native refill uncertain".into()),
@@ -106,6 +147,34 @@ fn candidate(source: &Path, root: &Path) -> Result<Candidate, Error> {
         editor.reload_owned()?;
         let after = TeardropRefillObservation::capture(&mut client, &identity.board_filename)?;
         let refill = VerifiedTeardropRefill::verify(&before, &filled, &after, &independent)?;
+        let typed = GeometryCandidateEvidence::capture_generated(
+            &prepared,
+            &receipts,
+            &before,
+            &filled,
+            &after,
+            &independent,
+        )?;
+        if GeometryCandidateEvidence::capture(
+            &prepared,
+            &receipts,
+            &before.authored_geometry()?,
+            &after.authored_geometry()?,
+            &independent,
+        )
+        .is_ok()
+        {
+            return Err("ordinary candidate accepted omitted generated content".into());
+        }
+        fs::write(
+            root.join("typed-candidate.json"),
+            serde_json::to_vec_pretty(&typed)?,
+        )?;
+        fs::write(
+            root.join("typed-request.json"),
+            serde_json::to_vec_pretty(&request)?,
+        )?;
+
         if after.text().generated_count() != 10 {
             return Err("unexpected generated count".into());
         }
@@ -162,6 +231,7 @@ fn candidate(source: &Path, root: &Path) -> Result<Candidate, Error> {
             serde_json::to_vec_pretty(&generated)?,
         )?;
         Ok(Candidate {
+            typed,
             generated,
             authored: after.text().authored().structure_digest().into(),
             ordinary,
@@ -196,6 +266,13 @@ fn main() -> Result<(), Error> {
         let preview = candidate(&source, &root.join("preview"))?;
         let actual = candidate(&source, &root.join("source"))?;
         let map = preview.generated.equivalent_to(&actual.generated)?;
+        if !preview.typed.equivalent_to(&actual.typed)?.is_empty() {
+            return Err("clearance-only edit unexpectedly created authored identities".into());
+        }
+        if preview.typed.generated_mapping(&actual.typed)? != map {
+            return Err("typed and independent generated identity mappings differ".into());
+        }
+
         if map.len() != 10 || map.iter().any(|(a, b)| a == b) {
             return Err("expected ten differing generated identities".into());
         }
@@ -213,7 +290,7 @@ fn main() -> Result<(), Error> {
         fs::write(
             root.join("acceptance.json"),
             serde_json::to_vec_pretty(
-                &json!({"passed":true,"kicad_version":"10.0.7","generated_map":map,"authored_digest":preview.authored,"full_ordinary_native_equal":true,"full_generated_content_equal":true,"full_mapped_raw_drc_equal":true,"unmapped_drc_rejected":true}),
+                &json!({"passed":true,"typed_geometry_candidate_verified":true,"generated_edit_refused":true,"omitted_generated_candidate_refused":true,"omitted_generated_definitions_refused":true,"generated_identity_change_requires_reload_verifier":true,"kicad_version":"10.0.7","generated_map":map,"authored_digest":preview.authored,"full_ordinary_native_equal":true,"full_generated_content_equal":true,"full_mapped_raw_drc_equal":true,"unmapped_drc_rejected":true}),
             )?,
         )?;
         Ok(())

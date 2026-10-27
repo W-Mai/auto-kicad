@@ -52,6 +52,32 @@ assert report('preview',0,mapping)==report('source',0,{})
 assert report('preview',0,{})!=report('source',0,{})
 for name in ['preview','source']:
     assert report(name,0,{})==report(name,1,{})
-result=dict(passed=True,read_only_inputs=True,records=records,full_raw_drc_mapping_equal=True,unmapped_drc_differs=True,repeated_reports_equal=True)
+typed_verified=False
+if acceptance.get('typed_geometry_candidate_verified'):
+    candidates=[]
+    fields=['native_uuid','correspondence_key','kind','layer','net',
+            'text_definition_digest','text_content_digest','native_definition_digest','native_content_digest']
+    for name in ['preview','source']:
+        candidate=json.loads((root/name/'typed-candidate.json').read_text())
+        for stage in ['before','after']:
+            items=candidate['generated_'+stage]['identities']
+            assert len(items)==10 and all(set(item)==set(fields) for item in items)
+            projected=[{key:('' if key=='native_uuid' else item[key]) for key in fields} for item in items]
+            digest=hashlib.sha256(json.dumps(projected,separators=(',',':'),ensure_ascii=False).encode()).hexdigest()
+            assert candidate[stage]['generated_digest']==digest
+        observed=json.loads((root/name/'inspection.json').read_text())
+        ids={i['native_uuid'] for i in observed['generated']['identities']}
+        zones=[z for z in observed['zones'] if z['source_uuid'] in ids]
+        assert len(zones)==10 and all(not z['editable_solid'] and z['refillable'] for z in zones)
+        candidates.append(candidate)
+    for key in ['before','after','intent_digest','creations']:
+        assert candidates[0][key]==candidates[1][key]
+    assert not candidates[0]['creations']
+    left=candidates[0]['generated_after']['identities']
+    right=candidates[1]['generated_after']['identities']
+    assert len(left)==len(right)
+    assert {a['native_uuid']:b['native_uuid'] for a,b in zip(left,right)}==mapping
+    typed_verified=True
+result=dict(passed=True,typed_candidates_verified=typed_verified,read_only_inputs=True,records=records,full_raw_drc_mapping_equal=True,unmapped_drc_differs=True,repeated_reports_equal=True)
 (root/'independent-native.json').write_text(json.dumps(result,indent=2)+'\n')
 print(json.dumps(dict(passed=True,candidates=2,generated_per_candidate=10)))

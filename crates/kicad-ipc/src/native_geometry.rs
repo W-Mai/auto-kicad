@@ -108,6 +108,25 @@ impl NativeBoardGeometry {
         Ok(result)
     }
 
+    /// Extract authored geometry only after the caller has classified every generated identity.
+    /// This view is not evidence that omitted generated content was preserved.
+    pub fn authored_geometry(&self, generated_ids: &BTreeSet<String>) -> Result<Self, IpcError> {
+        let actual = self
+            .zones
+            .iter()
+            .filter(|(_, zone)| zone.type_.enum_value() == Ok(board_types::ZoneType::ZT_TEARDROP))
+            .map(|(id, _)| id.clone())
+            .collect::<BTreeSet<_>>();
+        if &actual != generated_ids {
+            return Err(invalid(
+                "classified generated identities differ from native set",
+            ));
+        }
+        let mut authored = self.clone();
+        authored.zones.retain(|id, _| !generated_ids.contains(id));
+        Ok(authored)
+    }
+
     pub fn zones(&self) -> &BTreeMap<String, board_types::Zone> {
         &self.zones
     }
@@ -255,6 +274,39 @@ mod tests {
             value: zone.write_to_bytes().unwrap(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn authored_projection_requires_the_exact_generated_set_and_preserves_other_bytes() {
+        let ordinary = zone("ordinary");
+        let mut generated = board_types::Zone::parse_from_bytes(&zone("generated").value).unwrap();
+        generated.type_ = board_types::ZoneType::ZT_TEARDROP.into();
+        let generated = Any {
+            type_url: ZONE.into(),
+            value: generated.write_to_bytes().unwrap(),
+            ..Default::default()
+        };
+        let complete = NativeBoardGeometry::decode(&[ordinary.clone(), generated]).unwrap();
+        assert!(complete.authored_geometry(&BTreeSet::new()).is_err());
+        assert!(
+            complete
+                .authored_geometry(&BTreeSet::from(["ordinary".into()]))
+                .is_err()
+        );
+        assert!(
+            complete
+                .authored_geometry(&BTreeSet::from(["ordinary".into(), "generated".into()]))
+                .is_err()
+        );
+        let projected = complete
+            .authored_geometry(&BTreeSet::from(["generated".into()]))
+            .unwrap();
+        assert_eq!(projected.zones().len(), 1);
+        assert_eq!(
+            projected.zones()["ordinary"].write_to_bytes().unwrap(),
+            ordinary.value
+        );
+        assert_eq!(complete.zones().len(), 2);
     }
 
     #[test]

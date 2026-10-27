@@ -1,0 +1,459 @@
+{
+  "kicad_version": "10.0.7",
+  "generated_root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict",
+  "ordinary_root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression",
+  "acceptance": {
+    "authored_digest": "d7dbde633195866ddde6a8420edd3e129b278b959334d9bb6aafbf8249a23225",
+    "full_generated_content_equal": true,
+    "full_mapped_raw_drc_equal": true,
+    "full_ordinary_native_equal": true,
+    "generated_edit_refused": true,
+    "generated_identity_change_requires_reload_verifier": true,
+    "generated_map": {
+      "0ae9a07a-c96c-465d-a4c4-5995f1b957c4": "e0f34e9f-5141-486e-9212-bc48bbcd8569",
+      "1908e926-88cf-4c67-ab22-1b6e99d0b7e7": "9b50ddf8-87a1-40c1-8a7d-e2ea92864fea",
+      "50e948d0-28c6-44f9-8d3f-df44ddfb8930": "6275f383-7662-4da5-947c-4dd41ac0d73c",
+      "656fa636-9b71-4f45-878f-e55707ed660f": "48e09b34-d929-4e17-a74f-eafae4b089de",
+      "6ef4bf33-d969-433c-bc87-5c603e036aa2": "c87bc802-060c-45ee-a093-7cedb89737d4",
+      "a70ee2b0-73c6-4793-acd5-241ae58974fc": "5192a2c0-6057-44f5-bc4a-e26b0ec116e4",
+      "ad517966-40bd-4f49-92d7-f2a177be5afc": "67a70dfb-1443-47b1-b8de-1e763e806a42",
+      "b3185bfa-e01d-406e-ba17-281b82333883": "00661b96-25be-4720-bd04-5d75dedaf785",
+      "bffa85a8-1fdd-4215-99d1-80f03659ec27": "e4eb11e8-31a6-4edc-a4b9-1c96465e591f",
+      "f8ebc25c-f4b6-42a1-b11c-1bf5b1e9c0d1": "e2aa7bec-4766-453c-87ed-564cbd3d06db"
+    },
+    "kicad_version": "10.0.7",
+    "omitted_generated_candidate_refused": true,
+    "omitted_generated_definitions_refused": true,
+    "passed": true,
+    "typed_geometry_candidate_verified": true,
+    "unmapped_drc_rejected": true
+  },
+  "independent_typed": {
+    "complete_generated_digests_independently_verified": true,
+    "complete_candidates_equal": true,
+    "generated_noneditable_refill_targets": 10,
+    "exact_generated_map": true
+  },
+  "independent_native": {
+    "passed": true,
+    "typed_candidates_verified": true,
+    "read_only_inputs": true,
+    "records": [
+      {
+        "candidate": "preview",
+        "bound_uuids": [
+          "0ae9a07a-c96c-465d-a4c4-5995f1b957c4",
+          "1908e926-88cf-4c67-ab22-1b6e99d0b7e7",
+          "50e948d0-28c6-44f9-8d3f-df44ddfb8930",
+          "656fa636-9b71-4f45-878f-e55707ed660f",
+          "6ef4bf33-d969-433c-bc87-5c603e036aa2",
+          "a70ee2b0-73c6-4793-acd5-241ae58974fc",
+          "ad517966-40bd-4f49-92d7-f2a177be5afc",
+          "b3185bfa-e01d-406e-ba17-281b82333883",
+          "bffa85a8-1fdd-4215-99d1-80f03659ec27",
+          "f8ebc25c-f4b6-42a1-b11c-1bf5b1e9c0d1"
+        ],
+        "native_serialization_equal_except_zone_order": true,
+        "clearance_nm": 250000,
+        "inputs_unchanged": true
+      },
+      {
+        "candidate": "source",
+        "bound_uuids": [
+          "00661b96-25be-4720-bd04-5d75dedaf785",
+          "48e09b34-d929-4e17-a74f-eafae4b089de",
+          "5192a2c0-6057-44f5-bc4a-e26b0ec116e4",
+          "6275f383-7662-4da5-947c-4dd41ac0d73c",
+          "67a70dfb-1443-47b1-b8de-1e763e806a42",
+          "9b50ddf8-87a1-40c1-8a7d-e2ea92864fea",
+          "c87bc802-060c-45ee-a093-7cedb89737d4",
+          "e0f34e9f-5141-486e-9212-bc48bbcd8569",
+          "e2aa7bec-4766-453c-87ed-564cbd3d06db",
+          "e4eb11e8-31a6-4edc-a4b9-1c96465e591f"
+        ],
+        "native_serialization_equal_except_zone_order": true,
+        "clearance_nm": 250000,
+        "inputs_unchanged": true
+      }
+    ],
+    "full_raw_drc_mapping_equal": true,
+    "unmapped_drc_differs": true,
+    "repeated_reports_equal": true
+  },
+  "quality": {
+    "passed": 467,
+    "failed": 0,
+    "ignored": 15,
+    "format": true,
+    "warning_denied_clippy_all_targets": true,
+    "capability_matrix": true
+  },
+  "processes": {
+    "all_owned_pids_absent": true,
+    "pids": [
+      7139,
+      7412,
+      15108,
+      15293,
+      19002,
+      25908,
+      26219
+    ]
+  },
+  "ordinary_stages": 4,
+  "ordinary_intent_and_copper": true,
+  "ordinary_no_introduced_drc": true,
+  "ordinary_baseline_restored": false,
+  "diagnostic_counts": {
+    "violations": 12,
+    "unconnected": 4
+  },
+  "scope": "Typed adapter geometry with complete generated content; production generated MCP approval, private DRC project/library context and remaining product gates stay open.",
+  "artifacts": [
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/acceptance.json",
+      "bytes": 1388,
+      "sha256": "105b1e07bc4fe2019c896bf0059324cffc9623879df703b395f5f26bb6f7d488"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/independent-native.json",
+      "bytes": 1558,
+      "sha256": "cdef3562a4221ed23aee12be3e2c5d9b7456781c55a74c557b92c05a44a8473b"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/bound.kicad_pcb",
+      "bytes": 38775,
+      "sha256": "e92d92de4a751daca4e1c710efd589a9165d6dfaa09a192acc7196eb393091a3"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/bound.kicad_prl",
+      "bytes": 2292,
+      "sha256": "8903a52b693a50fccbd6e15ef7ca1903e5965526f0dec2736aed643b02ea89b7"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/bound.kicad_pro",
+      "bytes": 9827,
+      "sha256": "b3e0525c249608e87b31779ecdab57b1b1df980d05f79f1084d4f8d9ac62dd41"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/cleanup.json",
+      "bytes": 73,
+      "sha256": "60b536285ffb0d3a277540f50f30a1e5a5af06a3e633aca3eaafdf9fee0c31e3"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/correspondence.json",
+      "bytes": 6318,
+      "sha256": "1efac927d483d1bd5144e747588a6b639bb8249df582592fd4d7e2093725fcb5"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/drc-0.json",
+      "bytes": 10758,
+      "sha256": "be1953e3e4dcc999fa136151e58fa36dee2906c279010a51146fb02009c78a36"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/drc-1.json",
+      "bytes": 10758,
+      "sha256": "6373244de51491ee3688403dcf892b7957f81c01eb3a9a8a44c1ad0c10175170"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/inspection.json",
+      "bytes": 20184,
+      "sha256": "ffada42a5312ca9976c6ee4e4a8602a8af852e93f647db6002dd7aeec1364814"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/native-bound.kicad_pcb",
+      "bytes": 38297,
+      "sha256": "1a8dc02bcff6445f59364d5380da7aa7316244e11a43cca45fec8da7b1daa109"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/native-bound.kicad_pro",
+      "bytes": 9970,
+      "sha256": "7027b8af8ad325bc85f4130c67bcc59adb9a3850a0646b4b93337aa12ccb09e4"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/native-saved.kicad_pcb",
+      "bytes": 38297,
+      "sha256": "82f730ce39bd655ea4683346ebee30c85b3442da0625150a9bd5ffcc021863d6"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/native-saved.kicad_prl",
+      "bytes": 2299,
+      "sha256": "20b2fecc1bdfa02fd8b72476261bc3a79ba1a6b9d719a270aa9584a89f767ab7"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/native-saved.kicad_pro",
+      "bytes": 9972,
+      "sha256": "fb441d95cfe2577e239644612497a18b019f02d2d25a010bc78da9d421afda39"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/owned.json",
+      "bytes": 18,
+      "sha256": "77d47443c566291380aca54ea21cde48edc0e35a15e66911d7a452cc5bec14b2"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/refill.json",
+      "bytes": 4736,
+      "sha256": "3b45cbb3707bc416fbef0941729e0bc26c2f27eacbea35bb7ce8522cf0d73e68"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/result.kicad_pcb",
+      "bytes": 38315,
+      "sha256": "1f8f0b038045ba9479820375b62ece8ec8f00d5b4134398eb6dbf5c4b460cfab"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/result.kicad_pro",
+      "bytes": 9827,
+      "sha256": "b3e0525c249608e87b31779ecdab57b1b1df980d05f79f1084d4f8d9ac62dd41"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/snapshot.json",
+      "bytes": 6493,
+      "sha256": "8cf9d5818d0a1e14f84f97cd43ea818575f39749db207d73a5ff953abc074e40"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/typed-candidate.json",
+      "bytes": 14198,
+      "sha256": "c2f3f6a00e9d2a581cd02a0b2b82cf13a48d6473bd820d84785012d7896d1dcc"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/preview/typed-request.json",
+      "bytes": 623,
+      "sha256": "6e8fa6a4b5b14069046f1959230e4ff1a423f8d6cd27cf47451f37d078e0624f"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/bound.kicad_pcb",
+      "bytes": 38775,
+      "sha256": "7b1df3c196a58930df727750f042db07d182e4cf30ae83c291f5b4cf123193d7"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/bound.kicad_prl",
+      "bytes": 2292,
+      "sha256": "8903a52b693a50fccbd6e15ef7ca1903e5965526f0dec2736aed643b02ea89b7"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/bound.kicad_pro",
+      "bytes": 9827,
+      "sha256": "b3e0525c249608e87b31779ecdab57b1b1df980d05f79f1084d4f8d9ac62dd41"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/cleanup.json",
+      "bytes": 73,
+      "sha256": "8c05b90d3807e6992a5733440bec7973049c05bd78ce9f759e6c2531272b3fd2"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/correspondence.json",
+      "bytes": 6318,
+      "sha256": "3c676b4b3a642c849603e0e64d644481ba59f82b77554a00bbd5e61b30a7b25a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/drc-0.json",
+      "bytes": 10758,
+      "sha256": "515edd8fc78465ef4d5e6ba8e448735f466946578baf14151cfc18ea745d9bba"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/drc-1.json",
+      "bytes": 10758,
+      "sha256": "633761417df4284b049d29445bcef0b83c4901676835ea6ff694d227b0fc19f0"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/inspection.json",
+      "bytes": 20184,
+      "sha256": "e443f541545549517f9cf4e6f15eac11ed7b0e443328fb0058d14c830c25ea96"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/native-bound.kicad_pcb",
+      "bytes": 38297,
+      "sha256": "c08e190761417564359280e3539e552cc8c2f8b0de6064a830346f968877f2b2"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/native-bound.kicad_pro",
+      "bytes": 9970,
+      "sha256": "7027b8af8ad325bc85f4130c67bcc59adb9a3850a0646b4b93337aa12ccb09e4"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/native-saved.kicad_pcb",
+      "bytes": 38297,
+      "sha256": "a603d1fad49ed4ed4ee24fced0b8df4a20d2f7bce859587a62ff14f373055e65"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/native-saved.kicad_prl",
+      "bytes": 2299,
+      "sha256": "20b2fecc1bdfa02fd8b72476261bc3a79ba1a6b9d719a270aa9584a89f767ab7"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/native-saved.kicad_pro",
+      "bytes": 9972,
+      "sha256": "fb441d95cfe2577e239644612497a18b019f02d2d25a010bc78da9d421afda39"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/owned.json",
+      "bytes": 18,
+      "sha256": "cf80659ebf82911e13ffcb2fc86e2f574e832f48a7a69316789cfacaefc18121"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/refill.json",
+      "bytes": 4736,
+      "sha256": "29f0e3058805fb22a48670dcf6408524e16a0ef5d9a8aaa153f2022155cd66da"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/result.kicad_pcb",
+      "bytes": 38315,
+      "sha256": "1f8f0b038045ba9479820375b62ece8ec8f00d5b4134398eb6dbf5c4b460cfab"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/result.kicad_pro",
+      "bytes": 9827,
+      "sha256": "b3e0525c249608e87b31779ecdab57b1b1df980d05f79f1084d4f8d9ac62dd41"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/snapshot.json",
+      "bytes": 6493,
+      "sha256": "1ddb72f51ffd005290f1b6518678c9bc3fb76892da24e57db37815d66b98c345"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/typed-candidate.json",
+      "bytes": 14198,
+      "sha256": "fb7a5c901d14a51ed3e79bb37b23337ded380e0f68900e19499ed367ef63cb3e"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source/typed-request.json",
+      "bytes": 623,
+      "sha256": "50c6405d124b2bb5a67d49c2c214ee79686ce136e4be7cf422e273e565b8b221"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-geometry-strict/source-check.json",
+      "bytes": 48,
+      "sha256": "024ae792e5289e432e5abee882d18315e41cf01dbf798096321f12f46eeeb143"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/baseline-drc.json",
+      "bytes": 3093,
+      "sha256": "edab7d3ebabcd16b4b0d9553f80c7ecf39c685275fb7e929977378300a204615"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/baseline.kicad_pcb",
+      "bytes": 26258,
+      "sha256": "a3e0f56965e1657c3eee2b3f555bc29d3c14e4ba1acf8d316a00a9e641bfe24e"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/cleanup.json",
+      "bytes": 70,
+      "sha256": "6c8bca7c6b6bd4fb7a6a892ef6503c458a3d6771ad682a1b3ce09f3f72190eaf"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/independent-saved-intent.json",
+      "bytes": 11468,
+      "sha256": "bf4fb2a2fa4b8c134a56bf995751e0236285ef07a95bb0ae137480de1d6c38da"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/request-0.json",
+      "bytes": 4238,
+      "sha256": "9662396c77a8fe47378d99212d17aa18c9c4d41d60b56ee31c77518dd980dfa5"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/request-1.json",
+      "bytes": 2131,
+      "sha256": "a44b01c76fcb4917c70e85b16b01a4c428b7138be3297a2c2e5f99033fe077c2"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/request-2.json",
+      "bytes": 1767,
+      "sha256": "b82bad13f9127764e4c3e84cdb3f76482d19cdb218b14f6f1d29ac622f25f0ae"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/request-3.json",
+      "bytes": 1449,
+      "sha256": "5f5fac38a15d9ac0fe5c3786fd0e52c49883923f70d4e91e89e842c355cf51bb"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/result.json",
+      "bytes": 48143,
+      "sha256": "b6a4fe7d26f5597245b525015848b16178aa999b04107aa1724eca9915207ac5"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/result.kicad_pro",
+      "bytes": 9992,
+      "sha256": "270b08bcf6ac1d95545a47ed72694b7d1016c8d55193226f433ce61cf3bc6c0f"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/scenario.json",
+      "bytes": 9297,
+      "sha256": "5234d204ada4adf10efe4a6162d26cff9ad8447bf39cf2d7d6232c52e3d37266"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/stage-0.json",
+      "bytes": 10561,
+      "sha256": "35902e86421e4a71789d8dcdd6cf6e0a00ba6add283b613b0f5bce4def4ca670"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/stage-0.kicad_pcb",
+      "bytes": 36529,
+      "sha256": "f2fa2e21dc17b440d3f2463dfebeab07df95803616438ac4fc2741c2db4f9fc8"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/stage-1.json",
+      "bytes": 10562,
+      "sha256": "44b8f94fdbd7f13c10c34b87103acb0ff5d91d814e0a15ffa0834826f50d521e"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/stage-1.kicad_pcb",
+      "bytes": 36117,
+      "sha256": "06baf359a7415153c8c98b11d3ea7a5acba73732f11c856f3753db5f3203677f"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/stage-2.json",
+      "bytes": 10542,
+      "sha256": "e1ec3c412683dc882645e7aec3eae04482d5ce23182970a6eddaabed16d3a6f6"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/stage-2.kicad_pcb",
+      "bytes": 26278,
+      "sha256": "85842a443b724a04aad9519a6efe1c8ec5b1694075dfc8484c5da7e98d7de4b9"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/stage-3.json",
+      "bytes": 10398,
+      "sha256": "7ae9a300982498a75b733037f4427d0babcaf21701fdb24db7bf89e67cf51071"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-ordinary-regression/stage-3.kicad_pcb",
+      "bytes": 26250,
+      "sha256": "3f3be09ac1e0ac17ad121426273cbf23bbeebf4ad40777884f3f8e68393ea4d0"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-evidence/auto-kicad-generated-geometry-native-strict.log",
+      "bytes": 758,
+      "sha256": "b419b28b7256f9cb4d979a601859bfe632fa9c0e34c6380f994f3b69749e0e7d"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-evidence/auto-kicad-generated-geometry-ordinary-reader.log",
+      "bytes": 2742,
+      "sha256": "bf7263f22961856914e77b53a260e390459f4eebd974edc8e0170b90e779b1ef"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-evidence/auto-kicad-generated-geometry-ordinary.log",
+      "bytes": 99,
+      "sha256": "a2528b717c9b1753ee226ee2f0b2507746184721a87253864a0c3d3715864e65"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-evidence/auto-kicad-generated-geometry-reader-strict.log",
+      "bytes": 2738,
+      "sha256": "f1e4ddac030f35cbd4dca1d2e1c956d68381676159306710b0f791e4fecadaff"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-evidence/process-cleanup.json",
+      "bytes": 127,
+      "sha256": "ee1bafbffd746221fe85f5a1fe4827759412c07f94522d4909c54683f97f06ed"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-evidence/quality.log",
+      "bytes": 44916,
+      "sha256": "b4f8efb4803254a6472616837c9e109da3f08e755b117de6c6b68bc02cd76e7d"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-typed-generated-evidence/typed-check.json",
+      "bytes": 178,
+      "sha256": "c8b0d4ef2b5239e4912ba599476de0460e03c09d53d43fa2e980fdb30119461f"
+    }
+  ]
+}

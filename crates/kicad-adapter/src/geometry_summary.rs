@@ -144,7 +144,11 @@ impl GeometryObservation {
         let mut zones = Vec::new();
         for target in &self.context().zones {
             let id = target.source_uuid.as_str();
-            let zone = &self.live().native.zones()[id];
+            let native = self
+                .generated()
+                .map(|g| g.native())
+                .unwrap_or(&self.live().native);
+            let zone = &native.zones()[id];
             let (definition, reason) = match definition(zone, target.net.as_ref()) {
                 Ok(value) => (Some(value), None),
                 Err(reason) => (None, Some(reason)),
@@ -173,7 +177,11 @@ impl GeometryObservation {
                 .map(|w| w.value_nm);
             outlines.push(json!({"source_uuid":target.source_uuid,"lock_state":target.lock_state,"geometry":geometry,"unsupported_reason":reason,"width_nm":width,"definition_digest":digest(&persistent)?}));
         }
-        let summary = json!({"board_id":self.context().board_id,"observed_revision":self.context().revision.to_string(),"enabled_copper_layers":self.context().enabled_layers,"nets":self.context().nets,"zones":zones,"outlines":outlines,"definitions":RefillDefinitionEvidence::from_observation(self.live())?,"copper":self.live().text.filled_copper()?});
+        let mut summary = json!({"board_id":self.context().board_id,"observed_revision":self.context().revision.to_string(),"enabled_copper_layers":self.context().enabled_layers,"nets":self.context().nets,"zones":zones,"outlines":outlines,"definitions":RefillDefinitionEvidence::from_observation(self.live())?,"copper":self.live().text.filled_copper()?});
+        if let Some(generated) = self.generated() {
+            summary["generated"] = serde_json::to_value(generated.generated_correspondence())
+                .map_err(|e| e.to_string())?;
+        }
         if serde_json::to_vec(&summary)
             .map_err(|e| e.to_string())?
             .len()

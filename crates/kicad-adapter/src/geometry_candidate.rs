@@ -26,6 +26,8 @@ struct GeometryContent {
     native_definitions: String,
     board_definitions: String,
     copper: FilledCopperEvidence,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generated_digest: Option<String>,
 }
 
 /// Complete baseline content across editor instances; source/rule bindings remain separate.
@@ -33,7 +35,11 @@ struct GeometryContent {
 pub struct GeometryBaselineEvidence(GeometryContent);
 impl GeometryBaselineEvidence {
     pub fn capture(observed: &crate::geometry::GeometryObservation) -> Result<Self, String> {
-        Ok(Self(content(observed.live(), &BTreeMap::new())?))
+        let mut value = content(observed.live(), &BTreeMap::new())?;
+        if let Some(generated) = observed.generated().filter(|g| g.generated_count() > 0) {
+            value.generated_digest = Some(generated.generated_correspondence().content_digest()?);
+        }
+        Ok(Self(value))
     }
 }
 
@@ -44,6 +50,10 @@ pub struct GeometryCandidateEvidence {
     before: GeometryContent,
     after: GeometryContent,
     creations: Vec<GeometryCreationIdentity>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generated_before: Option<crate::live_geometry::GeneratedZoneCorrespondence>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generated_after: Option<crate::live_geometry::GeneratedZoneCorrespondence>,
 }
 
 fn digest(bytes: &[u8]) -> String {
@@ -105,6 +115,7 @@ fn content(
         native_definitions: digest(&bytes),
         board_definitions: projected.refill_definition_digest()?,
         copper: projected.filled_copper()?,
+        generated_digest: None,
     })
 }
 
@@ -122,8 +133,50 @@ impl GeometryCandidateEvidence {
         after: &LiveGeometryEvidence,
         independent: &ClosedRefillResult,
     ) -> Result<Self, String> {
+        if prepared
+            .generated_before()
+            .is_some_and(|g| g.generated_count() > 0)
+        {
+            return Err(
+                "generated content requires complete generated candidate verification".into(),
+            );
+        }
         prepared.verify_definitions(before_fill, receipts)?;
         VerifiedRefillContent::verify(before_fill, after, independent)?;
+        Self::from_verified(prepared, receipts, after, None)
+    }
+
+    /// Verify authored mutations and all generated content across refill and saved reload.
+    /// The caller must establish the actual saved reload preceding before_fill.
+    pub fn capture_generated(
+        prepared: &PreparedGeometryChange,
+        receipts: &GeometryMutationReceipts,
+        before_fill: &crate::teardrop_refill::TeardropRefillObservation,
+        filled: &crate::teardrop_refill::TeardropRefillObservation,
+        reloaded: &crate::teardrop_refill::TeardropRefillObservation,
+        independent: &ClosedRefillResult,
+    ) -> Result<Self, String> {
+        prepared.verify_generated_definitions_after_reload(before_fill, receipts)?;
+        crate::teardrop_refill::VerifiedTeardropRefill::verify(
+            before_fill,
+            filled,
+            reloaded,
+            independent,
+        )?;
+        Self::from_verified(
+            prepared,
+            receipts,
+            &reloaded.authored_geometry()?,
+            Some(reloaded),
+        )
+    }
+
+    fn from_verified(
+        prepared: &PreparedGeometryChange,
+        receipts: &GeometryMutationReceipts,
+        after: &LiveGeometryEvidence,
+        generated: Option<&crate::teardrop_refill::TeardropRefillObservation>,
+    ) -> Result<Self, String> {
         let mut creations = Vec::new();
         let zone_ids = prepared
             .compiled()
@@ -151,12 +204,45 @@ impl GeometryCandidateEvidence {
             }
         }
         let identities = creation_map(&creations)?;
+        let generated_before = prepared
+            .generated_before()
+            .filter(|g| g.generated_count() > 0)
+            .map(|g| g.generated_correspondence());
+        let generated_after = generated
+            .filter(|g| g.generated_count() > 0)
+            .map(|g| g.generated_correspondence());
+        let mut before = content(prepared.before(), &BTreeMap::new())?;
+        let mut after = content(after, &identities)?;
+        before.generated_digest = generated_before
+            .as_ref()
+            .map(|g| g.content_digest())
+            .transpose()?;
+        after.generated_digest = generated_after
+            .as_ref()
+            .map(|g| g.content_digest())
+            .transpose()?;
         Ok(Self {
             intent_digest: canonical_intent(prepared.compiled().request())?,
-            before: content(prepared.before(), &BTreeMap::new())?,
-            after: content(after, &identities)?,
+            before,
+            after,
             creations,
+            generated_before,
+            generated_after,
         })
+    }
+
+    pub fn generated_baseline(&self) -> Option<&crate::live_geometry::GeneratedZoneCorrespondence> {
+        self.generated_before.as_ref()
+    }
+
+    /// Return generated diagnostic identities separately from explicit creation receipts.
+    pub fn generated_mapping(&self, source: &Self) -> Result<BTreeMap<String, String>, String> {
+        self.equivalent_to(source)?;
+        match (&self.generated_after, &source.generated_after) {
+            (Some(a), Some(b)) => a.equivalent_to(b),
+            (None, None) => Ok(BTreeMap::new()),
+            _ => Err("generated candidate partitions differ".into()),
+        }
     }
 
     /// Return exact preview UUID to source UUID correspondence only after all complete content agrees.
@@ -225,11 +311,14 @@ mod tests {
             native_definitions: "native".into(),
             board_definitions: "text".into(),
             copper,
+            generated_digest: None,
         };
         GeometryCandidateEvidence {
             intent_digest: "intent".into(),
             before: content.clone(),
             after: content,
+            generated_before: None,
+            generated_after: None,
             creations: vec![GeometryCreationIdentity {
                 kind: "zone".into(),
                 logical_id: "new".into(),
@@ -246,7 +335,7 @@ mod tests {
             preview.equivalent_to(&source).unwrap(),
             BTreeMap::from([("preview".into(), "source".into())])
         );
-        for mode in 0..8 {
+        for mode in 0..10 {
             let mut changed = source.clone();
             match mode {
                 0 => changed.intent_digest.push('x'),
@@ -256,7 +345,9 @@ mod tests {
                 4 => changed.after.board_definitions.push('x'),
                 5 => changed.creations[0].kind = "outline".into(),
                 6 => changed.creations[0].logical_id = "other".into(),
-                _ => changed.creations.push(changed.creations[0].clone()),
+                7 => changed.creations.push(changed.creations[0].clone()),
+                8 => changed.before.generated_digest = Some("changed".into()),
+                _ => changed.after.generated_digest = Some("changed".into()),
             }
             assert!(preview.equivalent_to(&changed).is_err(), "{mode}");
         }

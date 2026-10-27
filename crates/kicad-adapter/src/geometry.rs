@@ -24,6 +24,7 @@ pub struct PreparedGeometryChange {
 #[derive(Clone, Debug)]
 pub struct GeometryObservation {
     live: LiveGeometryEvidence,
+    generated: Option<crate::teardrop_refill::TeardropRefillObservation>,
     context: GeometryContext,
     instance: InstanceToken,
     filename: String,
@@ -31,6 +32,9 @@ pub struct GeometryObservation {
 impl GeometryObservation {
     pub fn live(&self) -> &LiveGeometryEvidence {
         &self.live
+    }
+    pub fn generated(&self) -> Option<&crate::teardrop_refill::TeardropRefillObservation> {
+        self.generated.as_ref()
     }
     pub fn context(&self) -> &GeometryContext {
         &self.context
@@ -44,7 +48,12 @@ impl GeometryObservation {
         if filename != self.filename || client.instance_token() != Some(&self.instance) {
             return Err("geometry editor or document binding changed".into());
         }
-        let current = observe_context(client, filename, &self.context.board_id)?;
+        let current = observe_context_inner(
+            client,
+            filename,
+            &self.context.board_id,
+            self.generated.is_some(),
+        )?;
         if current.context.revision != self.context.revision || current.instance != self.instance {
             return Err("geometry composite observation changed before mutation".into());
         }
@@ -60,7 +69,34 @@ pub fn observe_context<T: KiCadTransport>(
     filename: &str,
     board_id: &StableId,
 ) -> Result<GeometryObservation, String> {
-    let before = observe_live_geometry(client, filename)?;
+    observe_context_inner(client, filename, board_id, false)
+}
+
+/// Observe complete generated regions alongside the authored view used by typed geometry.
+pub fn observe_generated_context<T: KiCadTransport>(
+    client: &mut KiCadClient<T>,
+    filename: &str,
+    board_id: &StableId,
+) -> Result<GeometryObservation, String> {
+    observe_context_inner(client, filename, board_id, true)
+}
+
+fn observe_context_inner<T: KiCadTransport>(
+    client: &mut KiCadClient<T>,
+    filename: &str,
+    board_id: &StableId,
+    generated: bool,
+) -> Result<GeometryObservation, String> {
+    let capture = |client: &mut KiCadClient<T>| -> Result<_, String> {
+        if generated {
+            let complete =
+                crate::teardrop_refill::TeardropRefillObservation::capture(client, filename)?;
+            Ok((complete.authored_geometry()?, Some(complete)))
+        } else {
+            Ok((observe_live_geometry(client, filename)?, None))
+        }
+    };
+    let (before, complete_before) = capture(client)?;
     let token = client
         .instance_token()
         .cloned()
@@ -81,7 +117,7 @@ pub fn observe_context<T: KiCadTransport>(
     )
     .map_err(|e| e.to_string())?;
     check_token(client)?;
-    let after = observe_live_geometry(client, filename)?;
+    let (after, complete_after) = capture(client)?;
     let repeated_nets = client.get_board_nets(filename).map_err(|e| e.to_string())?;
     check_token(client)?;
     let repeated_stackup = crate::board_stackup_observation(
@@ -98,6 +134,11 @@ pub fn observe_context<T: KiCadTransport>(
     if before.native != after.native || before.text.raw_text() != after.text.raw_text() {
         return Err("geometry changed during net/layer observation".into());
     }
+    if let (Some(a), Some(b)) = (&complete_before, &complete_after)
+        && (a.native() != b.native() || a.text().raw_text() != b.text().raw_text())
+    {
+        return Err("complete generated geometry changed during observation".into());
+    }
     let nets = nets
         .into_iter()
         .filter(|n| !n.name.is_empty())
@@ -107,7 +148,11 @@ pub fn observe_context<T: KiCadTransport>(
         })
         .collect();
     let mut zones = Vec::new();
-    for (id, zone) in before.native.zones() {
+    let full_native = complete_before
+        .as_ref()
+        .map(|o| o.native())
+        .unwrap_or(&before.native);
+    for (id, zone) in full_native.zones() {
         let mut payload = zone.clone();
         payload.filled = false;
         payload.filled_polygons.clear();
@@ -125,7 +170,9 @@ pub fn observe_context<T: KiCadTransport>(
         };
         zones.push(ObservedZoneTarget {
             source_uuid: StableId::new(id).map_err(|e| e.to_string())?,
-            lock_state: if before.text.zones()[id].locked {
+            lock_state: if !before.text.zones().contains_key(id) {
+                LockState::Unknown
+            } else if before.text.zones()[id].locked {
                 LockState::Locked
             } else {
                 LockState::Unlocked
@@ -143,6 +190,15 @@ pub fn observe_context<T: KiCadTransport>(
             token.as_str(),
             filename,
             outline_revision(&before)?,
+            complete_before
+                .as_ref()
+                .map(|o| {
+                    Ok::<_, String>((
+                        o.native().evidence_bytes().map_err(|e| e.to_string())?,
+                        o.text().raw_text(),
+                    ))
+                })
+                .transpose()?,
             &nets,
             &stackup,
         ))
@@ -159,6 +215,7 @@ pub fn observe_context<T: KiCadTransport>(
     };
     Ok(GeometryObservation {
         live: before,
+        generated: complete_before,
         context,
         instance: token,
         filename: filename.to_owned(),
@@ -246,7 +303,18 @@ impl PreparedGeometryChange {
     ) -> Result<GeometryMutationReceipts, String> {
         self.observation.verify_current(client, filename)?;
         let zones = match &self.zones {
-            Some(zones) => zones.apply_in_transaction(client, filename)?,
+            Some(zones) => {
+                if let Some(complete) = self.observation.generated() {
+                    zones.apply_with_observation(
+                        client,
+                        filename,
+                        self.before(),
+                        complete.native(),
+                    )?
+                } else {
+                    zones.apply_in_transaction(client, filename)?
+                }
+            }
             None => crate::zone_edits::SolidZoneMutationReceipts {
                 created: vec![],
                 updated: vec![],
@@ -286,8 +354,70 @@ impl PreparedGeometryChange {
         })
     }
 
+    pub fn generated_before(&self) -> Option<&crate::teardrop_refill::TeardropRefillObservation> {
+        self.observation.generated()
+    }
+
+    pub fn verify_generated_definitions(
+        &self,
+        after: &crate::teardrop_refill::TeardropRefillObservation,
+        receipts: &GeometryMutationReceipts,
+    ) -> Result<(), String> {
+        self.verify_complete_generated_definitions(after, receipts, false)
+    }
+
+    /// Caller must establish the same-editor saved reload; only complete generated UUID correspondence may differ.
+    pub fn verify_generated_definitions_after_reload(
+        &self,
+        after: &crate::teardrop_refill::TeardropRefillObservation,
+        receipts: &GeometryMutationReceipts,
+    ) -> Result<(), String> {
+        self.verify_complete_generated_definitions(after, receipts, true)
+    }
+
+    fn verify_complete_generated_definitions(
+        &self,
+        after: &crate::teardrop_refill::TeardropRefillObservation,
+        receipts: &GeometryMutationReceipts,
+        reloaded: bool,
+    ) -> Result<(), String> {
+        let before = self
+            .generated_before()
+            .ok_or("missing complete generated preparation")?;
+        if !before.same_binding(after) {
+            return Err(
+                "generated definition observations use different editors or documents".into(),
+            );
+        }
+        if !reloaded && before.generated_correspondence() != after.generated_correspondence() {
+            return Err(
+                "generated native identities or content changed during definition mutation".into(),
+            );
+        }
+        before
+            .generated_correspondence()
+            .equivalent_to(&after.generated_correspondence())?;
+        self.verify_authored_definitions(&after.authored_geometry()?, receipts)
+    }
+
     /// Verify complete native and unedited text definitions before refill, including after same-process reload.
     pub fn verify_definitions(
+        &self,
+        after: &LiveGeometryEvidence,
+        receipts: &GeometryMutationReceipts,
+    ) -> Result<(), String> {
+        if self
+            .generated_before()
+            .is_some_and(|g| g.generated_count() > 0)
+        {
+            return Err(
+                "complete generated definitions require generated preservation verification".into(),
+            );
+        }
+        self.verify_authored_definitions(after, receipts)
+    }
+
+    fn verify_authored_definitions(
         &self,
         after: &LiveGeometryEvidence,
         receipts: &GeometryMutationReceipts,

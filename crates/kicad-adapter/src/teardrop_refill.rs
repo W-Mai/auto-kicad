@@ -38,6 +38,29 @@ impl TeardropRefillObservation {
             identities,
         })
     }
+    pub(crate) fn same_binding(&self, other: &Self) -> bool {
+        self.instance == other.instance && self.filename == other.filename
+    }
+
+    /// Authored view for typed mutations; the complete observation must remain bound separately.
+    pub fn authored_geometry(&self) -> Result<crate::live_geometry::LiveGeometryEvidence, String> {
+        let ids = self
+            .identities
+            .iter()
+            .map(|id| id.native_uuid().to_owned())
+            .collect();
+        let native = self
+            .native
+            .authored_geometry(&ids)
+            .map_err(|e| e.to_string())?;
+        let text = self.text.authored().clone();
+        text.validate_native_zones(&native)?;
+        Ok(crate::live_geometry::LiveGeometryEvidence { native, text })
+    }
+    pub fn generated_count(&self) -> usize {
+        self.identities.len()
+    }
+
     pub fn generated_correspondence(&self) -> crate::live_geometry::GeneratedZoneCorrespondence {
         crate::live_geometry::GeneratedZoneCorrespondence::from_bound(self.identities.clone())
     }

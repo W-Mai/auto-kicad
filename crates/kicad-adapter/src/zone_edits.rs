@@ -228,6 +228,23 @@ impl PreparedSolidZoneEdits {
         filename: &str,
     ) -> Result<SolidZoneMutationReceipts, String> {
         let actual = observe_live_geometry(client, filename)?;
+        self.apply_with_observation(client, filename, &actual, &actual.native)
+    }
+
+    pub(crate) fn apply_with_observation<T: KiCadTransport>(
+        &self,
+        client: &mut KiCadClient<T>,
+        filename: &str,
+        actual: &LiveGeometryEvidence,
+        full_native: &kicad_ipc::NativeBoardGeometry,
+    ) -> Result<SolidZoneMutationReceipts, String> {
+        if client
+            .capture_board_geometry(filename)
+            .map_err(|e| e.to_string())?
+            != *full_native
+        {
+            return Err("complete native geometry changed before typed mutation".into());
+        }
         if actual.native != self.before.native
             || actual.text.raw_text() != self.before.text.raw_text()
         {
@@ -237,7 +254,7 @@ impl PreparedSolidZoneEdits {
             vec![]
         } else {
             client
-                .update_solid_zones(filename, &actual.native, &self.edits.updates)
+                .update_solid_zones(filename, full_native, &self.edits.updates)
                 .map_err(|e| e.to_string())?
         };
         let deleted = if self.edits.delete_ids.is_empty() {
