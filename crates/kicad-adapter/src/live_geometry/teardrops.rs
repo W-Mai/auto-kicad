@@ -38,10 +38,11 @@ impl TeardropIdentity {
 
 #[derive(Clone, Debug)]
 struct GeneratedText {
-    signature: Signature,
+    correspondence_key: String,
     definition_digest: String,
     content_digest: String,
     locked: bool,
+    default_generated_hatch: bool,
 }
 
 /// Keeps generated text separate from the complete remaining authored board.
@@ -239,10 +240,21 @@ impl TeardropTextPartition {
                 let mut hash = Sha256::new();
                 feed_zone_definition(&mut hash, text, node, &mut total_points)?;
                 let evidence = GeneratedText {
-                    signature: signature.clone(),
+                    correspondence_key: hash_bytes(
+                        &serde_json::to_vec(&signature).map_err(|e| e.to_string())?,
+                    ),
                     definition_digest: hex::encode(hash.finalize()),
                     content_digest: structural_digest(text, node),
                     locked,
+                    default_generated_hatch: match unique_form(node, "hatch")? {
+                        Some(hatch) => {
+                            let fields = items(hatch)?;
+                            fields.len() == 3
+                                && atom(&fields[1])? == "none"
+                                && atom(&fields[2])? == "0.1"
+                        }
+                        None => false,
+                    },
                 };
                 if generated.insert(signature, evidence).is_some() {
                     return Err("ambiguous generated teardrop correspondence".into());
@@ -280,6 +292,22 @@ impl TeardropTextPartition {
         &self.full_text_digest
     }
 
+    pub(crate) fn generated_content(&self) -> Result<BTreeMap<String, String>, String> {
+        self.generated
+            .values()
+            .map(|text| Ok((text.correspondence_key.clone(), text.content_digest.clone())))
+            .collect()
+    }
+
+    pub(crate) fn has_default_generated_hatch(&self, key: &str) -> Result<bool, String> {
+        for text in self.generated.values() {
+            if text.correspondence_key == key {
+                return Ok(text.default_generated_hatch);
+            }
+        }
+        Err("generated hatch correspondence missing".into())
+    }
+
     /// Pair generated text with complete native observations; UUID/parent projection is explicit in each digest.
     pub fn bind(&self, native: &NativeBoardGeometry) -> Result<Vec<TeardropIdentity>, String> {
         self.bind_zones(native.zones())
@@ -312,9 +340,7 @@ impl TeardropTextPartition {
                 payload.filled_polygons.clear();
                 identities.push(TeardropIdentity {
                     native_uuid: id.clone(),
-                    correspondence_key: hash_bytes(
-                        &serde_json::to_vec(&text.signature).map_err(|e| e.to_string())?,
-                    ),
+                    correspondence_key: text.correspondence_key.clone(),
                     kind: signature.kind,
                     layer: signature.layer,
                     net: signature.net,
@@ -390,6 +416,32 @@ mod tests {
         assert_ne!(
             partition.generated.values().next().unwrap().content_digest,
             changed.generated.values().next().unwrap().content_digest
+        );
+    }
+    #[test]
+    fn full_generated_result_keeps_mask_fill_flags_points_and_unknown_fields() {
+        let fill = "(filled_polygon (layer F.Mask) (island yes) (pts (xy 0 0) (xy 2 0) (xy 1 1)))";
+        let drop = DROP
+            .replace("F.Cu", "F.Mask")
+            .replace("(future 7)", &format!("(future 7) {fill}"));
+        let original = TeardropTextPartition::parse(&board(&drop)).unwrap();
+        for (from, to) in [
+            ("future 7", "future 8"),
+            ("(island yes)", ""),
+            ("(layer F.Mask)", "(layer B.Mask)"),
+            ("xy 2 0", "xy 2.000001 0"),
+        ] {
+            let changed = TeardropTextPartition::parse(&board(&drop.replace(from, to))).unwrap();
+            assert_ne!(original.generated_content(), changed.generated_content());
+        }
+        let moved = board(&drop)
+            .replace(&drop, "")
+            .replace("(version 20260206)", &format!("(version 20260206) {drop}"));
+        assert_eq!(
+            original.generated_content(),
+            TeardropTextPartition::parse(&moved)
+                .unwrap()
+                .generated_content()
         );
     }
     #[test]

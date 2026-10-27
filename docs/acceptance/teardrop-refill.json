@@ -1,0 +1,271 @@
+{
+  "kicad_version": "10.0.7",
+  "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-teardrop-refill-verified",
+  "scope": "Complete generated refill content and reload, not public MCP or electrical acceptance",
+  "proofs": [
+    {
+      "stage": 0,
+      "proof": {
+        "authored_definition_digest": "5662fa16759c5979c82cf4ef313f45dd965b8e2dc0a6680356739ee9ea2b8aa6",
+        "authored_native_definition_digest": "fbcf82134d9904515b752439b7598e4dafb2334bd7c1c85b9f0630960f6479f9",
+        "generated_content": {
+          "028c482da05cf0da877a4ae7dd9c21b441078c2f8686f288877a8c66f7f50117": "1904d0b352759c11d26ddc94dc41262cb0ac1f05690484c4890232273ef62c5d",
+          "0dad31506c39d5d9c5469b8bad8614f61933569bf31a9e16879c33425cb4a51c": "725f3741aecec91fecde52e37775de85f6c715033a84993230268eed7eac5d1e",
+          "24aefdd36a37d79248191521ebb4d2e72e60704425c7a53159a688002eae26dc": "c485fa01df4f6ee6d7673bd8ade8124e2382a62131b6fcdcc299b10ca5262fb0",
+          "306dcd1bcc06a65294f2da303b912c5bd597a68ff0ab96279e60325f24766544": "792cd560aac84acfaaeb13a4ab5c86db760b6ebd0b23ba4eae2bf0cd238967cd",
+          "34873df3b07b453d8e13b0532539dbdc4b44427ef7a798874c78f30081532e56": "a06b43e279e1b12bdb64e7e345c3e7453ce92da9fdbcfbc1c4956415872ea1e9",
+          "853f7b7ede0dd974e4b036617967b908fb5196bc2ee574e9401678d7f4e21e9c": "3516efadd826fcd32aef898f0cd6234a550e6053df159c7fc7473e3127123353",
+          "c1d3f7f278889e7508e712d70b008c5794f808c124b6684e8919dca046b0c2a5": "1d5fe915af250f857523019a225d07ce0178ee47241b9f3881958d1ed3e52e98",
+          "ee3c3860d2aa0f92f8fd60f5b5959c16ad43b77da4d638b72e8e36bcf57a9b5d": "95b3855737d260905cd123b1e98248e89734cf4e91f2628439395fb676bffd33",
+          "f41171720d23241ab161e772d7e50a6ded323f34ea29d299488cab9b5be97ddf": "890e0aba658dacdbcde0ee42a7daf9c2de792cff1cd4da66b25d56e705b7bf5c",
+          "fea942155083c2728a2a6d76af5f3ba20397b70f11b09a250277654f8a1f53c8": "42ca28ab7bb42fe3e87e74de16dffc05a7de8e466771b561c209d58ea015337c"
+        },
+        "independent_output_sha256": "b302f46622742c129c161c8e09898d43f8260f357bab534adc0ffe76cd2b0d4a",
+        "ordinary_copper": {
+          "digest": "ae670083f17b49a83ae634e348412d81850aa5fc681ee6c706e7acdfabb43502",
+          "point_count": 924,
+          "polygon_count": 3,
+          "zone_count": 3
+        },
+        "reload_identities": [
+          {
+            "after_uuid": "9a996f18-37d3-4b56-80e8-bd5a134ec76c",
+            "before_uuid": "d01c8ae8-bcf0-0910-1c76-29a12f929216",
+            "correspondence_key": "028c482da05cf0da877a4ae7dd9c21b441078c2f8686f288877a8c66f7f50117",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "152036e7-4df0-4f88-91e0-2365ccee3373",
+            "before_uuid": "346b7693-f53a-025e-2e5a-53b812b2ec83",
+            "correspondence_key": "0dad31506c39d5d9c5469b8bad8614f61933569bf31a9e16879c33425cb4a51c",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "bb523b6a-cd78-4b2b-a6cd-7e80cb393f6e",
+            "before_uuid": "346b7693-f53a-025e-2e5a-53b812b2ec82",
+            "correspondence_key": "24aefdd36a37d79248191521ebb4d2e72e60704425c7a53159a688002eae26dc",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "a54b02b7-a175-4ca1-a075-a0106795ef2b",
+            "before_uuid": "63c60705-b489-0fb3-3d5e-1c3c6511314c",
+            "correspondence_key": "306dcd1bcc06a65294f2da303b912c5bd597a68ff0ab96279e60325f24766544",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "4a1b52ea-bb28-4281-8283-4a32df629a6f",
+            "before_uuid": "0354172f-f6da-05f6-1922-522325f28b9f",
+            "correspondence_key": "34873df3b07b453d8e13b0532539dbdc4b44427ef7a798874c78f30081532e56",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "8e150c06-75ff-46b3-8314-6f406398947a",
+            "before_uuid": "63c60705-b489-0fb3-3d5e-1c3c6511314d",
+            "correspondence_key": "853f7b7ede0dd974e4b036617967b908fb5196bc2ee574e9401678d7f4e21e9c",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "deb2e862-1035-42a1-9d61-c90de90a64e7",
+            "before_uuid": "0354172f-f6da-05f6-1922-522325f28b9e",
+            "correspondence_key": "c1d3f7f278889e7508e712d70b008c5794f808c124b6684e8919dca046b0c2a5",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "0105c6d2-d256-404a-b070-32bde4d5c803",
+            "before_uuid": "d01c8ae8-bcf0-0910-1c76-29a12f929215",
+            "correspondence_key": "ee3c3860d2aa0f92f8fd60f5b5959c16ad43b77da4d638b72e8e36bcf57a9b5d",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "f13d9214-3673-4c27-bad2-4e3c90cc6437",
+            "before_uuid": "47454ecc-1537-01ce-0d7d-71cbfd1e5b08",
+            "correspondence_key": "f41171720d23241ab161e772d7e50a6ded323f34ea29d299488cab9b5be97ddf",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "f8d7fe1c-5b3d-4abd-a18b-0e240b86cb67",
+            "before_uuid": "47454ecc-1537-01ce-0d7d-71cbfd1e5b07",
+            "correspondence_key": "fea942155083c2728a2a6d76af5f3ba20397b70f11b09a250277654f8a1f53c8",
+            "invisible_to_solid_border": true
+          }
+        ],
+        "saved_input_sha256": "b302f46622742c129c161c8e09898d43f8260f357bab534adc0ffe76cd2b0d4a"
+      }
+    },
+    {
+      "stage": 1,
+      "proof": {
+        "authored_definition_digest": "5662fa16759c5979c82cf4ef313f45dd965b8e2dc0a6680356739ee9ea2b8aa6",
+        "authored_native_definition_digest": "fbcf82134d9904515b752439b7598e4dafb2334bd7c1c85b9f0630960f6479f9",
+        "generated_content": {
+          "028c482da05cf0da877a4ae7dd9c21b441078c2f8686f288877a8c66f7f50117": "1904d0b352759c11d26ddc94dc41262cb0ac1f05690484c4890232273ef62c5d",
+          "0dad31506c39d5d9c5469b8bad8614f61933569bf31a9e16879c33425cb4a51c": "725f3741aecec91fecde52e37775de85f6c715033a84993230268eed7eac5d1e",
+          "24aefdd36a37d79248191521ebb4d2e72e60704425c7a53159a688002eae26dc": "c485fa01df4f6ee6d7673bd8ade8124e2382a62131b6fcdcc299b10ca5262fb0",
+          "306dcd1bcc06a65294f2da303b912c5bd597a68ff0ab96279e60325f24766544": "792cd560aac84acfaaeb13a4ab5c86db760b6ebd0b23ba4eae2bf0cd238967cd",
+          "34873df3b07b453d8e13b0532539dbdc4b44427ef7a798874c78f30081532e56": "a06b43e279e1b12bdb64e7e345c3e7453ce92da9fdbcfbc1c4956415872ea1e9",
+          "853f7b7ede0dd974e4b036617967b908fb5196bc2ee574e9401678d7f4e21e9c": "3516efadd826fcd32aef898f0cd6234a550e6053df159c7fc7473e3127123353",
+          "c1d3f7f278889e7508e712d70b008c5794f808c124b6684e8919dca046b0c2a5": "1d5fe915af250f857523019a225d07ce0178ee47241b9f3881958d1ed3e52e98",
+          "ee3c3860d2aa0f92f8fd60f5b5959c16ad43b77da4d638b72e8e36bcf57a9b5d": "95b3855737d260905cd123b1e98248e89734cf4e91f2628439395fb676bffd33",
+          "f41171720d23241ab161e772d7e50a6ded323f34ea29d299488cab9b5be97ddf": "890e0aba658dacdbcde0ee42a7daf9c2de792cff1cd4da66b25d56e705b7bf5c",
+          "fea942155083c2728a2a6d76af5f3ba20397b70f11b09a250277654f8a1f53c8": "42ca28ab7bb42fe3e87e74de16dffc05a7de8e466771b561c209d58ea015337c"
+        },
+        "independent_output_sha256": "b302f46622742c129c161c8e09898d43f8260f357bab534adc0ffe76cd2b0d4a",
+        "ordinary_copper": {
+          "digest": "ae670083f17b49a83ae634e348412d81850aa5fc681ee6c706e7acdfabb43502",
+          "point_count": 924,
+          "polygon_count": 3,
+          "zone_count": 3
+        },
+        "reload_identities": [
+          {
+            "after_uuid": "6c204479-34b3-41c1-b4be-cf5b53627540",
+            "before_uuid": "d01c8ae8-bcf0-0910-1c76-29a12f929216",
+            "correspondence_key": "028c482da05cf0da877a4ae7dd9c21b441078c2f8686f288877a8c66f7f50117",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "ce4dd018-0036-4b8a-913b-0707a07f9b50",
+            "before_uuid": "346b7693-f53a-025e-2e5a-53b812b2ec83",
+            "correspondence_key": "0dad31506c39d5d9c5469b8bad8614f61933569bf31a9e16879c33425cb4a51c",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "f1d3da76-a338-4c24-83df-13930bdd96a8",
+            "before_uuid": "346b7693-f53a-025e-2e5a-53b812b2ec82",
+            "correspondence_key": "24aefdd36a37d79248191521ebb4d2e72e60704425c7a53159a688002eae26dc",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "08ab0891-44f8-4d11-806c-111069f9dae7",
+            "before_uuid": "63c60705-b489-0fb3-3d5e-1c3c6511314c",
+            "correspondence_key": "306dcd1bcc06a65294f2da303b912c5bd597a68ff0ab96279e60325f24766544",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "e00d70ad-66cf-449d-a674-124c35525360",
+            "before_uuid": "0354172f-f6da-05f6-1922-522325f28b9f",
+            "correspondence_key": "34873df3b07b453d8e13b0532539dbdc4b44427ef7a798874c78f30081532e56",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "deb625e1-4355-4270-b2be-679568c46eba",
+            "before_uuid": "63c60705-b489-0fb3-3d5e-1c3c6511314d",
+            "correspondence_key": "853f7b7ede0dd974e4b036617967b908fb5196bc2ee574e9401678d7f4e21e9c",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "880c41ec-e2bf-4981-883b-acbc6703a845",
+            "before_uuid": "0354172f-f6da-05f6-1922-522325f28b9e",
+            "correspondence_key": "c1d3f7f278889e7508e712d70b008c5794f808c124b6684e8919dca046b0c2a5",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "6d01fdc0-c7ee-4f9d-a805-1300b0669cbd",
+            "before_uuid": "d01c8ae8-bcf0-0910-1c76-29a12f929215",
+            "correspondence_key": "ee3c3860d2aa0f92f8fd60f5b5959c16ad43b77da4d638b72e8e36bcf57a9b5d",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "08263356-c970-4d30-b990-c863a6bb9df8",
+            "before_uuid": "47454ecc-1537-01ce-0d7d-71cbfd1e5b08",
+            "correspondence_key": "f41171720d23241ab161e772d7e50a6ded323f34ea29d299488cab9b5be97ddf",
+            "invisible_to_solid_border": true
+          },
+          {
+            "after_uuid": "abce863e-4c72-4ef3-8813-3b9a25916d50",
+            "before_uuid": "47454ecc-1537-01ce-0d7d-71cbfd1e5b07",
+            "correspondence_key": "fea942155083c2728a2a6d76af5f3ba20397b70f11b09a250277654f8a1f53c8",
+            "invisible_to_solid_border": true
+          }
+        ],
+        "saved_input_sha256": "b302f46622742c129c161c8e09898d43f8260f357bab534adc0ffe76cd2b0d4a"
+      }
+    }
+  ],
+  "generated_kind_layer_counts": {
+    "padvia:BL_F_Cu": 2,
+    "padvia:BL_F_Mask": 2,
+    "track_end:BL_F_Cu": 1,
+    "track_end:BL_F_Mask": 1,
+    "track_end:BL_B_Cu": 1,
+    "track_end:BL_B_Mask": 1,
+    "padvia:BL_B_Cu": 1,
+    "padvia:BL_B_Mask": 1
+  },
+  "independent_native_reader": {
+    "passed": true,
+    "read_only": true,
+    "stages": 2,
+    "generated_per_stage": 10,
+    "scope": "Complete generated geometry and supported settings; SWIG does not expose subtype enum"
+  },
+  "ordinary_regression": {
+    "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-teardrop-ordinary-regression",
+    "result": {
+      "cancellation_tested": false,
+      "complete_definitions_preserved": true,
+      "full_copper_equivalence": true,
+      "independent_cli_preserved": true,
+      "kicad_version": "10.0.7",
+      "locked_zone_count": 1,
+      "native_reload_preserved": true,
+      "pid": 97951,
+      "repeated_fill_preserved": true,
+      "scope": "native dispatch plus full definition/copper verification; GUI cancellation, DRC delta, teardrop regeneration and MCP acceptance remain separate",
+      "settled_project_unchanged": true,
+      "unfilled_negative_control_rejected": true,
+      "zone_count": 3
+    },
+    "cleanup": {
+      "owned_editor_closed": true,
+      "owned_pid": 97951,
+      "source_files_unchanged": true
+    }
+  },
+  "cleanup": {
+    "closed": true,
+    "failure": null,
+    "passed": true,
+    "pid": 92599,
+    "source_unchanged": true
+  },
+  "quality": {
+    "passed": 463,
+    "ignored": 15,
+    "fmt": true,
+    "clippy_warnings_denied": true
+  },
+  "artifact_sha256": {
+    "stage-1-reload.kicad_pcb": "3318f163fe69a01490549a768f8014e827d95d365c6b428b4146fd493ed6bdd9",
+    "stage-0.kicad_pcb": "b302f46622742c129c161c8e09898d43f8260f357bab534adc0ffe76cd2b0d4a",
+    "stage-0-after.kicad_pcb": "18302f49e2fc412c7f2c9f338e20450ff6ee49058f25dfa3328d3eedc9430600",
+    "acceptance.json": "4884dcecf028f5231df4b07f3de98ea92fb3215555b425bd7007d8527374e191",
+    "stage-1.kicad_pcb": "b302f46622742c129c161c8e09898d43f8260f357bab534adc0ffe76cd2b0d4a",
+    "stage-0-reload.kicad_pcb": "defa9d14fc9fd75689a86a308888265673d2e3cfe34254c6ac07daa2f51fc880",
+    "stage-0-cli.kicad_pcb": "b302f46622742c129c161c8e09898d43f8260f357bab534adc0ffe76cd2b0d4a",
+    "stage-1-after.kicad_pcb": "18302f49e2fc412c7f2c9f338e20450ff6ee49058f25dfa3328d3eedc9430600",
+    "cleanup.json": "6798b2505a6ee7ff109c3830bc162990d58e72532091ae370f84bfb5f48eb8e5",
+    "zone-10.0.7.cpp": "337d88619dd28ca3ba2b99a80f79daacc0a7124e4ece4c535467dcf135e7494c",
+    "stage-1-before.kicad_pcb": "defa9d14fc9fd75689a86a308888265673d2e3cfe34254c6ac07daa2f51fc880",
+    "stage-0.kicad_pro": "b3e0525c249608e87b31779ecdab57b1b1df980d05f79f1084d4f8d9ac62dd41",
+    "independent-saved.json": "decd1bb481567cc9d74ee1b2799eb16ed2535746ef796b6f64c44c3d0526aafc",
+    "stage-1-cli.kicad_pcb": "b302f46622742c129c161c8e09898d43f8260f357bab534adc0ffe76cd2b0d4a",
+    "owned.json": "fe51b95d2e0bae426e71badcd03604882326423b786f321482a13951edc2566d",
+    "stage-0-before.kicad_pcb": "b98d05e12e01cd449480350e36d9add4d3e5c401189d093a3933149c4117131f",
+    "stage-1.kicad_pro": "b3e0525c249608e87b31779ecdab57b1b1df980d05f79f1084d4f8d9ac62dd41"
+  },
+  "owned_pids_verified_absent": [
+    83110,
+    85491,
+    92599,
+    97951
+  ],
+  "retained_failures": [
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-teardrop-refill-full",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-teardrop-refill-diagnosis"
+  ],
+  "upstream_border": {
+    "url": "https://raw.githubusercontent.com/KiCad/kicad-source-mirror/10.0.7/pcbnew/zone.cpp",
+    "sha256": "337d88619dd28ca3ba2b99a80f79daacc0a7124e4ece4c535467dcf135e7494c"
+  }
+}

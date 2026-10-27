@@ -3,6 +3,7 @@ pub mod geometry_candidate;
 mod geometry_native;
 mod geometry_summary;
 pub mod refill_verification;
+pub mod teardrop_refill;
 pub mod zone_edits;
 use kicad_engine::{
     MAX_BOARD_POSITION_NM, MAX_GRAPHIC_BOUNDING_AREA_NM2, MAX_GRAPHIC_SPAN_NM, Operation,

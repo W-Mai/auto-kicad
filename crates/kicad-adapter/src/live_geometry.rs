@@ -759,6 +759,16 @@ pub fn observe_live_geometry<T: KiCadTransport>(
     client: &mut KiCadClient<T>,
     filename: &str,
 ) -> Result<LiveGeometryEvidence, String> {
+    let (native, text) = capture_geometry_text(client, filename)?;
+    let text = LiveBoardText::parse(&text)?;
+    text.validate_native_zones(&native)?;
+    Ok(LiveGeometryEvidence { native, text })
+}
+
+pub(crate) fn capture_geometry_text<T: KiCadTransport>(
+    client: &mut KiCadClient<T>,
+    filename: &str,
+) -> Result<(NativeBoardGeometry, String), String> {
     let token = client
         .instance_token()
         .cloned()
@@ -798,9 +808,7 @@ pub fn observe_live_geometry<T: KiCadTransport>(
     {
         return Err("live geometry, locks or document changed during observation".into());
     }
-    let text = LiveBoardText::parse(&text)?;
-    text.validate_native_zones(&native)?;
-    Ok(LiveGeometryEvidence { native, text })
+    Ok((native, text))
 }
 
 #[cfg(test)]
