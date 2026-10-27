@@ -1,7 +1,8 @@
 //! Complete native geometry evidence, approved execution and saved verification.
 use crate::{DiscoveryService, IpcDiscoveryService, digest_bytes};
 use kicad_adapter::{
-    LiveBoardObservation, geometry::observe_context, routing_rules::read_saved_routing_rules,
+    LiveBoardObservation, geometry::observe_generated_context,
+    routing_rules::read_saved_routing_rules,
 };
 use kicad_ipc::{ClientConfig, KiCadClient, NngTransport};
 use serde_json::{Value, json};
@@ -26,7 +27,7 @@ pub(crate) fn inspect(endpoint: &str, source: &LiveBoardObservation) -> Result<V
         return Err("editor identity changed before geometry inspection".into());
     }
     let saved = read_saved_routing_rules(&source.board_path)?;
-    let observed = observe_context(&mut client, &source.board_filename, board)?;
+    let observed = observe_generated_context(&mut client, &source.board_filename, board)?;
     let mut summary = observed.summary()?;
     let fresh = IpcDiscoveryService.live_board_observation(endpoint, None)?;
     if fresh != *source || read_saved_routing_rules(&source.board_path)? != saved {
@@ -61,6 +62,7 @@ use serde::Serialize;
 pub struct GeometryPlanningEvidence {
     pub context: GeometryContext,
     pub baseline: GeometryBaselineEvidence,
+    pub library_context: Option<kicad_adapter::library_catalog::NativeDrcLibraries>,
     pub saved: SavedRoutingRules,
     pub rules: Vec<RoutingRuleEvidence>,
     pub source_evidence: RevisionDigest,
@@ -95,6 +97,15 @@ pub(super) fn prepare(
     source: &LiveBoardObservation,
     request: &GeometryRequest,
 ) -> Result<GeometryPlanningEvidence, String> {
+    prepare_with_library_context(endpoint, source, request, None)
+}
+
+fn prepare_with_library_context(
+    endpoint: &str,
+    source: &LiveBoardObservation,
+    request: &GeometryRequest,
+    reference: Option<&kicad_adapter::library_catalog::NativeDrcLibraries>,
+) -> Result<GeometryPlanningEvidence, String> {
     if serde_json::to_vec(request)
         .map_err(|e| e.to_string())?
         .len()
@@ -110,9 +121,21 @@ pub(super) fn prepare(
         .as_ref()
         .ok_or("missing board identity")?;
     let saved = read_saved_routing_rules(&source.board_path)?;
-    let observed = observe_context(&mut client, &source.board_filename, board)?;
+    let observed = observe_generated_context(&mut client, &source.board_filename, board)?;
     let prepared = observed.prepare(request)?;
     let baseline = GeometryBaselineEvidence::capture(&observed)?;
+    let library_context = if observed
+        .generated()
+        .is_some_and(|g| g.generated_count() > 0)
+    {
+        Some(crate::geometry_drc::libraries(
+            &mut client,
+            source,
+            reference,
+        )?)
+    } else {
+        None
+    };
     let mut named_nets = prepared.compiled().affected_nets().to_vec();
     named_nets.sort_by(|a, b| a.name.cmp(&b.name));
     let ids = named_nets
@@ -133,6 +156,7 @@ pub(super) fn prepare(
         &serde_json::to_vec(&(
             observed.context(),
             &baseline,
+            &library_context,
             &saved,
             &rules,
             &source.snapshot,
@@ -142,6 +166,7 @@ pub(super) fn prepare(
     Ok(GeometryPlanningEvidence {
         context: observed.context().clone(),
         baseline,
+        library_context,
         saved,
         rules,
         source_evidence,
@@ -186,6 +211,11 @@ fn equivalent_rules(a: &GeometryPlanningEvidence, b: &GeometryPlanningEvidence) 
         a.present == b.present && a.digest == b.digest && a.size == b.size
     };
     a.baseline == b.baseline
+        && match (&a.library_context, &b.library_context) {
+            (None, None) => true,
+            (Some(a), Some(b)) => a.equivalent_to(b),
+            _ => false,
+        }
         && a.saved.constraints == b.saved.constraints
         && file(&a.saved.project, &b.saved.project)
         && file(&a.saved.custom_rules, &b.saved.custom_rules)
@@ -208,25 +238,52 @@ pub struct GeometryExecution {
     pub after: kicad_checks::CompleteDrcReport,
     pub delta: kicad_checks::BaselineDelta,
     pub creation_map: std::collections::BTreeMap<String, String>,
+    pub baseline_map: std::collections::BTreeMap<String, String>,
+    pub diagnostic_map: std::collections::BTreeMap<String, String>,
+    pub baseline_drc_input: Option<crate::geometry_drc::PrivateDrcEvidence>,
+    pub after_drc_input: Option<crate::geometry_drc::PrivateDrcEvidence>,
 }
 
 fn drc(
+    client: &mut KiCadClient<NngTransport>,
     source: &LiveBoardObservation,
+    observed: &kicad_adapter::teardrop_refill::TeardropRefillObservation,
+    libraries: Option<&kicad_adapter::library_catalog::NativeDrcLibraries>,
     timeout: std::time::Duration,
-) -> Result<kicad_checks::CompleteDrcReport, String> {
+) -> Result<
+    (
+        kicad_checks::CompleteDrcReport,
+        Option<crate::geometry_drc::PrivateDrcEvidence>,
+    ),
+    String,
+> {
     let policy = kicad_checks::DrcPolicy {
         allowed_root: source.project_dir.clone(),
         timeout,
     };
-    let report = kicad_checks::run_pcb_drc_complete(&source.board_path, &policy)
-        .map_err(|error| format!("geometry DRC unavailable: {error:?}"))?;
+    let (report, input) = if observed.generated_count() > 0 {
+        let (report, input) = crate::geometry_drc::run(
+            client,
+            source,
+            observed,
+            libraries.ok_or("missing generated DRC library context")?,
+            timeout,
+        )?;
+        (report, Some(input))
+    } else {
+        (
+            kicad_checks::run_pcb_drc_complete(&source.board_path, &policy)
+                .map_err(|error| format!("geometry DRC unavailable: {error:?}"))?,
+            None,
+        )
+    };
     if report.normalized().kicad_version != source.snapshot.kicad_version
         || source.board_path.file_name().and_then(|name| name.to_str())
             != Some(report.normalized().source.as_str())
     {
         return Err("geometry DRC version or source differs from bound editor".into());
     }
-    Ok(report)
+    Ok((report, input))
 }
 
 /// After beginning a native transaction, any unverified outcome requires manual recovery.
@@ -240,12 +297,14 @@ pub(super) fn execute(
     timeout: std::time::Duration,
 ) -> Result<GeometryExecution, kicad_adapter::BoardGraphicsCommitOutcome> {
     use kicad_adapter::{
-        BoardGraphicsCommitOutcome,
-        live_geometry::{RefillDefinitionEvidence, observe_live_geometry},
+        BoardGraphicsCommitOutcome, live_geometry::RefillDefinitionEvidence,
+        teardrop_refill::TeardropRefillObservation,
     };
     let reject = |reason: String| BoardGraphicsCommitOutcome::Rejected { reason };
     let unknown = |reason: String| BoardGraphicsCommitOutcome::Unknown { reason };
-    let current = prepare(endpoint, source, request).map_err(reject)?;
+    let current =
+        prepare_with_library_context(endpoint, source, request, expected.library_context.as_ref())
+            .map_err(reject)?;
     if &current != expected {
         return Err(reject(
             "complete geometry evidence changed before execution".into(),
@@ -266,7 +325,7 @@ pub(super) fn execute(
         .as_ref()
         .ok_or_else(|| reject("missing board identity".into()))?;
     let filename = &source.board_filename;
-    let observed = observe_context(&mut client, filename, board).map_err(reject)?;
+    let observed = observe_generated_context(&mut client, filename, board).map_err(reject)?;
     let prepared = observed.prepare(request).map_err(reject)?;
     let items = client
         .capture_existing_board_items(filename)
@@ -289,18 +348,41 @@ pub(super) fn execute(
     let files = crate::shadow_source_fingerprint(&source.board_path);
     let protected =
         crate::existing_footprint::protected_files(&source.board_path).map_err(reject)?;
-    let baseline = drc(source, timeout).map_err(reject)?;
+    let initial = observed
+        .generated()
+        .ok_or_else(|| reject("complete geometry observation missing".into()))?;
+    let (baseline, baseline_drc_input) = drc(
+        &mut client,
+        source,
+        initial,
+        expected.library_context.as_ref(),
+        timeout,
+    )
+    .map_err(reject)?;
+    let baseline_map = if let Some(approved) = approved {
+        match approved.candidate.generated_baseline() {
+            Some(before) => before
+                .equivalent_to(&initial.generated_correspondence())
+                .map_err(reject)?,
+            None if initial.generated_count() == 0 => std::collections::BTreeMap::new(),
+            None => return Err(reject("approved generated baseline missing".into())),
+        }
+    } else {
+        std::collections::BTreeMap::new()
+    };
     if let Some(approved) = approved
         && !approved
             .baseline
-            .equivalent_to(&baseline, &std::collections::BTreeMap::new())
+            .equivalent_to(&baseline, &baseline_map)
             .map_err(|e| reject(e.to_string()))?
     {
         return Err(reject(
             "source DRC differs from approved preview baseline".into(),
         ));
     }
-    if prepare(endpoint, source, request).map_err(reject)? != *expected
+    if prepare_with_library_context(endpoint, source, request, expected.library_context.as_ref())
+        .map_err(reject)?
+        != *expected
         || crate::shadow_source_fingerprint(&source.board_path) != files
         || crate::existing_footprint::protected_files(&source.board_path).map_err(reject)?
             != protected
@@ -318,9 +400,9 @@ pub(super) fn execute(
     client
         .commit_changes(&transaction, "Apply approved geometry definitions")
         .map_err(|e| unknown(e.to_string()))?;
-    let mutated = observe_live_geometry(&mut client, filename).map_err(unknown)?;
+    let mutated = TeardropRefillObservation::capture(&mut client, filename).map_err(unknown)?;
     prepared
-        .verify_definitions(&mutated, &receipts)
+        .verify_generated_definitions(&mutated, &receipts)
         .map_err(unknown)?;
     client
         .save_board(filename)
@@ -328,9 +410,9 @@ pub(super) fn execute(
     client
         .revert_board(filename)
         .map_err(|e| unknown(e.to_string()))?;
-    let before_fill = observe_live_geometry(&mut client, filename).map_err(unknown)?;
+    let before_fill = TeardropRefillObservation::capture(&mut client, filename).map_err(unknown)?;
     prepared
-        .verify_definitions(&before_fill, &receipts)
+        .verify_generated_definitions_after_reload(&before_fill, &receipts)
         .map_err(unknown)?;
     if request.refill == kicad_model::geometry::RefillMode::All {
         client = match client.request_zone_refill(filename) {
@@ -348,9 +430,13 @@ pub(super) fn execute(
             }
         };
     }
-    let filled = observe_live_geometry(&mut client, filename).map_err(unknown)?;
-    if RefillDefinitionEvidence::from_observation(&before_fill).map_err(unknown)?
-        != RefillDefinitionEvidence::from_observation(&filled).map_err(unknown)?
+    let filled = TeardropRefillObservation::capture(&mut client, filename).map_err(unknown)?;
+    if RefillDefinitionEvidence::from_observation(
+        &before_fill.authored_geometry().map_err(unknown)?,
+    )
+    .map_err(unknown)?
+        != RefillDefinitionEvidence::from_observation(&filled.authored_geometry().map_err(unknown)?)
+            .map_err(unknown)?
     {
         return Err(unknown("refill changed geometry definitions".into()));
     }
@@ -361,17 +447,18 @@ pub(super) fn execute(
         .revert_board(filename)
         .map_err(|e| unknown(e.to_string()))?;
     let saved_files = crate::shadow_source_fingerprint(&source.board_path);
-    let reloaded = observe_live_geometry(&mut client, filename).map_err(unknown)?;
+    let reloaded = TeardropRefillObservation::capture(&mut client, filename).map_err(unknown)?;
     let policy = kicad_checks::DrcPolicy {
         allowed_root: source.project_dir.clone(),
         timeout,
     };
     let independent = kicad_checks::refill::refill_closed_copy(&source.board_path, &policy)
         .map_err(|e| unknown(format!("independent copper verification failed: {e:?}")))?;
-    let candidate = GeometryCandidateEvidence::capture(
+    let candidate = GeometryCandidateEvidence::capture_generated(
         &prepared,
         &receipts,
         &before_fill,
+        &filled,
         &reloaded,
         &independent,
     )
@@ -386,6 +473,12 @@ pub(super) fn execute(
         .transpose()
         .map_err(unknown)?
         .unwrap_or_default();
+    let generated_map = approved
+        .map(|a| a.candidate.generated_mapping(&candidate))
+        .transpose()
+        .map_err(unknown)?
+        .unwrap_or_default();
+    let diagnostic_map = merge_diagnostic_maps(&creation_map, &generated_map).map_err(unknown)?;
     let removed = prepared
         .compiled()
         .outline()
@@ -452,7 +545,14 @@ pub(super) fn execute(
             "geometry split connectivity or merged pads outside affected named nets".into(),
         ));
     }
-    let after = drc(source, timeout).map_err(unknown)?;
+    let (after, after_drc_input) = drc(
+        &mut client,
+        source,
+        &reloaded,
+        expected.library_context.as_ref(),
+        timeout,
+    )
+    .map_err(unknown)?;
     let delta = kicad_checks::compare_drc(baseline.normalized(), after.normalized());
     if !delta.introduced.is_empty()
         || after.normalized().unconnected_items > baseline.normalized().unconnected_items
@@ -464,12 +564,13 @@ pub(super) fn execute(
     if let Some(approved) = approved
         && !approved
             .after
-            .equivalent_to(&after, &creation_map)
+            .equivalent_to(&after, &diagnostic_map)
             .map_err(|e| unknown(e.to_string()))?
     {
         return Err(unknown("source DRC differs from approved candidate".into()));
     }
-    let final_geometry = observe_context(&mut client, filename, board).map_err(unknown)?;
+    let final_geometry =
+        observe_generated_context(&mut client, filename, board).map_err(unknown)?;
     let observation = IpcDiscoveryService
         .live_board_observation(endpoint, None)
         .map_err(unknown)?;
@@ -506,11 +607,14 @@ pub(super) fn execute(
             "geometry changed protected rules or project files".into(),
         ));
     }
-    let final_candidate = GeometryCandidateEvidence::capture(
+    let final_candidate = GeometryCandidateEvidence::capture_generated(
         &prepared,
         &receipts,
         &before_fill,
-        final_geometry.live(),
+        &filled,
+        final_geometry
+            .generated()
+            .ok_or_else(|| unknown("complete final generated observation missing".into()))?,
         &independent,
     )
     .map_err(unknown)?;
@@ -519,6 +623,15 @@ pub(super) fn execute(
     {
         return Err(unknown(
             "geometry result changed during postcondition verification".into(),
+        ));
+    }
+    if let Some(expected) = &expected.library_context
+        && &crate::geometry_drc::libraries(&mut client, &observation, Some(expected))
+            .map_err(unknown)?
+            != expected
+    {
+        return Err(unknown(
+            "geometry library sources changed during execution".into(),
         ));
     }
     final_geometry
@@ -533,7 +646,28 @@ pub(super) fn execute(
         after,
         delta,
         creation_map,
+        baseline_map,
+        diagnostic_map,
+        baseline_drc_input,
+        after_drc_input,
     })
+}
+
+fn merge_diagnostic_maps(
+    explicit: &std::collections::BTreeMap<String, String>,
+    generated: &std::collections::BTreeMap<String, String>,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let mut result = explicit.clone();
+    let mut targets = explicit.values().collect::<std::collections::BTreeSet<_>>();
+    if targets.len() != explicit.len() {
+        return Err("explicit diagnostic mapping is not bijective".into());
+    }
+    for (from, to) in generated {
+        if result.insert(from.clone(), to.clone()).is_some() || !targets.insert(to) {
+            return Err("generated and explicit diagnostic identities collide".into());
+        }
+    }
+    Ok(result)
 }
 
 fn serialize_observation<S: serde::Serializer>(
@@ -593,14 +727,25 @@ pub(super) fn preview(
         if !shadow.is_within(&root) {
             return Err(reject("geometry shadow escaped server root".into()));
         }
-        crate::footprint_authoring::prepare_shadow_library_table(
-            settings,
-            &source.project_dir,
-            shadow.root(),
-            operations,
-            Some(&source.snapshot),
-        )
-        .map_err(reject)?;
+        if let Some(libraries) = &expected.library_context {
+            use std::io::Write;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(shadow.root().join("fp-lib-table"))
+                .map_err(|e| reject(e.to_string()))?;
+            file.write_all(libraries.table().as_bytes())
+                .map_err(|e| reject(e.to_string()))?;
+        } else {
+            crate::footprint_authoring::prepare_shadow_library_table(
+                settings,
+                &source.project_dir,
+                shadow.root(),
+                operations,
+                Some(&source.snapshot),
+            )
+            .map_err(reject)?;
+        }
         let identity = launcher
             .launch(&shadow)
             .map_err(|e| reject(e.to_string()))?;
@@ -627,8 +772,8 @@ pub(super) fn preview(
             .document_id
             .as_ref()
             .ok_or_else(|| reject("missing shadow identity".into()))?;
-        let context =
-            observe_context(&mut client, &copied.board_filename, board).map_err(reject)?;
+        let context = observe_generated_context(&mut client, &copied.board_filename, board)
+            .map_err(reject)?;
         let mut rebound = request.clone();
         rebound.observed_revision = context.context().revision.clone();
         for edit in &mut rebound.zones {
@@ -643,7 +788,13 @@ pub(super) fn preview(
                 net.net_id = kicad_model::board_net_id(board, &net.name);
             }
         }
-        let copied_evidence = prepare(&identity.endpoint, &copied, &rebound).map_err(reject)?;
+        let copied_evidence = prepare_with_library_context(
+            &identity.endpoint,
+            &copied,
+            &rebound,
+            expected.library_context.as_ref(),
+        )
+        .map_err(reject)?;
         if !equivalent_rules(&expected, &copied_evidence) {
             return Err(reject(
                 "saved geometry definitions, copper or effective rules differ from source".into(),

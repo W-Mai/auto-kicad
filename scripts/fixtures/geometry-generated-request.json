@@ -1,0 +1,1 @@
+[{"observed_revision":"${revision}","zones":[{"kind":"update","source_uuid":"80000000-0000-4000-8000-000000000001","patch":{"clearance_nm":250000}}],"refill":"all"}]

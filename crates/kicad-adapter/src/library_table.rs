@@ -51,6 +51,36 @@ pub struct LibraryTableFile {
     pub table: Option<FootprintLibraryTable>,
 }
 
+pub(crate) fn render_footprint_library_rows(rows: &[LibraryTableEntry]) -> Result<String, String> {
+    let quote = |value: &str| serde_json::to_string(value).map_err(|e| e.to_string());
+    let mut table = String::from("(fp_lib_table (version 7)\n");
+    for row in rows {
+        let format = match &row.format {
+            LibraryFormat::KiCad => "KiCad",
+            LibraryFormat::Table => "Table",
+            LibraryFormat::Unsupported(v) => v,
+        };
+        table.push_str(&format!(
+            "  (lib (name {}) (type {}) (uri {}) (options {}) (descr {}){}{})\n",
+            quote(&row.nickname)?,
+            quote(format)?,
+            quote(&row.uri)?,
+            quote(&row.options)?,
+            quote(&row.description)?,
+            if row.disabled { " (disabled)" } else { "" },
+            if row.hidden { " (hidden)" } else { "" }
+        ));
+        if table.len() >= MAX_TABLE_BYTES {
+            return Err("relocated library table exceeds byte limit".into());
+        }
+    }
+    table.push_str(")\n");
+    if parse_footprint_library_table(table.as_bytes())?.entries != rows {
+        return Err("library table serialization changed rows".into());
+    }
+    Ok(table)
+}
+
 /// Validate a single library identity component before constructing a filename.
 pub fn validate_library_component(value: &str) -> Result<(), String> {
     if value.is_empty()

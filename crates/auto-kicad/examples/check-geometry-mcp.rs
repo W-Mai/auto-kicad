@@ -1,10 +1,12 @@
 //! Verify geometry approval and native effects through production stdio on an owned PCB.
 use kicad_adapter::{
     lifecycle::{DisposablePcbLifecycle, OwnedPcbnewLauncher},
-    live_geometry::{RefillDefinitionEvidence, observe_live_geometry},
+    teardrop_refill::{TeardropRefillObservation, VerifiedTeardropRefill},
 };
+use kicad_checks::{DrcPolicy, refill::refill_closed_copy};
 use kicad_ipc::ZoneFillAttempt;
 use serde_json::json;
+use std::time::Duration;
 use std::{env, fs, path::PathBuf, process::Command};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -48,20 +50,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         client.get_version()?;
         client.save_board(&identity.board_filename)?;
         editor.reload_owned()?;
-        let before = observe_live_geometry(&mut client, &identity.board_filename)?;
+        let before = TeardropRefillObservation::capture(&mut client, &identity.board_filename)?;
         client = match client.request_zone_refill(&identity.board_filename) {
             ZoneFillAttempt::Returned { client, .. } => client,
             ZoneFillAttempt::NotDispatched { reason, .. } => return Err(reason.to_string().into()),
             ZoneFillAttempt::Uncertain(reader) => return Err(reader.reason().to_string().into()),
         };
-        let filled = observe_live_geometry(&mut client, &identity.board_filename)?;
-        if RefillDefinitionEvidence::from_observation(&before)?
-            != RefillDefinitionEvidence::from_observation(&filled)?
-        {
-            return Err("baseline fill changed definitions".into());
-        }
+        let filled = TeardropRefillObservation::capture(&mut client, &identity.board_filename)?;
         client.save_board(&identity.board_filename)?;
         editor.reload_owned()?;
+        let reloaded = TeardropRefillObservation::capture(&mut client, &identity.board_filename)?;
+        let policy = DrcPolicy {
+            allowed_root: copy
+                .board_path()
+                .parent()
+                .ok_or("missing project root")?
+                .into(),
+            timeout: Duration::from_secs(60),
+        };
+        let independent =
+            refill_closed_copy(copy.board_path(), &policy).map_err(|e| format!("{e:?}"))?;
+        let baseline = VerifiedTeardropRefill::verify(&before, &filled, &reloaded, &independent)?;
+        fs::write(
+            output.join("baseline-refill.json"),
+            serde_json::to_vec_pretty(&baseline)?,
+        )?;
         fs::copy(copy.board_path(), output.join("baseline.kicad_pcb"))?;
         let protected = ["kicad_pro", "kicad_dru"].map(|ext| {
             let p = copy.board_path().with_extension(ext);
@@ -91,15 +104,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Err("geometry changed protected files".into());
             }
         }
-        let before_reload = observe_live_geometry(&mut client, &identity.board_filename)?;
+        let before_reload =
+            TeardropRefillObservation::capture(&mut client, &identity.board_filename)?;
+        let snapshot = before_reload.drc_snapshot(&fs::read_to_string(copy.board_path())?)?;
+        fs::write(output.join("bound.kicad_pcb"), snapshot.text())?;
+        fs::write(
+            output.join("snapshot.json"),
+            serde_json::to_vec_pretty(&snapshot)?,
+        )?;
         editor.reload_owned()?;
-        let after_reload = observe_live_geometry(&mut client, &identity.board_filename)?;
-        if RefillDefinitionEvidence::from_observation(&before_reload)?
-            != RefillDefinitionEvidence::from_observation(&after_reload)?
-            || before_reload.text.filled_copper()? != after_reload.text.filled_copper()?
-            || editor.current_identity()?.pid != identity.pid
-        {
-            return Err("same-process reload changed complete geometry or copper".into());
+        let after_reload =
+            TeardropRefillObservation::capture(&mut client, &identity.board_filename)?;
+        let independent =
+            refill_closed_copy(copy.board_path(), &policy).map_err(|e| format!("{e:?}"))?;
+        let verified = VerifiedTeardropRefill::verify(
+            &before_reload,
+            &before_reload,
+            &after_reload,
+            &independent,
+        )?;
+        fs::write(
+            output.join("result-reload.json"),
+            serde_json::to_vec_pretty(&verified)?,
+        )?;
+        if editor.current_identity()?.pid != identity.pid {
+            return Err("reload replaced the owned editor process".into());
         }
         let status = Command::new(python)
             .arg(scripts.join("check-geometry-request.py"))

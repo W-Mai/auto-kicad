@@ -1,4 +1,6 @@
 //! Canonical local footprint sources with bounded table inclusion and provenance.
+mod native_drc;
+pub use native_drc::NativeDrcLibraries;
 
 use crate::library_table::{
     LibraryFormat, LibraryTableEntry, LibraryTableEvidence, MAX_TABLE_ENTRIES,
@@ -215,36 +217,19 @@ impl FootprintCatalog {
                 "project path cannot be represented without native variable expansion".into(),
             );
         }
-        let quote = |value: &str| serde_json::to_string(value).map_err(|e| e.to_string());
-        let mut table = String::from("(fp_lib_table (version 7)\n");
-        for entry in self.entries.values() {
-            let row = &entry.row;
-            // Other variables keep their native meaning; no placement fallback is applied.
-            let uri = row.uri.replace("${KIPRJMOD}", project);
-            if row.uri.replace("${KIPRJMOD}", "").contains("KIPRJMOD") {
-                return Err("unclassified project path variable in library URI".into());
-            }
-            let format = match &row.format {
-                LibraryFormat::KiCad => "KiCad",
-                LibraryFormat::Unsupported(value) => value,
-                LibraryFormat::Table => return Err("unexpanded nested library table".into()),
-            };
-            table.push_str(&format!(
-                "  (lib (name {}) (type {}) (uri {}) (options {}) (descr {}){}{})\n",
-                quote(&row.nickname)?,
-                quote(format)?,
-                quote(&uri)?,
-                quote(&row.options)?,
-                quote(&row.description)?,
-                if row.disabled { " (disabled)" } else { "" },
-                if row.hidden { " (hidden)" } else { "" },
-            ));
-            if table.len() >= crate::library_table::MAX_TABLE_BYTES {
-                return Err("relocated library table exceeds byte limit".into());
-            }
-        }
-        table.push_str(")\n");
-        crate::library_table::parse_footprint_library_table(table.as_bytes())?;
+        let rows = self
+            .entries
+            .values()
+            .map(|entry| {
+                let mut row = entry.row.clone();
+                if row.uri.replace("${KIPRJMOD}", "").contains("KIPRJMOD") {
+                    return Err("unclassified project path variable in library URI".to_owned());
+                }
+                row.uri = row.uri.replace("${KIPRJMOD}", project);
+                Ok(row)
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        let table = crate::library_table::render_footprint_library_rows(&rows)?;
         self.ensure_current()?;
         Ok(table)
     }

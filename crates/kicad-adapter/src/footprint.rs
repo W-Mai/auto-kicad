@@ -329,6 +329,22 @@ impl FootprintRegistry {
             .map_err(FootprintBackendError::SourceResolution)
     }
 
+    pub fn native_drc_libraries<T: kicad_ipc::KiCadTransport>(
+        &self,
+        client: &mut kicad_ipc::KiCadClient<T>,
+        filename: &str,
+        identifiers: &[FootprintLibraryIdentifier],
+        reference: Option<&crate::library_catalog::NativeDrcLibraries>,
+    ) -> Result<crate::library_catalog::NativeDrcLibraries, FootprintBackendError> {
+        self.catalog
+            .as_ref()
+            .ok_or_else(|| {
+                FootprintBackendError::SourceResolution("native library catalog unavailable".into())
+            })?
+            .native_drc_libraries(client, filename, identifiers, reference)
+            .map_err(FootprintBackendError::SourceResolution)
+    }
+
     pub fn resolve_identifier(
         &self,
         identifier: &FootprintLibraryIdentifier,

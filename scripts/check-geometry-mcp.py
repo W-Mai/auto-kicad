@@ -1,5 +1,6 @@
 """Exercise exclusive geometry planning, actual preview, approval and durable native commit."""
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -66,7 +67,7 @@ try:
     rpc.send(dict(jsonrpc='2.0',method='notifications/initialized'))
     tools=rpc.call('tools/list',{})['tools']
     assert 'geometry' in next(t for t in tools if t['name']=='kicad_plan_change')['inputSchema']['properties']
-    stages=[]; created={}
+    stages=[]; created={}; library_drift_verified=False
     for index,template in enumerate(json.loads(Path(requests_arg).read_text())):
         inspected=call('kicad_inspect_project',dict(endpoint=endpoint,geometry=True))
         summary=inspected['geometry']['observation']
@@ -93,6 +94,24 @@ try:
             call('kicad_commit_change',drift_approval,reject=True)
             call('kicad_preview_change',params(drift,'revoked-preview'),reject=True)
             assert board.read_bytes()==original
+        if index==0 and drift.get('geometry_evidence',{}).get('library_context'):
+            local=[Path(item['path']) for item in drift['geometry_evidence']['library_context']['sources']
+                   if item['state']=='present' and Path(item['path']).is_relative_to(board.parent)]
+            if local:
+                library=local[0]
+                library_before=library.read_bytes()
+                drift_library=call('kicad_plan_change',dict(request,request_id='geometry-library-drift'))
+                checked=call('kicad_preview_change',params(drift_library,'library-drift-preview'))
+                authorization=dict(params(drift_library,'library-drift-commit'),**{key:checked[key] for key in ['approval_hash','validation_evidence_hash']})
+                try:
+                    library.write_bytes(library_before+b'\n# native library source drift\n')
+                    call('kicad_commit_change',authorization,reject=True)
+                finally:
+                    library.write_bytes(library_before)
+                call('kicad_commit_change',authorization,reject=True)
+                call('kicad_preview_change',params(drift_library,'revoked-library-preview'),reject=True)
+                assert board.read_bytes()==original
+                library_drift_verified=True
         planned=call('kicad_plan_change',request)
         preview=call('kicad_preview_change',params(planned,f'preview-{index}'))
         assert preview['state']=='awaiting_approval',preview
@@ -110,8 +129,30 @@ try:
         assert result['candidate']['before']==proof['geometry']['candidate']['before']
         assert result['candidate']['after']==proof['geometry']['candidate']['after']
         assert not result['delta']['introduced']
-        assert complete_drc(proof['geometry']['baseline'])==complete_drc(result['baseline'])
-        assert complete_drc(proof['geometry']['after'],result['creation_map'])==complete_drc(result['after'])
+        assert complete_drc(proof['geometry']['baseline'],result['baseline_map'])==complete_drc(result['baseline'])
+        assert complete_drc(proof['geometry']['after'],result['diagnostic_map'])==complete_drc(result['after'])
+        generated=result['candidate'].get('generated_after')
+        if generated and generated['identities']:
+            preview_geometry=proof['geometry']
+            for phase,report_field,input_field in [('before','baseline','baseline_drc_input'),('after','after','after_drc_input')]:
+                left=preview_geometry['candidate']['generated_'+phase]['identities']
+                right=result['candidate']['generated_'+phase]['identities']
+                assert len(left)==len(right)>0
+                projected=lambda values:[{k:v for k,v in item.items() if k!='native_uuid'} for item in values]
+                assert projected(left)==projected(right)
+                mapping={a['native_uuid']:b['native_uuid'] for a,b in zip(left,right)}
+                expected=dict(mapping)
+                if phase=='after': expected.update(result['creation_map'])
+                assert expected==result['baseline_map' if phase=='before' else 'diagnostic_map']
+                for candidate in [preview_geometry,result]:
+                    evidence=candidate[input_field]
+                    assert evidence['snapshot']['identities']==candidate['candidate']['generated_'+phase]['identities']
+                    assert len(evidence['native_settings'])==len(evidence['native_settings_after'])
+                    assert [(v['path'],v['validation_sha256']) for v in evidence['native_settings']]==[(v['path'],v['validation_sha256']) for v in evidence['native_settings_after']]
+                    assert evidence['libraries']['sources']
+                saved=original if phase=='before' else board.read_bytes()
+                assert hashlib.sha256(saved).hexdigest()==result[input_field]['snapshot']['input_sha256']
+            assert not list(board.parent.glob('.auto-kicad-generated-drc-*'))
         assert proof['baseline']==proof['geometry']['baseline']['normalized']
         assert proof['after']==proof['geometry']['after']['normalized']
         assert all(a!=b for a,b in result['creation_map'].items())
@@ -123,6 +164,8 @@ try:
         assert journal['outcome']['geometry']['candidate']==result['candidate']
         assert journal['outcome']['geometry']['baseline']==result['baseline']
         assert journal['outcome']['geometry']['after']==result['after']
+        for key in ['baseline_map','diagnostic_map','baseline_drc_input','after_drc_input']:
+            assert journal['outcome']['geometry'][key]==result[key]
         assert all(p.stat().st_size<=4*1024*1024 for p in (output/'state').rglob('record.json'))
         assert len(journals)==index+1
         call('kicad_inspect_project',dict(endpoint=endpoint,geometry=True))
@@ -132,8 +175,8 @@ try:
             else: outline_ids.append(identity['native_uuid'])
         shutil.copyfile(board,output/f'stage-{index}.kicad_pcb')
         (output/f'request-{index}.json').write_text(json.dumps(geometry,indent=2))
-        stages.append(dict(complete_drc_correspondence=True,complete_drc_durable=True,stage=index,native_creation_ids=created.copy(),outline_creation_ids=outline_ids,candidate=result['candidate'],drc_delta=result['delta'],creation_map=result['creation_map']))
-        (output/'result.json').write_text(json.dumps(dict(kicad_version='10.0.7',production_stdio=True,stages=stages,approval_and_replay_refused=True,duplicate_preview_refused=True,rule_drift_permanently_revokes_approval=True),indent=2))
+        stages.append(dict(complete_drc_correspondence=True,complete_drc_durable=True,stage=index,native_creation_ids=created.copy(),outline_creation_ids=outline_ids,candidate=result['candidate'],drc_delta=result['delta'],creation_map=result['creation_map'],baseline_map=result['baseline_map'],diagnostic_map=result['diagnostic_map']))
+        (output/'result.json').write_text(json.dumps(dict(kicad_version='10.0.7',production_stdio=True,stages=stages,approval_and_replay_refused=True,duplicate_preview_refused=True,rule_drift_permanently_revokes_approval=True,library_drift_permanently_revokes_approval=library_drift_verified),indent=2))
 finally:
     (output/'mcp.json').write_text(json.dumps(records,indent=2))
     rpc.close()

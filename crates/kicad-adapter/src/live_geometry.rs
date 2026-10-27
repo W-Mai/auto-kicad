@@ -1,6 +1,7 @@
 //! Complete live board text and independently observed zone locks.
 mod filled_copper;
 mod geometry_identity;
+mod saved_binding;
 mod teardrops;
 pub use filled_copper::FilledCopperEvidence;
 use kicad_ipc::{

@@ -74,6 +74,24 @@ pub(crate) fn registry(
         .registry(project, version)
 }
 
+pub(crate) fn native_settings_paths(version: &str) -> Result<Vec<PathBuf>, String> {
+    let settings = LibrarySettings::from_environment()?;
+    let major: u16 = version
+        .split('.')
+        .next()
+        .ok_or("missing KiCad version")?
+        .parse()
+        .map_err(|_| "invalid KiCad version")?;
+    let base = settings
+        .config_base
+        .ok_or("native configuration directory unavailable")?
+        .join(format!("{major}.0"));
+    Ok(vec![
+        base.join("kicad.json"),
+        base.join("kicad_common.json"),
+    ])
+}
+
 impl LibrarySettings {
     fn from_environment() -> Result<Self, String> {
         let (config, config_digest) = match std::env::var_os("AUTO_KICAD_LIBRARY_CONFIG") {

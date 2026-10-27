@@ -4,6 +4,7 @@ mod existing_footprint;
 mod existing_item_edit;
 mod footprint_authoring;
 mod geometry;
+mod geometry_drc;
 pub use geometry::{GeometryExecution, GeometryPlanningEvidence};
 mod library_settings;
 pub mod recovery;
