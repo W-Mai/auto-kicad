@@ -1,0 +1,150 @@
+{
+  "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-generated-correspondence",
+  "scope": "Complete generated correspondence and private DRC input compilation; not public MCP integration",
+  "acceptance": {
+    "authored_digest": "d7dbde633195866ddde6a8420edd3e129b278b959334d9bb6aafbf8249a23225",
+    "full_generated_content_equal": true,
+    "full_mapped_raw_drc_equal": true,
+    "full_ordinary_native_equal": true,
+    "generated_map": {
+      "060f64f7-3e1b-4769-bf29-61aa3b5b22c9": "2c4a49ab-cc3c-46f4-be9d-dda0665de859",
+      "07bbbbcb-d5ed-464e-8f49-b4b9f5a15aee": "1b0641e8-3a14-4c62-bdf0-0748dfd67f3f",
+      "1b2f1be4-cb07-4ece-9165-e902d567d6b4": "a9481a3d-1251-4a7f-a204-25e791cecd60",
+      "36cb9056-2bc8-4902-bd16-06beb7a06271": "0d2a7467-4574-469d-ae85-f66317e73e36",
+      "4a722f2e-2926-4672-aed3-4dd7870fe692": "79e8c503-cae8-432a-b351-c8a36734f067",
+      "5de0ff22-7dba-4ca4-b7e1-d81f326af042": "fd273172-f34d-4059-a2f6-1e3ffd90c6a0",
+      "69ccaa5e-cffc-49fe-b4ee-d8b4a006cf30": "cb1691f6-6fd0-4dfc-b84e-55ceac69ca51",
+      "94568436-1f4b-436a-90b0-7cf93e937a8d": "6bfd77e7-fe5c-414f-afeb-2c50e0ecd131",
+      "9b53b140-9fb0-4db7-95c1-e6ccaf692961": "537f08eb-86bb-4e93-a793-b460d2015605",
+      "e1e41ad9-e78a-4d3c-971a-34b4b0bc6e63": "a9d48cb7-98df-4214-bae7-58b2ab71dbd9"
+    },
+    "kicad_version": "10.0.7",
+    "passed": true,
+    "unmapped_drc_rejected": true
+  },
+  "reader": {
+    "passed": true,
+    "read_only_inputs": true,
+    "records": [
+      {
+        "candidate": "preview",
+        "bound_uuids": [
+          "060f64f7-3e1b-4769-bf29-61aa3b5b22c9",
+          "07bbbbcb-d5ed-464e-8f49-b4b9f5a15aee",
+          "1b2f1be4-cb07-4ece-9165-e902d567d6b4",
+          "36cb9056-2bc8-4902-bd16-06beb7a06271",
+          "4a722f2e-2926-4672-aed3-4dd7870fe692",
+          "5de0ff22-7dba-4ca4-b7e1-d81f326af042",
+          "69ccaa5e-cffc-49fe-b4ee-d8b4a006cf30",
+          "94568436-1f4b-436a-90b0-7cf93e937a8d",
+          "9b53b140-9fb0-4db7-95c1-e6ccaf692961",
+          "e1e41ad9-e78a-4d3c-971a-34b4b0bc6e63"
+        ],
+        "native_serialization_equal_except_zone_order": true,
+        "clearance_nm": 250000,
+        "inputs_unchanged": true
+      },
+      {
+        "candidate": "source",
+        "bound_uuids": [
+          "0d2a7467-4574-469d-ae85-f66317e73e36",
+          "1b0641e8-3a14-4c62-bdf0-0748dfd67f3f",
+          "2c4a49ab-cc3c-46f4-be9d-dda0665de859",
+          "537f08eb-86bb-4e93-a793-b460d2015605",
+          "6bfd77e7-fe5c-414f-afeb-2c50e0ecd131",
+          "79e8c503-cae8-432a-b351-c8a36734f067",
+          "a9481a3d-1251-4a7f-a204-25e791cecd60",
+          "a9d48cb7-98df-4214-bae7-58b2ab71dbd9",
+          "cb1691f6-6fd0-4dfc-b84e-55ceac69ca51",
+          "fd273172-f34d-4059-a2f6-1e3ffd90c6a0"
+        ],
+        "native_serialization_equal_except_zone_order": true,
+        "clearance_nm": 250000,
+        "inputs_unchanged": true
+      }
+    ],
+    "full_raw_drc_mapping_equal": true,
+    "unmapped_drc_differs": true,
+    "repeated_reports_equal": true
+  },
+  "source_check": {
+    "passed": true,
+    "source_unchanged": true
+  },
+  "cleanup": {
+    "preview": {
+      "closed": true,
+      "failure": null,
+      "passed": true,
+      "pid": 94623
+    },
+    "source": {
+      "closed": true,
+      "failure": null,
+      "passed": true,
+      "pid": 94964
+    }
+  },
+  "report_counts": {
+    "preview": {
+      "violations": 12,
+      "unconnected_items": 4,
+      "schematic_parity": 0
+    },
+    "source": {
+      "violations": 12,
+      "unconnected_items": 4,
+      "schematic_parity": 0
+    }
+  },
+  "quality": {
+    "passed": 465,
+    "ignored": 15,
+    "fmt": true,
+    "clippy_warnings_denied": true
+  },
+  "artifact_sha256": {
+    "acceptance.json": "a52b077b5b5014f9ef5cb66bf1a8c11704f41375457006207882dde9b45d142e",
+    "independent-native.json": "511553bae3ba19e6b6fb870a96b6e5a59682bc8f1a7145c84a6c9b57ad083b75",
+    "source-check.json": "024ae792e5289e432e5abee882d18315e41cf01dbf798096321f12f46eeeb143",
+    "source/result.kicad_pro": "03a233a0f0396f74af5fb912477b440b364660ab44c514b5250e86a97ee4bb10",
+    "source/correspondence.json": "3b6fba45ae36381a48dafe7a4e2fb9623c9048179ad1c5584793e9481ffef794",
+    "source/native-saved.kicad_pro": "adfd4abb0cfb198634af5ecc1f9321af8d1dd8599ed03d8d9cb50070c822a46c",
+    "source/native-bound.kicad_pro": "ae574b218e60c15fb85a82e692c7fc7aaac9c1404f2db8aac9c05d26c55eb91d",
+    "source/bound.kicad_prl": "8903a52b693a50fccbd6e15ef7ca1903e5965526f0dec2736aed643b02ea89b7",
+    "source/refill.json": "8cdba1c684e39232f8353594243037dc6ede57f9c4bea79f64eee4d034159c28",
+    "source/snapshot.json": "cae6d4927543ad23ccb37080cc67725512143234eb8527093866deed081c1afa",
+    "source/bound.kicad_pcb": "30a2d1b7bbddbd21d58d59533005d9fbb37a8f40dac7099aa185317f4dc9fe94",
+    "source/cleanup.json": "2b2e68a5fce9fc59c0df8b7041cb2df58d60728af6a2f93c6e29d767ea9fe421",
+    "source/result.kicad_pcb": "1f8f0b038045ba9479820375b62ece8ec8f00d5b4134398eb6dbf5c4b460cfab",
+    "source/owned.json": "f52324345ffc0251c63dd64299bf7b991d59c64eeebea4049be8a231815a2a8a",
+    "source/native-saved.kicad_prl": "20b2fecc1bdfa02fd8b72476261bc3a79ba1a6b9d719a270aa9584a89f767ab7",
+    "source/bound.kicad_pro": "03a233a0f0396f74af5fb912477b440b364660ab44c514b5250e86a97ee4bb10",
+    "source/drc-0.json": "aa58b5a643d841b1ed883a68a3d01ab2e41511778d3a91b4ea2769cafd90df77",
+    "source/drc-1.json": "8468532cd377534f832210655bbc536b41914b2560e9646fb2e929f513c2ccc1",
+    "source/native-saved.kicad_pcb": "8997b821ec32ab03c4200ab9ab534d96aa17e949e1520326b7c7ff2b27552c5f",
+    "source/native-bound.kicad_pcb": "4fcb3ca724e137f7b3f9a29f8f0585aab32f7f1232184df01a22313ca7e9c83b",
+    "preview/result.kicad_pro": "03a233a0f0396f74af5fb912477b440b364660ab44c514b5250e86a97ee4bb10",
+    "preview/correspondence.json": "27c1316be8ce986c9ec1a2e012bc054d36c67209e27974d046099d316b32bdd9",
+    "preview/native-saved.kicad_pro": "adfd4abb0cfb198634af5ecc1f9321af8d1dd8599ed03d8d9cb50070c822a46c",
+    "preview/native-bound.kicad_pro": "ae574b218e60c15fb85a82e692c7fc7aaac9c1404f2db8aac9c05d26c55eb91d",
+    "preview/bound.kicad_prl": "8903a52b693a50fccbd6e15ef7ca1903e5965526f0dec2736aed643b02ea89b7",
+    "preview/refill.json": "a4a52c47e70229770bdf40090a5712c0ca48dbbab2da7d04cf9ec80927d08330",
+    "preview/snapshot.json": "8f88cc7d6e54091e453857fd78f3778c80a7378c111a82dc56dfcde31884abc7",
+    "preview/bound.kicad_pcb": "6d4d0005b7b6f4d657d9a3727fba3d45635bda813447ade7a08a3ee98688c070",
+    "preview/cleanup.json": "8a0b63797c67ff44b6f24593c8b32c17c8ff0a91784eb61a896e38f7011aeb71",
+    "preview/result.kicad_pcb": "1f8f0b038045ba9479820375b62ece8ec8f00d5b4134398eb6dbf5c4b460cfab",
+    "preview/owned.json": "234df9f32bc3e1578678615f13fbbb2edfa82855e2954bb9c63a3048e859f8db",
+    "preview/native-saved.kicad_prl": "20b2fecc1bdfa02fd8b72476261bc3a79ba1a6b9d719a270aa9584a89f767ab7",
+    "preview/bound.kicad_pro": "03a233a0f0396f74af5fb912477b440b364660ab44c514b5250e86a97ee4bb10",
+    "preview/drc-0.json": "7c69d409e10ac4f790a230665e0895078d11c582798df6dedb508ecb085ca310",
+    "preview/drc-1.json": "a64fe3bfc7f5110cd4bafc503b41ad1f8387ff869fbdecfe006e5dbdb9ccae35",
+    "preview/native-saved.kicad_pcb": "0da075d14eaef1cb0953c2278e9a5b492bbe3d0d7ee9a4b2e44547564a0f8344",
+    "preview/native-bound.kicad_pcb": "74f250052692bc9eec8d638b52c8069f9790fdc9d5bf2731982ffa5340ae3a76"
+  },
+  "owned_pids_verified_absent": [
+    94623,
+    94964
+  ],
+  "feasibility_probe_root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-teardrop-drc-identity-probe"
+}

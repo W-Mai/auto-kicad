@@ -38,6 +38,16 @@ impl TeardropRefillObservation {
             identities,
         })
     }
+    pub fn generated_correspondence(&self) -> crate::live_geometry::GeneratedZoneCorrespondence {
+        crate::live_geometry::GeneratedZoneCorrespondence::from_bound(self.identities.clone())
+    }
+    /// Compile identities into a private DRC copy; caller must bind actual saved bytes and project context.
+    pub fn drc_snapshot(
+        &self,
+        saved: &str,
+    ) -> Result<crate::live_geometry::GeneratedDrcSnapshot, String> {
+        crate::live_geometry::GeneratedDrcSnapshot::bind(saved, &self.text, &self.native)
+    }
     pub fn text(&self) -> &TeardropTextPartition {
         &self.text
     }

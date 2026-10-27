@@ -11,7 +11,9 @@ use kiutils_sexpr::{Atom, CstDocument, Node, Span, parse_one};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-pub use teardrops::{TeardropIdentity, TeardropTextPartition};
+pub use teardrops::{
+    GeneratedDrcSnapshot, GeneratedZoneCorrespondence, TeardropIdentity, TeardropTextPartition,
+};
 
 const MAX_DEPTH: usize = 64;
 const MAX_NODES: usize = 3_000_000;

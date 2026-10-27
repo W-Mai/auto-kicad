@@ -39,7 +39,7 @@ Guarded recovery uses `kicad_plan_recovery`, `kicad_preview_recovery` and `kicad
 
 PCB and schematic commits acquire an OS writer lock in `.auto-kicad-writer.lock` at the canonical project directory. Multiple server instances share this lock even with different state directories. The file stays in place after release; it is separate from KiCad editor locks. Durable recording must succeed before mutation. An approval with a recorded completed or uncertain attempt cannot be replayed.
 
-Backend [generated teardrop observations](docs/acceptance/teardrop-observation.md) bind UUID-free copper/mask regions to complete native records. [Complete refill verification](docs/acceptance/teardrop-refill.md) checks front/back copper and mask content against saved reload and independent CLI refill. Preview/source correspondence and public MCP integration for generated zones remain unfinished.
+Backend [generated teardrop observations](docs/acceptance/teardrop-observation.md) bind UUID-free copper/mask regions to complete native records. [Complete refill verification](docs/acceptance/teardrop-refill.md) checks front/back copper and mask content against saved reload and independent CLI refill. [Generated candidate correspondence and private DRC snapshots](docs/acceptance/generated-correspondence.md) retain complete content while binding generated UUIDs. Public MCP integration for generated zones remains unfinished.
 
 ## Geometry changes
 

@@ -1,6 +1,8 @@
 //! Bounded identity binding for generated zones whose native serialization omits UUIDs.
+mod correspondence;
 use super::filled_copper::{FillNode, canonical, point};
 use super::*;
+pub use correspondence::{GeneratedDrcSnapshot, GeneratedZoneCorrespondence};
 use kicad_ipc::{base_types, board_types};
 use protobuf::{Enum, Message};
 use std::collections::BTreeSet;
@@ -43,6 +45,7 @@ struct GeneratedText {
     content_digest: String,
     locked: bool,
     default_generated_hatch: bool,
+    span: Span,
 }
 
 /// Keeps generated text separate from the complete remaining authored board.
@@ -246,6 +249,7 @@ impl TeardropTextPartition {
                     definition_digest: hex::encode(hash.finalize()),
                     content_digest: structural_digest(text, node),
                     locked,
+                    span: *span,
                     default_generated_hatch: match unique_form(node, "hatch")? {
                         Some(hatch) => {
                             let fields = items(hatch)?;
