@@ -39,6 +39,8 @@ Guarded recovery uses `kicad_plan_recovery`, `kicad_preview_recovery` and `kicad
 
 PCB and schematic commits acquire an OS writer lock in `.auto-kicad-writer.lock` at the canonical project directory. Multiple server instances share this lock even with different state directories. The file stays in place after release; it is separate from KiCad editor locks. Durable recording must succeed before mutation. An approval with a recorded completed or uncertain attempt cannot be replayed.
 
+Backend [generated teardrop observations](docs/acceptance/teardrop-observation.md) bind UUID-free copper/mask regions to complete native records and retain all content digests. Full teardrop refill approval and public MCP integration remain unverified.
+
 ## Geometry changes
 
 Inspect with `geometry: true` and use the returned geometry revision, source UUIDs, named nets and enabled copper layers in the exclusive `geometry` field of `kicad_plan_change`. Zone edits and zoned outline changes require `refill: "all"`. Preview and commit verify complete native definitions, independent filled copper, saved topology, pad connectivity and DRC. Definitions and refill are separate native undo entries. Detected source or rule drift revokes approval; uncertain execution blocks further project writes until matching guarded recovery. See [the request contract and actual MCP evidence](docs/acceptance/geometry-mcp.md) and [native fault/recovery evidence](docs/acceptance/geometry-recovery.md). Use release builds for populated boards; CM5 previews can exceed 180 seconds even in release builds, so configure Codex `tool_timeout_sec = 600`.

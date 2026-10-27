@@ -1,6 +1,7 @@
 //! Complete live board text and independently observed zone locks.
 mod filled_copper;
 mod geometry_identity;
+mod teardrops;
 pub use filled_copper::FilledCopperEvidence;
 use kicad_ipc::{
     DocumentQuery, KiCadClient, KiCadTransport, MAX_NATIVE_GEOMETRY_BYTES, NativeBoardGeometry,
@@ -10,6 +11,7 @@ use kiutils_sexpr::{Atom, CstDocument, Node, Span, parse_one};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
+pub use teardrops::{TeardropIdentity, TeardropTextPartition};
 
 const MAX_DEPTH: usize = 64;
 const MAX_NODES: usize = 3_000_000;
@@ -713,15 +715,7 @@ impl LiveBoardText {
             return Err("live text and native zone identity sets differ".into());
         }
         for (id, zone) in native.zones() {
-            let matches = match zone.locked.enum_value() {
-                Ok(LockedState::LS_UNKNOWN) => true,
-                Ok(LockedState::LS_LOCKED) => self.zones[id].locked,
-                Ok(LockedState::LS_UNLOCKED) => !self.zones[id].locked,
-                Err(_) => false,
-            };
-            if !matches {
-                return Err("native zone lock contradicts live serialization".into());
-            }
+            validate_zone_lock(self.zones[id].locked, zone)?;
         }
         Ok(())
     }
@@ -1154,4 +1148,17 @@ mod mixed_geometry_tests {
             );
         }
     }
+}
+
+fn validate_zone_lock(locked: bool, zone: &kicad_ipc::board_types::Zone) -> Result<(), String> {
+    let matches = match zone.locked.enum_value() {
+        Ok(LockedState::LS_UNKNOWN) => true,
+        Ok(LockedState::LS_LOCKED) => locked,
+        Ok(LockedState::LS_UNLOCKED) => !locked,
+        Err(_) => false,
+    };
+    if !matches {
+        return Err("native zone lock contradicts live serialization".into());
+    }
+    Ok(())
 }

@@ -4,7 +4,7 @@ use serde::Serialize;
 
 type Point = (i64, i64);
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-enum FillNode {
+pub(super) enum FillNode {
     Point(Point),
     Arc(Point, Point, Point),
 }
@@ -43,7 +43,7 @@ fn least_rotation<T: Ord + Clone>(nodes: &[T]) -> Vec<T> {
     let start = i.min(j);
     (0..n).map(|k| nodes[(start + k) % n].clone()).collect()
 }
-fn canonical(nodes: Vec<FillNode>) -> Vec<FillNode> {
+pub(super) fn canonical(nodes: Vec<FillNode>) -> Vec<FillNode> {
     let reversed = nodes
         .iter()
         .rev()
@@ -81,7 +81,7 @@ fn nm(text: &str) -> Result<i64, String> {
     }
     Ok(if negative { -value } else { value })
 }
-fn point(node: &Node) -> Result<Point, String> {
+pub(super) fn point(node: &Node) -> Result<Point, String> {
     let fields = items(node)?;
     if fields.len() != 3 {
         return Err("invalid filled point".into());

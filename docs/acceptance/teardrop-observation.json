@@ -1,0 +1,468 @@
+{
+  "kicad_version": "10.0.7",
+  "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-teardrop-binding",
+  "scope": "Generated teardrop observation and native/text identity binding; no refill or MCP write acceptance",
+  "stages": [
+    {
+      "stage": 0,
+      "identities": [
+        {
+          "correspondence_key": "028c482da05cf0da877a4ae7dd9c21b441078c2f8686f288877a8c66f7f50117",
+          "kind": "padvia",
+          "layer": 42,
+          "native_content_digest": "7866fce99ec5407bdc28f3e5b21fb0229814e7592e9c1b0a92d90b470472da65",
+          "native_definition_digest": "3927a48b775b37435b16f2cd6a0bbc6816f90849737b0c9f63cc30c826ec8039",
+          "native_uuid": "7cef628a-36aa-4ec0-b49c-f89ab94439a6",
+          "net": "",
+          "text_content_digest": "1904d0b352759c11d26ddc94dc41262cb0ac1f05690484c4890232273ef62c5d",
+          "text_definition_digest": "a9cd677efd47baba2beb82156313ae30200949c1625689df6c9f9f903fe0813f"
+        },
+        {
+          "correspondence_key": "34873df3b07b453d8e13b0532539dbdc4b44427ef7a798874c78f30081532e56",
+          "kind": "padvia",
+          "layer": 42,
+          "native_content_digest": "8da8c1dd8ea959cc6c1f1d3c4f845b7334abb6df389d88fc9c7e2686b8037057",
+          "native_definition_digest": "91af445010e8eab22ae35b9a907943a4daf24f4d70678597d1ea47aade67914b",
+          "native_uuid": "14f05258-dcf0-427f-afdc-04dbad60c39c",
+          "net": "",
+          "text_content_digest": "a06b43e279e1b12bdb64e7e345c3e7453ce92da9fdbcfbc1c4956415872ea1e9",
+          "text_definition_digest": "a58a87383bbc5fd22f4c6df8989129098321480fe120a29b26c05412f6f14c34"
+        },
+        {
+          "correspondence_key": "6a891eaaa8d4b09961fa93a99e29393f1b9b9eee883f2cf72bc0f3bc644cad19",
+          "kind": "padvia",
+          "layer": 3,
+          "native_content_digest": "3920195b46c7c32dee480f828d5585de6484348b3e90e2c7ead573b4a7fd3f63",
+          "native_definition_digest": "52d4d0cfceaeef1202377f85cfe5280ecc3bbbc58223764a480e2b8cc0dc18a8",
+          "native_uuid": "e1f63689-cbca-43eb-b3dd-6122032909d4",
+          "net": "GND",
+          "text_content_digest": "fdf564029bf86f18bc1cfeb3941e0250f739d85aaf5ab48b555481e5b6d7c5d7",
+          "text_definition_digest": "6e1e873e4e58d09901d45c3c7c1080787819a16ed19d89cc062a26e8664cbb25"
+        },
+        {
+          "correspondence_key": "c1d3f7f278889e7508e712d70b008c5794f808c124b6684e8919dca046b0c2a5",
+          "kind": "padvia",
+          "layer": 3,
+          "native_content_digest": "21a8e0350bb66c24a79923b1dd3a0616d8565be60ca407dba38cd5e0ba9b371d",
+          "native_definition_digest": "e4f670a81541ec5db2f088f8b0ecc745aec9b6ef67808f74db6241c844bdfdc3",
+          "native_uuid": "775515ab-5926-4815-a999-197d77caedb5",
+          "net": "GND",
+          "text_content_digest": "1d5fe915af250f857523019a225d07ce0178ee47241b9f3881958d1ed3e52e98",
+          "text_definition_digest": "096ff00f1b0e26cc3c6bd1b2380e9e86ec72a6558ddb2c35c02eab1bf49e3882"
+        }
+      ],
+      "reloaded_identities": [
+        {
+          "correspondence_key": "028c482da05cf0da877a4ae7dd9c21b441078c2f8686f288877a8c66f7f50117",
+          "kind": "padvia",
+          "layer": 42,
+          "native_content_digest": "7866fce99ec5407bdc28f3e5b21fb0229814e7592e9c1b0a92d90b470472da65",
+          "native_definition_digest": "3927a48b775b37435b16f2cd6a0bbc6816f90849737b0c9f63cc30c826ec8039",
+          "native_uuid": "28606c5e-a003-45eb-8796-b8c5b67b0265",
+          "net": "",
+          "text_content_digest": "1904d0b352759c11d26ddc94dc41262cb0ac1f05690484c4890232273ef62c5d",
+          "text_definition_digest": "a9cd677efd47baba2beb82156313ae30200949c1625689df6c9f9f903fe0813f"
+        },
+        {
+          "correspondence_key": "34873df3b07b453d8e13b0532539dbdc4b44427ef7a798874c78f30081532e56",
+          "kind": "padvia",
+          "layer": 42,
+          "native_content_digest": "8da8c1dd8ea959cc6c1f1d3c4f845b7334abb6df389d88fc9c7e2686b8037057",
+          "native_definition_digest": "91af445010e8eab22ae35b9a907943a4daf24f4d70678597d1ea47aade67914b",
+          "native_uuid": "8e835a56-b2bf-4d21-b763-4ce0c3d4343e",
+          "net": "",
+          "text_content_digest": "a06b43e279e1b12bdb64e7e345c3e7453ce92da9fdbcfbc1c4956415872ea1e9",
+          "text_definition_digest": "a58a87383bbc5fd22f4c6df8989129098321480fe120a29b26c05412f6f14c34"
+        },
+        {
+          "correspondence_key": "6a891eaaa8d4b09961fa93a99e29393f1b9b9eee883f2cf72bc0f3bc644cad19",
+          "kind": "padvia",
+          "layer": 3,
+          "native_content_digest": "3920195b46c7c32dee480f828d5585de6484348b3e90e2c7ead573b4a7fd3f63",
+          "native_definition_digest": "52d4d0cfceaeef1202377f85cfe5280ecc3bbbc58223764a480e2b8cc0dc18a8",
+          "native_uuid": "33c2e7a2-4b98-4268-985a-7d30d7c37998",
+          "net": "GND",
+          "text_content_digest": "fdf564029bf86f18bc1cfeb3941e0250f739d85aaf5ab48b555481e5b6d7c5d7",
+          "text_definition_digest": "6e1e873e4e58d09901d45c3c7c1080787819a16ed19d89cc062a26e8664cbb25"
+        },
+        {
+          "correspondence_key": "c1d3f7f278889e7508e712d70b008c5794f808c124b6684e8919dca046b0c2a5",
+          "kind": "padvia",
+          "layer": 3,
+          "native_content_digest": "21a8e0350bb66c24a79923b1dd3a0616d8565be60ca407dba38cd5e0ba9b371d",
+          "native_definition_digest": "e4f670a81541ec5db2f088f8b0ecc745aec9b6ef67808f74db6241c844bdfdc3",
+          "native_uuid": "da3d5b0a-1632-4690-8c46-5db8a213ec63",
+          "net": "GND",
+          "text_content_digest": "1d5fe915af250f857523019a225d07ce0178ee47241b9f3881958d1ed3e52e98",
+          "text_definition_digest": "096ff00f1b0e26cc3c6bd1b2380e9e86ec72a6558ddb2c35c02eab1bf49e3882"
+        }
+      ],
+      "reload_differences": {
+        "native_uuid": 4,
+        "correspondence_key": 0,
+        "text_definition_digest": 0,
+        "text_content_digest": 0,
+        "native_definition_digest": 0,
+        "native_content_digest": 0
+      },
+      "authored_definition_digest": "4e15632899480e0b0571f342b4b7a76891e379bfea306fd172943adcab2a4402"
+    },
+    {
+      "stage": 1,
+      "identities": [
+        {
+          "correspondence_key": "028c482da05cf0da877a4ae7dd9c21b441078c2f8686f288877a8c66f7f50117",
+          "kind": "padvia",
+          "layer": 42,
+          "native_content_digest": "d488871a7748b2fd98b44a27fb1e82dc1c20440ae57a5e9143dce7bafb0cbf3a",
+          "native_definition_digest": "046e7881e0b0d96a85586fcf4d94d928623cbc07a03d19291b6afffc87864995",
+          "native_uuid": "d01c8ae8-bcf0-0910-1c76-29a12f929216",
+          "net": "",
+          "text_content_digest": "1904d0b352759c11d26ddc94dc41262cb0ac1f05690484c4890232273ef62c5d",
+          "text_definition_digest": "a9cd677efd47baba2beb82156313ae30200949c1625689df6c9f9f903fe0813f"
+        },
+        {
+          "correspondence_key": "34873df3b07b453d8e13b0532539dbdc4b44427ef7a798874c78f30081532e56",
+          "kind": "padvia",
+          "layer": 42,
+          "native_content_digest": "facea87e17e4733db10123a1a7a5bfce7c0ddef0d896d0acb7aa0b822bef701a",
+          "native_definition_digest": "42e2cc95c20511c40389bbdd0a39c32e4fe723d3b892f638f3dcbe43d37ad7ee",
+          "native_uuid": "0354172f-f6da-05f6-1922-522325f28b9f",
+          "net": "",
+          "text_content_digest": "a06b43e279e1b12bdb64e7e345c3e7453ce92da9fdbcfbc1c4956415872ea1e9",
+          "text_definition_digest": "a58a87383bbc5fd22f4c6df8989129098321480fe120a29b26c05412f6f14c34"
+        },
+        {
+          "correspondence_key": "6a891eaaa8d4b09961fa93a99e29393f1b9b9eee883f2cf72bc0f3bc644cad19",
+          "kind": "padvia",
+          "layer": 3,
+          "native_content_digest": "1484cb83ed50e0c38c82debfeeff982b5f8549be47d4a66e77882e21ba0cd237",
+          "native_definition_digest": "c5666dd1a995d70c1c120d0ab7ff86b120ab1c83a3694663ee66c1926b9da2ff",
+          "native_uuid": "d01c8ae8-bcf0-0910-1c76-29a12f929215",
+          "net": "GND",
+          "text_content_digest": "fdf564029bf86f18bc1cfeb3941e0250f739d85aaf5ab48b555481e5b6d7c5d7",
+          "text_definition_digest": "6e1e873e4e58d09901d45c3c7c1080787819a16ed19d89cc062a26e8664cbb25"
+        },
+        {
+          "correspondence_key": "c1d3f7f278889e7508e712d70b008c5794f808c124b6684e8919dca046b0c2a5",
+          "kind": "padvia",
+          "layer": 3,
+          "native_content_digest": "34f82b6289c12a5bc85df28ee91665fb3704f0fa35fd877985ccc396241a43cc",
+          "native_definition_digest": "86074f1b7acc8cda6ae27b8f7bbe3781ee3ad0a41b9618d4f3d7efbe10c6ac42",
+          "native_uuid": "0354172f-f6da-05f6-1922-522325f28b9e",
+          "net": "GND",
+          "text_content_digest": "1d5fe915af250f857523019a225d07ce0178ee47241b9f3881958d1ed3e52e98",
+          "text_definition_digest": "096ff00f1b0e26cc3c6bd1b2380e9e86ec72a6558ddb2c35c02eab1bf49e3882"
+        }
+      ],
+      "reloaded_identities": [
+        {
+          "correspondence_key": "028c482da05cf0da877a4ae7dd9c21b441078c2f8686f288877a8c66f7f50117",
+          "kind": "padvia",
+          "layer": 42,
+          "native_content_digest": "7866fce99ec5407bdc28f3e5b21fb0229814e7592e9c1b0a92d90b470472da65",
+          "native_definition_digest": "3927a48b775b37435b16f2cd6a0bbc6816f90849737b0c9f63cc30c826ec8039",
+          "native_uuid": "bca64a11-a21e-47ce-b47e-e39aba13d0d6",
+          "net": "",
+          "text_content_digest": "1904d0b352759c11d26ddc94dc41262cb0ac1f05690484c4890232273ef62c5d",
+          "text_definition_digest": "a9cd677efd47baba2beb82156313ae30200949c1625689df6c9f9f903fe0813f"
+        },
+        {
+          "correspondence_key": "34873df3b07b453d8e13b0532539dbdc4b44427ef7a798874c78f30081532e56",
+          "kind": "padvia",
+          "layer": 42,
+          "native_content_digest": "8da8c1dd8ea959cc6c1f1d3c4f845b7334abb6df389d88fc9c7e2686b8037057",
+          "native_definition_digest": "91af445010e8eab22ae35b9a907943a4daf24f4d70678597d1ea47aade67914b",
+          "native_uuid": "7f444edb-2fec-4d3d-a984-4da1fef77d8a",
+          "net": "",
+          "text_content_digest": "a06b43e279e1b12bdb64e7e345c3e7453ce92da9fdbcfbc1c4956415872ea1e9",
+          "text_definition_digest": "a58a87383bbc5fd22f4c6df8989129098321480fe120a29b26c05412f6f14c34"
+        },
+        {
+          "correspondence_key": "6a891eaaa8d4b09961fa93a99e29393f1b9b9eee883f2cf72bc0f3bc644cad19",
+          "kind": "padvia",
+          "layer": 3,
+          "native_content_digest": "3920195b46c7c32dee480f828d5585de6484348b3e90e2c7ead573b4a7fd3f63",
+          "native_definition_digest": "52d4d0cfceaeef1202377f85cfe5280ecc3bbbc58223764a480e2b8cc0dc18a8",
+          "native_uuid": "3056f2cd-e768-4050-b5e2-01c86d0bb138",
+          "net": "GND",
+          "text_content_digest": "fdf564029bf86f18bc1cfeb3941e0250f739d85aaf5ab48b555481e5b6d7c5d7",
+          "text_definition_digest": "6e1e873e4e58d09901d45c3c7c1080787819a16ed19d89cc062a26e8664cbb25"
+        },
+        {
+          "correspondence_key": "c1d3f7f278889e7508e712d70b008c5794f808c124b6684e8919dca046b0c2a5",
+          "kind": "padvia",
+          "layer": 3,
+          "native_content_digest": "21a8e0350bb66c24a79923b1dd3a0616d8565be60ca407dba38cd5e0ba9b371d",
+          "native_definition_digest": "e4f670a81541ec5db2f088f8b0ecc745aec9b6ef67808f74db6241c844bdfdc3",
+          "native_uuid": "c4a39b60-4fb9-41b8-9386-8ab9bc6f13bf",
+          "net": "GND",
+          "text_content_digest": "1d5fe915af250f857523019a225d07ce0178ee47241b9f3881958d1ed3e52e98",
+          "text_definition_digest": "096ff00f1b0e26cc3c6bd1b2380e9e86ec72a6558ddb2c35c02eab1bf49e3882"
+        }
+      ],
+      "reload_differences": {
+        "native_uuid": 4,
+        "correspondence_key": 0,
+        "text_definition_digest": 0,
+        "text_content_digest": 0,
+        "native_definition_digest": 4,
+        "native_content_digest": 4
+      },
+      "authored_definition_digest": "4e15632899480e0b0571f342b4b7a76891e379bfea306fd172943adcab2a4402"
+    },
+    {
+      "stage": 2,
+      "identities": [
+        {
+          "correspondence_key": "028c482da05cf0da877a4ae7dd9c21b441078c2f8686f288877a8c66f7f50117",
+          "kind": "padvia",
+          "layer": 42,
+          "native_content_digest": "d488871a7748b2fd98b44a27fb1e82dc1c20440ae57a5e9143dce7bafb0cbf3a",
+          "native_definition_digest": "046e7881e0b0d96a85586fcf4d94d928623cbc07a03d19291b6afffc87864995",
+          "native_uuid": "d01c8ae8-bcf0-0910-1c76-29a12f929216",
+          "net": "",
+          "text_content_digest": "1904d0b352759c11d26ddc94dc41262cb0ac1f05690484c4890232273ef62c5d",
+          "text_definition_digest": "a9cd677efd47baba2beb82156313ae30200949c1625689df6c9f9f903fe0813f"
+        },
+        {
+          "correspondence_key": "34873df3b07b453d8e13b0532539dbdc4b44427ef7a798874c78f30081532e56",
+          "kind": "padvia",
+          "layer": 42,
+          "native_content_digest": "facea87e17e4733db10123a1a7a5bfce7c0ddef0d896d0acb7aa0b822bef701a",
+          "native_definition_digest": "42e2cc95c20511c40389bbdd0a39c32e4fe723d3b892f638f3dcbe43d37ad7ee",
+          "native_uuid": "0354172f-f6da-05f6-1922-522325f28b9f",
+          "net": "",
+          "text_content_digest": "a06b43e279e1b12bdb64e7e345c3e7453ce92da9fdbcfbc1c4956415872ea1e9",
+          "text_definition_digest": "a58a87383bbc5fd22f4c6df8989129098321480fe120a29b26c05412f6f14c34"
+        },
+        {
+          "correspondence_key": "6a891eaaa8d4b09961fa93a99e29393f1b9b9eee883f2cf72bc0f3bc644cad19",
+          "kind": "padvia",
+          "layer": 3,
+          "native_content_digest": "1484cb83ed50e0c38c82debfeeff982b5f8549be47d4a66e77882e21ba0cd237",
+          "native_definition_digest": "c5666dd1a995d70c1c120d0ab7ff86b120ab1c83a3694663ee66c1926b9da2ff",
+          "native_uuid": "d01c8ae8-bcf0-0910-1c76-29a12f929215",
+          "net": "GND",
+          "text_content_digest": "fdf564029bf86f18bc1cfeb3941e0250f739d85aaf5ab48b555481e5b6d7c5d7",
+          "text_definition_digest": "6e1e873e4e58d09901d45c3c7c1080787819a16ed19d89cc062a26e8664cbb25"
+        },
+        {
+          "correspondence_key": "c1d3f7f278889e7508e712d70b008c5794f808c124b6684e8919dca046b0c2a5",
+          "kind": "padvia",
+          "layer": 3,
+          "native_content_digest": "34f82b6289c12a5bc85df28ee91665fb3704f0fa35fd877985ccc396241a43cc",
+          "native_definition_digest": "86074f1b7acc8cda6ae27b8f7bbe3781ee3ad0a41b9618d4f3d7efbe10c6ac42",
+          "native_uuid": "0354172f-f6da-05f6-1922-522325f28b9e",
+          "net": "GND",
+          "text_content_digest": "1d5fe915af250f857523019a225d07ce0178ee47241b9f3881958d1ed3e52e98",
+          "text_definition_digest": "096ff00f1b0e26cc3c6bd1b2380e9e86ec72a6558ddb2c35c02eab1bf49e3882"
+        }
+      ],
+      "reloaded_identities": [
+        {
+          "correspondence_key": "028c482da05cf0da877a4ae7dd9c21b441078c2f8686f288877a8c66f7f50117",
+          "kind": "padvia",
+          "layer": 42,
+          "native_content_digest": "7866fce99ec5407bdc28f3e5b21fb0229814e7592e9c1b0a92d90b470472da65",
+          "native_definition_digest": "3927a48b775b37435b16f2cd6a0bbc6816f90849737b0c9f63cc30c826ec8039",
+          "native_uuid": "ed515c3c-bbb9-4a11-8909-c21155242bda",
+          "net": "",
+          "text_content_digest": "1904d0b352759c11d26ddc94dc41262cb0ac1f05690484c4890232273ef62c5d",
+          "text_definition_digest": "a9cd677efd47baba2beb82156313ae30200949c1625689df6c9f9f903fe0813f"
+        },
+        {
+          "correspondence_key": "34873df3b07b453d8e13b0532539dbdc4b44427ef7a798874c78f30081532e56",
+          "kind": "padvia",
+          "layer": 42,
+          "native_content_digest": "8da8c1dd8ea959cc6c1f1d3c4f845b7334abb6df389d88fc9c7e2686b8037057",
+          "native_definition_digest": "91af445010e8eab22ae35b9a907943a4daf24f4d70678597d1ea47aade67914b",
+          "native_uuid": "43451a5b-fe24-4be7-a426-05e4b19cc4fc",
+          "net": "",
+          "text_content_digest": "a06b43e279e1b12bdb64e7e345c3e7453ce92da9fdbcfbc1c4956415872ea1e9",
+          "text_definition_digest": "a58a87383bbc5fd22f4c6df8989129098321480fe120a29b26c05412f6f14c34"
+        },
+        {
+          "correspondence_key": "6a891eaaa8d4b09961fa93a99e29393f1b9b9eee883f2cf72bc0f3bc644cad19",
+          "kind": "padvia",
+          "layer": 3,
+          "native_content_digest": "3920195b46c7c32dee480f828d5585de6484348b3e90e2c7ead573b4a7fd3f63",
+          "native_definition_digest": "52d4d0cfceaeef1202377f85cfe5280ecc3bbbc58223764a480e2b8cc0dc18a8",
+          "native_uuid": "e2e6ec31-24b6-44b7-ada5-7f91898bf9eb",
+          "net": "GND",
+          "text_content_digest": "fdf564029bf86f18bc1cfeb3941e0250f739d85aaf5ab48b555481e5b6d7c5d7",
+          "text_definition_digest": "6e1e873e4e58d09901d45c3c7c1080787819a16ed19d89cc062a26e8664cbb25"
+        },
+        {
+          "correspondence_key": "c1d3f7f278889e7508e712d70b008c5794f808c124b6684e8919dca046b0c2a5",
+          "kind": "padvia",
+          "layer": 3,
+          "native_content_digest": "21a8e0350bb66c24a79923b1dd3a0616d8565be60ca407dba38cd5e0ba9b371d",
+          "native_definition_digest": "e4f670a81541ec5db2f088f8b0ecc745aec9b6ef67808f74db6241c844bdfdc3",
+          "native_uuid": "60d0d23e-64df-4803-8976-f9562b0f01d6",
+          "net": "GND",
+          "text_content_digest": "1d5fe915af250f857523019a225d07ce0178ee47241b9f3881958d1ed3e52e98",
+          "text_definition_digest": "096ff00f1b0e26cc3c6bd1b2380e9e86ec72a6558ddb2c35c02eab1bf49e3882"
+        }
+      ],
+      "reload_differences": {
+        "native_uuid": 4,
+        "correspondence_key": 0,
+        "text_definition_digest": 0,
+        "text_content_digest": 0,
+        "native_definition_digest": 4,
+        "native_content_digest": 4
+      },
+      "authored_definition_digest": "4e15632899480e0b0571f342b4b7a76891e379bfea306fd172943adcab2a4402"
+    }
+  ],
+  "independent_saved": {
+    "passed": true,
+    "read_only": true,
+    "records": [
+      {
+        "stage": 0,
+        "generated_count": 4,
+        "sha256": "57649c8230b67e4f58fe255e0b514dbba56619456b5d56d05b660d1dd9c9fbc5",
+        "native_identity_map": [
+          {
+            "native_uuid": "775515ab-5926-4815-a999-197d77caedb5",
+            "layer": "F.Cu",
+            "net": "GND",
+            "priority": 30000,
+            "point_count": 5
+          },
+          {
+            "native_uuid": "e1f63689-cbca-43eb-b3dd-6122032909d4",
+            "layer": "F.Cu",
+            "net": "GND",
+            "priority": 30001,
+            "point_count": 13
+          },
+          {
+            "native_uuid": "14f05258-dcf0-427f-afdc-04dbad60c39c",
+            "layer": "F.Mask",
+            "net": "",
+            "priority": 0,
+            "point_count": 5
+          },
+          {
+            "native_uuid": "7cef628a-36aa-4ec0-b49c-f89ab94439a6",
+            "layer": "F.Mask",
+            "net": "",
+            "priority": 0,
+            "point_count": 13
+          }
+        ]
+      },
+      {
+        "stage": 1,
+        "generated_count": 4,
+        "sha256": "e9621f501c3205b9bac6fc57d85cdb79585d3f14d9a0595556f089652e0b26d6",
+        "native_identity_map": [
+          {
+            "native_uuid": "0354172f-f6da-05f6-1922-522325f28b9e",
+            "layer": "F.Cu",
+            "net": "GND",
+            "priority": 30000,
+            "point_count": 5
+          },
+          {
+            "native_uuid": "d01c8ae8-bcf0-0910-1c76-29a12f929215",
+            "layer": "F.Cu",
+            "net": "GND",
+            "priority": 30001,
+            "point_count": 13
+          },
+          {
+            "native_uuid": "0354172f-f6da-05f6-1922-522325f28b9f",
+            "layer": "F.Mask",
+            "net": "",
+            "priority": 0,
+            "point_count": 5
+          },
+          {
+            "native_uuid": "d01c8ae8-bcf0-0910-1c76-29a12f929216",
+            "layer": "F.Mask",
+            "net": "",
+            "priority": 0,
+            "point_count": 13
+          }
+        ]
+      },
+      {
+        "stage": 2,
+        "generated_count": 4,
+        "sha256": "e9621f501c3205b9bac6fc57d85cdb79585d3f14d9a0595556f089652e0b26d6",
+        "native_identity_map": [
+          {
+            "native_uuid": "0354172f-f6da-05f6-1922-522325f28b9e",
+            "layer": "F.Cu",
+            "net": "GND",
+            "priority": 30000,
+            "point_count": 5
+          },
+          {
+            "native_uuid": "d01c8ae8-bcf0-0910-1c76-29a12f929215",
+            "layer": "F.Cu",
+            "net": "GND",
+            "priority": 30001,
+            "point_count": 13
+          },
+          {
+            "native_uuid": "0354172f-f6da-05f6-1922-522325f28b9f",
+            "layer": "F.Mask",
+            "net": "",
+            "priority": 0,
+            "point_count": 5
+          },
+          {
+            "native_uuid": "d01c8ae8-bcf0-0910-1c76-29a12f929216",
+            "layer": "F.Mask",
+            "net": "",
+            "priority": 0,
+            "point_count": 13
+          }
+        ]
+      }
+    ]
+  },
+  "cleanup": {
+    "closed": true,
+    "passed": true,
+    "pid": 43080,
+    "source_unchanged": true
+  },
+  "upstream": {
+    "auto-kicad-teardrop.cpp": {
+      "url": "https://raw.githubusercontent.com/KiCad/kicad-source-mirror/10.0.7/pcbnew/teardrop/teardrop.cpp",
+      "sha256": "83beeb972592de5887defa55ae4cbd9b66eb1d761454bc47b5e74640708e327d"
+    },
+    "auto-kicad-teardrop-serializer.cpp": {
+      "url": "https://raw.githubusercontent.com/KiCad/kicad-source-mirror/10.0.7/pcbnew/pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.cpp",
+      "sha256": "a152d85b058339025bf1fe45054f2444b552f2d7c5a94928a9bf14c8f1e350be"
+    }
+  },
+  "quality": {
+    "passed": 461,
+    "ignored": 15,
+    "clippy_warnings_denied": true
+  },
+  "sha256": {
+    "observations.json": "894473e36946c4a39397818866a1022baa2635701da009ce6b3b0fc4ab0f025a",
+    "cleanup.json": "26034cd3040c8ab77edd432b981bc56db4c1e45944fec777953a1557e4969a61",
+    "independent-saved.json": "28dedf20058c0c8763006eae522199c7f04240dae3688569554a712f685c2267",
+    "stage-0.kicad_pcb": "57649c8230b67e4f58fe255e0b514dbba56619456b5d56d05b660d1dd9c9fbc5",
+    "stage-0-live.kicad_pcb": "dbd3f510756511fd6a7abd5d6b95236220577e050837f531c295a957c01a0c19",
+    "stage-1.kicad_pcb": "e9621f501c3205b9bac6fc57d85cdb79585d3f14d9a0595556f089652e0b26d6",
+    "stage-1-live.kicad_pcb": "885d81145996d5d2e54eff836ee959613b0c2fdf6c218e1b0bcd50b97274e5e5",
+    "stage-2.kicad_pcb": "e9621f501c3205b9bac6fc57d85cdb79585d3f14d9a0595556f089652e0b26d6",
+    "stage-2-live.kicad_pcb": "885d81145996d5d2e54eff836ee959613b0c2fdf6c218e1b0bcd50b97274e5e5"
+  },
+  "native_border_difference": "Newly regenerated native zones use ZBS_INVISIBLE; reloaded zones use ZBS_SOLID. Both serialize hatch none. Digests retain this difference; no equality exception introduced.",
+  "initial_probe_root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-teardrop-observation",
+  "owned_pids_verified_absent": [
+    27819,
+    43080
+  ]
+}
