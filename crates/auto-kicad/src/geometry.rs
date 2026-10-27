@@ -204,8 +204,8 @@ pub struct GeometryExecution {
     pub observation: LiveBoardObservation,
     pub candidate: GeometryCandidateEvidence,
     pub summary: Value,
-    pub baseline: kicad_checks::DrcReport,
-    pub after: kicad_checks::DrcReport,
+    pub baseline: kicad_checks::CompleteDrcReport,
+    pub after: kicad_checks::CompleteDrcReport,
     pub delta: kicad_checks::BaselineDelta,
     pub creation_map: std::collections::BTreeMap<String, String>,
 }
@@ -213,15 +213,20 @@ pub struct GeometryExecution {
 fn drc(
     source: &LiveBoardObservation,
     timeout: std::time::Duration,
-) -> Result<kicad_checks::DrcReport, String> {
+) -> Result<kicad_checks::CompleteDrcReport, String> {
     let policy = kicad_checks::DrcPolicy {
         allowed_root: source.project_dir.clone(),
         timeout,
     };
-    match kicad_checks::run_pcb_drc(&source.board_path, &policy) {
-        kicad_checks::CheckResult::Completed(report) => Ok(report),
-        result => Err(format!("geometry DRC unavailable: {result:?}")),
+    let report = kicad_checks::run_pcb_drc_complete(&source.board_path, &policy)
+        .map_err(|error| format!("geometry DRC unavailable: {error:?}"))?;
+    if report.normalized().kicad_version != source.snapshot.kicad_version
+        || source.board_path.file_name().and_then(|name| name.to_str())
+            != Some(report.normalized().source.as_str())
+    {
+        return Err("geometry DRC version or source differs from bound editor".into());
     }
+    Ok(report)
 }
 
 /// After beginning a native transaction, any unverified outcome requires manual recovery.
@@ -286,7 +291,10 @@ pub(super) fn execute(
         crate::existing_footprint::protected_files(&source.board_path).map_err(reject)?;
     let baseline = drc(source, timeout).map_err(reject)?;
     if let Some(approved) = approved
-        && !same_drc(&approved.baseline, &baseline)
+        && !approved
+            .baseline
+            .equivalent_to(&baseline, &std::collections::BTreeMap::new())
+            .map_err(|e| reject(e.to_string()))?
     {
         return Err(reject(
             "source DRC differs from approved preview baseline".into(),
@@ -445,17 +453,21 @@ pub(super) fn execute(
         ));
     }
     let after = drc(source, timeout).map_err(unknown)?;
-    let delta = kicad_checks::compare_drc(&baseline, &after);
-    if !delta.introduced.is_empty() || after.unconnected_items > baseline.unconnected_items {
+    let delta = kicad_checks::compare_drc(baseline.normalized(), after.normalized());
+    if !delta.introduced.is_empty()
+        || after.normalized().unconnected_items > baseline.normalized().unconnected_items
+    {
         return Err(unknown(format!(
             "geometry regressed DRC or connectivity: {delta:?}"
         )));
     }
-    if let Some(approved) = approved {
-        let projected = mapped_drc(&approved.after, &creation_map);
-        if !same_drc(&projected, &after) {
-            return Err(unknown("source DRC differs from approved candidate".into()));
-        }
+    if let Some(approved) = approved
+        && !approved
+            .after
+            .equivalent_to(&after, &creation_map)
+            .map_err(|e| unknown(e.to_string()))?
+    {
+        return Err(unknown("source DRC differs from approved candidate".into()));
     }
     let final_geometry = observe_context(&mut client, filename, board).map_err(unknown)?;
     let observation = IpcDiscoveryService
@@ -533,31 +545,6 @@ fn serialize_observation<S: serde::Serializer>(
         .revision()
         .map_err(serde::ser::Error::custom)?;
     json!({"snapshot_revision":revision,"project_id":value.snapshot.project_id,"board_id":value.snapshot.board.document_id,"kicad_version":value.snapshot.kicad_version,"instance_token":value.instance_token.as_str(),"board_filename":value.board_filename,"board_path":value.board_path,"project_dir":value.project_dir}).serialize(serializer)
-}
-
-fn mapped_drc(
-    report: &kicad_checks::DrcReport,
-    map: &std::collections::BTreeMap<String, String>,
-) -> kicad_checks::DrcReport {
-    let mut result = report.clone();
-    for violation in &mut result.violations {
-        if let kicad_checks::ViolationIdentity::Uuids { uuids, .. } = &mut violation.identity {
-            for id in uuids.iter_mut() {
-                if let Some(mapped) = map.get(id) {
-                    *id = mapped.clone();
-                }
-            }
-            uuids.sort();
-        }
-        for item in &mut violation.items {
-            if let Some(id) = &mut item.uuid
-                && let Some(mapped) = map.get(id)
-            {
-                *id = mapped.clone();
-            }
-        }
-    }
-    result
 }
 
 pub(super) fn preview(
@@ -680,8 +667,8 @@ pub(super) fn preview(
             reopened_revision: result.observation.snapshot.revision().ok(),
             reopened: true,
             normalized_snapshot_matches: true,
-            baseline: Some(result.baseline.clone()),
-            after: Some(result.after.clone()),
+            baseline: Some(result.baseline.normalized().clone()),
+            after: Some(result.after.normalized().clone()),
             delta: Some(result.delta.clone()),
             source_unchanged: true,
             shadow_cleaned: false,
@@ -709,29 +696,6 @@ pub(super) fn preview(
         outcome.reason = Some(format!("geometry export cleanup failed: {e}"));
     }
     outcome
-}
-
-fn same_drc(left: &kicad_checks::DrcReport, right: &kicad_checks::DrcReport) -> bool {
-    fn canonical(report: &kicad_checks::DrcReport) -> Result<Value, serde_json::Error> {
-        let mut value = serde_json::to_value(report)?;
-        value
-            .as_object_mut()
-            .expect("serialized report object")
-            .remove("source");
-        if let Some(violations) = value["violations"].as_array_mut() {
-            for violation in violations.iter_mut() {
-                if let Some(uuids) = violation["identity"]["Uuids"]["uuids"].as_array_mut() {
-                    uuids.sort_by_key(Value::to_string);
-                }
-                if let Some(items) = violation["items"].as_array_mut() {
-                    items.sort_by_key(Value::to_string);
-                }
-            }
-            violations.sort_by_key(Value::to_string);
-        }
-        Ok(value)
-    }
-    matches!((canonical(left),canonical(right)),(Ok(a),Ok(b)) if a==b)
 }
 
 #[cfg(test)]
@@ -779,64 +743,5 @@ mod tests {
             evidence["snapshot_revision"],
             serde_json::to_value(Evidence(&source)).unwrap()["snapshot_revision"]
         );
-    }
-
-    #[test]
-    fn candidate_drc_correspondence_maps_only_creation_identities_and_keeps_complete_diagnostics() {
-        use kicad_checks::{DrcItem, DrcReport, DrcViolation, ViolationIdentity};
-        let report = DrcReport {
-            parser_version: "1".into(),
-            schema: "1".into(),
-            kicad_version: "10.0.7".into(),
-            source: "preview".into(),
-            ignored_checks: 0,
-            unconnected_items: 0,
-            violations: vec![DrcViolation {
-                identity: ViolationIdentity::Uuids {
-                    rule_type: "test".into(),
-                    uuids: vec!["original".into(), "created".into()],
-                },
-                rule_type: "test".into(),
-                severity: "warning".into(),
-                description: "unchanged diagnostic".into(),
-                items: vec![
-                    DrcItem {
-                        uuid: Some("created".into()),
-                        description: "created".into(),
-                        position: None,
-                    },
-                    DrcItem {
-                        uuid: Some("original".into()),
-                        description: "original".into(),
-                        position: None,
-                    },
-                ],
-            }],
-        };
-        assert!(same_drc(
-            &report,
-            &mapped_drc(&report, &std::collections::BTreeMap::new())
-        ));
-        let map = std::collections::BTreeMap::from([("created".into(), "source-created".into())]);
-        let mapped = mapped_drc(&report, &map);
-        assert_eq!(
-            mapped.violations[0].items[0].uuid.as_deref(),
-            Some("source-created")
-        );
-        assert_eq!(mapped.violations[0].items[0].description, "created");
-        assert_eq!(
-            mapped.violations[0].items[1].uuid.as_deref(),
-            Some("original")
-        );
-        assert!(!same_drc(&report, &mapped));
-        let mut actual = mapped.clone();
-        actual.source = "source".into();
-        actual.violations[0].items.reverse();
-        assert!(same_drc(&mapped, &actual));
-        actual.violations[0].severity = "error".into();
-        assert!(!same_drc(&mapped, &actual));
-        actual = mapped.clone();
-        actual.ignored_checks += 1;
-        assert!(!same_drc(&mapped, &actual));
     }
 }

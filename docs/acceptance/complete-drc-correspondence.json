@@ -1,0 +1,594 @@
+{
+  "kicad_version": "10.0.7",
+  "profiles": [
+    {
+      "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed",
+      "commits": [
+        {
+          "elapsed_seconds": 7.684971707989462,
+          "baseline_violations": 5,
+          "after_violations": 5,
+          "unconnected_before": 2,
+          "unconnected_after": 2,
+          "raw_json_bytes": 5134,
+          "candidate": {
+            "after": {
+              "board_definitions": "8bb214061e4ba6a19176c76ca3c4de9ebfcf7df5d102d950fcb8228eaadcbfce",
+              "copper": {
+                "digest": "af755b159e5758c76c3c90a00346f069b7fc9f9946e674c165b547d0b46aca39",
+                "point_count": 1334,
+                "polygon_count": 5,
+                "zone_count": 4
+              },
+              "native_definitions": "4cd004eea97cac8a3109c52ccea82ec1d5703a3ac73f48e0ae0ba179e147becc"
+            },
+            "before": {
+              "board_definitions": "f7a1a7271a3adef1ffd4b7eeed6e3507d6caa89def30a9ff93981a0738a1940f",
+              "copper": {
+                "digest": "ae670083f17b49a83ae634e348412d81850aa5fc681ee6c706e7acdfabb43502",
+                "point_count": 924,
+                "polygon_count": 3,
+                "zone_count": 3
+              },
+              "native_definitions": "fbcf82134d9904515b752439b7598e4dafb2334bd7c1c85b9f0630960f6479f9"
+            },
+            "creations": [
+              {
+                "kind": "zone",
+                "logical_id": "created",
+                "native_uuid": "77c97181-8d75-4a6f-8a9e-d5754b5d0bc0"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "curved-outer:edge:0",
+                "native_uuid": "f9079baa-17cb-447e-9aaa-10061b6e181e"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "curved-outer:edge:1",
+                "native_uuid": "610b9ff4-65cb-47fe-a895-145cd03fc89b"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "curved-outer:edge:2",
+                "native_uuid": "e28ce75a-0e46-4781-8cf8-db0f0329df5b"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "curved-outer:edge:3",
+                "native_uuid": "9cdb09b1-e2a3-4a9b-a943-bb1c44917ef9"
+              }
+            ],
+            "intent_digest": "807d7a7d42d396f628e7bfe5d649fd19ff988d3af267b0b8ba357e9e1d98bccc"
+          },
+          "creation_map": {
+            "510306aa-a3d4-4dc4-a169-355fadb047d2": "77c97181-8d75-4a6f-8a9e-d5754b5d0bc0",
+            "6b63192f-a35b-49a6-b80a-55d4b69088b2": "f9079baa-17cb-447e-9aaa-10061b6e181e",
+            "6bcf37ff-5aac-4243-8d15-6cfc0e4bea2c": "9cdb09b1-e2a3-4a9b-a943-bb1c44917ef9",
+            "dbd043d1-0afb-4d68-8bf2-d4358e0576a1": "610b9ff4-65cb-47fe-a895-145cd03fc89b",
+            "eb11918d-b7ab-46b3-a2ad-20fd89d76e17": "e28ce75a-0e46-4781-8cf8-db0f0329df5b"
+          }
+        },
+        {
+          "elapsed_seconds": 7.498175582964905,
+          "baseline_violations": 5,
+          "after_violations": 5,
+          "unconnected_before": 2,
+          "unconnected_after": 2,
+          "raw_json_bytes": 5134,
+          "candidate": {
+            "after": {
+              "board_definitions": "7e7de70c8575b2d542be458cbc3506a012866cec97a257649ce0c15508b879f5",
+              "copper": {
+                "digest": "96363d017bb7e05305ab5a81e8c75d9aef9b0a6b77169af69ad97811750a5c74",
+                "point_count": 1312,
+                "polygon_count": 5,
+                "zone_count": 4
+              },
+              "native_definitions": "7c747026a665b38fef38f8124e107d0acde5f7238aefc7dce03f20e9b2fcd42f"
+            },
+            "before": {
+              "board_definitions": "27261bfe84c4d424fdbcfba7c906211afdb79278781b43b62fd865b978c7b9aa",
+              "copper": {
+                "digest": "90801dd19145da05bfdde86981cd15c83408125df4aef54e0f20b083a746b192",
+                "point_count": 1334,
+                "polygon_count": 5,
+                "zone_count": 4
+              },
+              "native_definitions": "34e638a81827c630506b165bc7dcaf9e6f026a17b1b907335c56a78bb17b83de"
+            },
+            "creations": [
+              {
+                "kind": "outline",
+                "logical_id": "rectangle:edge:0",
+                "native_uuid": "62635140-61aa-4b8a-bf3c-f5dc0d8c79ba"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "rectangle:edge:1",
+                "native_uuid": "c5497047-9c51-45c0-900d-32244a6509dc"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "rectangle:edge:2",
+                "native_uuid": "eaf1c3a5-3f3d-4790-8342-290c6710ea09"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "rectangle:edge:3",
+                "native_uuid": "b246eb73-ad89-4a28-8d61-b6206c65915b"
+              }
+            ],
+            "intent_digest": "36f327014263f0d4f286cdf1e91ef295409cd645bdbd7ad7001a20fe94b484b8"
+          },
+          "creation_map": {
+            "3d6e1559-e857-4c0b-accc-5601f3a88a54": "b246eb73-ad89-4a28-8d61-b6206c65915b",
+            "4b990089-fadf-430b-b4c7-5f7541173745": "eaf1c3a5-3f3d-4790-8342-290c6710ea09",
+            "4fc67024-9339-4e10-9996-be1dc844b18c": "62635140-61aa-4b8a-bf3c-f5dc0d8c79ba",
+            "949c1d3f-49ea-4b1c-85f9-38efd77579e7": "c5497047-9c51-45c0-900d-32244a6509dc"
+          }
+        },
+        {
+          "elapsed_seconds": 9.18408479099162,
+          "baseline_violations": 5,
+          "after_violations": 5,
+          "unconnected_before": 2,
+          "unconnected_after": 2,
+          "raw_json_bytes": 5134,
+          "candidate": {
+            "after": {
+              "board_definitions": "f852bad5ebc5418329e21b0b8adc2718ffcb6aba7f91473103d5c8aa9d870047",
+              "copper": {
+                "digest": "ae670083f17b49a83ae634e348412d81850aa5fc681ee6c706e7acdfabb43502",
+                "point_count": 924,
+                "polygon_count": 3,
+                "zone_count": 3
+              },
+              "native_definitions": "ca20f354db84225efbac31a2f9111376eff7c8ce1e01aa184db2575f22b99fa5"
+            },
+            "before": {
+              "board_definitions": "1d7ba991ade342e9d7334f183290721785d1ac0229c74c84a216d4cc9dd11102",
+              "copper": {
+                "digest": "96363d017bb7e05305ab5a81e8c75d9aef9b0a6b77169af69ad97811750a5c74",
+                "point_count": 1312,
+                "polygon_count": 5,
+                "zone_count": 4
+              },
+              "native_definitions": "179d68432a49bd33c45d942f4d2bc5669a7f4271de9642d74292229960254d00"
+            },
+            "creations": [
+              {
+                "kind": "outline",
+                "logical_id": "curved-outer:edge:0",
+                "native_uuid": "2ffd87f7-7c58-4396-9a61-b663616d333a"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "curved-outer:edge:1",
+                "native_uuid": "48dca0cc-188e-42bb-b65a-2e9b24c99175"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "curved-outer:edge:2",
+                "native_uuid": "0309c976-644e-4a43-8ffc-f567c13c98b6"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "curved-outer:edge:3",
+                "native_uuid": "dcdcc515-c8b4-4cbe-b8bf-6719cab7d425"
+              }
+            ],
+            "intent_digest": "16cccbc82fb858b5160fcfee10deff1ef65c9abdf64a5b4d216553a3e2f0c8d0"
+          },
+          "creation_map": {
+            "08708b42-f19b-43b1-86e8-5a1f492d1c39": "dcdcc515-c8b4-4cbe-b8bf-6719cab7d425",
+            "a18de44a-014d-4efc-b4e3-4ed6600c6798": "0309c976-644e-4a43-8ffc-f567c13c98b6",
+            "b52dd9ac-8492-47ad-9ec4-46bdd41cf90e": "2ffd87f7-7c58-4396-9a61-b663616d333a",
+            "cd6b68a2-3aac-4f34-8b31-b61f2445e892": "48dca0cc-188e-42bb-b65a-2e9b24c99175"
+          }
+        },
+        {
+          "elapsed_seconds": 8.291358708054759,
+          "baseline_violations": 5,
+          "after_violations": 5,
+          "unconnected_before": 2,
+          "unconnected_after": 2,
+          "raw_json_bytes": 5134,
+          "candidate": {
+            "after": {
+              "board_definitions": "be650a899ec8896add48b8ed83e065886fb8a26316475862284a8fdc3d010285",
+              "copper": {
+                "digest": "ae670083f17b49a83ae634e348412d81850aa5fc681ee6c706e7acdfabb43502",
+                "point_count": 924,
+                "polygon_count": 3,
+                "zone_count": 3
+              },
+              "native_definitions": "42cb0ce6a86015eeac36abc033685e00e5da3129466235acd843d2d862a8ff7c"
+            },
+            "before": {
+              "board_definitions": "70141b9e75e3deca9e622fc5147a43bc49a7a7b726170b8e34a77e64d9b0a5f0",
+              "copper": {
+                "digest": "ae670083f17b49a83ae634e348412d81850aa5fc681ee6c706e7acdfabb43502",
+                "point_count": 924,
+                "polygon_count": 3,
+                "zone_count": 3
+              },
+              "native_definitions": "263b37741f04fc315d94e7cf71354fb2d61660fc1e33d7af153314bbcabfc802"
+            },
+            "creations": [
+              {
+                "kind": "outline",
+                "logical_id": "rectangle:edge:0",
+                "native_uuid": "c830ff20-aff0-4dc4-a4dd-61ba058dd089"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "rectangle:edge:1",
+                "native_uuid": "9c341651-2268-4625-80e6-f8644684f136"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "rectangle:edge:2",
+                "native_uuid": "4c2e396d-4df1-4888-85d9-5a03d6c6ac91"
+              },
+              {
+                "kind": "outline",
+                "logical_id": "rectangle:edge:3",
+                "native_uuid": "d608ff84-e416-4bdb-bc86-7a3a29827f3d"
+              }
+            ],
+            "intent_digest": "0417646374bd8f7c8f3847707925c4e1a7747a4e8c6b84b709f76ad48c075417"
+          },
+          "creation_map": {
+            "15247bc3-2e3b-4cba-921f-89f794d066d9": "4c2e396d-4df1-4888-85d9-5a03d6c6ac91",
+            "9433f2bb-a4e1-45e1-bd65-b75a6e73943e": "d608ff84-e416-4bdb-bc86-7a3a29827f3d",
+            "a3497359-a0fd-49e9-871c-248578698690": "c830ff20-aff0-4dc4-a4dd-61ba058dd089",
+            "cb247a7e-48f9-4c70-a082-53b41f83afac": "9c341651-2268-4625-80e6-f8644684f136"
+          }
+        }
+      ],
+      "cleanup": {
+        "closed": true,
+        "pid": 63420,
+        "same_process_reload_verified": true,
+        "source_unchanged": true
+      },
+      "record_bytes": [
+        105087,
+        102200,
+        94358,
+        92012
+      ],
+      "independent_full_raw_comparison": true,
+      "exact_raw_durable_reports": true
+    },
+    {
+      "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-cm5",
+      "commits": [
+        {
+          "elapsed_seconds": 30.181097749969922,
+          "baseline_violations": 171,
+          "after_violations": 171,
+          "unconnected_before": 0,
+          "unconnected_after": 0,
+          "raw_json_bytes": 129002,
+          "candidate": {
+            "after": {
+              "board_definitions": "85db0366330a0150138443a057f20e42115b50f9fd39b719da6e72bc0e58943a",
+              "copper": {
+                "digest": "9b68b4ce25a25ac8b1a33777048c402c31c58e4f563c44664a985b40e7518292",
+                "point_count": 90184,
+                "polygon_count": 31,
+                "zone_count": 14
+              },
+              "native_definitions": "59ba270ae5ca61d1115ca5271d52f2edf15f5612b769c399196f544ac4fd9554"
+            },
+            "before": {
+              "board_definitions": "97af2b1d197759d1166262d4103f07649708649e6cfba789ec39f5726753446c",
+              "copper": {
+                "digest": "91fd28db41462086498e5e6b9b6a708074d86e2483a85bbed58ccd57d038b635",
+                "point_count": 90184,
+                "polygon_count": 31,
+                "zone_count": 14
+              },
+              "native_definitions": "a15e793a0fee4be8cc8b182d7f457e34bbdf94b0b59dd6e0f1bdeb0ef87fd8d2"
+            },
+            "creations": [],
+            "intent_digest": "5e4148aca43efbb92d3722cda9ac7962f8f3abdc8040ea62a9cc38d9588d7e13"
+          },
+          "creation_map": {}
+        }
+      ],
+      "cleanup": {
+        "closed": true,
+        "pid": 72659,
+        "same_process_reload_verified": true,
+        "source_unchanged": true
+      },
+      "record_bytes": [
+        1903085
+      ],
+      "independent_full_raw_comparison": true,
+      "exact_raw_durable_reports": true
+    }
+  ],
+  "retained_report_probe": {
+    "actual_reports": 4,
+    "legacy_summary_misses_corruption": true,
+    "mapped_generated_ids": 10,
+    "passed": true,
+    "repeat_correspondence": true,
+    "same_count_endpoint_corruption_rejected": true,
+    "unconnected": 4,
+    "unmapped_rejected": true,
+    "violations": 12
+  },
+  "processes": {
+    "pids": [
+      63420,
+      63516,
+      63718,
+      64135,
+      64455,
+      64947,
+      72659,
+      72954,
+      73851
+    ],
+    "all_absent": true,
+    "ps_exit": 1
+  },
+  "quality": {
+    "passed": 466,
+    "failed": 0,
+    "ignored": 15,
+    "fmt": true,
+    "warning_denied_clippy_all_targets": true,
+    "capability_matrix": true
+  },
+  "tested_release_binary_sha256": "dfbb503b81b9a8a320bec4d61b0f062067a5b59b45b88266f9c0d821e73cbc8b",
+  "source_note": "Native acceptance preceded two behavior-preserving clippy rewrites: question-mark error propagation and a collapsed conditional. Full quality covers the final source.",
+  "scope": "Complete production geometry DRC correspondence and durable reports; generated-zone MCP integration and remaining product delivery gates stay open.",
+  "artifacts": [
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/baseline.kicad_pcb",
+      "bytes": 26258,
+      "sha256": "a3e0f56965e1657c3eee2b3f555bc29d3c14e4ba1acf8d316a00a9e641bfe24e"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/cleanup.json",
+      "bytes": 104,
+      "sha256": "8f29f26c79ecc9ec2e6dec973fe8822a80c5f29e16d5ce672f0bcf027c2a3a73"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/independent-saved-intent.json",
+      "bytes": 11468,
+      "sha256": "f0f7ae9c9ce01849d8b8858450440920e85a5f25a9ad57b5ae329cf87bfc808e"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/mcp.json",
+      "bytes": 5182571,
+      "sha256": "fb77974876a515472b8fc93697bba6783ae63a9ffbdb1a9ffcf636488c3b3afa"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/owned-editor.json",
+      "bytes": 67,
+      "sha256": "b04233bd678ea424b5905751952709ee02ebed15341cc5531685d3ab2ef69823"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/request-0.json",
+      "bytes": 4245,
+      "sha256": "228378279223e18f96b0baf27fc44d674eb03d8dd89cc11d43a7f83fe3fa609b"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/request-1.json",
+      "bytes": 2113,
+      "sha256": "8ab01c1a42fe4c6c0023ab7ebf729538e471d42852efe48a29b7cd186e34e1ee"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/request-2.json",
+      "bytes": 1774,
+      "sha256": "956a163b087694155812a1c9b2840d679d71a2830c9fca05535506cf7e6dd88d"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/request-3.json",
+      "bytes": 1456,
+      "sha256": "afef47685c1efd65fd794022fc2dcc9959defe0fa05580043b343fccff2b6a33"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/result.json",
+      "bytes": 25680,
+      "sha256": "d8637a46378a7929db68e883e81203a91f3351ea605003bbb48de191ecf5b487"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/result.kicad_pcb",
+      "bytes": 26250,
+      "sha256": "81830add55dfc51ad8aa35cca2911510f49ab5c72f31183f6fe5d0cac2a2d459"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/result.kicad_pro",
+      "bytes": 9992,
+      "sha256": "270b08bcf6ac1d95545a47ed72694b7d1016c8d55193226f433ce61cf3bc6c0f"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/stage-0.kicad_pcb",
+      "bytes": 36529,
+      "sha256": "2e9bf1ee9fa1520e7bdd1b5a4b86520e9618c4b5b54cd0417053f40a74ad29c6"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/stage-1.kicad_pcb",
+      "bytes": 36117,
+      "sha256": "0c109ea5a998ef08f781fb5167b96b423f4fed281d9c9bff354ffa3c08150e5a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/stage-2.kicad_pcb",
+      "bytes": 26278,
+      "sha256": "aff423ab8578bffdb0ed7769ffcca4bac630e6261b3d70dab234f97051516fc2"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/stage-3.kicad_pcb",
+      "bytes": 26250,
+      "sha256": "81830add55dfc51ad8aa35cca2911510f49ab5c72f31183f6fe5d0cac2a2d459"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/state/sha256:3fac0d73b4ea2be3657368135dd7f1b00f581ea35e23ca6ed67b3111d9601952/000000000000000000001793068759955426000-63504-0/record.json",
+      "bytes": 105087,
+      "sha256": "06075f91ef0baa2848d1273041cabc6e3366b7c1525e6d4fbba7db180e5e59e1"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/state/sha256:3fac0d73b4ea2be3657368135dd7f1b00f581ea35e23ca6ed67b3111d9601952/000000000000000000001793068759955426000-63504-0/source-0.backup",
+      "bytes": 26258,
+      "sha256": "a3e0f56965e1657c3eee2b3f555bc29d3c14e4ba1acf8d316a00a9e641bfe24e"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/state/sha256:3fac0d73b4ea2be3657368135dd7f1b00f581ea35e23ca6ed67b3111d9601952/000000000000000000001793068759955426000-63504-0/source-1.backup",
+      "bytes": 9992,
+      "sha256": "270b08bcf6ac1d95545a47ed72694b7d1016c8d55193226f433ce61cf3bc6c0f"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/state/sha256:3fac0d73b4ea2be3657368135dd7f1b00f581ea35e23ca6ed67b3111d9601952/000000000000000000001793068778366748000-63504-1/record.json",
+      "bytes": 102200,
+      "sha256": "f0f9cb4b075234aa6588a0f0f72ce7bfc6ba697d4bfea2009cbb1c4d69be63e9"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/state/sha256:3fac0d73b4ea2be3657368135dd7f1b00f581ea35e23ca6ed67b3111d9601952/000000000000000000001793068778366748000-63504-1/source-0.backup",
+      "bytes": 36529,
+      "sha256": "2e9bf1ee9fa1520e7bdd1b5a4b86520e9618c4b5b54cd0417053f40a74ad29c6"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/state/sha256:3fac0d73b4ea2be3657368135dd7f1b00f581ea35e23ca6ed67b3111d9601952/000000000000000000001793068778366748000-63504-1/source-1.backup",
+      "bytes": 9992,
+      "sha256": "270b08bcf6ac1d95545a47ed72694b7d1016c8d55193226f433ce61cf3bc6c0f"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/state/sha256:3fac0d73b4ea2be3657368135dd7f1b00f581ea35e23ca6ed67b3111d9601952/000000000000000000001793068796685373000-63504-2/record.json",
+      "bytes": 94358,
+      "sha256": "996fcd8634a9238aad2dc610062677aa75bdd7fbacba6906b4575cb5c02fa4c3"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/state/sha256:3fac0d73b4ea2be3657368135dd7f1b00f581ea35e23ca6ed67b3111d9601952/000000000000000000001793068796685373000-63504-2/source-0.backup",
+      "bytes": 36117,
+      "sha256": "0c109ea5a998ef08f781fb5167b96b423f4fed281d9c9bff354ffa3c08150e5a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/state/sha256:3fac0d73b4ea2be3657368135dd7f1b00f581ea35e23ca6ed67b3111d9601952/000000000000000000001793068796685373000-63504-2/source-1.backup",
+      "bytes": 9992,
+      "sha256": "270b08bcf6ac1d95545a47ed72694b7d1016c8d55193226f433ce61cf3bc6c0f"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/state/sha256:3fac0d73b4ea2be3657368135dd7f1b00f581ea35e23ca6ed67b3111d9601952/000000000000000000001793068817557975000-63504-3/record.json",
+      "bytes": 92012,
+      "sha256": "94c72c96a541e18eb32e0fcec0d94e9881343bac666f3f3190ce01c639525f9c"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/state/sha256:3fac0d73b4ea2be3657368135dd7f1b00f581ea35e23ca6ed67b3111d9601952/000000000000000000001793068817557975000-63504-3/source-0.backup",
+      "bytes": 26278,
+      "sha256": "aff423ab8578bffdb0ed7769ffcca4bac630e6261b3d70dab234f97051516fc2"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/state/sha256:3fac0d73b4ea2be3657368135dd7f1b00f581ea35e23ca6ed67b3111d9601952/000000000000000000001793068817557975000-63504-3/source-1.backup",
+      "bytes": 9992,
+      "sha256": "270b08bcf6ac1d95545a47ed72694b7d1016c8d55193226f433ce61cf3bc6c0f"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-mixed/stdio.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-cm5/baseline.kicad_pcb",
+      "bytes": 3728851,
+      "sha256": "33c02e911b9e2edb60cebd16dca21000f87979a9015ca2746c0c5a88cecafd2d"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-cm5/cleanup.json",
+      "bytes": 104,
+      "sha256": "b6f252cccc74546ba33d2bbb3830597346fff6f5d89dde6b2c5a4b2fedf0025d"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-cm5/independent-saved-intent.json",
+      "bytes": 425,
+      "sha256": "6cba3fadfda9705fcc4ca8a41f97911ef4d85ae43d564dc573e05d12cf918dda"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-cm5/mcp.json",
+      "bytes": 65033330,
+      "sha256": "97990a98da399c64fdf1e2f1785ef2b8b79382fd156524a99c3197586e9074bc"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-cm5/owned-editor.json",
+      "bytes": 67,
+      "sha256": "ffff5c9d25a0c9b4eb4c95cf25bc3d406c3fe93b1245d1a75b4e54dafe1770e3"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-cm5/request-0.json",
+      "bytes": 309,
+      "sha256": "1a2e2b27691fa88689ceaf0b4476fe19afd8333895f052258fa88bb922965348"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-cm5/result.json",
+      "bytes": 181130,
+      "sha256": "2eb8a16e6f1e416029d6406a865497b5244e57f2bc52a2a24d3572cc6b240b03"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-cm5/result.kicad_pcb",
+      "bytes": 3728848,
+      "sha256": "4e0398ecf03440b9408b7ee55627c904963ffa1f3773fdfb52e3ae93c5fd4f7d"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-cm5/result.kicad_pro",
+      "bytes": 24797,
+      "sha256": "a53e984e1356fe4f2a2efd7c7d78de5243061e3a823d6b7e412831c4b178916a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-cm5/stage-0.kicad_pcb",
+      "bytes": 3728848,
+      "sha256": "4e0398ecf03440b9408b7ee55627c904963ffa1f3773fdfb52e3ae93c5fd4f7d"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-cm5/state/sha256:a2bd072e2f3b5579ac8e1d617d6154d24464e365a479dd029971c759b4492cfa/000000000000000000001793068995323289000-72795-0/record.json",
+      "bytes": 1903085,
+      "sha256": "3c3868a68be3583220d2e0984caacfc86f0d0d248d4d160219d8bfafd613eb06"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-cm5/state/sha256:a2bd072e2f3b5579ac8e1d617d6154d24464e365a479dd029971c759b4492cfa/000000000000000000001793068995323289000-72795-0/source-0.backup",
+      "bytes": 3728851,
+      "sha256": "33c02e911b9e2edb60cebd16dca21000f87979a9015ca2746c0c5a88cecafd2d"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-cm5/state/sha256:a2bd072e2f3b5579ac8e1d617d6154d24464e365a479dd029971c759b4492cfa/000000000000000000001793068995323289000-72795-0/source-1.backup",
+      "bytes": 24797,
+      "sha256": "a53e984e1356fe4f2a2efd7c7d78de5243061e3a823d6b7e412831c4b178916a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-cm5/stdio.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-evidence/check-complete-drc-retained.rs",
+      "bytes": 1900,
+      "sha256": "0d0770ce81a57d403e95c0071a40e943dce2418c410a924244bf94ba345609a7"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-evidence/process-cleanup.json",
+      "bytes": 156,
+      "sha256": "25d71022e4a3a7849879340815997bec77d69a4a4278ca8fcb66816941274c9c"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-evidence/quality.log",
+      "bytes": 47163,
+      "sha256": "6ec7ca6895a3411f2d2fc5b3d665f65d946a0b32a76b899f7e9a9b9823e8e8be"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-evidence/retained.json",
+      "bytes": 271,
+      "sha256": "4b94752d820a41d20ae8491d61529f716494bbda718be77771dace54f436a96e"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-complete-drc-evidence/retained.log",
+      "bytes": 563,
+      "sha256": "990a329e3cca2b0d332fe654282cfa0152831901679cd6d2024f13ebc64bf6eb"
+    }
+  ]
+}

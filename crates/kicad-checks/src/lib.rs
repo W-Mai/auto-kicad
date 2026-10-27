@@ -1,3 +1,6 @@
+mod complete_drc;
+pub use complete_drc::CompleteDrcReport;
+
 pub mod outline;
 pub mod refill;
 
@@ -150,20 +153,44 @@ fn run_pcb_drc_with_executable(
     run_pcb_drc_with_options(board_path, policy, executable, false)
 }
 
+pub fn run_pcb_drc_complete(
+    board_path: &Path,
+    policy: &DrcPolicy,
+) -> Result<CompleteDrcReport, CheckFailure> {
+    let raw = run_pcb_drc_raw_with_options(board_path, policy, Path::new("kicad-cli"), false)?;
+    CompleteDrcReport::parse(&raw).map_err(|error| CheckFailure::MalformedReport {
+        message: error.to_string(),
+    })
+}
+
 fn run_pcb_drc_with_options(
     board_path: &Path,
     policy: &DrcPolicy,
     executable: &Path,
     include_exclusions: bool,
 ) -> CheckResult {
-    let board_path = match confined_board_path(board_path, &policy.allowed_root) {
-        Ok(path) => path,
-        Err(failure) => return CheckResult::Failed(failure),
-    };
+    match run_pcb_drc_raw_with_options(board_path, policy, executable, include_exclusions) {
+        Ok(raw) => match DrcReport::parse(&raw) {
+            Ok(report) => CheckResult::Completed(report),
+            Err(error) => CheckResult::Failed(CheckFailure::MalformedReport {
+                message: error.to_string(),
+            }),
+        },
+        Err(failure) => CheckResult::Failed(failure),
+    }
+}
+
+fn run_pcb_drc_raw_with_options(
+    board_path: &Path,
+    policy: &DrcPolicy,
+    executable: &Path,
+    include_exclusions: bool,
+) -> Result<String, CheckFailure> {
+    let board_path = confined_board_path(board_path, &policy.allowed_root)?;
     let allowed_root = match fs::canonicalize(&policy.allowed_root) {
         Ok(path) => path,
         Err(error) => {
-            return CheckResult::Failed(CheckFailure::InvalidInput {
+            return Err(CheckFailure::InvalidInput {
                 message: format!("invalid allowed root: {error}"),
             });
         }
@@ -174,7 +201,7 @@ fn run_pcb_drc_with_options(
     {
         Ok(directory) => directory,
         Err(error) => {
-            return CheckResult::Failed(CheckFailure::ReportWriteFailed {
+            return Err(CheckFailure::ReportWriteFailed {
                 message: error.to_string(),
             });
         }
@@ -185,7 +212,7 @@ fn run_pcb_drc_with_options(
     let stdout_file = match File::create(&stdout_path) {
         Ok(file) => file,
         Err(error) => {
-            return CheckResult::Failed(CheckFailure::ReportWriteFailed {
+            return Err(CheckFailure::ReportWriteFailed {
                 message: error.to_string(),
             });
         }
@@ -193,7 +220,7 @@ fn run_pcb_drc_with_options(
     let stderr_file = match File::create(&stderr_path) {
         Ok(file) => file,
         Err(error) => {
-            return CheckResult::Failed(CheckFailure::ReportWriteFailed {
+            return Err(CheckFailure::ReportWriteFailed {
                 message: error.to_string(),
             });
         }
@@ -227,12 +254,12 @@ fn run_pcb_drc_with_options(
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return CheckResult::Failed(CheckFailure::CommandUnavailable {
+            return Err(CheckFailure::CommandUnavailable {
                 message: error.to_string(),
             });
         }
         Err(error) => {
-            return CheckResult::Failed(CheckFailure::ProcessFailed {
+            return Err(CheckFailure::ProcessFailed {
                 status: None,
                 stdout: String::new(),
                 stderr: error.to_string(),
@@ -245,11 +272,11 @@ fn run_pcb_drc_with_options(
             terminate_child_tree(&mut child);
             let stdout = read_bounded_file(&stdout_path);
             let stderr = read_bounded_file(&stderr_path);
-            return CheckResult::Failed(CheckFailure::Timeout { stdout, stderr });
+            return Err(CheckFailure::Timeout { stdout, stderr });
         }
         Err(error) => {
             terminate_child_tree(&mut child);
-            return CheckResult::Failed(CheckFailure::ProcessFailed {
+            return Err(CheckFailure::ProcessFailed {
                 status: None,
                 stdout: read_bounded_file(&stdout_path),
                 stderr: format!("{error}; {}", read_bounded_file(&stderr_path)),
@@ -259,7 +286,7 @@ fn run_pcb_drc_with_options(
     let stdout = read_bounded_file(&stdout_path);
     let stderr = read_bounded_file(&stderr_path);
     if !matches!(status.code(), Some(0 | 5)) {
-        return CheckResult::Failed(classify_process_failure(status, stdout, stderr));
+        return Err(classify_process_failure(status, stdout, stderr));
     }
     let report = match File::open(&report_path).and_then(|file| {
         const LIMIT: u64 = 32 * 1024 * 1024;
@@ -275,20 +302,15 @@ fn run_pcb_drc_with_options(
     }) {
         Ok(report) => report,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            return CheckResult::Failed(CheckFailure::ReportMissing);
+            return Err(CheckFailure::ReportMissing);
         }
         Err(error) => {
-            return CheckResult::Failed(CheckFailure::ReportWriteFailed {
+            return Err(CheckFailure::ReportWriteFailed {
                 message: error.to_string(),
             });
         }
     };
-    match DrcReport::parse(&report) {
-        Ok(report) => CheckResult::Completed(report),
-        Err(error) => CheckResult::Failed(CheckFailure::MalformedReport {
-            message: error.to_string(),
-        }),
-    }
+    Ok(report)
 }
 
 fn confined_board_path(board_path: &Path, allowed_root: &Path) -> Result<PathBuf, CheckFailure> {

@@ -28,6 +28,25 @@ def call(name,args,reject=False):
     assert not error,raw
     return raw['structuredContent']['data']
 
+def complete_drc(report, identities=None):
+    raw=json.loads(report['raw_json'])
+    normalized=report['normalized']
+    assert normalized['unconnected_items']==len(raw.get('unconnected_items',[]))
+    assert normalized['ignored_checks']==len(raw.get('ignored_checks',[]))
+    assert normalized['kicad_version']==raw['kicad_version']=='10.0.7'
+    assert len(normalized['violations'])==len(raw['violations'])
+    raw.pop('source',None)
+    raw.pop('date',None)
+    for section in ['violations','unconnected_items','schematic_parity']:
+        if section not in raw: continue
+        for diagnostic in raw[section]:
+            for item in diagnostic['items']:
+                if identities and item.get('uuid') in identities:
+                    item['uuid']=identities[item['uuid']]
+            diagnostic['items'].sort(key=lambda v:json.dumps(v,sort_keys=True))
+        raw[section].sort(key=lambda v:json.dumps(v,sort_keys=True))
+    return raw
+
 def params(plan,label):
     return dict(plan_id=plan['plan_id'],plan_hash=plan['plan_hash'],request_id=label)
 
@@ -91,6 +110,10 @@ try:
         assert result['candidate']['before']==proof['geometry']['candidate']['before']
         assert result['candidate']['after']==proof['geometry']['candidate']['after']
         assert not result['delta']['introduced']
+        assert complete_drc(proof['geometry']['baseline'])==complete_drc(result['baseline'])
+        assert complete_drc(proof['geometry']['after'],result['creation_map'])==complete_drc(result['after'])
+        assert proof['baseline']==proof['geometry']['baseline']['normalized']
+        assert proof['after']==proof['geometry']['after']['normalized']
         assert all(a!=b for a,b in result['creation_map'].items())
         call('kicad_commit_change',approval,reject=True)
         journals=[json.loads(p.read_text()) for p in (output/'state').rglob('record.json')]
@@ -98,6 +121,9 @@ try:
         assert journal['state']=='committed',journal
         assert not (board.parent/'.auto-kicad-geometry-pending').exists()
         assert journal['outcome']['geometry']['candidate']==result['candidate']
+        assert journal['outcome']['geometry']['baseline']==result['baseline']
+        assert journal['outcome']['geometry']['after']==result['after']
+        assert all(p.stat().st_size<=4*1024*1024 for p in (output/'state').rglob('record.json'))
         assert len(journals)==index+1
         call('kicad_inspect_project',dict(endpoint=endpoint,geometry=True))
         outline_ids=[]
@@ -106,7 +132,7 @@ try:
             else: outline_ids.append(identity['native_uuid'])
         shutil.copyfile(board,output/f'stage-{index}.kicad_pcb')
         (output/f'request-{index}.json').write_text(json.dumps(geometry,indent=2))
-        stages.append(dict(stage=index,native_creation_ids=created.copy(),outline_creation_ids=outline_ids,candidate=result['candidate'],drc_delta=result['delta'],creation_map=result['creation_map']))
+        stages.append(dict(complete_drc_correspondence=True,complete_drc_durable=True,stage=index,native_creation_ids=created.copy(),outline_creation_ids=outline_ids,candidate=result['candidate'],drc_delta=result['delta'],creation_map=result['creation_map']))
         (output/'result.json').write_text(json.dumps(dict(kicad_version='10.0.7',production_stdio=True,stages=stages,approval_and_replay_refused=True,duplicate_preview_refused=True,rule_drift_permanently_revokes_approval=True),indent=2))
 finally:
     (output/'mcp.json').write_text(json.dumps(records,indent=2))
