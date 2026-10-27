@@ -1,0 +1,326 @@
+{
+  "kicad_version": "10.0.7",
+  "scope": "Combined synthetic geometry maxima and dense-board recovery; full product acceptance remains open",
+  "bounds": {
+    "rejected": [
+      "101-outline-removals",
+      "513-outline-edges",
+      "33-outline-loops",
+      "33-zone-mutations",
+      "513-zone-vertices",
+      "17-zone-holes"
+    ],
+    "saved_unchanged": true,
+    "native_observation_unchanged": true,
+    "loops": 32,
+    "outline_edges": 512,
+    "outline_removals": 100,
+    "zones": 32,
+    "vertices_per_zone": 512,
+    "holes_per_zone": 16
+  },
+  "cleanup": {
+    "closed": true,
+    "pid": 77554,
+    "same_process_reload_verified": true,
+    "source_unchanged": true
+  },
+  "recovery_cleanup": {
+    "owned_closed": true,
+    "passed": true,
+    "source_pids": [
+      83056,
+      89640,
+      94550
+    ],
+    "source_unchanged": true
+  },
+  "recovery": {
+    "additive_faults": false,
+    "cases": [
+      {
+        "drc_restored": true,
+        "fault": {
+          "attempt_id": "000000000000000000001793099511286265000-83189-0",
+          "fault": {
+            "command": "type.googleapis.com/kiapi.common.commands.SaveDocument",
+            "mode": "corrupt_saved_reply",
+            "native_success": true,
+            "sequence": 1375
+          },
+          "journal_state": "unknown",
+          "mode": "corrupt_saved_reply",
+          "no_post_fault_ipc": true,
+          "open_editor_recovery_rejected": true,
+          "other_state_blocked": true,
+          "passed": true,
+          "same_state_blocked": true,
+          "source_changed": true
+        },
+        "native_content_restored": true,
+        "reopened_pid": 89640
+      },
+      {
+        "drc_restored": true,
+        "fault": {
+          "attempt_id": "000000000000000000001793099783636089000-89758-0",
+          "fault": {
+            "command": "type.googleapis.com/kiapi.common.commands.GetVersion",
+            "mode": "interrupt_before_write",
+            "native_success": true,
+            "sequence": 855
+          },
+          "journal_state": "in_flight",
+          "mode": "interrupt_before_write",
+          "no_post_fault_ipc": true,
+          "open_editor_recovery_rejected": true,
+          "other_state_blocked": true,
+          "passed": true,
+          "same_state_blocked": true,
+          "source_changed": false
+        },
+        "native_content_restored": true,
+        "reopened_pid": 94550
+      }
+    ],
+    "kicad_version": "10.0.7",
+    "passed": true,
+    "same_process_final_reload": true,
+    "source_pids": [
+      83056,
+      89640,
+      94550
+    ],
+    "subsequent_geometry_commit": true
+  },
+  "owned_editor_pids_absent": [
+    49823,
+    55921,
+    63243,
+    63718,
+    77554,
+    83056,
+    89640,
+    94550
+  ],
+  "runtime": {
+    "target_removed": "/private/tmp/auto-kicad-m4-target",
+    "target_allocated_bytes": 1355644928,
+    "retained_allocated_bytes": 57491456,
+    "reclaimed_allocated_bytes": 1298153472,
+    "binaries": {
+      "auto-kicad": {
+        "sha256": "e7bd3b9814a1f4cc519148c513de3f09a8741cb220f7fafb8b6ed356e29e92a0",
+        "bytes": 43381680
+      },
+      "check-geometry-mcp": {
+        "sha256": "508747f489f7c8d5394220d813ea77de0aa9d4c12ccf32303267bcc20c55f8f9",
+        "bytes": 5141728
+      },
+      "check-geometry-recovery": {
+        "sha256": "890034cce3e596c3cb17ff4d979f9816a9db52f1091320614a11813b1cb023cb",
+        "bytes": 7509680
+      },
+      "geometry-fault-relay": {
+        "sha256": "c76c697e27600eefbf11bfe04b3f3997251c3a533f6078f1e82812d36c185a23",
+        "bytes": 1446096
+      }
+    }
+  },
+  "quality": {
+    "passed": 482,
+    "failed": 0,
+    "ignored": 15,
+    "format": true,
+    "clippy_all_targets_warnings_denied": true,
+    "capability_matrix": true
+  },
+  "record_bytes": 2432303,
+  "equivalent_pretty_bytes": 8207485,
+  "artifact_root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance",
+  "sha256": {
+    "m4-maximum-geometry-full/baseline-refill.json": "e60bdf3e5fd28fcdc4f98eba9cb01494b6b5011ef9844ae98744493131688ba6",
+    "m4-maximum-geometry-full/baseline.kicad_pcb": "d89e4849d9843a864ba8b7f2c06845e3ef62ace359a54b4158e68670e33832d7",
+    "m4-maximum-geometry-full/bound.kicad_pcb": "e9d5f0c67117a1607bd7c1250f194842ba20e6a28f42663fd819b9f49020eac7",
+    "m4-maximum-geometry-full/cleanup.json": "b4c28674451302f1e8faef77480a482f4f7e0963c64f6b93e66f3d766523b167",
+    "m4-maximum-geometry-full/independent-saved-intent.json": "dccb9fd3b605db3262547b99cfdf2495dc6d1a3f664742b4ee68a1f1784a0bd0",
+    "m4-maximum-geometry-full/maximum-boundaries.json": "80d5a62b0cb38f69dd8d8b35d0c850af1ffc1ea289eb86730ddc9cb492c0bbfe",
+    "m4-maximum-geometry-full/mcp.json": "09624e4fe9fbfb8d1805cce18b3a09f4aa62e8a96c3b4f855391173dbd29c690",
+    "m4-maximum-geometry-full/owned-editor.json": "8f68f8ae100df072170135d9a0cf0537358707d7e7e40ce3e0f85fce1870b269",
+    "m4-maximum-geometry-full/request-0.json": "8aaed1bae059bac0ac585b0a940bfb548846b3e4d31cee987700f863308a81d4",
+    "m4-maximum-geometry-full/result-reload.json": "1a5094854c1341e88f4e1b348e76bd017e9e5003f777bcf36adf180124a1eeb2",
+    "m4-maximum-geometry-full/result.json": "83b666e86050b85e921d0ad0ecd28503af323a9b34c7b449e686a2c2ef7fe400",
+    "m4-maximum-geometry-full/result.kicad_pcb": "e9d5f0c67117a1607bd7c1250f194842ba20e6a28f42663fd819b9f49020eac7",
+    "m4-maximum-geometry-full/result.kicad_pro": "98111d1ae8f501244d38e10d48ca0d2f59194c8e8cc2e4d1cb2938d3cc47a5c4",
+    "m4-maximum-geometry-full/snapshot.json": "99c60c167cb7bbd6ae4c477b968b59697dd5efa714a30c1b3377453c2577801b",
+    "m4-maximum-geometry-full/stage-0.kicad_pcb": "e9d5f0c67117a1607bd7c1250f194842ba20e6a28f42663fd819b9f49020eac7",
+    "m4-maximum-geometry-full/state/sha256:07d9f366d0205c6d28ec1e0b44345c67382b302914b68d969bd994503bc58aba/000000000000000000001793099020479040000-77730-0/record.json": "6f89246469035efd28e8c1609721a51dae4001045a3366e4c08605e75727d316",
+    "m4-maximum-geometry-full/state/sha256:07d9f366d0205c6d28ec1e0b44345c67382b302914b68d969bd994503bc58aba/000000000000000000001793099020479040000-77730-0/source-0.backup": "d89e4849d9843a864ba8b7f2c06845e3ef62ace359a54b4158e68670e33832d7",
+    "m4-maximum-geometry-full/state/sha256:07d9f366d0205c6d28ec1e0b44345c67382b302914b68d969bd994503bc58aba/000000000000000000001793099020479040000-77730-0/source-1.backup": "98111d1ae8f501244d38e10d48ca0d2f59194c8e8cc2e4d1cb2938d3cc47a5c4",
+    "m4-maximum-geometry-full/stdio.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m4-maximum-geometry-full-recovery/baseline.kicad_pcb": "e9d5f0c67117a1607bd7c1250f194842ba20e6a28f42663fd819b9f49020eac7",
+    "m4-maximum-geometry-full-recovery/cleanup.json": "7be45b8ba6aa603303738ef641b68ba89dd845f0b7ad668d5553627348ba1bfa",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/fault-result.kicad_pcb": "162b300397647ef89ecabccadaf8f23cdafedc9835f24834b6f8b5cbdae44b88",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/mcp.json": "55ed856b70096a96220c73a9e6d930ccceaab9759f977fc6abede66c73347512",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/owned.json": "5a9a98655c02def7a55c8c47814221c7e25f3bcb2de7dd1fd0bab318ca0011e8",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/recovery.json": "8edb2089a29bd293211fc18f767b4b6d6ff3327f498a7b6459359efcca8bb91a",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/relay/arm": "23b498c0f1a1dca17e941a6e71bf294385a5f4f8700cc0f39d09bbbf9e25c244",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/relay/commands.jsonl": "cf24dc75427c4e04ecb4317d701c5caa623ad743291b58ea509e02382b607850",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/relay/fault-request.bin": "fdb25a35c0c4fb0d2a0580d6c97f7ff187197430d67a3b36345f6e7d9786711d",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/relay/fault.json": "eee302f6ea6b4fcb717a66d9b46505aea9401c9e04a32c4c44c50260a776781b",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/relay/native-response.bin": "33727c8f2313200e82a869d46f3ae3a10da6a86ce5ed04a671d8ac6c7eb52b45",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/relay/ready.json": "029fda60f60d21ba08559a7965cd81e49decd64c49424bfd0c0475a538a003c0",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/relay/stop": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/relay.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/request-0.json": "5fa011b5eaa36c0cdd9296dab1f925ce2ca2b75ba54570d67e44f99fb90119a5",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/result.json": "4d2f3bdbac6fac748bb1337a4e0002c4c7a651349d31943f2ac55690fd4c0494",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/state/recoveries/sha256:072a98d95644ef737c1f4aa4e617548b6d1e7efcb8552c14d4bb298c889a6e79/recovery-000000000000000000001793099533238131000-89615-0/record.json": "b8c1bf3c90ced98875f962f60ea3ca15fc013c65dbc683f4622b67dd8eef5c47",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/state/recoveries/sha256:072a98d95644ef737c1f4aa4e617548b6d1e7efcb8552c14d4bb298c889a6e79/recovery-000000000000000000001793099533440335000-89625-0/record.json": "28228aa903d3774d6bc6c4e607285e4f4af1e8c26f9806b4451098365ee3831e",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/state/sha256:072a98d95644ef737c1f4aa4e617548b6d1e7efcb8552c14d4bb298c889a6e79/000000000000000000001793099511286265000-83189-0/record.json": "73e39f7ed477331319acbf001820aaf52cbbfbdacbf3553fa6ffd2d868769abc",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/state/sha256:072a98d95644ef737c1f4aa4e617548b6d1e7efcb8552c14d4bb298c889a6e79/000000000000000000001793099511286265000-83189-0/source-0.backup": "e9d5f0c67117a1607bd7c1250f194842ba20e6a28f42663fd819b9f49020eac7",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/state/sha256:072a98d95644ef737c1f4aa4e617548b6d1e7efcb8552c14d4bb298c889a6e79/000000000000000000001793099511286265000-83189-0/source-1.backup": "98111d1ae8f501244d38e10d48ca0d2f59194c8e8cc2e4d1cb2938d3cc47a5c4",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/stdio-0.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/stdio-1.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/stdio-2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m4-maximum-geometry-full-recovery/corrupt_saved_reply/stdio-3.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/fault-result.kicad_pcb": "e9d5f0c67117a1607bd7c1250f194842ba20e6a28f42663fd819b9f49020eac7",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/mcp.json": "6fc6d3c43dea265f2175a4c03003a518f98efe30981e863f8f35e1905b8f682d",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/owned.json": "755badb5b9f45732fb008e74508b9b7eb453c9446612770ab5acd21430b09133",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/recovery.json": "cc1bbd1f956d32d612f5399f77b49a69191bdcd14c9fa6573997432a3c8b1320",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/relay/arm": "59e42f4767a68cef3c0e692638f2ddb18eefa0c82e00769c6b2b9daedccf2581",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/relay/commands.jsonl": "b32f082c70c3d44466c733c3423af8bb7d5d5c7702fb1036435ce63951714071",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/relay/fault-request.bin": "7f093d860dcc6d2814e41ea8c93b1b3ab1558cebfb8ec01ec61425dadc046ee2",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/relay/fault.json": "71a9240475c8b3e84c8d2303b9ebf85c24f53ffbe33c6ca9bc02ed000f32a7f7",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/relay/native-response.bin": "c3b544e4ae6697e270fa52b0dd26f3ba93dec3612d95d6e3e83b2bac91916d32",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/relay/ready.json": "5d017da7093f9f1af6b4c323a16e5f3e2b9b5a1b50bca4fa6738a7b04669c8ad",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/relay/release": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/relay/stop": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/relay.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/request-0.json": "5bc53c251b0290170ed6847dff54c25df7220d60c1ea9e3ad633ef05d4afec0f",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/result.json": "4bb7afec7582690b8f3399f41481328de6508c29a55ef0658f955b692fb60775",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/state/recoveries/sha256:072a98d95644ef737c1f4aa4e617548b6d1e7efcb8552c14d4bb298c889a6e79/recovery-000000000000000000001793099787957280000-94529-0/record.json": "7a17791a3f451ab431e5b41f75036f64501abaa68dbaabe303fd8c9ecabd3e9b",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/state/recoveries/sha256:072a98d95644ef737c1f4aa4e617548b6d1e7efcb8552c14d4bb298c889a6e79/recovery-000000000000000000001793099788158005000-94537-0/record.json": "44dbd5135e9bd71a28c106d75b3bec29a26bc89b73b59e2b32f24d9636a094ee",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/state/sha256:072a98d95644ef737c1f4aa4e617548b6d1e7efcb8552c14d4bb298c889a6e79/000000000000000000001793099783636089000-89758-0/record.json": "e145571b9278b8870eff95805942704a73d0a3bb16deaf1faaf103218075629a",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/state/sha256:072a98d95644ef737c1f4aa4e617548b6d1e7efcb8552c14d4bb298c889a6e79/000000000000000000001793099783636089000-89758-0/source-0.backup": "e9d5f0c67117a1607bd7c1250f194842ba20e6a28f42663fd819b9f49020eac7",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/state/sha256:072a98d95644ef737c1f4aa4e617548b6d1e7efcb8552c14d4bb298c889a6e79/000000000000000000001793099783636089000-89758-0/source-1.backup": "98111d1ae8f501244d38e10d48ca0d2f59194c8e8cc2e4d1cb2938d3cc47a5c4",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/stdio-0.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/stdio-1.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/stdio-2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m4-maximum-geometry-full-recovery/interrupt_before_write/stdio-3.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m4-maximum-geometry-full-recovery/normal/independent-saved-intent.json": "b37c7c1c6705b83738cf74839cf25c15cf90649bcb3f5deb49eedaafe22f1279",
+    "m4-maximum-geometry-full-recovery/normal/mcp.json": "283ce6666257f75314586b9a52b4b2521884f4b02368f3eb8588fd09d97d9a12",
+    "m4-maximum-geometry-full-recovery/normal/request-0.json": "bac9fd6b7674456233e6bfd91718603b893b36abad07da97831f3d9c9795929a",
+    "m4-maximum-geometry-full-recovery/normal/result.json": "a91dae33072c3f7669621dab5731e998d5baf4a80b26030cc95a6e612b2cf79c",
+    "m4-maximum-geometry-full-recovery/normal/stage-0.kicad_pcb": "4b10e4994f706b5e4a689503070352b336ffc50c342309cf5165a14a2353a9e6",
+    "m4-maximum-geometry-full-recovery/normal/state/sha256:072a98d95644ef737c1f4aa4e617548b6d1e7efcb8552c14d4bb298c889a6e79/000000000000000000001793099851619491000-94657-0/record.json": "7b7719578e18ee609c817532dae65791441afdd15e34752c2d021c66adeb945e",
+    "m4-maximum-geometry-full-recovery/normal/state/sha256:072a98d95644ef737c1f4aa4e617548b6d1e7efcb8552c14d4bb298c889a6e79/000000000000000000001793099851619491000-94657-0/source-0.backup": "e9d5f0c67117a1607bd7c1250f194842ba20e6a28f42663fd819b9f49020eac7",
+    "m4-maximum-geometry-full-recovery/normal/state/sha256:072a98d95644ef737c1f4aa4e617548b6d1e7efcb8552c14d4bb298c889a6e79/000000000000000000001793099851619491000-94657-0/source-1.backup": "98111d1ae8f501244d38e10d48ca0d2f59194c8e8cc2e4d1cb2938d3cc47a5c4",
+    "m4-maximum-geometry-full-recovery/normal/stdio-0.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "m4-maximum-geometry-full-recovery/result.json": "bbe064ded06c9ea8650cb42c278dd0d450b8ec383bef29f5977ac93985cae6ce",
+    "m4-maximum-geometry-full-recovery/result.kicad_pcb": "4b10e4994f706b5e4a689503070352b336ffc50c342309cf5165a14a2353a9e6",
+    "m4-maximum-geometry-full-recovery/result.kicad_pro": "98111d1ae8f501244d38e10d48ca0d2f59194c8e8cc2e4d1cb2938d3cc47a5c4",
+    "m4-maximum-geometry-full-fixture/board.kicad_pcb": "cbec35ea408afeee6ef325f5b752750d580cbe67bfb6f26ddb2bc1c1cb5677f9",
+    "m4-maximum-geometry-full-fixture/board.kicad_pro": "8419222138158c81918c3658150733feb0854bc37dc5a0b980afe94399a18f38",
+    "m4-maximum-geometry-full-fixture/fixture.json": "686fb9b10dcc73e4647f4558189cd8839a4c0568e38adc773dca1326677fb8c6",
+    "m4-maximum-geometry-checkpoint/auto-kicad-maximum-final-quality.log": "b1bf176865d31de29003d74edf23da40154d8570d1442ce5321b506843f869d8",
+    "m4-maximum-geometry-checkpoint/runtime-retention.json": "ff24eb5473d875719268d6e55cf214a2b35ac816c503b35e9ec272dbc0e8813b",
+    "m4-maximum-geometry-checkpoint/runtime-cleanup.json": "11b7cd92e5aa54c641937072abd3bdb92afc411e0d6673f149a110a7454f225f",
+    "m4-maximum-geometry-checkpoint/final-build-cleanup.json": "e964f1c1cccd07fdd8d58b6e9935ad948f3f8dcd816ab766a5d0fe9ef3f04f5b",
+    "m4-maximum-geometry-checkpoint/auto-kicad-maximum-document-quality.log": "a847258412311f616571084df50ea362ab3f7f31f44076a969371bafa14709f8"
+  },
+  "failed_attempts": {
+    "m4-maximum-geometry-combined": {
+      "m4-maximum-geometry-combined/baseline-refill.json": "17ab23f50f91f492ee9cc3db7fd00c258c7312be4e1fa661628358b9ee3c3034",
+      "m4-maximum-geometry-combined/baseline.kicad_pcb": "a071d7e9e0944ff1fb9ca7a9aca85611c4f4a4318ed40db689270f26f3eccef3",
+      "m4-maximum-geometry-combined/cleanup.json": "c78307a876b5874b4136e6948ba0a2407d13c53289c3fccd3bd91c6456f81160",
+      "m4-maximum-geometry-combined/failure.json": "1adae8be42df759f4adf8ece96fded3c5f174dc300e551e30ceb1df15cbe1de0",
+      "m4-maximum-geometry-combined/maximum-boundaries.json": "6bfe5b5c6acd8f8b8373fbaec0ce8f6fecf49b81ec775114d9113a6cdfa75489",
+      "m4-maximum-geometry-combined/mcp.json": "6ac669edf90777acaefa6675c08271ed8b6b8ac96bc0e9c0a384562643e89aa6",
+      "m4-maximum-geometry-combined/owned-editor.json": "c08bbb3c03ef9a4519b955281e15564db5a834bf67899e275f47a69c6c8a1312",
+      "m4-maximum-geometry-combined/result.kicad_pcb": "a071d7e9e0944ff1fb9ca7a9aca85611c4f4a4318ed40db689270f26f3eccef3",
+      "m4-maximum-geometry-combined/result.kicad_pro": "98111d1ae8f501244d38e10d48ca0d2f59194c8e8cc2e4d1cb2938d3cc47a5c4",
+      "m4-maximum-geometry-combined/stdio.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "m4-maximum-geometry-defaults": {
+      "m4-maximum-geometry-defaults/baseline-refill.json": "17ab23f50f91f492ee9cc3db7fd00c258c7312be4e1fa661628358b9ee3c3034",
+      "m4-maximum-geometry-defaults/baseline.kicad_pcb": "a071d7e9e0944ff1fb9ca7a9aca85611c4f4a4318ed40db689270f26f3eccef3",
+      "m4-maximum-geometry-defaults/cleanup.json": "597d950bd32455fbea03df73a75d2a3adcf5af392a7a5f53441517fe3d575c4f",
+      "m4-maximum-geometry-defaults/failure.json": "1adae8be42df759f4adf8ece96fded3c5f174dc300e551e30ceb1df15cbe1de0",
+      "m4-maximum-geometry-defaults/maximum-boundaries.json": "6bfe5b5c6acd8f8b8373fbaec0ce8f6fecf49b81ec775114d9113a6cdfa75489",
+      "m4-maximum-geometry-defaults/mcp.json": "8b3a8a0ccf775d054585721f0e96668083103e095aa0c4588cffd1c48f2f7350",
+      "m4-maximum-geometry-defaults/owned-editor.json": "d594c06adb3530791fdf4c7914d803502538559ac97e6555ddd3bacbadef5c56",
+      "m4-maximum-geometry-defaults/result.kicad_pcb": "a071d7e9e0944ff1fb9ca7a9aca85611c4f4a4318ed40db689270f26f3eccef3",
+      "m4-maximum-geometry-defaults/result.kicad_pro": "98111d1ae8f501244d38e10d48ca0d2f59194c8e8cc2e4d1cb2938d3cc47a5c4",
+      "m4-maximum-geometry-defaults/stdio.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "m4-maximum-geometry-connected": {
+      "m4-maximum-geometry-connected/baseline-refill.json": "e3f19ef7a21ae4d80b076affc0e0dbb02981adec99f843970295924e3a7d8ae9",
+      "m4-maximum-geometry-connected/baseline.kicad_pcb": "ca9799da0b3c0ca5ab57b83e45a126fdb1465dfb62f02bca2c779322bff5053e",
+      "m4-maximum-geometry-connected/cleanup.json": "37fc9f19a216d33ba0551170cc5e85fc1945a981f7d39f8c443a0410194dd707",
+      "m4-maximum-geometry-connected/failure.json": "1adae8be42df759f4adf8ece96fded3c5f174dc300e551e30ceb1df15cbe1de0",
+      "m4-maximum-geometry-connected/maximum-boundaries.json": "6bfe5b5c6acd8f8b8373fbaec0ce8f6fecf49b81ec775114d9113a6cdfa75489",
+      "m4-maximum-geometry-connected/mcp.json": "669285733ac5d1599c5992d7098483e12deaf8e03e641fbf22dc5a41e20bef27",
+      "m4-maximum-geometry-connected/owned-editor.json": "b9c739c37dabdb3eec35257662419677a482c43c4149777d3d3780621629c6d6",
+      "m4-maximum-geometry-connected/result.kicad_pcb": "ca9799da0b3c0ca5ab57b83e45a126fdb1465dfb62f02bca2c779322bff5053e",
+      "m4-maximum-geometry-connected/result.kicad_pro": "98111d1ae8f501244d38e10d48ca0d2f59194c8e8cc2e4d1cb2938d3cc47a5c4",
+      "m4-maximum-geometry-connected/state/sha256:8a3d5368407a9abbe503a89d53153e8d5608c2ae1ed76569e31a8e80841ce027/000000000000000000001793097375220996000-38996-0/source-0.backup": "ca9799da0b3c0ca5ab57b83e45a126fdb1465dfb62f02bca2c779322bff5053e",
+      "m4-maximum-geometry-connected/state/sha256:8a3d5368407a9abbe503a89d53153e8d5608c2ae1ed76569e31a8e80841ce027/000000000000000000001793097375220996000-38996-0/source-1.backup": "98111d1ae8f501244d38e10d48ca0d2f59194c8e8cc2e4d1cb2938d3cc47a5c4",
+      "m4-maximum-geometry-connected/stdio.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "m4-maximum-geometry-recovery": {
+      "m4-maximum-geometry-recovery/baseline.kicad_pcb": "ad9fe092c34c1a82a51d74d22947981edf63aab1c6287d486a634f07ad8b0d26",
+      "m4-maximum-geometry-recovery/cleanup.json": "ba3c2e662e8397793ebf66278708e62228e9aa420e193e0ce07552edb8a8bddf",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/fault-result.kicad_pcb": "9c077977ca6de16e4977c53db3a8642cd0b9ab9cf91773543c42b43e733b3387",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/mcp.json": "0c44a72812d64d683ee5d94d3936fe718d32f5cd7cf2403c30c674f5c69fb8de",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/owned.json": "6bae19d88370197c0187c4d26feb278078180505548fd4b4ff1fba313ec0c263",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/recovery.json": "6bc31b9676cb86899dc87dc8e3d48fd553522c952425f2f7334a87bfab184157",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/relay/arm": "23b498c0f1a1dca17e941a6e71bf294385a5f4f8700cc0f39d09bbbf9e25c244",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/relay/commands.jsonl": "406da5c5c01520f934b20e5fa9e1b22795192c94b543c5959316d05731eaf1a5",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/relay/fault-request.bin": "910feef82bd3b056d8a17f3ea0982df31f3ce48937f3d9bb80bc87a852a8ce80",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/relay/fault.json": "eee302f6ea6b4fcb717a66d9b46505aea9401c9e04a32c4c44c50260a776781b",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/relay/native-response.bin": "9443af17f26b41d4a58a441e06cc033eaf9fd75635826efa8a47cc1dcfe26eb1",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/relay/ready.json": "92e306d8152442c91bb10db948fcfaae9f1bf6537856ae9ba578e3845a186c9b",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/relay/stop": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/relay.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/request-0.json": "7e22bccaa8dee2469154674a5ff55affe5cf1fd11c553f41fe2da79cdfb0f8aa",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/result.json": "6407d59f5ba5797c320ba29ddbcdbcd67c11929e8e693a583c38b3c343106646",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/state/recoveries/sha256:7a4603b8df455bf464f2d7f7441eb02e64dca7246b6969288b861c7e61bb4f36/recovery-000000000000000000001793098369072949000-63214-0/record.json": "136ce984ac2ab47b16d778f7a3dc521f0172b297f9b8bb147a37a0e6bed0fc8c",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/state/recoveries/sha256:7a4603b8df455bf464f2d7f7441eb02e64dca7246b6969288b861c7e61bb4f36/recovery-000000000000000000001793098369560727000-63223-0/record.json": "782706e364379aab9baf83e83c334e7301ac939f0979c70f83724ac10adbb447",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/state/sha256:7a4603b8df455bf464f2d7f7441eb02e64dca7246b6969288b861c7e61bb4f36/000000000000000000001793098335684026000-56101-0/record.json": "4cf6a86a0a36db5a1e179593b40be8f9059d5315c1a67690890f91797c10106f",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/state/sha256:7a4603b8df455bf464f2d7f7441eb02e64dca7246b6969288b861c7e61bb4f36/000000000000000000001793098335684026000-56101-0/source-0.backup": "ad9fe092c34c1a82a51d74d22947981edf63aab1c6287d486a634f07ad8b0d26",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/state/sha256:7a4603b8df455bf464f2d7f7441eb02e64dca7246b6969288b861c7e61bb4f36/000000000000000000001793098335684026000-56101-0/source-1.backup": "98111d1ae8f501244d38e10d48ca0d2f59194c8e8cc2e4d1cb2938d3cc47a5c4",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/stdio-0.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/stdio-1.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/stdio-2.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "m4-maximum-geometry-recovery/corrupt_saved_reply/stdio-3.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "m4-maximum-geometry-recovery/failure.json": "219658f4fd9bfd5393d910daa5bbbb8795e9d8b53a14094df7e5685099debefa",
+      "m4-maximum-geometry-recovery/interrupt_before_write/mcp.json": "fea95da7ac4ea27d333c4ba2654f9d4443341bc418d9b1e839ca51448c55f956",
+      "m4-maximum-geometry-recovery/interrupt_before_write/owned.json": "a64a177eedd9f226452e3326336ba98d75ea8e5ff266198bb559769ea52e2ee3",
+      "m4-maximum-geometry-recovery/interrupt_before_write/relay/commands.jsonl": "6b7c0f39e1f1b6ede35df1c45a67fcd01a680e285458b38850dbc106bee2f28c",
+      "m4-maximum-geometry-recovery/interrupt_before_write/relay/ready.json": "000ee6282c02e44ca394758311b9faf6a1fb3f934aa6988c4978494f84dcfb96",
+      "m4-maximum-geometry-recovery/interrupt_before_write/relay/stop": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "m4-maximum-geometry-recovery/interrupt_before_write/relay.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "m4-maximum-geometry-recovery/interrupt_before_write/stdio-0.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "m4-maximum-geometry-recovery/result.kicad_pcb": "ad9fe092c34c1a82a51d74d22947981edf63aab1c6287d486a634f07ad8b0d26",
+      "m4-maximum-geometry-recovery/result.kicad_pro": "98111d1ae8f501244d38e10d48ca0d2f59194c8e8cc2e4d1cb2938d3cc47a5c4"
+    }
+  },
+  "runtime_cleanup": {
+    "path": "/private/tmp/auto-kicad-maximum-runtime",
+    "removed": true,
+    "allocated_bytes": 57495552
+  },
+  "final_build_cleanup": {
+    "target": "/private/tmp/auto-kicad-m4-target",
+    "removed": true,
+    "allocated_bytes": 897060864
+  },
+  "final_quality_log": "m4-maximum-geometry-checkpoint/auto-kicad-maximum-document-quality.log",
+  "verified_source_sha256": {
+    "crates/auto-kicad/src/recovery.rs": "e09d0d3241daef5a6bfd3311a4741a5ca7d0f4799252d24417f179625ad704b1",
+    "scripts/check-geometry-mcp.py": "dc558e5b5b954ce6a05d9ebccd1e075be7ff9b21c3b03bd5abe3636031acb684",
+    "scripts/check-geometry-request.py": "5a57dd8fa56e17c0836ee6456ee67620518ecfe1308ed1875614e6dccb53b5a2",
+    "scripts/prepare-maximum-geometry.py": "20597d3606ba6d9d74ea8566e48de8a3eadac600c5f0c8811b3ee2f48c10ed1c",
+    "schemas/capability-matrix.json": "c1ea03a572825f208e9356b15dbf4f9608facc27be09a26aea37d9e8d3febbf9"
+  }
+}

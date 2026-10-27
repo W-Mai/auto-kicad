@@ -375,7 +375,7 @@
         "saved source/shadow baseline and complete native/text/copper correspondence",
         "no introduced DRC or split original pad connectivity; complete candidate DRC correspondence",
         "uncertain execution blocks project writes until matching guarded recovery",
-        "generated teardrop regeneration is verified; GUI cancellation and combined maximum-size zoned MCP qualification remain unverified"
+        "generated teardrop regeneration and combined maximum-size zoned MCP qualification are verified; GUI cancellation remains unverified; see docs/acceptance/geometry-boundaries.md"
       ],
       "evidence": {
         "fixture": "mixed-geometry-and-settled-cm5-copy",

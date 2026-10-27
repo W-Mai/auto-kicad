@@ -361,7 +361,7 @@ impl ProjectWriter {
             post_attempt: None,
         };
         let path = directory.join("record.json");
-        let bytes = serde_json::to_vec_pretty(&record)?;
+        let bytes = serde_json::to_vec(&record)?;
         if bytes.len() as u64 > MAX_RECORD_BYTES {
             return Err(invalid("recovery evidence exceeds size limit"));
         }
@@ -581,7 +581,7 @@ impl ExecutionStore {
     }
 
     fn persist_recovery(attempt: &RecoveryAttempt) -> io::Result<()> {
-        let bytes = serde_json::to_vec_pretty(&attempt.record)?;
+        let bytes = serde_json::to_vec(&attempt.record)?;
         if bytes.len() as u64 > MAX_RECORD_BYTES {
             return Err(invalid("recovery record exceeds size limit"));
         }
@@ -872,7 +872,7 @@ impl ExecutionAttempt {
         );
         self.record.state = state.into();
         self.record.outcome = Some(outcome);
-        let bytes = serde_json::to_vec_pretty(&self.record)?;
+        let bytes = serde_json::to_vec(&self.record)?;
         if bytes.len() as u64 > MAX_RECORD_BYTES {
             return Err(invalid("recovery outcome exceeds size limit"));
         }
@@ -970,6 +970,68 @@ mod tests {
         fn drop(&mut self) {
             fs::remove_dir_all(&self.root).unwrap();
         }
+    }
+
+    #[test]
+    fn bounded_execution_records_preserve_dense_evidence_without_indentation_overhead() {
+        let f = Fixture::new(false);
+        let before = fs::read(&f.source).unwrap();
+        let points = (0..512)
+            .map(|i| serde_json::json!({"x_nm":3000000+i * 40000,"y_nm":43000000}))
+            .collect::<Vec<_>>();
+        let zones = (0..32).map(|i| serde_json::json!({"zone_id":format!("zone-{i}"),"definition":{"polygon":{"exterior":{"points":points}}}})).collect::<Vec<_>>();
+        let evidence = serde_json::json!({
+            "plan":{"operations":[{"kind":"EditGeometry","request":{"zones":zones}}]},
+            "geometry_candidate":{"summary":{"zones":zones}},
+            "geometry_evidence":{"bound":true}
+        });
+        let outcome = serde_json::json!({"geometry":{"summary":{"zones":zones}}});
+        let writer = f.store.acquire(&f.project).unwrap();
+        let attempt = writer
+            .begin(
+                "pcb",
+                "dense-plan",
+                "dense-approval",
+                evidence.clone(),
+                std::slice::from_ref(&f.source),
+            )
+            .unwrap();
+        assert!(
+            serde_json::to_vec_pretty(&attempt.record).unwrap().len() as u64 > MAX_RECORD_BYTES
+        );
+        let path = attempt.path.clone();
+        let id = attempt.attempt_id().to_owned();
+        attempt.finish("unknown", outcome.clone()).unwrap();
+        let bytes = read_bounded(&path, MAX_RECORD_BYTES).unwrap();
+        let record: ExecutionRecord = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(record.evidence, evidence);
+        assert_eq!(record.outcome, Some(outcome));
+        assert_eq!(fs::read(&f.source).unwrap(), before);
+        drop(writer);
+        let plan = f.store.plan_recovery(&f.project, &id).unwrap();
+        let approval = f
+            .store
+            .preview_recovery(&f.project, &plan.recovery_id, &plan.plan_hash)
+            .unwrap();
+        f.store
+            .commit_recovery(&f.project, &plan.recovery_id, &plan.plan_hash, &approval)
+            .unwrap();
+        assert_eq!(fs::read(&f.source).unwrap(), before);
+        assert!(!f.project.join(GEOMETRY_PENDING).exists());
+        let writer = f.store.acquire(&f.project).unwrap();
+        assert!(
+            writer
+                .begin(
+                    "pcb",
+                    "oversized",
+                    "oversized",
+                    serde_json::json!({"payload":"x".repeat(MAX_RECORD_BYTES as usize)}),
+                    std::slice::from_ref(&f.source)
+                )
+                .is_err()
+        );
+        assert!(!f.project.join(GEOMETRY_PENDING).exists());
+        assert_eq!(fs::read(&f.source).unwrap(), before);
     }
 
     #[test]

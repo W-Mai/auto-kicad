@@ -68,6 +68,9 @@ def main():
         before = path.read_bytes()
         board = pcbnew.LoadBoard(str(path))
         zones = {str(z.m_Uuid.AsString()): z for z in board.Zones()}
+        connectivity = board.GetConnectivity()
+        if (output / "maximum-boundaries.json").exists():
+            connectivity.Build(board)
         request = json.loads((output / f'request-{index}.json').read_text())
         mutations = []
         for edit in request['zones']:
@@ -83,6 +86,18 @@ def main():
             else:
                 assert identifier in zones
                 fields = check(board, zones[identifier], expected)
+                if (output / 'maximum-boundaries.json').exists():
+                    assert edit['kind'] == 'create'
+                    index = int(edit['zone_id'].removeprefix('maximum-zone-'))
+                    zone = zones[identifier]
+                    assert zone.GetFilledPolysList(pcbnew.In2_Cu).OutlineCount() > 0
+                    via_id = f'90000000-0000-4000-8000-{index+1:012d}'
+                    via = next(v for v in board.GetTracks() if str(v.m_Uuid.AsString()) == via_id)
+                    connected = {str(item.m_Uuid.AsString()) for item in connectivity.GetConnectedItems(via, 0)}
+                    assert identifier in connected, (edit['zone_id'], 'zone is not connected to its ground component')
+                    fields['verified_nonempty_fill'] = True
+                    fields['verified_ground_via'] = via_id
+
             mutations.append(dict(kind=edit['kind'], uuid=identifier, fields=fields))
         outline_fields = []
         if request.get('outline'):

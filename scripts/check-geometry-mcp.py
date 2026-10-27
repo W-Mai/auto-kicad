@@ -62,6 +62,61 @@ def bind(value,summary,created):
     if isinstance(value,str) and value.startswith('${created:'): return created[value[10:-1]]
     return value
 
+def maximum_boundary_controls(request, summary, saved):
+    shape = request['geometry']
+    loops = shape['outline']['loops']
+    assert len(loops) == 32 and sum(len(v['edges']) for v in loops) == 512
+    assert len(shape['zones']) == 32
+    assert len(shape['outline']['remove_ids']) == 100
+    variants = []
+    invalid = copy.deepcopy(request)
+    invalid['geometry']['outline']['remove_ids'].append('a0000000-0000-4000-8000-999999999999')
+    variants.append(('101-outline-removals', invalid))
+    invalid = copy.deepcopy(request)
+    edges = invalid['geometry']['outline']['loops'][0]['edges']
+    edge = edges.pop(0)
+    mid = {k: (edge['start'][k]+edge['end'][k])//2 for k in edge['start']}
+    edges[:0] = [dict(kind='segment', start=edge['start'], end=mid),
+                 dict(kind='segment', start=mid, end=edge['end'])]
+    variants.append(('513-outline-edges', invalid))
+    invalid = copy.deepcopy(request)
+    first = invalid['geometry']['outline']['loops'][0]
+    points = [e['start'] for i, e in enumerate(first['edges']) if i % 4 != 1]
+    first['edges'] = [dict(kind='segment', start=a, end=b) for a, b in zip(points, points[1:]+points[:1])]
+    extra = copy.deepcopy(first)
+    extra['loop_id'] = 'overflow-loop'
+    points = [dict(x_nm=x, y_nm=y) for x, y in [(200000000,0),(202000000,0),(202000000,2000000),(200000000,2000000)]]
+    extra['edges'] = [dict(kind='segment', start=a, end=b) for a, b in zip(points, points[1:]+points[:1])]
+    invalid['geometry']['outline']['loops'].append(extra)
+    variants.append(('33-outline-loops', invalid))
+    invalid = copy.deepcopy(request)
+    zone = copy.deepcopy(invalid['geometry']['zones'][0])
+    zone['zone_id'] = 'overflow-zone'
+    invalid['geometry']['zones'].append(zone)
+    variants.append(('33-zone-mutations', invalid))
+    invalid = copy.deepcopy(request)
+    points = invalid['geometry']['zones'][0]['definition']['polygon']['exterior']['points']
+    points.insert(1, {k: (points[0][k]+points[1][k])//2 for k in points[0]})
+    variants.append(('513-zone-vertices', invalid))
+    invalid = copy.deepcopy(request)
+    polygon = invalid['geometry']['zones'][0]['definition']['polygon']
+    origin = polygon['exterior']['points'][0]
+    del polygon['exterior']['points'][1:5]
+    polygon['holes'].append(dict(points=[dict(x_nm=origin['x_nm']+x, y_nm=origin['y_nm']+y)
+                                          for x, y in [(100000,100000),(300000,100000),(300000,300000),(100000,300000)]]))
+    variants.append(('17-zone-holes', invalid))
+    for label, invalid in variants:
+        call('kicad_plan_change', dict(invalid, request_id=label), reject=True)
+        assert board.read_bytes() == saved
+    after = call('kicad_inspect_project', dict(endpoint=endpoint, geometry=True))
+    assert after['geometry']['observation'] == summary
+    proof = dict(rejected=[label for label, _ in variants], saved_unchanged=True, native_observation_unchanged=True,
+                 loops=32, outline_edges=512, outline_removals=100, zones=32, vertices_per_zone=512, holes_per_zone=16)
+    (output/'maximum-boundaries.json').write_text(json.dumps(proof, indent=2))
+    return proof
+
+
+
 try:
     rpc.call('initialize',dict(protocolVersion='2025-03-26',capabilities={},clientInfo=dict(name='geometry-mcp-acceptance',version='1')))
     rpc.send(dict(jsonrpc='2.0',method='notifications/initialized'))
@@ -74,6 +129,8 @@ try:
         geometry=bind(template,summary,created)
         request=dict(endpoint=endpoint,source_run_id='geometry-acceptance',geometry=geometry,request_id=f'geometry-{index}')
         original=board.read_bytes()
+        if index == 0 and os.environ.get('AUTO_KICAD_GEOMETRY_BOUNDARY') == '1':
+            maximum_boundary_controls(request, summary, original)
         invalid=copy.deepcopy(request); invalid['geometry']['observed_revision']='sha256:'+'0'*64
         call('kicad_plan_change',invalid,reject=True)
         invalid=copy.deepcopy(request); invalid['segments']=[]
