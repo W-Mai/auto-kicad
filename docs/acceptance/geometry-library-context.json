@@ -1,0 +1,1346 @@
+{
+  "kicad_version": "10.0.7",
+  "quality": {
+    "passed": 469,
+    "failed": 0,
+    "ignored": 15,
+    "format": true,
+    "clippy_warnings_denied": true,
+    "capability_matrix": true
+  },
+  "native": {
+    "binary_sha256": "0a0534997d0686221992cb4d79cb3c4e17fe4d289cc83812d752cf9d6095c40e",
+    "cases": [
+      {
+        "catalog_digest": "5a6d9d97c1bcadb4b81b34b209401846a51966f31f83f65e48de552bedcbd686",
+        "entry_count": 157,
+        "inputs": [
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override/geometry-zones.kicad_pcb",
+            "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+          },
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override/geometry-zones.kicad_pro",
+            "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+          },
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override/geometry-zones.kicad_dru",
+            "sha256": null
+          }
+        ],
+        "kicad_version": "10.0.7",
+        "passed": true,
+        "source": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override/geometry-zones.kicad_pcb",
+        "source_unchanged": true,
+        "table_evidence": [
+          {
+            "canonical_path": "/Users/w-mai/Library/Preferences/kicad/10.0/fp-lib-table",
+            "digest": "02511f4212d34080642667e02cdce26c665d629af776a57af341e49e7cd1e03e",
+            "present": true,
+            "requested_path": "/Users/w-mai/Library/Preferences/kicad/10.0/fp-lib-table",
+            "size": 452
+          },
+          {
+            "canonical_path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/template/fp-lib-table",
+            "digest": "4042e1c92709d4f872d4cdeaddfa7ec0f6bd49be240e0d9668b76e89888b1e77",
+            "present": true,
+            "requested_path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/template/fp-lib-table",
+            "size": 25235
+          },
+          {
+            "canonical_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override/fp-lib-table",
+            "digest": "d3fd26bbd26e349f71ce702ac4a01e39d599d8fc44bd99492aade938c0556d99",
+            "present": true,
+            "requested_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override/fp-lib-table",
+            "size": 154
+          }
+        ],
+        "table_sha256": "cfd947b680f1cc11ddfbec717a28847c88330d8f759990d99ec553a41827fb14",
+        "unconnected": 2,
+        "violations": 4,
+        "case": "missing-override",
+        "independent_complete_report_equal": true,
+        "omitted_override_changes_diagnostics": true,
+        "library_errors_preserved": 2
+      },
+      {
+        "catalog_digest": "1782ce3dc320d8e0943b45ce0f6ba165e67023f6fdc674e13c36da1bb5073937",
+        "entry_count": 157,
+        "inputs": [
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override/geometry-zones.kicad_pcb",
+            "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+          },
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override/geometry-zones.kicad_pro",
+            "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+          },
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override/geometry-zones.kicad_dru",
+            "sha256": null
+          }
+        ],
+        "kicad_version": "10.0.7",
+        "passed": true,
+        "source": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override/geometry-zones.kicad_pcb",
+        "source_unchanged": true,
+        "table_evidence": [
+          {
+            "canonical_path": "/Users/w-mai/Library/Preferences/kicad/10.0/fp-lib-table",
+            "digest": "02511f4212d34080642667e02cdce26c665d629af776a57af341e49e7cd1e03e",
+            "present": true,
+            "requested_path": "/Users/w-mai/Library/Preferences/kicad/10.0/fp-lib-table",
+            "size": 452
+          },
+          {
+            "canonical_path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/template/fp-lib-table",
+            "digest": "4042e1c92709d4f872d4cdeaddfa7ec0f6bd49be240e0d9668b76e89888b1e77",
+            "present": true,
+            "requested_path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/template/fp-lib-table",
+            "size": 25235
+          },
+          {
+            "canonical_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override/fp-lib-table",
+            "digest": "8040ab95a1fe8bad759b3056f0bdbb372c67f9d92cef9c1fbee548a1337c757a",
+            "present": true,
+            "requested_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override/fp-lib-table",
+            "size": 191
+          }
+        ],
+        "table_sha256": "811cdb7ffd2a1e8d4e09be63b5c43ce37c124731ca348ffed2ec6399a793df14",
+        "unconnected": 2,
+        "violations": 4,
+        "case": "disabled-override",
+        "independent_complete_report_equal": true
+      },
+      {
+        "catalog_digest": "2db7200075bc3a4ddc5332c2bba85a1234b9c56348e1339c056bd2d45241046a",
+        "entry_count": 158,
+        "inputs": [
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias/geometry-zones.kicad_pcb",
+            "sha256": "09c9755b1e1567a758e3468b97f23e85f806e0b01d272ad391b02f13e4244590"
+          },
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias/geometry-zones.kicad_pro",
+            "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+          },
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias/geometry-zones.kicad_dru",
+            "sha256": null
+          }
+        ],
+        "kicad_version": "10.0.7",
+        "passed": true,
+        "source": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias/geometry-zones.kicad_pcb",
+        "source_unchanged": true,
+        "table_evidence": [
+          {
+            "canonical_path": "/Users/w-mai/Library/Preferences/kicad/10.0/fp-lib-table",
+            "digest": "02511f4212d34080642667e02cdce26c665d629af776a57af341e49e7cd1e03e",
+            "present": true,
+            "requested_path": "/Users/w-mai/Library/Preferences/kicad/10.0/fp-lib-table",
+            "size": 452
+          },
+          {
+            "canonical_path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/template/fp-lib-table",
+            "digest": "4042e1c92709d4f872d4cdeaddfa7ec0f6bd49be240e0d9668b76e89888b1e77",
+            "present": true,
+            "requested_path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/template/fp-lib-table",
+            "size": 25235
+          },
+          {
+            "canonical_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias/fp-lib-table",
+            "digest": "257884d5913d7d39e45978d571e634b80cca5dda74f87798c630e356d6fafc2f",
+            "present": true,
+            "requested_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias/fp-lib-table",
+            "size": 152
+          }
+        ],
+        "table_sha256": "c06e313f994b49cd6e61b7b8ce944f7db063dc3327fb19117dc9061737345d7b",
+        "unconnected": 2,
+        "violations": 4,
+        "case": "hidden-alias",
+        "independent_complete_report_equal": true
+      },
+      {
+        "catalog_digest": "7a871d674dba530973ff496e889a6111f580abd919ac1bf1e0fad3466ea3ee20",
+        "entry_count": 157,
+        "inputs": [
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled/geometry-zones.kicad_pcb",
+            "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+          },
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled/geometry-zones.kicad_pro",
+            "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+          },
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled/geometry-zones.kicad_dru",
+            "sha256": null
+          }
+        ],
+        "kicad_version": "10.0.7",
+        "passed": true,
+        "source": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled/geometry-zones.kicad_pcb",
+        "source_unchanged": true,
+        "table_evidence": [
+          {
+            "canonical_path": "/Users/w-mai/Library/Preferences/kicad/10.0/fp-lib-table",
+            "digest": "02511f4212d34080642667e02cdce26c665d629af776a57af341e49e7cd1e03e",
+            "present": true,
+            "requested_path": "/Users/w-mai/Library/Preferences/kicad/10.0/fp-lib-table",
+            "size": 452
+          },
+          {
+            "canonical_path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/template/fp-lib-table",
+            "digest": "4042e1c92709d4f872d4cdeaddfa7ec0f6bd49be240e0d9668b76e89888b1e77",
+            "present": true,
+            "requested_path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/template/fp-lib-table",
+            "size": 25235
+          },
+          {
+            "canonical_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled/fp-lib-table",
+            "digest": "aaf2d40d092ce2cd7e5906f6b0b88a4fc12a99d52b34b624edef543921c55986",
+            "present": true,
+            "requested_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled/fp-lib-table",
+            "size": 141
+          },
+          {
+            "canonical_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled/nested-table",
+            "digest": "f373d00a3d1eadf8fe095d6fda97a3567e73c8326baa3010e4c468e3d904ecb8",
+            "present": true,
+            "requested_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled/nested-table",
+            "size": 180
+          }
+        ],
+        "table_sha256": "0b5ef9c015e5565a6745d2a859e2ae8558ded597c418f5ff6bf0f66eed19c28c",
+        "unconnected": 2,
+        "violations": 2,
+        "case": "nested-disabled",
+        "independent_complete_report_equal": true
+      },
+      {
+        "catalog_digest": "208d9d85ad755555a87b58d60768cfa2ea85b6e7ac2fa051d8c5ad9c77572879",
+        "entry_count": 157,
+        "inputs": [
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled/geometry-zones.kicad_pcb",
+            "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+          },
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled/geometry-zones.kicad_pro",
+            "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+          },
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled/geometry-zones.kicad_dru",
+            "sha256": null
+          }
+        ],
+        "kicad_version": "10.0.7",
+        "passed": true,
+        "source": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled/geometry-zones.kicad_pcb",
+        "source_unchanged": true,
+        "table_evidence": [
+          {
+            "canonical_path": "/Users/w-mai/Library/Preferences/kicad/10.0/fp-lib-table",
+            "digest": "02511f4212d34080642667e02cdce26c665d629af776a57af341e49e7cd1e03e",
+            "present": true,
+            "requested_path": "/Users/w-mai/Library/Preferences/kicad/10.0/fp-lib-table",
+            "size": 452
+          },
+          {
+            "canonical_path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/template/fp-lib-table",
+            "digest": "4042e1c92709d4f872d4cdeaddfa7ec0f6bd49be240e0d9668b76e89888b1e77",
+            "present": true,
+            "requested_path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/template/fp-lib-table",
+            "size": 25235
+          },
+          {
+            "canonical_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled/fp-lib-table",
+            "digest": "1f987281d001ec22d4b62763f8d815451956730fdf335e8eff8b246e7a923684",
+            "present": true,
+            "requested_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled/fp-lib-table",
+            "size": 134
+          }
+        ],
+        "table_sha256": "14140c8d13d67d9704cd8bcf2078ce9217591f3b30850d020f95867d58ba82ac",
+        "unconnected": 2,
+        "violations": 4,
+        "case": "unsupported-disabled",
+        "independent_complete_report_equal": true
+      },
+      {
+        "catalog_digest": "bef1b8a494106769351b14bc8bd2a032efc68a9f56fcd17c50909afc3e190e84",
+        "entry_count": 1,
+        "inputs": [
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/readonly-override/geometry-zones.kicad_pcb",
+            "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+          },
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/readonly-override/geometry-zones.kicad_pro",
+            "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+          },
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/readonly-override/geometry-zones.kicad_dru",
+            "sha256": null
+          }
+        ],
+        "kicad_version": "10.0.7",
+        "passed": true,
+        "source": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/readonly-override/geometry-zones.kicad_pcb",
+        "source_unchanged": true,
+        "table_evidence": [
+          {
+            "canonical_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/native-config/10.0/fp-lib-table",
+            "digest": "7013a4c736a78049380d1911c927234c815e346ab2c0844348a12bfff4fb9cec",
+            "present": true,
+            "requested_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/native-config/10.0/fp-lib-table",
+            "size": 191
+          },
+          {
+            "canonical_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/native-config/10.0/readonly-table",
+            "digest": "fc40a7029253a616a59d38967157232c183adf36a55b4df646327e3bd093367d",
+            "present": true,
+            "requested_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/native-config/10.0/readonly-table",
+            "size": 152
+          },
+          {
+            "canonical_path": null,
+            "digest": null,
+            "present": false,
+            "requested_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/readonly-override/fp-lib-table",
+            "size": 0
+          }
+        ],
+        "table_sha256": "72a7d9e7c30544f1e37e442f75807474daaaebf4841684161d8eb25f39076b6a",
+        "unconnected": 2,
+        "violations": 4,
+        "case": "readonly-override",
+        "independent_complete_report_equal": true,
+        "native_readonly_flags_verified": true
+      },
+      {
+        "catalog_digest": "d448ed12387d8be8e11c05e9ea95b2558c03662908b1dd13e7f3f067324a2210",
+        "entry_count": 158,
+        "inputs": [
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-geometry-candidate-cm5-settled/CM5_MINIMA_3.kicad_pcb",
+            "sha256": "33c02e911b9e2edb60cebd16dca21000f87979a9015ca2746c0c5a88cecafd2d"
+          },
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-geometry-candidate-cm5-settled/CM5_MINIMA_3.kicad_pro",
+            "sha256": "a53e984e1356fe4f2a2efd7c7d78de5243061e3a823d6b7e412831c4b178916a"
+          },
+          {
+            "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-geometry-candidate-cm5-settled/CM5_MINIMA_3.kicad_dru",
+            "sha256": null
+          }
+        ],
+        "kicad_version": "10.0.7",
+        "passed": true,
+        "source": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-geometry-candidate-cm5-settled/CM5_MINIMA_3.kicad_pcb",
+        "source_unchanged": true,
+        "table_evidence": [
+          {
+            "canonical_path": "/Users/w-mai/Library/Preferences/kicad/10.0/fp-lib-table",
+            "digest": "02511f4212d34080642667e02cdce26c665d629af776a57af341e49e7cd1e03e",
+            "present": true,
+            "requested_path": "/Users/w-mai/Library/Preferences/kicad/10.0/fp-lib-table",
+            "size": 452
+          },
+          {
+            "canonical_path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/template/fp-lib-table",
+            "digest": "4042e1c92709d4f872d4cdeaddfa7ec0f6bd49be240e0d9668b76e89888b1e77",
+            "present": true,
+            "requested_path": "/Applications/KiCad/KiCad.app/Contents/SharedSupport/template/fp-lib-table",
+            "size": 25235
+          },
+          {
+            "canonical_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-geometry-candidate-cm5-settled/fp-lib-table",
+            "digest": "7546c2f069c301d990137482b1d5e4742b5c8c6c40fe61333e931e3a28a97c19",
+            "present": true,
+            "requested_path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-geometry-candidate-cm5-settled/fp-lib-table",
+            "size": 121
+          }
+        ],
+        "table_sha256": "c35010f1eea8927b25d217764f00a59595e01c2a2cc0698e1dd55c432fb289c9",
+        "unconnected": 0,
+        "violations": 171,
+        "case": "cm5",
+        "independent_complete_report_equal": true
+      }
+    ]
+  },
+  "profiles": [
+    {
+      "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-missing",
+      "cleanup": {
+        "closed": true,
+        "pid": 4506,
+        "same_process_reload_verified": true,
+        "source_unchanged": true
+      },
+      "record_bytes": 102082,
+      "reports": {
+        "baseline": {
+          "violations": 7,
+          "unconnected": 2,
+          "library_errors": 2
+        },
+        "after": {
+          "violations": 7,
+          "unconnected": 2,
+          "library_errors": 2
+        }
+      }
+    },
+    {
+      "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-cm5",
+      "cleanup": {
+        "closed": true,
+        "pid": 6270,
+        "same_process_reload_verified": true,
+        "source_unchanged": true
+      },
+      "record_bytes": 1903159,
+      "reports": {
+        "baseline": {
+          "violations": 171,
+          "unconnected": 0,
+          "library_errors": 0
+        },
+        "after": {
+          "violations": 171,
+          "unconnected": 0,
+          "library_errors": 0
+        }
+      }
+    }
+  ],
+  "owned_editor_pids": [
+    4506,
+    4877,
+    5226,
+    6270,
+    6686,
+    7596
+  ],
+  "all_owned_editors_absent": true,
+  "binary_sha256": "446b323747d12676906fe25e1dc7f35e03037bbf8c1f2fcf8d1aae72f9ed52de",
+  "artifacts": [
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/cm5-final/acceptance.json",
+      "bytes": 2180,
+      "sha256": "fbaef1d65bfe24e1544cd494caa4add95da5b0e1e00a587f23738cbbda5e33cf"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/cm5-final/private/CM5_MINIMA_3.kicad_pcb",
+      "bytes": 3728851,
+      "sha256": "33c02e911b9e2edb60cebd16dca21000f87979a9015ca2746c0c5a88cecafd2d"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/cm5-final/private/CM5_MINIMA_3.kicad_prl",
+      "bytes": 2299,
+      "sha256": "f0698046cad0c9132f6f45b908415a4b9f9b59dd954c281498d55a070c5475fe"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/cm5-final/private/CM5_MINIMA_3.kicad_pro",
+      "bytes": 24797,
+      "sha256": "a53e984e1356fe4f2a2efd7c7d78de5243061e3a823d6b7e412831c4b178916a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/cm5-final/private/fp-lib-table",
+      "bytes": 25833,
+      "sha256": "c35010f1eea8927b25d217764f00a59595e01c2a2cc0698e1dd55c432fb289c9"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/cm5-final/private-drc.json",
+      "bytes": 129002,
+      "sha256": "c6d716b53eb8aecb8267492f02e4e3d3260548ced4a1e079706907d652118d46"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/cm5-final/source-drc.json",
+      "bytes": 129002,
+      "sha256": "15760ba1253963a3b81e93bb913b40d14de95389b9581b97c9e941853b6d09f1"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/cm5-final.log",
+      "bytes": 1902,
+      "sha256": "dc5952721729816ef601c7147ebb211e076a7fcfc0a5bf408cc9c88fa1fc3926"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override/fp-lib-table",
+      "bytes": 191,
+      "sha256": "8040ab95a1fe8bad759b3056f0bdbb372c67f9d92cef9c1fbee548a1337c757a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override/geometry-zones.kicad_pcb",
+      "bytes": 7941,
+      "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override-check/acceptance.json",
+      "bytes": 2258,
+      "sha256": "c6cb56ce6679164c791594962626fbf100851186525764f335e0e545541d2987"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override-check/private/fp-lib-table",
+      "bytes": 25649,
+      "sha256": "811cdb7ffd2a1e8d4e09be63b5c43ce37c124731ca348ffed2ec6399a793df14"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override-check/private/geometry-zones.kicad_pcb",
+      "bytes": 7941,
+      "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override-check/private/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override-check/private/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override-check/private-drc.json",
+      "bytes": 4600,
+      "sha256": "acb09d9996b67605868607ec819b4e43c28ac0ae1578b870325c8d1698b9181e"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override-check/source-drc.json",
+      "bytes": 4600,
+      "sha256": "5862ff6b29132263a5ef7e723d9c93b492d00281eae31f4ba2027e1803d574b0"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override-final/acceptance.json",
+      "bytes": 2258,
+      "sha256": "027687cdbdfaf423371a551b9c7e3850f80513b802845bef6308b37d66ff318a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override-final/private/fp-lib-table",
+      "bytes": 25649,
+      "sha256": "811cdb7ffd2a1e8d4e09be63b5c43ce37c124731ca348ffed2ec6399a793df14"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override-final/private/geometry-zones.kicad_pcb",
+      "bytes": 7941,
+      "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override-final/private/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override-final/private/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override-final/private-drc.json",
+      "bytes": 4600,
+      "sha256": "c5b1c25621475513913cd17c514c87c7c7ca0d507a9bbb685f9b14b6363280b1"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override-final/source-drc.json",
+      "bytes": 4600,
+      "sha256": "eaaa57b6c18477cea6320cd954592adf924edcd7aa0d50e1013dd685ebc5e05e"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override-final.log",
+      "bytes": 1980,
+      "sha256": "77a83102b953dfb244fcdc10cc65f2ef2809351c490da3f6fa17b63fd181f39b"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/disabled-override.log",
+      "bytes": 1980,
+      "sha256": "519eecbf02ad11b89f566b125b180b044bbab3f9cbb1a822b149bd9835d635ea"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias/Local.pretty/TestPoint_THTPad_D2.0mm_Drill1.0mm.kicad_mod",
+      "bytes": 1842,
+      "sha256": "5dd1c13d2327afbd359025f456f0003188c17d91d2a3447f5d1aaaf6d3478386"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias/fp-lib-table",
+      "bytes": 152,
+      "sha256": "257884d5913d7d39e45978d571e634b80cca5dda74f87798c630e356d6fafc2f"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias/geometry-zones.kicad_pcb",
+      "bytes": 7933,
+      "sha256": "09c9755b1e1567a758e3468b97f23e85f806e0b01d272ad391b02f13e4244590"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias-check/acceptance.json",
+      "bytes": 2228,
+      "sha256": "997c0846d939157f232cdfb1f6ca9d73acf7fde3618429be9c3ef79c811ade43"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias-check/private/fp-lib-table",
+      "bytes": 25872,
+      "sha256": "c06e313f994b49cd6e61b7b8ce944f7db063dc3327fb19117dc9061737345d7b"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias-check/private/geometry-zones.kicad_pcb",
+      "bytes": 7933,
+      "sha256": "09c9755b1e1567a758e3468b97f23e85f806e0b01d272ad391b02f13e4244590"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias-check/private/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias-check/private/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias-check/private-drc.json",
+      "bytes": 4592,
+      "sha256": "0e2c8c22505124f946e94a5c61f5fd25511bd163719c370a8eb6a2133623a963"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias-check/source-drc.json",
+      "bytes": 4592,
+      "sha256": "0ce38bcc026ed7f7e8613544f30f276674e82d021a96e1c992e8fc2545fda1f3"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias-final/acceptance.json",
+      "bytes": 2228,
+      "sha256": "c446ceaa932d048e9284c49cdec4eb547a9959683e4d033baac7e635a7c23446"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias-final/private/fp-lib-table",
+      "bytes": 25872,
+      "sha256": "c06e313f994b49cd6e61b7b8ce944f7db063dc3327fb19117dc9061737345d7b"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias-final/private/geometry-zones.kicad_pcb",
+      "bytes": 7933,
+      "sha256": "09c9755b1e1567a758e3468b97f23e85f806e0b01d272ad391b02f13e4244590"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias-final/private/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias-final/private/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias-final/private-drc.json",
+      "bytes": 4592,
+      "sha256": "cd962633945f956940c9563e7ee7d7d30b8f83acf1921fc16e1a0ad954bf7d44"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias-final/source-drc.json",
+      "bytes": 4592,
+      "sha256": "22472e8cfdd975e602d79d2d79b75238e815372344db793236fab6a82a3ab04b"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias-final.log",
+      "bytes": 1950,
+      "sha256": "41324670ec90010f68d6680dca9e6317dd2eab388cbcbd65d689bd7bed69abca"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/hidden-alias.log",
+      "bytes": 1950,
+      "sha256": "3c17297650dedf0f17e7086d0e486e9bf2484412905970fc73dce0d881eb2b0d"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override/fp-lib-table",
+      "bytes": 154,
+      "sha256": "d3fd26bbd26e349f71ce702ac4a01e39d599d8fc44bd99492aade938c0556d99"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override/geometry-zones.kicad_pcb",
+      "bytes": 7941,
+      "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-check/acceptance.json",
+      "bytes": 2252,
+      "sha256": "abb018654e6f82b7707e78520c552aacb9d63044f9f113e088b5ecd2a32b050c"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-check/old-omitted-drc.json",
+      "bytes": 3629,
+      "sha256": "fbddbfc6edc2e2ff735ea289b3f392f35e00dbc270568ce320315058fc7a96a4"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-check/old-omitted-table/fp-lib-table",
+      "bytes": 27,
+      "sha256": "c712cfa161419912eea8e73616d62224ee9ee44d321b4ab68962ff6fa11ad92a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-check/old-omitted-table/geometry-zones.kicad_pcb",
+      "bytes": 7941,
+      "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-check/old-omitted-table/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-check/old-omitted-table/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-check/old-omitted.log",
+      "bytes": 207,
+      "sha256": "b3f0b7bfe8cab1ac6c7d74e6a349407400c5550cd2e07ab2417984dc3e7df505"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-check/private/fp-lib-table",
+      "bytes": 25706,
+      "sha256": "cfd947b680f1cc11ddfbec717a28847c88330d8f759990d99ec553a41827fb14"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-check/private/geometry-zones.kicad_pcb",
+      "bytes": 7941,
+      "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-check/private/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-check/private/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-check/private-drc.json",
+      "bytes": 4600,
+      "sha256": "68d45a6f4bd44728453bbe4cdbc3ddcb49d2ea7c202e1be6c9be01470cfb7a6e"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-check/source-drc.json",
+      "bytes": 4600,
+      "sha256": "18362b277d233bb04aece3ff3a17f3fd2ae7eff88238abc23bb94469c731929b"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-final/acceptance.json",
+      "bytes": 2252,
+      "sha256": "5990dc7e308a9fda28467176db706f75a6027bc8827bd6da35878658640a3a21"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-final/old-omitted-drc.json",
+      "bytes": 3629,
+      "sha256": "3e7a333c6f77913997d0f53b6b9fe8cc13c4f103c1014ba58c870d66c464633c"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-final/old-omitted-table/fp-lib-table",
+      "bytes": 27,
+      "sha256": "c712cfa161419912eea8e73616d62224ee9ee44d321b4ab68962ff6fa11ad92a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-final/old-omitted-table/geometry-zones.kicad_pcb",
+      "bytes": 7941,
+      "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-final/old-omitted-table/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-final/old-omitted-table/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-final/old-omitted.log",
+      "bytes": 207,
+      "sha256": "c9ba8e409fb55c83f11ed41f978ed9208597e1301e12cf8b7ad99c43c3f43272"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-final/private/fp-lib-table",
+      "bytes": 25706,
+      "sha256": "cfd947b680f1cc11ddfbec717a28847c88330d8f759990d99ec553a41827fb14"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-final/private/geometry-zones.kicad_pcb",
+      "bytes": 7941,
+      "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-final/private/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-final/private/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-final/private-drc.json",
+      "bytes": 4600,
+      "sha256": "8daff8a38ac229cfe9f1b71a55744422563c1b2d512f5a20c0253026b1f7fe06"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-final/source-drc.json",
+      "bytes": 4600,
+      "sha256": "ae918ac879a45e0c252547be7d537bdf8de32e5d00560234799e32ad204fdeca"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override-final.log",
+      "bytes": 1974,
+      "sha256": "be252032907094e9ae3cb775d3213b2cb7e2e8c1afbb242f47164a0c6ec5e7a4"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/missing-override.log",
+      "bytes": 1974,
+      "sha256": "3e5223ee2d8d5a917434f7b84884bcd3cf7f2094d989c0f7c71b9185fe7e701e"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/native-config/10.0/3d_viewer.json",
+      "bytes": 9269,
+      "sha256": "7c95b3fdd72f837a3cc49248249c40bc24c07b75bafe02d0d091a0864746b6a9"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/native-config/10.0/cvpcb.json",
+      "bytes": 8409,
+      "sha256": "3a24bbacab369da74efdaff851be8869d8ca2e5e4ca28304f9eb57041bdad759"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/native-config/10.0/fp-lib-table",
+      "bytes": 191,
+      "sha256": "7013a4c736a78049380d1911c927234c815e346ab2c0844348a12bfff4fb9cec"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/native-config/10.0/fpedit.json",
+      "bytes": 7196,
+      "sha256": "4d824ab97688dcfc144494386c6991dc0a31f324228d6a85cea279a474f51bb0"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/native-config/10.0/kicad.json",
+      "bytes": 278,
+      "sha256": "be118a5bbbe83302d54b3efe220454518177cbb075b4bcf48334011c011a3557"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/native-config/10.0/kicad_common.json",
+      "bytes": 2611,
+      "sha256": "2160e6f31b5139bdc99f2b0a024203a4895d502264b2f2bc903cdc2010f4cb74"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/native-config/10.0/pcbnew.json",
+      "bytes": 13751,
+      "sha256": "412c1fe43f0db375147a9d25f5c7da6768ae054d94300cef57c9349bd3374e7a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/native-config/10.0/readonly-table",
+      "bytes": 152,
+      "sha256": "fc40a7029253a616a59d38967157232c183adf36a55b4df646327e3bd093367d"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled/fp-lib-table",
+      "bytes": 141,
+      "sha256": "aaf2d40d092ce2cd7e5906f6b0b88a4fc12a99d52b34b624edef543921c55986"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled/geometry-zones.kicad_pcb",
+      "bytes": 7941,
+      "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled/nested-table",
+      "bytes": 180,
+      "sha256": "f373d00a3d1eadf8fe095d6fda97a3567e73c8326baa3010e4c468e3d904ecb8"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled-check/acceptance.json",
+      "bytes": 2675,
+      "sha256": "7f792122501ee2834020d93b1b681a2726949347036125a0c42e06cdd1e53eec"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled-check/private/fp-lib-table",
+      "bytes": 25658,
+      "sha256": "f7ed9b642f8cda9185f265403ea7a1e829134d2afaf26db70b14ee6721542202"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled-check/private/geometry-zones.kicad_pcb",
+      "bytes": 7941,
+      "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled-check/private/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled-check/private/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled-check/private-drc.json",
+      "bytes": 4600,
+      "sha256": "3d719a1001867598658e783bd03c9b47c6f5823bcaa8a414f9ab99e2adec1188"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled-check/source-drc.json",
+      "bytes": 3628,
+      "sha256": "dd5576ccd9a4e15cb61c753f7aacb38ed7e5d622159d7162912b45214816c259"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled-final/acceptance.json",
+      "bytes": 2674,
+      "sha256": "0fea70d7248440de63ca9b4fb584fd57cd7b29f9db7bb35fba244234a95ddd85"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled-final/private/fp-lib-table",
+      "bytes": 25655,
+      "sha256": "0b5ef9c015e5565a6745d2a859e2ae8558ded597c418f5ff6bf0f66eed19c28c"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled-final/private/geometry-zones.kicad_pcb",
+      "bytes": 7941,
+      "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled-final/private/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled-final/private/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled-final/private-drc.json",
+      "bytes": 3628,
+      "sha256": "d36055bb69ab84f9952a956b4b9ce297c785854bb099c0a81705ecc133caeb07"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled-final/source-drc.json",
+      "bytes": 3628,
+      "sha256": "bc4e4252ce74ac56070fa3a5836ab04c6f7b85730a2dc36666132f234b34b152"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled-final.log",
+      "bytes": 2346,
+      "sha256": "454b8b78c4ac27cb6b5a6559ff2727ae57e59da6c02fe816c25994e4828d4b77"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/nested-disabled.log",
+      "bytes": 2402,
+      "sha256": "aa7e2a7d3f1cb4036e56c07b97e83f842086d08ef1e86a2310f52e3e3caae1cd"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/readonly-override/geometry-zones.kicad_pcb",
+      "bytes": 7941,
+      "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/readonly-override/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/readonly-override/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/readonly-override-final/acceptance.json",
+      "bytes": 2298,
+      "sha256": "a23a85201a73c92b5bb7e61a802fc45fdfe8cc0b40f3173c89cef946cb683769"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/readonly-override-final/private/fp-lib-table",
+      "bytes": 203,
+      "sha256": "72a7d9e7c30544f1e37e442f75807474daaaebf4841684161d8eb25f39076b6a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/readonly-override-final/private/geometry-zones.kicad_pcb",
+      "bytes": 7941,
+      "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/readonly-override-final/private/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/readonly-override-final/private/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/readonly-override-final/private-drc.json",
+      "bytes": 4600,
+      "sha256": "42da4f59aa30e1d250ae5874b45deef59913c71c2faf49f655624b437b7fc9d0"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/readonly-override-final/source-drc.json",
+      "bytes": 4600,
+      "sha256": "2d4927ea6b7cb5e73a91e823500cf4ba3fa273dbde8701f8944653f7cf7e1352"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/readonly-override-final.log",
+      "bytes": 2020,
+      "sha256": "922285cc9ea553ea3ca5bac7de035bbb5422f7c14a25f93172c7bf86ac4aff3b"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/request.json",
+      "bytes": 265,
+      "sha256": "b7387ecfdd5d5c911d1ed05b6da2063e3d7f202db5c762e9c493bf489e1fcfe4"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/result-final.json",
+      "bytes": 18363,
+      "sha256": "63516fea3a9f8bcbc469625adf25316b1babcaeb2fa269c7a844c97e3bf01560"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled/fp-lib-table",
+      "bytes": 134,
+      "sha256": "1f987281d001ec22d4b62763f8d815451956730fdf335e8eff8b246e7a923684"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled/geometry-zones.kicad_pcb",
+      "bytes": 7941,
+      "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled-final/acceptance.json",
+      "bytes": 2276,
+      "sha256": "9ea1ebd7bc403141c200fb303b74130dacba84b3bd2c2842c1bf979448a5e901"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled-final/private/fp-lib-table",
+      "bytes": 25690,
+      "sha256": "14140c8d13d67d9704cd8bcf2078ce9217591f3b30850d020f95867d58ba82ac"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled-final/private/geometry-zones.kicad_pcb",
+      "bytes": 7941,
+      "sha256": "71e6a78aac46f42b4164dc00c5efdea562d259b43ce801e72d13bbdfe93d7156"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled-final/private/geometry-zones.kicad_prl",
+      "bytes": 2301,
+      "sha256": "d977d74aeb3fd38607d3124b7bedfacfa240e5ea18b455a29daeea843686a38a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled-final/private/geometry-zones.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled-final/private-drc.json",
+      "bytes": 4600,
+      "sha256": "2d4927ea6b7cb5e73a91e823500cf4ba3fa273dbde8701f8944653f7cf7e1352"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled-final/source-drc.json",
+      "bytes": 4600,
+      "sha256": "f819fd85d3c33f152d8e2bceb897149bb66b687c31a2fc01866ab52ed15c1af5"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-controls/unsupported-disabled-final.log",
+      "bytes": 1998,
+      "sha256": "f6c2631ed9a2097820abe9f155258598c60c368282132eb592e6d9f3952d8429"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-missing/baseline.kicad_pcb",
+      "bytes": 26258,
+      "sha256": "a3e0f56965e1657c3eee2b3f555bc29d3c14e4ba1acf8d316a00a9e641bfe24e"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-missing/cleanup.json",
+      "bytes": 103,
+      "sha256": "60c359ad8c759bab1ffdc07b704b3e147c32a9af14aa67d39162a0e0da3a84c1"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-missing/independent-saved-intent.json",
+      "bytes": 425,
+      "sha256": "52f5f7965b31e422e6477ab2125f25287af9351d31893991a43be09de827e9a6"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-missing/mcp.json",
+      "bytes": 870462,
+      "sha256": "443c3ad4dc1caae698344934dc0890c23bbb79edac6b8600e15c5f7f83d42681"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-missing/owned-editor.json",
+      "bytes": 65,
+      "sha256": "096839288bad008dac1f2b7f6d18e6e0aa935eb9210d9f8accf6132adeccf342"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-missing/request-0.json",
+      "bytes": 309,
+      "sha256": "97c54d3e481c52bf58b58ebb7f1c062d7bccd25007dbb64ca37f6d52c9944487"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-missing/result.json",
+      "bytes": 6692,
+      "sha256": "01ea52fe80c41fa1a51aacd084fb61e8b8ab8d7ba3322dc1c27d547cf5a09dbe"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-missing/result.kicad_pcb",
+      "bytes": 26259,
+      "sha256": "c1ef48533062eeafecb8ca77e592db98765d0d50f9e8c172104f8f68f7b00d42"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-missing/result.kicad_pro",
+      "bytes": 9992,
+      "sha256": "270b08bcf6ac1d95545a47ed72694b7d1016c8d55193226f433ce61cf3bc6c0f"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-missing/stage-0.kicad_pcb",
+      "bytes": 26259,
+      "sha256": "c1ef48533062eeafecb8ca77e592db98765d0d50f9e8c172104f8f68f7b00d42"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-missing/state/sha256:39d274806d4430404d6955e6c1b06881ebc853c6de03f1a98d584685fe5e67d6/000000000000000000001793073903715917000-4809-0/record.json",
+      "bytes": 102082,
+      "sha256": "314e8a2a86d7708ccbb892873988152a6fc230cfa915240ffbc661915486b363"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-missing/state/sha256:39d274806d4430404d6955e6c1b06881ebc853c6de03f1a98d584685fe5e67d6/000000000000000000001793073903715917000-4809-0/source-0.backup",
+      "bytes": 26258,
+      "sha256": "a3e0f56965e1657c3eee2b3f555bc29d3c14e4ba1acf8d316a00a9e641bfe24e"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-missing/state/sha256:39d274806d4430404d6955e6c1b06881ebc853c6de03f1a98d584685fe5e67d6/000000000000000000001793073903715917000-4809-0/source-1.backup",
+      "bytes": 9992,
+      "sha256": "270b08bcf6ac1d95545a47ed72694b7d1016c8d55193226f433ce61cf3bc6c0f"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-missing/stdio.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-cm5/baseline.kicad_pcb",
+      "bytes": 3728851,
+      "sha256": "33c02e911b9e2edb60cebd16dca21000f87979a9015ca2746c0c5a88cecafd2d"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-cm5/cleanup.json",
+      "bytes": 103,
+      "sha256": "5ec653e622387cac042bb205f4f60fef06d9692e2de5f0664d71df262988e752"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-cm5/independent-saved-intent.json",
+      "bytes": 425,
+      "sha256": "6cba3fadfda9705fcc4ca8a41f97911ef4d85ae43d564dc573e05d12cf918dda"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-cm5/mcp.json",
+      "bytes": 65033644,
+      "sha256": "603ad5e081710598935076149854eea0f785137895cee7c43da3d314a1ffdef4"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-cm5/owned-editor.json",
+      "bytes": 65,
+      "sha256": "af66f47e02d097933f34d6e9236e11309cf974cd57c8dbb24e5b4d7a9e8a9660"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-cm5/request-0.json",
+      "bytes": 309,
+      "sha256": "7c7ba95a24d66b0975093578bad0b65a82aa8b3b7f5ae4a2c5440fe8fb1d6482"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-cm5/result.json",
+      "bytes": 181130,
+      "sha256": "2eb8a16e6f1e416029d6406a865497b5244e57f2bc52a2a24d3572cc6b240b03"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-cm5/result.kicad_pcb",
+      "bytes": 3728848,
+      "sha256": "4e0398ecf03440b9408b7ee55627c904963ffa1f3773fdfb52e3ae93c5fd4f7d"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-cm5/result.kicad_pro",
+      "bytes": 24797,
+      "sha256": "a53e984e1356fe4f2a2efd7c7d78de5243061e3a823d6b7e412831c4b178916a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-cm5/stage-0.kicad_pcb",
+      "bytes": 3728848,
+      "sha256": "4e0398ecf03440b9408b7ee55627c904963ffa1f3773fdfb52e3ae93c5fd4f7d"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-cm5/state/sha256:6941f881b9d70b355964784081129816363795b64b649f8d90e5711661933e52/000000000000000000001793074040925623000-6534-0/record.json",
+      "bytes": 1903159,
+      "sha256": "c21b9450bf0ff0712410f412abc21e62dac81f0f9caeab4a9c8b2af6a4426de2"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-cm5/state/sha256:6941f881b9d70b355964784081129816363795b64b649f8d90e5711661933e52/000000000000000000001793074040925623000-6534-0/source-0.backup",
+      "bytes": 3728851,
+      "sha256": "33c02e911b9e2edb60cebd16dca21000f87979a9015ca2746c0c5a88cecafd2d"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-cm5/state/sha256:6941f881b9d70b355964784081129816363795b64b649f8d90e5711661933e52/000000000000000000001793074040925623000-6534-0/source-1.backup",
+      "bytes": 24797,
+      "sha256": "a53e984e1356fe4f2a2efd7c7d78de5243061e3a823d6b7e412831c4b178916a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-mcp-cm5/stdio.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/auto-kicad-drc-context-probe.py",
+      "bytes": 2446,
+      "sha256": "564d3d334f48973c492b2eaf19d4b090bade3c602a579abbe2cf8429801dda07"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/auto-kicad-drc-relocated-probe.py",
+      "bytes": 2501,
+      "sha256": "4ba7859d9d238e75237672d3d7194aec0daed0538c6e200137cc978c0f2dd49f"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/auto-kicad-library-context-build-final.log",
+      "bytes": 237,
+      "sha256": "dba916784b8beff49403a762e2367f2ae0ab7941ce3a2c1614be36bcf5b2be6e"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/auto-kicad-library-context-build-native.log",
+      "bytes": 237,
+      "sha256": "902387f15d7303d10b0ade76e5a73b723c9fdc36b4ab6d645096509ad325688a"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/auto-kicad-library-context-build.log",
+      "bytes": 3938,
+      "sha256": "a6b7a025ee9bafc0d3a4240aee230bea20666d863e05886b603840c3805d831e"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/auto-kicad-library-context-mcp-cm5.log",
+      "bytes": 267,
+      "sha256": "01575d36993c5f56f382e29648e5a1350461e61c1d67d7209fbb7b2fd3b24af9"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/auto-kicad-library-context-mcp-missing.log",
+      "bytes": 267,
+      "sha256": "01575d36993c5f56f382e29648e5a1350461e61c1d67d7209fbb7b2fd3b24af9"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/auto-kicad-library-context-native-final.log",
+      "bytes": 424,
+      "sha256": "7ddf07c003bcd5f17b994186ae7a49e488861ed0fee8d4e2a99267c7326deea2"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/auto-kicad-library-context-native.log",
+      "bytes": 382,
+      "sha256": "0d073c5cc9d04f47bfab03ff58c39981b749be667f73bfd2746989f0934bc26f"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/auto-kicad-library-context-quality-final.log",
+      "bytes": 45133,
+      "sha256": "59bdce84da5bb7c5cde61564a4c41a22823023861524eb2539bca6e86f6d4668"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/auto-kicad-library-context-quality.log",
+      "bytes": 49674,
+      "sha256": "2e3b764ac82324fa26dccf38155e987c63f16fbacf940168f426e99eb12a8075"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/auto-kicad-library-context-unit-final.log",
+      "bytes": 1277,
+      "sha256": "e6c833f90531c3fca3e88ed7d97225715e547a9d8314f64c22e0fb55c08f957f"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/auto-kicad-library-context-unit.log",
+      "bytes": 3165,
+      "sha256": "ed4233420f4fbbbce2c51d4098a84ea7d611f50d71992e7d0d6cedb55bdff94e"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/prepare-kicad-library-controls.py",
+      "bytes": 2226,
+      "sha256": "de03d0c4ad959774173e8d79de28cc4fde52f41513f92b252bb57f8816ede02f"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/prepare-kicad-readonly-control.py",
+      "bytes": 2240,
+      "sha256": "be05804ba6e24176d2cbc62f04f7a8badd8d3a689d6be5c63c853f5e14ff7f0d"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/process-cleanup.json",
+      "bytes": 107,
+      "sha256": "704dea8198a7c4854bc24538a5d71d793e4bca45ba302f2f2e2f07e2f4885608"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/run-kicad-library-controls-final.py",
+      "bytes": 3652,
+      "sha256": "717b1aa2168752340aa0af15fd65482bc81e71013c977f3a09353166afe8daeb"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-library-context-evidence/run-kicad-library-controls.py",
+      "bytes": 3146,
+      "sha256": "a196b4f76cf9594691650b37ece6a9ea413cfcc232214a8f40553de9a9215816"
+    }
+  ],
+  "remaining": [
+    "private generated DRC context and source provenance",
+    "generated geometry production MCP integration",
+    "GUI cancellation and recovery gates",
+    "zoned routing and combined geometry gates",
+    "M5/M6 and final product project profiles"
+  ]
+}

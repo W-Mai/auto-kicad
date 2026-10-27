@@ -601,7 +601,26 @@ pub(crate) fn prepare_shadow_library_table(
         let version = &existing
             .ok_or("geometry requires an observed source")?
             .kicad_version;
-        crate::library_settings::registry(settings, project, version)?
+        let registry = crate::library_settings::registry(settings, project, version)?;
+        let table = registry
+            .relocated_library_table()
+            .map_err(|e| e.to_string())?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(shadow.join("fp-lib-table"))
+            .map_err(|e| e.to_string())?;
+        file.write_all(table.as_bytes())
+            .map_err(|e| e.to_string())?;
+        // Source table drift must not leave a usable geometry shadow.
+        if registry
+            .relocated_library_table()
+            .map_err(|e| e.to_string())?
+            != table
+        {
+            return Err("geometry library table changed while preparing shadow".into());
+        }
+        return Ok(());
     } else {
         return Ok(());
     };

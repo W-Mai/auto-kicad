@@ -47,6 +47,7 @@ pub struct LibraryCatalogPolicy {
     variables: BTreeMap<String, String>,
     legacy_mappings: Vec<LegacyLibraryMapping>,
     configuration_digest: Option<String>,
+    native_settings: Option<PathBuf>,
 }
 
 impl LibraryCatalogPolicy {
@@ -97,8 +98,18 @@ impl LibraryCatalogPolicy {
             variables,
             legacy_mappings,
             configuration_digest: None,
+            native_settings: None,
         })
     }
+    /// Bind the native settings file containing read-only table flag overrides.
+    pub fn with_native_settings(mut self, path: &Path) -> Result<Self, String> {
+        if !path.is_absolute() {
+            return Err("native settings path must be absolute".into());
+        }
+        self.native_settings = Some(path.into());
+        Ok(self)
+    }
+
     pub fn with_configuration_digest(mut self, digest: &str) -> Result<Self, String> {
         if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err("invalid library configuration digest".into());
@@ -142,7 +153,7 @@ pub struct FootprintCatalog {
 
 impl FootprintCatalog {
     pub fn load(policy: &LibraryCatalogPolicy) -> Result<Self, String> {
-        let mut loader = TableLoader::new(policy);
+        let mut loader = TableLoader::new(policy)?;
         let global = loader.load_scope(&policy.global_table, LibraryScope::Global)?;
         let mut project_source_roots = vec![policy.project_root.clone()];
         project_source_roots.extend(policy.official_root.iter().cloned());
@@ -167,7 +178,14 @@ impl FootprintCatalog {
         let mut entries = global;
         entries.extend(project);
         let table_files = loader.evidence;
-        let digest = hash_json(&(1u32, policy, &table_files, &entries, &project_source_roots))?;
+        let digest = hash_json(&(
+            1u32,
+            policy,
+            &table_files,
+            &entries,
+            &project_source_roots,
+            &loader.overrides,
+        ))?;
         Ok(Self {
             policy: policy.clone(),
             entries,
@@ -185,6 +203,50 @@ impl FootprintCatalog {
     }
     pub fn entry_count(&self) -> usize {
         self.entries.len()
+    }
+
+    /// Preserve all effective native rows when moving a board into an owned shadow.
+    /// This binds table provenance, not the contents of files referenced by a library.
+    pub fn relocated_table(&self) -> Result<String, String> {
+        self.ensure_current()?;
+        let project = path_text(&self.policy.project_root)?;
+        if unsafe_path_text(project) {
+            return Err(
+                "project path cannot be represented without native variable expansion".into(),
+            );
+        }
+        let quote = |value: &str| serde_json::to_string(value).map_err(|e| e.to_string());
+        let mut table = String::from("(fp_lib_table (version 7)\n");
+        for entry in self.entries.values() {
+            let row = &entry.row;
+            // Other variables keep their native meaning; no placement fallback is applied.
+            let uri = row.uri.replace("${KIPRJMOD}", project);
+            if row.uri.replace("${KIPRJMOD}", "").contains("KIPRJMOD") {
+                return Err("unclassified project path variable in library URI".into());
+            }
+            let format = match &row.format {
+                LibraryFormat::KiCad => "KiCad",
+                LibraryFormat::Unsupported(value) => value,
+                LibraryFormat::Table => return Err("unexpanded nested library table".into()),
+            };
+            table.push_str(&format!(
+                "  (lib (name {}) (type {}) (uri {}) (options {}) (descr {}){}{})\n",
+                quote(&row.nickname)?,
+                quote(format)?,
+                quote(&uri)?,
+                quote(&row.options)?,
+                quote(&row.description)?,
+                if row.disabled { " (disabled)" } else { "" },
+                if row.hidden { " (hidden)" } else { "" },
+            ));
+            if table.len() >= crate::library_table::MAX_TABLE_BYTES {
+                return Err("relocated library table exceeds byte limit".into());
+            }
+        }
+        table.push_str(")\n");
+        crate::library_table::parse_footprint_library_table(table.as_bytes())?;
+        self.ensure_current()?;
+        Ok(table)
     }
 
     /// Resolve exact source bytes; callers must still verify native geometry and binding.
@@ -282,16 +344,18 @@ struct TableLoader<'a> {
     evidence: Vec<LibraryTableEvidence>,
     bytes: u64,
     rows: usize,
+    overrides: NativeOverrides,
 }
 
 impl<'a> TableLoader<'a> {
-    fn new(policy: &'a LibraryCatalogPolicy) -> Self {
-        Self {
+    fn new(policy: &'a LibraryCatalogPolicy) -> Result<Self, String> {
+        Ok(Self {
             policy,
             evidence: Vec::new(),
             bytes: 0,
             rows: 0,
-        }
+            overrides: native_overrides(policy.native_settings.as_deref())?,
+        })
     }
 
     fn load_scope(
@@ -347,9 +411,27 @@ impl<'a> TableLoader<'a> {
         let Some(table) = file.table else {
             return Ok(());
         };
+        // KiCad applies saved flag overrides to read-only nested tables.
+        let overrides = if !chain.is_empty() && !native_writable(path)? {
+            file.evidence
+                .canonical_path
+                .as_ref()
+                .and_then(|p| p.to_str())
+                .and_then(|p| self.overrides.get(p))
+                .cloned()
+        } else {
+            None
+        };
         let mut chain = chain.to_vec();
         chain.push(file.evidence);
         for mut row in table.entries {
+            if let Some(flags) = overrides
+                .as_ref()
+                .and_then(|values| values.get(&row.nickname))
+            {
+                row.disabled = flags.0;
+                row.hidden = flags.1;
+            }
             self.rows += 1;
             if self.rows > MAX_TABLE_ENTRIES {
                 return Err("aggregate library entry limit exceeded".into());
@@ -360,9 +442,14 @@ impl<'a> TableLoader<'a> {
                 if !row.options.is_empty() {
                     return Err("nested library table options are unsupported".into());
                 }
-                // Read disabled tables only to reserve their names; never load their footprints.
                 let next = expand_uri(&row.uri, &self.policy.variables)?;
-                self.visit(&next, scope, &chain, row.disabled, row.hidden, entries)?;
+                // Disabled table containers contribute no names to native lookup.
+                // Still bind their bounded table files, without contacting footprint plugins.
+                if row.disabled {
+                    self.visit(&next, scope, &chain, true, row.hidden, &mut BTreeMap::new())?;
+                } else {
+                    self.visit(&next, scope, &chain, false, row.hidden, entries)?;
+                }
             } else {
                 let name = row.nickname.clone();
                 if entries
@@ -381,6 +468,89 @@ impl<'a> TableLoader<'a> {
             }
         }
         Ok(())
+    }
+}
+
+type NativeOverrides = BTreeMap<String, BTreeMap<String, (bool, bool)>>;
+
+fn native_overrides(path: Option<&Path>) -> Result<NativeOverrides, String> {
+    let Some(path) = path else {
+        return Ok(BTreeMap::new());
+    };
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
+    }
+    let file = match options.open(path) {
+        Ok(file) => file,
+        Err(e)
+            if e.kind() == std::io::ErrorKind::NotFound && fs::symlink_metadata(path).is_err() =>
+        {
+            return Ok(BTreeMap::new());
+        }
+        Err(e) => return Err(format!("cannot read native library settings: {e}")),
+    };
+    let meta = file.metadata().map_err(|e| e.to_string())?;
+    if !meta.is_file() || meta.len() > MAX_TOTAL_TABLE_BYTES {
+        return Err("native library settings exceed bounds".into());
+    }
+    let mut bytes = Vec::new();
+    file.take(MAX_TOTAL_TABLE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    if bytes.len() as u64 != meta.len() {
+        return Err("native settings changed while reading".into());
+    }
+    let value: serde_json::Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+    let Some(overrides) = value.pointer("/libraries/overrides") else {
+        return Ok(BTreeMap::new());
+    };
+    let tables = overrides
+        .as_object()
+        .ok_or("invalid native library overrides")?;
+    let mut result = BTreeMap::new();
+    let mut count = 0;
+    for (table, rows) in tables {
+        let mut entries = BTreeMap::new();
+        for (name, flags) in rows.as_object().ok_or("invalid native table overrides")? {
+            count += 1;
+            if count > MAX_TABLE_ENTRIES {
+                return Err("native library override limit exceeded".into());
+            }
+            let flags = flags.as_object().ok_or("invalid native library flags")?;
+            let flag = |key: &str| -> Result<bool, String> {
+                flags
+                    .get(key)
+                    .map(|v| {
+                        v.as_bool()
+                            .ok_or_else(|| "invalid native library flag".into())
+                    })
+                    .unwrap_or(Ok(false))
+            };
+            entries.insert(name.clone(), (flag("disabled")?, flag("hidden")?));
+        }
+        result.insert(table.clone(), entries);
+    }
+    Ok(result)
+}
+
+fn native_writable(path: &Path) -> Result<bool, String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let path =
+            std::ffi::CString::new(path.as_os_str().as_bytes()).map_err(|e| e.to_string())?;
+        Ok(unsafe { libc::access(path.as_ptr(), libc::W_OK) } == 0)
+    }
+    #[cfg(not(unix))]
+    {
+        Ok(!fs::metadata(path)
+            .map_err(|e| e.to_string())?
+            .permissions()
+            .readonly())
     }
 }
 
@@ -557,6 +727,88 @@ mod tests {
     }
 
     #[test]
+    fn relocated_tables_preserve_complete_effective_rows_and_reject_stale_provenance() {
+        let f = Fixture::new();
+        f.table(
+            "global",
+            r#"
+            (lib (name Override) (type KiCad) (uri "${KICAD10_FOOTPRINT_DIR}/Good.pretty"))
+            (lib (name Global) (type KiCad) (uri "${UNRESOLVED}/Absent.pretty"))
+        "#,
+        );
+        f.table(
+            "project/fp-lib-table",
+            r#"
+            (lib (name Override) (type KiCad) (uri "${KIPRJMOD}/Missing.pretty") (disabled))
+            (lib (name Parent) (type Table) (uri "${KIPRJMOD}/nested") (hidden))
+        "#,
+        );
+        f.table("project/nested", r#"
+            (lib (name Alias) (type KiCad) (uri "${KIPRJMOD}/Shared.pretty") (options "key=value") (descr "a \"quoted\" description"))
+            (lib (name Foreign) (type Eagle) (uri "${KIPRJMOD}/absent.lbr") (disabled))
+        "#);
+        let catalog = f.catalog();
+        let rendered = catalog.relocated_table().unwrap();
+        let parsed =
+            crate::library_table::parse_footprint_library_table(rendered.as_bytes()).unwrap();
+        let expected = catalog
+            .entries
+            .values()
+            .map(|e| {
+                let mut row = e.row.clone();
+                row.uri = row
+                    .uri
+                    .replace("${KIPRJMOD}", f.0.join("project").to_str().unwrap());
+                row
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(parsed.entries, expected);
+        assert_eq!(parsed.entries.len(), 4);
+        assert!(
+            parsed
+                .entries
+                .iter()
+                .find(|r| r.nickname == "Override")
+                .unwrap()
+                .disabled
+        );
+        assert!(
+            parsed
+                .entries
+                .iter()
+                .find(|r| r.nickname == "Alias")
+                .unwrap()
+                .hidden
+        );
+        assert!(
+            parsed
+                .entries
+                .iter()
+                .find(|r| r.nickname == "Global")
+                .unwrap()
+                .uri
+                .contains("${UNRESOLVED}")
+        );
+        f.table("project/nested", "");
+        assert!(
+            catalog
+                .relocated_table()
+                .unwrap_err()
+                .contains("catalog changed")
+        );
+        f.table(
+            "project/fp-lib-table",
+            r#"(lib (name Bad) (type KiCad) (uri "$(KIPRJMOD)/Bad.pretty"))"#,
+        );
+        assert!(
+            f.catalog()
+                .relocated_table()
+                .unwrap_err()
+                .contains("unclassified")
+        );
+    }
+
+    #[test]
     fn binds_project_precedence_aliases_table_presence_and_source_changes() {
         let f = Fixture::new();
         let global = f.library("official/Different.pretty");
@@ -587,8 +839,52 @@ mod tests {
         assert_eq!(selected.table_chain.len(), 1);
     }
 
+    #[cfg(unix)]
     #[test]
-    fn nested_tables_preserve_disabled_names_and_reject_cycles_and_ambiguity() {
+    fn native_readonly_overrides_bind_effective_flags_and_source_changes() {
+        use std::os::unix::fs::PermissionsExt;
+        let f = Fixture::new();
+        let root = f.library("official/Native.pretty");
+        f.table("nested", &row("Alias", &root));
+        f.table("global", &table_row("Bundle", &f.0.join("nested"), ""));
+        let settings = f.0.join("kicad.json");
+        fs::write(
+            &settings,
+            serde_json::to_vec(&serde_json::json!({"libraries":{"overrides":{
+                f.0.join("nested").to_str().unwrap():{"Alias":{"disabled":true,"hidden":true}}
+            }}}))
+            .unwrap(),
+        )
+        .unwrap();
+        let policy = f.policy().with_native_settings(&settings).unwrap();
+        let writable = FootprintCatalog::load(&policy).unwrap();
+        assert!(writable.resolve(&id("Alias")).is_ok());
+        fs::set_permissions(f.0.join("nested"), fs::Permissions::from_mode(0o444)).unwrap();
+        let readonly = FootprintCatalog::load(&policy).unwrap();
+        assert!(
+            readonly
+                .resolve(&id("Alias"))
+                .unwrap_err()
+                .contains("disabled")
+        );
+        let table = crate::library_table::parse_footprint_library_table(
+            readonly.relocated_table().unwrap().as_bytes(),
+        )
+        .unwrap();
+        assert!(table.entries[0].hidden && table.entries[0].disabled);
+        assert!(writable.relocated_table().is_err());
+        fs::write(&settings, "{}").unwrap();
+        assert!(readonly.relocated_table().is_err());
+        assert!(
+            FootprintCatalog::load(&policy)
+                .unwrap()
+                .resolve(&id("Alias"))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn nested_tables_skip_disabled_containers_and_reject_cycles_and_ambiguity() {
         let f = Fixture::new();
         let root = f.library("official/Native.pretty");
         f.table("nested", &row("Alias", &root));
@@ -600,7 +896,7 @@ mod tests {
             f.catalog()
                 .resolve(&id("Alias"))
                 .unwrap_err()
-                .contains("disabled")
+                .contains("unavailable")
         );
         f.table("global", &table_row("Bundle", &f.0.join("nested"), ""));
         assert_eq!(

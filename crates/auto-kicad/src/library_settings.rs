@@ -129,6 +129,13 @@ impl LibrarySettings {
             .map(PathBuf::from)
             .or_else(|| home.map(|p| p.join(".config")))
             .map(|p| p.join("kicad"));
+        let config_base = std::env::var_os("KICAD_CONFIG_HOME")
+            .filter(|p| !p.is_empty())
+            .map(PathBuf::from)
+            .or(config_base);
+        if config_base.as_ref().is_some_and(|p| !p.is_absolute()) {
+            return Err("KiCad configuration directory must be absolute".into());
+        }
         Ok(Self {
             config,
             config_digest,
@@ -197,7 +204,7 @@ impl LibrarySettings {
                 LegacyMappingMode::MissingNicknameFallback
             },
         });
-        let policy = LibraryCatalogPolicy::new(
+        let mut policy = LibraryCatalogPolicy::new(
             &project,
             &global,
             self.official_root.as_deref(),
@@ -206,6 +213,9 @@ impl LibrarySettings {
             legacy,
         )?
         .with_configuration_digest(self.config_digest.as_str())?;
+        if let Some(base) = &self.config_base {
+            policy = policy.with_native_settings(&base.join(format!("{major}.0/kicad.json")))?;
+        }
         Ok(FootprintRegistry::from_catalog(FootprintCatalog::load(
             &policy,
         )?))

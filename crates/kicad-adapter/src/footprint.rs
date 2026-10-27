@@ -318,6 +318,17 @@ impl FootprintRegistry {
         }
     }
 
+    /// Render complete native table context without legacy placement overrides.
+    pub fn relocated_library_table(&self) -> Result<String, FootprintBackendError> {
+        self.catalog
+            .as_ref()
+            .ok_or_else(|| {
+                FootprintBackendError::SourceResolution("native library catalog unavailable".into())
+            })?
+            .relocated_table()
+            .map_err(FootprintBackendError::SourceResolution)
+    }
+
     pub fn resolve_identifier(
         &self,
         identifier: &FootprintLibraryIdentifier,
