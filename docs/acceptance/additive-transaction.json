@@ -1,0 +1,373 @@
+{
+  "kicad_version": "10.0.7",
+  "evidence_root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m4-additive-transaction",
+  "baseline_commit": "b84348985cdcffa8b43c65e23cc7e1e1dfeb3247",
+  "source_sha256": {
+    "crates/kicad-adapter/src/lib.rs": "47b765dbb8f2a54304893e7240211c8b2ab37d8bd176927d793d9e3a033c1ef7",
+    "crates/auto-kicad/examples/check-native-route.rs": "6acb049de66d07ecffd3f93744836a970b9dced520e16056837bffa6fc769e91"
+  },
+  "quality": {
+    "passed": 475,
+    "failed": 0,
+    "ignored": 15,
+    "fmt": true,
+    "clippy_warnings_as_errors": true,
+    "capability_matrix": true
+  },
+  "native": {
+    "all_route_items_and_anchors_connected": true,
+    "anchor_kinds": [
+      "pad",
+      "track_end",
+      "via"
+    ],
+    "baseline_unconnected": 3,
+    "caller_owned_transaction": true,
+    "component": [
+      "40000000-0000-4000-8000-000000000001",
+      "4725586b-c0fc-41d6-9d97-18bf5077a28d",
+      "50000000-0000-4000-8000-000000000001",
+      "50000000-0000-4000-8000-000000000002",
+      "586ce05e-cdf9-4570-b15b-440d1cc3f4fe",
+      "60000000-0000-4000-8000-000000000002",
+      "69c4dae0-276e-4c52-af70-fb4019d838d4",
+      "7046f2de-d60a-47c8-b297-8f1922336c08",
+      "754c2792-5379-4e0a-9ee9-794466baf2cf",
+      "7a0e369c-dfdd-4f5e-8cd0-772070ca28e4",
+      "8c72c361-4a1d-440a-99ca-6aab6bdcae93",
+      "9109d1e4-1dfa-44f3-8ab7-029f5dc1268f",
+      "c178954f-e39b-4189-a3d0-f191a04ebf50",
+      "cd3f2afa-a4a6-49fb-8a31-e466b439d74b",
+      "ea1df9d8-0a1b-413a-9744-e0f78d509214"
+    ],
+    "creation_calls": [
+      "type.googleapis.com/kiapi.common.commands.CreateItems",
+      "type.googleapis.com/kiapi.common.commands.CreateItems",
+      "type.googleapis.com/kiapi.common.commands.CreateItems",
+      "type.googleapis.com/kiapi.common.commands.CreateItems",
+      "type.googleapis.com/kiapi.common.commands.CreateItems",
+      "type.googleapis.com/kiapi.common.commands.CreateItems",
+      "type.googleapis.com/kiapi.common.commands.CreateItems",
+      "type.googleapis.com/kiapi.common.commands.CreateItems",
+      "type.googleapis.com/kiapi.common.commands.CreateItems",
+      "type.googleapis.com/kiapi.common.commands.CreateItems",
+      "type.googleapis.com/kiapi.common.commands.CreateItems"
+    ],
+    "creation_preserved_saved_files": true,
+    "failed_creation_calls": [
+      "type.googleapis.com/kiapi.common.commands.CreateItems",
+      "type.googleapis.com/kiapi.common.commands.CreateItems"
+    ],
+    "final_unconnected": 0,
+    "introduced_drc": 0,
+    "kicad_version": "10.0.7",
+    "layers": [
+      "F.Cu",
+      "In1.Cu",
+      "B.Cu"
+    ],
+    "mapping": [
+      {
+        "layer": "F.Cu",
+        "native": "9109d1e4-1dfa-44f3-8ab7-029f5dc1268f",
+        "planned": "layered-path:leg:0:segment:0"
+      },
+      {
+        "layer": "F.Cu",
+        "native": "8c72c361-4a1d-440a-99ca-6aab6bdcae93",
+        "planned": "layered-path:leg:0:segment:1"
+      },
+      {
+        "layer": "In1.Cu",
+        "native": "69c4dae0-276e-4c52-af70-fb4019d838d4",
+        "planned": "layered-path:leg:1:segment:0"
+      },
+      {
+        "layer": "F.Cu",
+        "native": "ea1df9d8-0a1b-413a-9744-e0f78d509214",
+        "planned": "layered-path:leg:2:segment:0"
+      },
+      {
+        "layer": "F.Cu",
+        "native": "c178954f-e39b-4189-a3d0-f191a04ebf50",
+        "planned": "layered-path:leg:2:segment:1"
+      },
+      {
+        "layer": "F.Cu",
+        "native": "754c2792-5379-4e0a-9ee9-794466baf2cf",
+        "planned": "join-existing-track:leg:0:segment:0"
+      },
+      {
+        "layer": "F.Cu",
+        "native": "7046f2de-d60a-47c8-b297-8f1922336c08",
+        "planned": "join-existing-track:leg:0:segment:1"
+      },
+      {
+        "layer": "B.Cu",
+        "native": "586ce05e-cdf9-4570-b15b-440d1cc3f4fe",
+        "planned": "join-back-pad:leg:0:segment:0"
+      },
+      {
+        "layer": "B.Cu",
+        "native": "7a0e369c-dfdd-4f5e-8cd0-772070ca28e4",
+        "planned": "join-back-pad:leg:0:segment:1"
+      },
+      {
+        "native": "cd3f2afa-a4a6-49fb-8a31-e466b439d74b",
+        "planned": "transition-a"
+      },
+      {
+        "native": "4725586b-c0fc-41d6-9d97-18bf5077a28d",
+        "planned": "transition-b"
+      }
+    ],
+    "native_existing_items_preserved": true,
+    "native_footprints_preserved": true,
+    "partial_create_cancelled": true,
+    "routes": 3,
+    "same_process_reload": true,
+    "scope": "native path primitive; no MCP approval binding",
+    "source_pid": 48932,
+    "source_project_unchanged": true,
+    "tracks": 9,
+    "vias": 2
+  },
+  "mcp": {
+    "production_stdio": true,
+    "kicad_version": "10.0.7",
+    "tracks_added": 16,
+    "vias_added": 4,
+    "front_smd_inner_transition": true,
+    "non_default_netclass": true,
+    "explicit_width_differs_from_preference": true,
+    "selected_back_track": true,
+    "drift_cases": [
+      "custom_rule_presence",
+      "saved_minimum",
+      "saved_netclass"
+    ],
+    "anchor_kinds": [
+      "pad",
+      "track_end",
+      "via"
+    ],
+    "layers": [
+      "F.Cu",
+      "In1.Cu",
+      "B.Cu"
+    ],
+    "invalid_paths_rejected": true,
+    "rule_drift_invalidates_approval": true,
+    "restored_rules_cannot_replay_approval": true,
+    "invalid_approval_rejected": true,
+    "replay_rejected": true,
+    "scope": "synthetic route MCP acceptance; populated-copy gate remains open"
+  },
+  "mcp_drc": {
+    "introduced": 0,
+    "baseline_unconnected": 7,
+    "final_unconnected": 2
+  },
+  "processes": [
+    {
+      "pid": 48932,
+      "absent": true
+    },
+    {
+      "pid": 49074,
+      "absent": true
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "binaries.json",
+      "bytes": 413,
+      "sha256": "c5ea55f7151a12254faef987b592d71989029376ca3e0af3ed32abbc7f49bb2c"
+    },
+    {
+      "path": "build.log",
+      "bytes": 144,
+      "sha256": "4c66afc207faffc7c1338d87c325fe0048a9ad24b3b83ea59a401e558a4cf48d"
+    },
+    {
+      "path": "commands.json",
+      "bytes": 833,
+      "sha256": "5c8f6c6ebe02df3366a7ab68ff28d4f143d044b051f29ae35a86ff510601bc66"
+    },
+    {
+      "path": "mcp/after-items.pb",
+      "bytes": 4827,
+      "sha256": "dfe3bbb538aab128b9c102790c5d00d2e827e2fe6df71fe20adad0de461b08d1"
+    },
+    {
+      "path": "mcp/before-items.pb",
+      "bytes": 1559,
+      "sha256": "b51fc4d0e7c0f6db06cd825007a8884576a641aff59f3c083155e3e4963a88f9"
+    },
+    {
+      "path": "mcp/cleanup.json",
+      "bytes": 89,
+      "sha256": "5a581d173a0b4cb70ad1551b1d7b1f42caf6630cb5626713089cd7cf88965b3b"
+    },
+    {
+      "path": "mcp/fixture/board.kicad_pcb",
+      "bytes": 3806,
+      "sha256": "648945c17de502f619d09e1686fb6650570f13bbc7c7a3a0fcd4bd1361f95a7b"
+    },
+    {
+      "path": "mcp/fixture/board.kicad_pro",
+      "bytes": 1020,
+      "sha256": "2dc61a28c5819bb8df2471be66f8ff4eeeba761e1affc79e0d4fa46a0c7d8681"
+    },
+    {
+      "path": "mcp/mcp.json",
+      "bytes": 1905659,
+      "sha256": "e680474f6f44e6276157ac1178e1daf96243cc2494386af6dd2bf75cc2996077"
+    },
+    {
+      "path": "mcp/native.json",
+      "bytes": 257,
+      "sha256": "b3e6b3066720181c8a54d3907bf2e4ed6a4003663a7672d35110ffccc6b59feb"
+    },
+    {
+      "path": "mcp/result/board.kicad_pcb",
+      "bytes": 10775,
+      "sha256": "27e926f1f387a005327301d205fc7f0a6af3cf04c49d0e74edc4f191ca13ff74"
+    },
+    {
+      "path": "mcp/result/board.kicad_pro",
+      "bytes": 9965,
+      "sha256": "98111d1ae8f501244d38e10d48ca0d2f59194c8e8cc2e4d1cb2938d3cc47a5c4"
+    },
+    {
+      "path": "mcp/result.json",
+      "bytes": 61687,
+      "sha256": "cdead1beb5d353cd010cabf152f10647a6d6913b35e2edd6d5d1b2a5f724d104"
+    },
+    {
+      "path": "mcp/state/sha256:24a3fe507282fc16fc79088d6b27604a0ce7b54e129456748f5ee750ba542823/000000000000000000001793079975728275000-49131-0/record.json",
+      "bytes": 28042,
+      "sha256": "27887fe213e52110a89c2c5536eefd3e0ba6057e1107135c84d5b18a489e5671"
+    },
+    {
+      "path": "mcp/state/sha256:24a3fe507282fc16fc79088d6b27604a0ce7b54e129456748f5ee750ba542823/000000000000000000001793079975728275000-49131-0/source-0.backup",
+      "bytes": 7561,
+      "sha256": "0bc6b76d5c579f32af0cfc78ec274c6be0a2acf70235e6fac8c663da25e2ce7b"
+    },
+    {
+      "path": "mcp/state/sha256:24a3fe507282fc16fc79088d6b27604a0ce7b54e129456748f5ee750ba542823/000000000000000000001793079975728275000-49131-0/source-1.backup",
+      "bytes": 9965,
+      "sha256": "98111d1ae8f501244d38e10d48ca0d2f59194c8e8cc2e4d1cb2938d3cc47a5c4"
+    },
+    {
+      "path": "mcp/state/sha256:24a3fe507282fc16fc79088d6b27604a0ce7b54e129456748f5ee750ba542823/000000000000000000001793079986671003000-49131-1/record.json",
+      "bytes": 5214,
+      "sha256": "1b662eb95a9f3d92112d3a65afce4aaebf0d045582b30ba7523c907ce6393d45"
+    },
+    {
+      "path": "mcp/state/sha256:24a3fe507282fc16fc79088d6b27604a0ce7b54e129456748f5ee750ba542823/000000000000000000001793079986671003000-49131-1/source-0.backup",
+      "bytes": 10638,
+      "sha256": "e97ea958ae2b2dbfead3272fdd7808ec696cbfebca9e89328276f04e6051aac2"
+    },
+    {
+      "path": "mcp/state/sha256:24a3fe507282fc16fc79088d6b27604a0ce7b54e129456748f5ee750ba542823/000000000000000000001793079986671003000-49131-1/source-1.backup",
+      "bytes": 9965,
+      "sha256": "98111d1ae8f501244d38e10d48ca0d2f59194c8e8cc2e4d1cb2938d3cc47a5c4"
+    },
+    {
+      "path": "mcp/stdio.log",
+      "bytes": 0,
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "mcp.log",
+      "bytes": 48,
+      "sha256": "28accc3f4295e0d309c76638b31a93305c8fb77501c43b0d8fbca1403d047d85"
+    },
+    {
+      "path": "native/baseline-drc.json",
+      "bytes": 3066,
+      "sha256": "f283a8b01525fef1f85cce458994f817ccf200ced74335308d3fe9acc972a5fd"
+    },
+    {
+      "path": "native/baseline-items.pb",
+      "bytes": 1326,
+      "sha256": "c0db4317108f38132b3f4d3b1c68007d2491386fcdefe738b691d5e55a69c391"
+    },
+    {
+      "path": "native/cleanup.json",
+      "bytes": 89,
+      "sha256": "32a763cd2649779c063ba7443a622bab4435ed1a4cdb249614d39dcd459ff6dd"
+    },
+    {
+      "path": "native/expected.json",
+      "bytes": 33825,
+      "sha256": "db08e5936c6544eaf1bce9021de2dc9a51982457e1f72e5fd68b0a8fe6e210fa"
+    },
+    {
+      "path": "native/final-drc.json",
+      "bytes": 2493,
+      "sha256": "1b448545aa1f9e3e27df6e6d475ead1b6c9aaa28c0c4bb37a2da78e357096b0d"
+    },
+    {
+      "path": "native/final-items.pb",
+      "bytes": 3096,
+      "sha256": "fe22b7426ad6186f682998385e52c417edaa0d061a36008d74db2c9379eb6257"
+    },
+    {
+      "path": "native/fixture/board.kicad_pcb",
+      "bytes": 2253,
+      "sha256": "41de655fbc3e73e24ed60a104c35694a497919f3dc1b392aeaa46b069640ee8c"
+    },
+    {
+      "path": "native/fixture/board.kicad_pro",
+      "bytes": 832,
+      "sha256": "05161e6e698a3a866753d43f20345432ede83c8678c52ba7b3dfe9c0187da3ce"
+    },
+    {
+      "path": "native/footprint-60000000-0000-4000-8000-000000000001-after.pb",
+      "bytes": 1031,
+      "sha256": "3d9b38a8d2f1b085a56f707b171c2ef8d189874f350a4987427312b307630536"
+    },
+    {
+      "path": "native/footprint-60000000-0000-4000-8000-000000000001-before.pb",
+      "bytes": 1031,
+      "sha256": "3d9b38a8d2f1b085a56f707b171c2ef8d189874f350a4987427312b307630536"
+    },
+    {
+      "path": "native/plan.json",
+      "bytes": 7928,
+      "sha256": "c950654d77f44bb26fc97acc3b3b0c4117313a17b5dc84402817392ea45de656"
+    },
+    {
+      "path": "native/result/board.kicad_pcb",
+      "bytes": 5913,
+      "sha256": "6d7074d8552bd42d7c0b210e87cea3fb404a218228f40f6d096c0cd3448c9186"
+    },
+    {
+      "path": "native/result/board.kicad_pro",
+      "bytes": 9825,
+      "sha256": "8419222138158c81918c3658150733feb0854bc37dc5a0b980afe94399a18f38"
+    },
+    {
+      "path": "native/result.json",
+      "bytes": 3699,
+      "sha256": "e253ec6b2bc0767f93128df04a89ee55186109ca2025ce72fbc433a684f62416"
+    },
+    {
+      "path": "native.log",
+      "bytes": 3061,
+      "sha256": "0bf22ad833c08add8b18adb7a3bcbebbcaf59ea96db0748ecc99db646aa63147"
+    },
+    {
+      "path": "process-cleanup.json",
+      "bytes": 95,
+      "sha256": "1a328d9a2582350bf67110a36363324d2d6060cd183fbe2413fc7d25c3606a3b"
+    },
+    {
+      "path": "quality.log",
+      "bytes": 45450,
+      "sha256": "3e1de6c2fcfe83d211d4102533a2ebc504aee0b38ada9a257740a950bf733e5d"
+    }
+  ]
+}

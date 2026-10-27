@@ -1,7 +1,7 @@
 //! Verify typed route compilation, atomic native creation and saved connectivity.
 use auto_kicad::{DiscoveryService, IpcDiscoveryService};
 use kicad_adapter::{
-    BoardGraphicsCommitOutcome, BoardGraphicsExecutor, created_routing_matches_reloaded,
+    BoardGraphicsExecutor, created_routing_matches_reloaded,
     lifecycle::{DisposablePcbLifecycle, OwnedPcbnewLauncher},
     prepare_bound_native_batch, read_verified_native_routing,
 };
@@ -24,12 +24,37 @@ use std::{
     time::Duration,
 };
 
+struct RecordingTransport {
+    native: NngTransport,
+    calls: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+impl KiCadTransport for RecordingTransport {
+    fn request(&mut self, request: ApiRequest) -> Result<ApiResponse, IpcError> {
+        self.calls.lock().unwrap().push(
+            request
+                .message
+                .as_ref()
+                .map(|m| m.type_url.clone())
+                .unwrap_or_default(),
+        );
+        self.native.request(request)
+    }
+}
+
 struct FailureTransport {
     native: NngTransport,
     creates: usize,
+    calls: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
 }
 impl KiCadTransport for FailureTransport {
     fn request(&mut self, request: ApiRequest) -> Result<ApiResponse, IpcError> {
+        self.calls.lock().unwrap().push(
+            request
+                .message
+                .as_ref()
+                .map(|m| m.type_url.clone())
+                .unwrap_or_default(),
+        );
         if request
             .message
             .as_ref()
@@ -243,40 +268,72 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let executor = BoardGraphicsExecutor {
             max_segments: kicad_model::copper_route::MAX_BATCH_COPPER,
         };
+        let failure_calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let config = ClientConfig::new(&identity.endpoint, "route-failure-probe")?;
         let mut fault = KiCadClient::new(
             FailureTransport {
                 native: NngTransport::connect(config.clone())?,
                 creates: 0,
+                calls: failure_calls.clone(),
             },
             config,
         );
         fault.get_version()?;
-        let failed = executor.execute_native_batch(
+        let failed_commit = fault.begin_commit()?;
+        failure_calls.lock().unwrap().clear();
+        let failed = executor.create_native_batch_in_transaction(
             &mut fault,
             &identity.board_filename,
             &batch.graphics,
             &batch.tracks,
             &batch.vias,
-            "route failure injection",
         );
-        if !matches!(failed, Err(BoardGraphicsCommitOutcome::Rejected { .. }))
-            || !baseline
-                .matches_saved(&ipc.capture_existing_board_items(&identity.board_filename)?)?
+        let failed_creation_calls = failure_calls.lock().unwrap().clone();
+        if failed.is_ok()
+            || failed_creation_calls != vec![kicad_ipc::CREATE_ITEMS_TYPE_URL; 2]
+            || protected != [fs::read(copy.board_path())?, fs::read(copy.project_path())?]
+        {
+            return Err("failed creation changed transaction ownership or saved files".into());
+        }
+        fault.drop_commit(&failed_commit)?;
+        if !baseline.matches_saved(&ipc.capture_existing_board_items(&identity.board_filename)?)?
             || protected != [fs::read(copy.board_path())?, fs::read(copy.project_path())?]
         {
             return Err("partial create rollback changed source".into());
         }
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let config = ClientConfig::new(&identity.endpoint, "route-owned-transaction-probe")?;
+        let mut creation = KiCadClient::new(
+            RecordingTransport {
+                native: NngTransport::connect(config.clone())?,
+                calls: calls.clone(),
+            },
+            config,
+        );
+        creation.get_version()?;
+        let commit = creation.begin_commit()?;
+        calls.lock().unwrap().clear();
         let receipts = executor
-            .execute_native_batch(
-                &mut ipc,
+            .create_native_batch_in_transaction(
+                &mut creation,
                 &identity.board_filename,
                 &batch.graphics,
                 &batch.tracks,
                 &batch.vias,
-                "create explicit native copper routes",
             )
-            .map_err(|e| format!("native route failed: {e:?}"))?;
+            .map_err(|e| format!("native route creation failed: {e}"))?;
+        let creation_calls = calls.lock().unwrap().clone();
+        if creation_calls.len() != batch.tracks.len() + batch.vias.len()
+            || creation_calls
+                .iter()
+                .any(|call| call != kicad_ipc::CREATE_ITEMS_TYPE_URL)
+            || protected != [fs::read(copy.board_path())?, fs::read(copy.project_path())?]
+        {
+            return Err("shared creation changed transaction ownership or saved files".into());
+        }
+        creation.commit_changes(&commit, "create explicit native copper routes")?;
+        ipc.save_board(&identity.board_filename)?;
+        kicad_adapter::verify_native_pcb_batch(&mut ipc, &identity.board_filename, &receipts)?;
         let saved = read_verified_native_routing(&mut ipc, &identity.board_filename, &receipts)?;
         editor.reload_owned()?;
         let reloaded = read_verified_native_routing(&mut ipc, &identity.board_filename, &receipts)?;
@@ -379,7 +436,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
         fs::write(output.join("final-items.pb"), after.persistent_evidence()?)?;
         Ok(
-            json!({"kicad_version":source.snapshot.kicad_version,"source_pid":identity.pid,"tracks":9,"vias":2,"routes":3,"anchor_kinds":["pad","track_end","via"],"layers":["F.Cu","In1.Cu","B.Cu"],"native_footprints_preserved":true,"partial_create_cancelled":true,"same_process_reload":true,"native_existing_items_preserved":true,"all_route_items_and_anchors_connected":true,"component":component,"mapping":mapping,"introduced_drc":delta.introduced.len(),"baseline_unconnected":baseline_drc.unconnected_items,"final_unconnected":final_drc.unconnected_items,"source_project_unchanged":true,"scope":"native path primitive; no MCP approval binding"}),
+            json!({"kicad_version":source.snapshot.kicad_version,"source_pid":identity.pid,"tracks":9,"vias":2,"routes":3,"anchor_kinds":["pad","track_end","via"],"layers":["F.Cu","In1.Cu","B.Cu"],"native_footprints_preserved":true,"caller_owned_transaction":true,"creation_calls":creation_calls,"failed_creation_calls":failed_creation_calls,"creation_preserved_saved_files":true,"partial_create_cancelled":true,"same_process_reload":true,"native_existing_items_preserved":true,"all_route_items_and_anchors_connected":true,"component":component,"mapping":mapping,"introduced_drc":delta.introduced.len(),"baseline_unconnected":baseline_drc.unconnected_items,"final_unconnected":final_drc.unconnected_items,"source_project_unchanged":true,"scope":"native path primitive; no MCP approval binding"}),
         )
     })();
     editor.close_owned(identity.pid)?;

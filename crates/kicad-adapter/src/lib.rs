@@ -2003,11 +2003,35 @@ impl BoardGraphicsExecutor {
         vias: &[CreateThroughVia],
         message: &str,
     ) -> Result<NativePcbBatchReceipt, BoardGraphicsCommitOutcome> {
+        self.validate_native_batch(board_filename, graphics, tracks, vias)
+            .map_err(|reason| BoardGraphicsCommitOutcome::Rejected { reason })?;
+        let commit = ipc
+            .begin_commit()
+            .map_err(|reason| BoardGraphicsCommitOutcome::Unknown { reason })?;
+        let receipt = self
+            .create_native_batch_in_transaction(ipc, board_filename, graphics, tracks, vias)
+            .map_err(|reason| drop_native_pcb_commit(ipc, &commit, reason))?;
+        if let Err(reason) = ipc.commit_changes(&commit, message) {
+            return Err(BoardGraphicsCommitOutcome::Unknown { reason });
+        }
+        if let Err(reason) = ipc.save_board(board_filename) {
+            return Err(BoardGraphicsCommitOutcome::Unknown { reason });
+        }
+        verify_native_pcb_batch(ipc, board_filename, &receipt)
+            .map_err(|reason| BoardGraphicsCommitOutcome::Unknown { reason })?;
+        Ok(receipt)
+    }
+
+    fn validate_native_batch(
+        &self,
+        board_filename: &str,
+        graphics: &[IpcBoardGraphicSegment],
+        tracks: &[CreateTrack],
+        vias: &[CreateThroughVia],
+    ) -> Result<(), String> {
         let item_count = graphics.len() + tracks.len() + vias.len();
         if board_filename.is_empty() || item_count == 0 || item_count > self.max_segments {
-            return Err(BoardGraphicsCommitOutcome::Rejected {
-                reason: "native PCB batch is empty, oversized, or has no board filename".into(),
-            });
+            return Err("native PCB batch is empty, oversized, or has no board filename".into());
         }
         if graphics.iter().any(|graphic| {
             graphic.width_nm <= 0
@@ -2043,14 +2067,24 @@ impl BoardGraphicsExecutor {
                 || via.position_x_nm.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
                 || via.position_y_nm.unsigned_abs() > MAX_BOARD_POSITION_NM as u64
         }) {
-            return Err(BoardGraphicsCommitOutcome::Rejected {
-                reason: "native PCB batch contains invalid or out-of-bounds items".into(),
-            });
+            return Err("native PCB batch contains invalid or out-of-bounds items".into());
         }
 
-        let commit = ipc
-            .begin_commit()
-            .map_err(|reason| BoardGraphicsCommitOutcome::Unknown { reason })?;
+        Ok(())
+    }
+
+    /// Create a bounded additive batch inside a caller-owned native transaction.
+    /// Errors may follow partial creation; this method never retries or changes the transaction lifecycle.
+    /// Receipts do not establish saved preservation, refill, connectivity, DRC or approval.
+    pub fn create_native_batch_in_transaction<I: BoardGraphicsIpc>(
+        &self,
+        ipc: &mut I,
+        board_filename: &str,
+        graphics: &[IpcBoardGraphicSegment],
+        tracks: &[CreateTrack],
+        vias: &[CreateThroughVia],
+    ) -> Result<NativePcbBatchReceipt, String> {
+        self.validate_native_batch(board_filename, graphics, tracks, vias)?;
         let graphic_receipts = if graphics.is_empty() {
             Vec::new()
         } else {
@@ -2064,13 +2098,9 @@ impl BoardGraphicsExecutor {
                     receipts
                 }
                 Ok(_) => {
-                    return Err(drop_native_pcb_commit(
-                        ipc,
-                        &commit,
-                        "created board graphic receipt did not match the request".into(),
-                    ));
+                    return Err("created board graphic receipt did not match the request".into());
                 }
-                Err(reason) => return Err(drop_native_pcb_commit(ipc, &commit, reason)),
+                Err(reason) => return Err(reason),
             }
         };
         let mut track_receipts = Vec::with_capacity(tracks.len());
@@ -2083,13 +2113,9 @@ impl BoardGraphicsExecutor {
                     track_receipts.push(receipt);
                 }
                 Ok(_) => {
-                    return Err(drop_native_pcb_commit(
-                        ipc,
-                        &commit,
-                        "created track receipt did not match the request".into(),
-                    ));
+                    return Err("created track receipt did not match the request".into());
                 }
-                Err(reason) => return Err(drop_native_pcb_commit(ipc, &commit, reason)),
+                Err(reason) => return Err(reason),
             }
         }
         let mut via_receipts = Vec::with_capacity(vias.len());
@@ -2099,27 +2125,23 @@ impl BoardGraphicsExecutor {
                     if receipt.request_index == 0 && legacy_via_receipt_matches(&receipt.via, via) {
                         via_receipts.push(receipt);
                     } else {
-                        return Err(drop_native_pcb_commit(
-                            ipc,
-                            &commit,
-                            format!(
-                                "created via receipt did not match the request: index={} actual=({}, {}, {}, {}, {:?}) expected=({}, {}, {}, {}, {:?})",
-                                receipt.request_index,
-                                receipt.via.position_x_nm,
-                                receipt.via.position_y_nm,
-                                receipt.via.pad_diameter_nm,
-                                receipt.via.drill_diameter_nm,
-                                receipt.via.net.as_ref().map(|net| net.name.as_str()),
-                                via.position_x_nm,
-                                via.position_y_nm,
-                                via.pad_diameter_nm,
-                                via.drill_diameter_nm,
-                                via.net.as_ref().map(|net| net.name.as_str()),
-                            ),
+                        return Err(format!(
+                            "created via receipt did not match the request: index={} actual=({}, {}, {}, {}, {:?}) expected=({}, {}, {}, {}, {:?})",
+                            receipt.request_index,
+                            receipt.via.position_x_nm,
+                            receipt.via.position_y_nm,
+                            receipt.via.pad_diameter_nm,
+                            receipt.via.drill_diameter_nm,
+                            receipt.via.net.as_ref().map(|net| net.name.as_str()),
+                            via.position_x_nm,
+                            via.position_y_nm,
+                            via.pad_diameter_nm,
+                            via.drill_diameter_nm,
+                            via.net.as_ref().map(|net| net.name.as_str()),
                         ));
                     }
                 }
-                Err(reason) => return Err(drop_native_pcb_commit(ipc, &commit, reason)),
+                Err(reason) => return Err(reason),
             }
         }
         let receipt = NativePcbBatchReceipt {
@@ -2127,14 +2149,6 @@ impl BoardGraphicsExecutor {
             tracks: track_receipts,
             vias: via_receipts,
         };
-        if let Err(reason) = ipc.commit_changes(&commit, message) {
-            return Err(BoardGraphicsCommitOutcome::Unknown { reason });
-        }
-        if let Err(reason) = ipc.save_board(board_filename) {
-            return Err(BoardGraphicsCommitOutcome::Unknown { reason });
-        }
-        verify_native_pcb_batch(ipc, board_filename, &receipt)
-            .map_err(|reason| BoardGraphicsCommitOutcome::Unknown { reason })?;
         Ok(receipt)
     }
 
@@ -5078,6 +5092,69 @@ mod tests {
                 "routing-read-by-id:board.kicad_pcb",
             ]
         );
+    }
+
+    #[test]
+    fn additive_creation_leaves_transaction_lifecycle_to_caller() {
+        let track = CreateTrack {
+            layer: kicad_ipc::CopperLayer::FRONT,
+            start_x_nm: 1,
+            start_y_nm: 2,
+            end_x_nm: 3,
+            end_y_nm: 4,
+            width_nm: 100,
+            net: None,
+        };
+        let via = CreateThroughVia {
+            copper_layers: vec![kicad_ipc::CopperLayer::FRONT, kicad_ipc::CopperLayer::BACK],
+            position_x_nm: 5,
+            position_y_nm: 6,
+            pad_diameter_nm: 200,
+            drill_diameter_nm: 100,
+            net: None,
+        };
+        let graphic = IpcBoardGraphicSegment {
+            start_x_nm: 0,
+            start_y_nm: 0,
+            end_x_nm: 10,
+            end_y_nm: 0,
+            width_nm: 100,
+            layer: IpcBoardGraphicLayer::DwgsUser,
+        };
+        // Definite rejection, partial writes and uncertain responses share the same ownership boundary.
+        for fault in 0..6 {
+            let mut ipc = FakeGraphicsIpc::default();
+            match fault {
+                1 => ipc.create = Err("graphic transport timeout".into()),
+                2 => ipc.track = Err("track transport timeout".into()),
+                3 => ipc.via = Err("via transport timeout".into()),
+                4 => ipc.routing_receipt_matches = false,
+                _ => {}
+            }
+            let mut input_track = track.clone();
+            if fault == 5 {
+                input_track.width_nm = 0;
+            }
+            let outcome = BoardGraphicsExecutor::default().create_native_batch_in_transaction(
+                &mut ipc,
+                "board.kicad_pcb",
+                std::slice::from_ref(&graphic),
+                &[input_track],
+                std::slice::from_ref(&via),
+            );
+            assert_eq!(outcome.is_ok(), fault == 0, "fault {fault}");
+            let calls: &[&str] = match fault {
+                0 | 3 => &[
+                    "create:board.kicad_pcb",
+                    "track:board.kicad_pcb",
+                    "via:board.kicad_pcb",
+                ],
+                1 => &["create:board.kicad_pcb"],
+                2 | 4 => &["create:board.kicad_pcb", "track:board.kicad_pcb"],
+                _ => &[],
+            };
+            assert_eq!(ipc.calls, calls, "fault {fault}");
+        }
     }
 
     #[test]
