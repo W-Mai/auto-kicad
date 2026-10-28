@@ -18,6 +18,7 @@ pub mod identities;
 mod netlist;
 mod patch;
 pub mod pins;
+pub mod probes;
 
 pub use netlist::{
     NetlistComponent, NetlistDocument, NetlistLimits, NetlistNet, NetlistNode, NetlistRun,

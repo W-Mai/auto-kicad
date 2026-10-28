@@ -5,8 +5,11 @@ use std::{collections::BTreeMap, env, fs, path::Path};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = env::args().skip(1).collect::<Vec<_>>();
-    if args.len() != 3 {
-        return Err("usage: check-schematic-pins OWNED_SCHEMATIC OWNED_CONFIG NEW_OUTPUT".into());
+    if args.len() != 3 && !(args.len() == 4 && args[3] == "--connectivity") {
+        return Err(
+            "usage: check-schematic-pins OWNED_SCHEMATIC OWNED_CONFIG NEW_OUTPUT [--connectivity]"
+                .into(),
+        );
     }
     let source = fs::canonicalize(&args[0])?;
     let root = source.parent().ok_or("missing source parent")?;
@@ -74,6 +77,79 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         output.join("contacts.json"),
         serde_json::to_vec_pretty(&contacts)?,
     )?;
+    let mut connectivity_summary = serde_json::Value::Null;
+    if args.len() == 4 {
+        let observed = audit.observe_pin_connectivity()?;
+        fs::write(
+            output.join("complete-connectivity.txt"),
+            format!("{:#?}", observed.connectivity()),
+        )?;
+        fs::write(
+            output.join("probe-netlist.txt"),
+            format!("{:#?}", observed.native()),
+        )?;
+        fs::write(
+            output.join("probe-evidence.json"),
+            serde_json::to_vec_pretty(observed.evidence())?,
+        )?;
+        let plan =
+            kicad_schematic::probes::PinProbePlan::prepare(&parsed, audit.netlist(), &sources)?;
+        let original_refs = audit
+            .netlist()
+            .components
+            .iter()
+            .map(|c| c.reference.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let probe = observed
+            .native()
+            .components
+            .iter()
+            .find(|c| !original_refs.contains(c.reference.as_str()));
+        let mut rejected = Vec::new();
+        if let Some(probe) = probe {
+            for mode in [
+                "missing_probe",
+                "duplicate_probe",
+                "changed_original_network",
+            ] {
+                let mut bad = observed.native().clone();
+                let net = bad
+                    .nets
+                    .iter_mut()
+                    .find(|n| n.nodes.iter().any(|p| p.reference == probe.reference))
+                    .ok_or("probe node absent")?;
+                let index = net
+                    .nodes
+                    .iter()
+                    .position(|p| p.reference == probe.reference)
+                    .ok_or("probe node absent")?;
+                match mode {
+                    "missing_probe" => {
+                        net.nodes.remove(index);
+                    }
+                    "duplicate_probe" => net.nodes.push(net.nodes[index].clone()),
+                    "changed_original_network" => {
+                        let original = bad
+                            .nets
+                            .iter_mut()
+                            .find(|n| {
+                                n.nodes
+                                    .iter()
+                                    .any(|p| original_refs.contains(p.reference.as_str()))
+                            })
+                            .ok_or("original network absent")?;
+                        original.name.push_str("-changed");
+                    }
+                    _ => unreachable!(),
+                }
+                if plan.validate(&bad).is_ok() {
+                    return Err(format!("accepted {mode}").into());
+                }
+                rejected.push(mode);
+            }
+        }
+        connectivity_summary = serde_json::json!({"nets":observed.connectivity().nets().len(),"connected_pins":observed.connectivity().nets().iter().map(|n|n.pins.len()).sum::<usize>(),"isolated_no_connect":observed.connectivity().isolated_no_connect().len(),"negative_controls":rejected,"evidence":observed.evidence()});
+    }
     let original = audit.netlist();
     let populated = original
         .nets
@@ -114,7 +190,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         controls.push(mode);
     }
     audit.verify()?;
-    let result = serde_json::json!({"passed":true,"components":audit.identities().components().len(),"pins":audit.pins().pins().len(),"unexported_source_pins":audit.pins().unexported().len(),"explicit_no_connect":audit.pins().pins().iter().filter(|p|p.net.explicit_no_connect).count(),"common_pin_groups":audit.pins().pins().iter().filter(|p|p.occurrences.len()>1).count(),"nets":audit.netlist().nets.len(),"negative_controls":controls});
+    let result = serde_json::json!({"passed":true,"components":audit.identities().components().len(),"pins":audit.pins().pins().len(),"unexported_source_pins":audit.pins().unexported().len(),"explicit_no_connect":audit.pins().pins().iter().filter(|p|p.net.explicit_no_connect).count(),"common_pin_groups":audit.pins().pins().iter().filter(|p|p.occurrences.len()>1).count(),"nets":audit.netlist().nets.len(),"negative_controls":controls,"complete_connectivity":connectivity_summary});
     let private = audit.private_root().to_owned();
     drop(audit);
     if private.exists() {

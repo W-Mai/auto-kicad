@@ -189,7 +189,12 @@ fn definition<'a>(
     }
 }
 
-fn source_unit(raw: &RawSymbol, source: &[Node], def: &[Node]) -> Result<SourceUnit, String> {
+fn source_unit(
+    raw: &RawSymbol,
+    source: &[Node],
+    def: &[Node],
+    format: u32,
+) -> Result<SourceUnit, String> {
     let transform = SymbolTransform::from_cst(source)?;
     let mut record_lists = BTreeMap::<&str, Vec<String>>::new();
     for pin in &raw.pins {
@@ -257,7 +262,12 @@ fn source_unit(raw: &RawSymbol, source: &[Node], def: &[Node]) -> Result<SourceU
             }
             let library_position = Point::from_at(at)?;
             let position = transform.contact(library_position)?;
-            let mut name = field(pin, "name")?;
+            let name = field(pin, "name")?;
+            let mut name = if format < 20250318 && name == "~" {
+                ""
+            } else {
+                name
+            };
             let mut kind = text(pin, 1)?;
             if let Some(alt) = alternates.get(graphical) {
                 let matching = children(pin, "alternate")
@@ -272,7 +282,6 @@ fn source_unit(raw: &RawSymbol, source: &[Node], def: &[Node]) -> Result<SourceU
             if name.contains('$') {
                 return Err("dynamic pin function requires expansion evidence".into());
             }
-            let name = if name == "~" { "" } else { name };
             let records = stored_records.get(graphical).cloned().unwrap_or_default();
             if records.is_empty() {
                 return Err("active graphical pin has no stored UUID record".into());
@@ -360,7 +369,11 @@ fn source_inventory(
             let source = placed
                 .get(raw.source_uuid.as_str())
                 .ok_or("missing placed symbol source")?;
-            let unit = source_unit(raw, source, def)?;
+            let format = file
+                .format_version
+                .parse::<u32>()
+                .map_err(|_| "invalid pin source format version")?;
+            let unit = source_unit(raw, source, def, format)?;
             pin_count += unit.active.len() + unit.all_styles.len();
             if pin_count > MAX_PINS {
                 return Err("physical pin inventory exceeds bound".into());
@@ -689,6 +702,44 @@ mod tests {
         assert!(parsed.symbols.iter().all(|s| s.body_style == Some(2)));
         let repeated = legacy.replace("(convert 2)", "(convert 2) (body_style 1)");
         assert!(parse_schematic("pins.kicad_sch", repeated.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn pin_name_normalization_is_format_bound_and_does_not_rewrite_alternates() {
+        for format in [20250114, 20260306] {
+            for alternate in [false, true] {
+                let (mut project, mut native, bytes) = fixture("U1");
+                let mut text = String::from_utf8(bytes)
+                    .unwrap()
+                    .replace("20260306", &format.to_string());
+                if alternate {
+                    text = text.replace(
+                        "(name \"A\")",
+                        "(name \"A\") (alternate \"~\" passive line)",
+                    );
+                    text = text.replace("(pin \"1\" (uuid", "(pin \"1\" (alternate \"~\") (uuid");
+                } else {
+                    text = text.replace("(name \"A\")", "(name \"~\")");
+                }
+                let parsed = parse_schematic("pins.kicad_sch", text.as_bytes()).unwrap();
+                project.revision = SchematicArtifactRevision::new(
+                    vec![parsed.artifact.clone()],
+                    "10.0.7",
+                    1,
+                    false,
+                )
+                .unwrap();
+                project.files = vec![parsed];
+                native.nets[0].nodes[0].pin_function = if alternate || format >= 20250318 {
+                    "~_1".into()
+                } else {
+                    String::new()
+                };
+                assert!(resolve(&project, &native, text.as_bytes()).is_ok());
+                native.nets[0].nodes[0].pin_function = "incorrect".into();
+                assert!(resolve(&project, &native, text.as_bytes()).is_err());
+            }
+        }
     }
 
     #[test]

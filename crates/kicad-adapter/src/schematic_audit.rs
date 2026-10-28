@@ -346,6 +346,24 @@ fn relocate(
     render_library_rows(&result, kind)
 }
 
+/// Source-bound connectivity with private native witness evidence, not write approval.
+pub struct SchematicConnectivityAudit {
+    connectivity: kicad_schematic::probes::PinConnectivity,
+    native: NetlistDocument,
+    evidence: Value,
+}
+impl SchematicConnectivityAudit {
+    pub fn connectivity(&self) -> &kicad_schematic::probes::PinConnectivity {
+        &self.connectivity
+    }
+    pub fn native(&self) -> &NetlistDocument {
+        &self.native
+    }
+    pub fn evidence(&self) -> &Value {
+        &self.evidence
+    }
+}
+
 /// Native observation only. Pin-level proof and write approval are separate contracts.
 pub struct SchematicAudit {
     owner: tempfile::TempDir,
@@ -426,6 +444,129 @@ impl SchematicAudit {
         }
         Ok(())
     }
+    /// Observe omitted source pins in an isolated copy while retaining original ERC evidence.
+    pub fn observe_pin_connectivity(&self) -> Result<SchematicConnectivityAudit, String> {
+        self.verify()?;
+        let sources = self
+            .parsed
+            .files
+            .iter()
+            .map(|file| {
+                let bytes = self
+                    .source
+                    .files
+                    .get(&self.policy.project.join(&file.artifact.relative_path))
+                    .and_then(|f| f.bytes.as_deref())
+                    .ok_or("missing bound probe source bytes")?;
+                Ok((file.artifact.relative_path.clone(), bytes))
+            })
+            .collect::<Result<BTreeMap<_, _>, String>>()?;
+        let plan =
+            kicad_schematic::probes::PinProbePlan::prepare(&self.parsed, &self.netlist, &sources)?;
+        if plan.probe_count() == 0 {
+            let connectivity = plan.validate(&self.netlist)?;
+            self.verify()?;
+            return Ok(SchematicConnectivityAudit {
+                connectivity,
+                native: self.netlist.clone(),
+                evidence: serde_json::json!({"source_revision":self.revision,"probe_count":0,"original_native_reused":true}),
+            });
+        }
+        let owner = tempfile::Builder::new()
+            .prefix("auto-kicad-pin-probe-")
+            .tempdir()
+            .map_err(|e| e.to_string())?;
+        let root = fs::canonicalize(owner.path()).map_err(|e| e.to_string())?;
+        let project = root.join("project");
+        let configuration = root.join("config");
+        let original_project = fs::canonicalize(self.owner.path())
+            .map_err(|e| e.to_string())?
+            .join("project");
+        let names = self
+            .private_trees
+            .get(&original_project)
+            .ok_or("missing original private namespace")?;
+        let mut inputs = Inputs::default();
+        for path in names {
+            if path.is_file() {
+                let relative = path
+                    .strip_prefix(&original_project)
+                    .map_err(|e| e.to_string())?;
+                let name = relative.to_str().ok_or("non-UTF8 private path")?;
+                let bytes = match plan.files().get(name) {
+                    Some(bytes) => bytes.as_slice(),
+                    None => self
+                        .private_inputs
+                        .files
+                        .get(path)
+                        .and_then(|f| f.bytes.as_deref())
+                        .ok_or("missing captured private bytes")?,
+                };
+                let target = project.join(relative);
+                write_new(&target, bytes)?;
+                inputs.track(&target)?;
+            }
+        }
+        for path in &self.private_config_names {
+            let bytes = self
+                .private_inputs
+                .files
+                .get(path)
+                .and_then(|f| f.bytes.as_deref())
+                .ok_or("missing captured private configuration")?;
+            write_new(
+                &configuration
+                    .join("10.0")
+                    .join(path.file_name().ok_or("missing configuration name")?),
+                bytes,
+            )?;
+        }
+        let expected_tree = tree_names(&project)?;
+        let runner = self
+            .runner
+            .clone()
+            .freeze_context(Some(&configuration))
+            .map_err(|e| e.to_string())?;
+        let schematic = project.join(&self.parsed.root_relative_path);
+        let first = runner
+            .run(&project, &schematic)
+            .map_err(|e| e.to_string())?
+            .document;
+        inputs.verify()?;
+        self.verify()?;
+        if tree_names(&project)? != expected_tree {
+            return Err("probe initialization changed project namespace".into());
+        }
+        let config = configuration.join("10.0");
+        let config_files = config_names(&config)?;
+        for path in &config_files {
+            inputs.track(path)?;
+        }
+        let native = runner
+            .run(&project, &schematic)
+            .map_err(|e| e.to_string())?
+            .document;
+        if native != first {
+            return Err("native probe output changed after initialization".into());
+        }
+        let connectivity = plan.validate(&native)?;
+        inputs.verify()?;
+        self.verify()?;
+        if tree_names(&project)? != expected_tree || config_names(&config)? != config_files {
+            return Err("probe namespace changed during validation".into());
+        }
+        let evidence = serde_json::json!({"source_revision":self.revision,"probe_count":plan.probe_count(),"candidate_files":plan.files().iter().map(|(name,bytes)|(name.clone(),hash(bytes))).collect::<BTreeMap<_,_>>(),"native_digest":hash(format!("{native:?}").as_bytes()),"private_inputs":inputs,"execution":runner.execution_context().ok_or("missing probe execution context")?.digest(),"repeated_native_equal":true,"original_erc_retained":true});
+        drop(owner);
+        if root.exists() {
+            return Err("private probe directory was not removed".into());
+        }
+        Ok(SchematicConnectivityAudit {
+            connectivity,
+            native,
+            evidence,
+        })
+    }
+
     pub fn evidence(&self) -> Result<Value, String> {
         Ok(
             serde_json::json!({"revision":self.revision,"source":self.source,"private_inputs":self.private_inputs,"private_trees":self.private_trees,"initialized_local_preferences":self.initialized_local_preferences,"symbols":self.symbol_context,"footprints":self.footprint_context,"execution":self.runner.execution_context().ok_or("missing context")?.digest(),"erc":self.erc,"components":self.identities.components().len(),"sheets":self.identities.sheets().len(),"units":self.identities.units().len(),"nets":self.netlist.nets.len(),"logical_pins":self.pins.pins().len(),"unexported_source_pins":self.pins.unexported().len()}),
