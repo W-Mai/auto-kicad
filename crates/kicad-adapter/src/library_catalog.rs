@@ -1,7 +1,11 @@
 //! Canonical local footprint sources with bounded table inclusion and provenance.
 mod native_drc;
+mod schematic_files;
 pub mod symbols;
 pub use native_drc::NativeDrcLibraries;
+pub use schematic_files::{
+    SchematicFootprintContext, SchematicFootprintFile, SchematicFootprintState,
+};
 
 use crate::library_table::{
     LibraryFormat, LibraryTableEntry, LibraryTableEvidence, MAX_TABLE_ENTRIES, TableKind,
@@ -200,6 +204,10 @@ impl FootprintCatalog {
 
     pub fn digest(&self) -> &str {
         &self.digest
+    }
+    pub(crate) fn effective_rows(&self) -> Result<Vec<LibraryTableEntry>, String> {
+        self.ensure_current()?;
+        Ok(self.entries.values().map(|e| e.row.clone()).collect())
     }
     pub fn table_evidence(&self) -> &[LibraryTableEvidence] {
         &self.table_files

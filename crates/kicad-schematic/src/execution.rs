@@ -166,6 +166,11 @@ impl NativeExecutionContext {
     pub fn configuration_home(&self) -> Option<&Path> {
         self.configuration_home.as_deref()
     }
+    /// Enumerate captured variable names for server-side resource resolution.
+    pub fn environment_names(&self) -> impl Iterator<Item = &OsStr> {
+        self.effective.0.keys().map(OsString::as_os_str)
+    }
+
     /// For server-side resource resolution. Do not include returned values in diagnostics.
     pub fn environment_value(&self, name: &OsStr) -> Option<&OsStr> {
         self.effective.0.get(name).map(OsString::as_os_str)

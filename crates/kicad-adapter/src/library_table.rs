@@ -66,8 +66,15 @@ pub struct LibraryTableFile {
 }
 
 pub(crate) fn render_footprint_library_rows(rows: &[LibraryTableEntry]) -> Result<String, String> {
+    render_library_rows(rows, TableKind::Footprint)
+}
+
+pub(crate) fn render_library_rows(
+    rows: &[LibraryTableEntry],
+    kind: TableKind,
+) -> Result<String, String> {
     let quote = |value: &str| serde_json::to_string(value).map_err(|e| e.to_string());
-    let mut table = String::from("(fp_lib_table (version 7)\n");
+    let mut table = format!("({} (version 7)\n", kind.tag());
     for row in rows {
         let format = match &row.format {
             LibraryFormat::KiCad => "KiCad",
@@ -89,7 +96,7 @@ pub(crate) fn render_footprint_library_rows(rows: &[LibraryTableEntry]) -> Resul
         }
     }
     table.push_str(")\n");
-    if parse_footprint_library_table(table.as_bytes())?.entries != rows {
+    if parse_library_table(table.as_bytes(), kind)?.entries != rows {
         return Err("library table serialization changed rows".into());
     }
     Ok(table)

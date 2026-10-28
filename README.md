@@ -21,11 +21,13 @@ Native backend callers can [create segment/arc Edge.Cuts primitives and replace 
 
 Backend callers can resolve [hierarchical schematic instances and multi-unit component identities](docs/acceptance/schematic-identities.md) against a native CLI netlist. This read-only identity model retains per-instance annotations and embedded library names; it does not enable general schematic authoring or PCB synchronization.
 
-[Complete schematic ERC capture and comparison](docs/acceptance/schematic-erc.md) retains all diagnostics, exclusions, sheet identities and exact native fields. The backend validates KiCad 10.0.7 reports and detects ignored-check policy changes; full source/context binding and general schematic editing remain unavailable.
+[Complete schematic ERC capture and comparison](docs/acceptance/schematic-erc.md) retains all diagnostics, exclusions, sheet identities and exact native fields. The backend validates KiCad 10.0.7 reports and detects ignored-check policy changes; general schematic editing remains unavailable.
 
 [Symbol library context](docs/acceptance/symbol-library-context.md) records effective project/global tables and used library-file content or absence. Revalidation detects library changes even when ERC results remain unchanged.
 
 [Fixed schematic CLI execution inputs](docs/acceptance/native-execution.md) bind executable bytes and the captured process environment for netlist export and ERC. Prepared native configuration copies can be selected explicitly; configuration and project-file content binding remain separate requirements.
+
+[Private schematic audit](docs/acceptance/schematic-audit.md) composes source, configuration and used-library snapshots with native netlist/ERC checks. It retains unresolved library states and detects input drift; the read-only backend does not authorize general schematic edits.
 
 ## Board workflow
 

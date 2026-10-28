@@ -72,6 +72,7 @@ pub mod lifecycle;
 pub mod live_geometry;
 pub mod outline;
 pub mod routing_rules;
+pub mod schematic_audit;
 pub use footprint::{
     AllowlistedFootprint, DisabledFootprintRunner, DisposableFootprintContext,
     DisposableFootprintRunner, FootprintBackendError, FootprintPlacementReceipt, FootprintRegistry,

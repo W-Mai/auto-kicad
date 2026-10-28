@@ -3,6 +3,14 @@ pub mod erc;
 mod exact_json;
 pub use complete_drc::CompleteDrcReport;
 
+/// Reject duplicate keys and excessive nesting without converting numeric tokens.
+pub fn validate_json_structure(bytes: &[u8]) -> Result<(), ParseError> {
+    let raw: Box<serde_json::value::RawValue> =
+        serde_json::from_slice(bytes).map_err(exact_json::json_error)?;
+    exact_json::Node::parse(&raw, 0)?;
+    Ok(())
+}
+
 pub mod connectivity;
 pub mod outline;
 pub mod refill;
