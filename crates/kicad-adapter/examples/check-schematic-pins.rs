@@ -55,6 +55,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .iter()
         .map(|(name, data)| (name.clone(), data.as_slice()))
         .collect::<BTreeMap<_, _>>();
+    let contact = |reference: &str,
+                   number: &str,
+                   occurrence: &kicad_schematic::pins::PinOccurrence,
+                   exported: bool| {
+        serde_json::json!({"reference":reference,"number":number,"file":occurrence.source.file,"sheet_path":occurrence.source.sheet_path,"symbol_uuid":occurrence.source.symbol_uuid,"graphical_number":occurrence.graphical_number,"x_nm":occurrence.position.x.nm(),"y_nm":occurrence.position.y.nm(),"library_x_nm":occurrence.library_position.x.nm(),"library_y_nm":occurrence.library_position.y.nm(),"exported":exported})
+    };
+    let mut contacts = Vec::new();
+    for pin in audit.pins().pins() {
+        for occurrence in &pin.occurrences {
+            contacts.push(contact(&pin.reference, &pin.key.number, occurrence, true));
+        }
+    }
+    for pin in audit.pins().unexported() {
+        contacts.push(contact(&pin.reference, &pin.number, &pin.occurrence, false));
+    }
+    fs::write(
+        output.join("contacts.json"),
+        serde_json::to_vec_pretty(&contacts)?,
+    )?;
     let original = audit.netlist();
     let populated = original
         .nets

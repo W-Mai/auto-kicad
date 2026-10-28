@@ -13,6 +13,7 @@ use thiserror::Error;
 
 mod execution;
 pub use execution::NativeExecutionContext;
+pub mod geometry;
 pub mod identities;
 mod netlist;
 mod patch;

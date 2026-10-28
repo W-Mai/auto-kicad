@@ -1,6 +1,7 @@
 //! Source-backed logical component pins and complete native net membership.
 use crate::{
     NetlistDocument, ParsedSchematicProject, RawSymbol, atom_text,
+    geometry::{Point, SymbolTransform},
     identities::{SchematicIdentityIndex, SymbolUnitIdentity, uuid},
     list_items, list_tag, parse_schematic,
 };
@@ -44,6 +45,8 @@ pub struct PinOccurrence {
     pub stored_pin_uuids: Arc<[String]>,
     pub name: String,
     pub electrical_type: String,
+    pub library_position: Point,
+    pub position: Point,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -86,6 +89,8 @@ struct SourcePin {
     name: String,
     kind: String,
     native_function: String,
+    library_position: Point,
+    position: Point,
 }
 struct SourceUnit {
     all_styles: BTreeSet<String>,
@@ -185,6 +190,7 @@ fn definition<'a>(
 }
 
 fn source_unit(raw: &RawSymbol, source: &[Node], def: &[Node]) -> Result<SourceUnit, String> {
+    let transform = SymbolTransform::from_cst(source)?;
     let mut record_lists = BTreeMap::<&str, Vec<String>>::new();
     for pin in &raw.pins {
         record_lists
@@ -245,6 +251,12 @@ fn source_unit(raw: &RawSymbol, source: &[Node], def: &[Node]) -> Result<SourceU
             if body_style != 0 && body_style != style {
                 continue;
             }
+            let at = one(pin, "at")?;
+            if at.len() != 4 {
+                return Err("invalid library pin contact position".into());
+            }
+            let library_position = Point::from_at(at)?;
+            let position = transform.contact(library_position)?;
             let mut name = field(pin, "name")?;
             let mut kind = text(pin, 1)?;
             if let Some(alt) = alternates.get(graphical) {
@@ -283,6 +295,8 @@ fn source_unit(raw: &RawSymbol, source: &[Node], def: &[Node]) -> Result<SourceU
                     name: name.into(),
                     kind: kind.into(),
                     native_function,
+                    library_position,
+                    position,
                 });
             }
         }
@@ -368,6 +382,8 @@ fn occurrence(unit: &SymbolUnitIdentity, pin: &SourcePin) -> PinOccurrence {
         stored_pin_uuids: pin.records.clone(),
         name: pin.name.clone(),
         electrical_type: pin.kind.clone(),
+        library_position: pin.library_position,
+        position: pin.position,
     }
 }
 
@@ -546,11 +562,11 @@ mod tests {
         }
         let bytes = format!(r#"(kicad_sch (version 20260306) (generator eeschema) (uuid "{root}")
             (lib_symbols (symbol "Test:Multi"
-                (symbol "Multi_0_0" (pin power_in line (number "7") (name "VCC")))
-                (symbol "Multi_1_1" (pin passive line (number "1") (name "A")))
-                (symbol "Multi_1_2" (pin input line (number "1") (name "B")))
-                (symbol "Multi_2_1" (pin output line (number "2") (name "C")))
-                (symbol "Multi_3_1" (pin passive line (number "9") (name "Unplaced"))))) {symbols})"#).into_bytes();
+                (symbol "Multi_0_0" (pin power_in line (at 1 2 0) (number "7") (name "VCC")))
+                (symbol "Multi_1_1" (pin passive line (at 1 2 0) (number "1") (name "A")))
+                (symbol "Multi_1_2" (pin input line (at 1 2 0) (number "1") (name "B")))
+                (symbol "Multi_2_1" (pin output line (at 1 2 0) (number "2") (name "C")))
+                (symbol "Multi_3_1" (pin passive line (at 1 2 0) (number "9") (name "Unplaced"))))) {symbols})"#).into_bytes();
         let parsed = parse_schematic("pins.kicad_sch", &bytes).unwrap();
         let project = ParsedSchematicProject {
             root_relative_path: "pins.kicad_sch".into(),

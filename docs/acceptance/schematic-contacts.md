@@ -1,0 +1,21 @@
+# Schematic pin contact positions
+
+`Coordinate` stores signed schematic internal units and exposes nanometres. Decimal and scientific source atoms are parsed without floating-point conversion; values must be exactly representable on the 100 nm native grid and fit the native signed range. `Point` and `SymbolTransform` apply checked quarter turns and native X/Y mirror axes. Source geometry with duplicate positions, ambiguous mirror fields, non-quarter-turn rotations, off-grid values or overflow rejects explicitly. The coordinate scale is defined in [KiCad 10.0.7 base_units.h](https://gitlab.com/kicad/code/kicad/-/raw/10.0.7/include/base_units.h).
+
+Every active `PinOccurrence` retains its library-local position and transformed sheet contact position. Geometry uses the same embedded inheritance, unit, graphical-body and alternate-function selection as logical pin observation. Common pins retain their separate physical contacts; stacked logical numbers retain their shared graphical position. Unexported power/virtual pins retain positions without claiming their electrical connectivity is proven. Logical keys remain independent of positions and displayed references.
+
+## Native acceptance
+
+Actual KiCad 10.0.7 exports qualified 442 contact occurrences across 6 cases: ECC83 42, multichannel 340, common/stacked/alternate-body cases 6 in each supported format, and 24 rotation/mirror/body combinations in each supported format. For every exported occurrence, an added passive observer at its computed contact belongs to the same native net as the source pin. This checked 383 exported occurrences, including repeated-sheet annotations and distinct common-pin contacts. All original exported-pin connectivity partitions stayed identical. The 59 omitted power/virtual contacts were exposed only in owned observer copies; their final production connectivity contract remains open.
+
+The transform cases cover angles 0/90/180/270, no mirror/X mirror/Y mirror, and 2 graphical bodies, in formats 20260306 and 20250114 with legacy `convert`. Moving an observer by 100 nm breaks its expected contact in both formats, demonstrating that the check detects a single native-unit displacement. Complete source and retained original-project hashes remained unchanged. No GUI was launched. The existing actual fixed-circuit CLI/MCP regression passed separately in 4.92 seconds.
+
+Full quality passed formatting, capability matrix, warning-denied all-target Clippy and 512 tests with 0 failures and 15 environment-dependent tests ignored. Architecture tests verify exact coordinate round trips, representability/range checks, transform grid/distance preservation, checked overflow and rejection of ambiguous source transforms.
+
+## Virtual-pin observer constraint
+
+Changing a virtual symbol reference to expose it in native XML can change its electrical network. A native counterexample uses a power value `${REFERENCE}` and another power value `#PWR01`. Renaming the first reference splits their shared power net while an unrelated ordinary-pin projection remains unchanged. Passive observers at the original positions reveal the split. The original and aliased files, native XML and commands are retained. Reference aliasing is not used by the production observer.
+
+Passive contact probes are acceptance instrumentation, not an implemented general connectivity oracle. Added pins can affect no-connect and dangling-pin diagnostics; their reports do not replace the original ERC or no-connect evidence. Full virtual connectivity, physical wire topology, typed editing, multi-file publication/recovery and PCB synchronization remain separate unfinished requirements. Public MCP authoring capabilities are unchanged.
+
+`check-schematic-pins` records `contacts.json` in addition to pin, native-context and ERC evidence. The retained `accept-physical-contacts.py` script adds observers to separate owned copies and validates native membership. [schematic-contacts.json](schematic-contacts.json) records results and hashes of the source snapshots, native artifacts, scripts and quality logs.
