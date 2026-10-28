@@ -923,7 +923,11 @@ fn handle_text(stack: &[Vec<u8>], value: String, component: &mut Option<Componen
     match stack.last().map(Vec::as_slice) {
         Some(b"value") => builder.value = Some(value),
         Some(b"footprint") => builder.footprint = Some(value),
-        Some(b"tstamps") => builder.symbol_uuid = Some(value),
+        Some(b"tstamps") => {
+            let mut ids = value.split_whitespace().collect::<Vec<_>>();
+            ids.sort_unstable();
+            builder.symbol_uuid = Some(ids.join(" "));
+        }
         _ => {}
     }
 }
@@ -992,6 +996,14 @@ fn node_order(node: &NetlistNode) -> (&str, &str, &str, &str) {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn component_source_uuid_order_is_canonical_without_dropping_duplicates() {
+        let mut builder = Some(ComponentBuilder::default());
+        let stack = vec![b"tstamps".to_vec()];
+        handle_text(&stack, "b a b".into(), &mut builder);
+        assert_eq!(builder.unwrap().symbol_uuid.as_deref(), Some("a b b"));
+    }
 
     const XML: &str = r#"<?xml version="1.0"?>
 <export version="D">

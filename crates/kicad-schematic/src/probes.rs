@@ -1,10 +1,11 @@
 //! Immutable private contact probes and source-identity connectivity observations.
+use crate::cst::parse_one;
 use crate::pins::{LogicalPinKey, SchematicPinIndex, SourceUnitKey};
 use crate::{
     NetlistDocument, ParsedSchematicProject, list_items, list_tag, node_span, parse_schematic,
 };
 use kicad_model::SchematicArtifactRevision;
-use kiutils_sexpr::{Node, parse_one};
+use kiutils_sexpr::Node;
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},

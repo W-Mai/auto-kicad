@@ -1,3 +1,4 @@
+use crate::cst::parse_one;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,10 +8,12 @@ use kicad_model::{
     SchematicArtifactFile, SchematicArtifactRevision, StableId, schematic_pin_id,
     schematic_symbol_id,
 };
-use kiutils_sexpr::{Atom, Node, Span, parse_one};
+use kiutils_sexpr::{Atom, Node, Span};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+mod cst;
+pub mod editing;
 mod execution;
 pub use execution::NativeExecutionContext;
 pub mod geometry;

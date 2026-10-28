@@ -1,3 +1,4 @@
+use crate::cst::parse_one;
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -5,7 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use kicad_model::{RevisionDigest, SchematicArtifactFile};
-use kiutils_sexpr::{Node, parse_one};
+use kiutils_sexpr::Node;
 use sha2::{Digest, Sha256};
 use tempfile::Builder;
 

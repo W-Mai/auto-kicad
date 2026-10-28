@@ -1,0 +1,157 @@
+{
+  "scope": "Typed immutable candidates for existing symbols, wires, junctions, no-connect markers and labels; no public general-edit publication",
+  "kicad_version": "10.0.7",
+  "quality": {
+    "passed": 522,
+    "failed": 0,
+    "ignored": 15,
+    "fmt": true,
+    "matrix": true,
+    "clippy_all_targets_warnings_denied": true,
+    "actual_cli_mcp_regression_seconds": 4.6
+  },
+  "profiles": [
+    {
+      "profile": "ecc83",
+      "affected_instances": [
+        "/28f865a0-4433-4a53-bbd7-b62f276848e4"
+      ],
+      "affected_pin_count": 2,
+      "cases": [
+        "properties_flags",
+        "symbol_transform",
+        "create_wire_markers_labels",
+        "update_wire_markers_labels",
+        "delete_wire_markers_labels",
+        "delete_symbol"
+      ],
+      "configuration_unchanged": true,
+      "gui_launched": false,
+      "native_version": "10.0.7",
+      "passed": true,
+      "private_directories_removed": true,
+      "reference": "R1",
+      "source_unchanged": true,
+      "target_file": "ecc83-pp.kicad_sch",
+      "target_uuid": "00000000-0000-0000-0000-00004549f38a"
+    },
+    {
+      "profile": "multichannel",
+      "affected_instances": [
+        "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8"
+      ],
+      "affected_pin_count": 2,
+      "cases": [
+        "properties_flags",
+        "symbol_transform",
+        "create_wire_markers_labels",
+        "update_wire_markers_labels",
+        "delete_wire_markers_labels",
+        "delete_symbol"
+      ],
+      "configuration_unchanged": true,
+      "gui_launched": false,
+      "native_version": "10.0.7",
+      "passed": true,
+      "private_directories_removed": true,
+      "reference": "R1",
+      "source_unchanged": true,
+      "target_file": "multichannel_mixer.kicad_sch",
+      "target_uuid": "7b6efc27-7552-4dfe-b337-b08fb5f64b34"
+    },
+    {
+      "profile": "multichannel_child",
+      "affected_instances": [
+        "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8/28f12a69-adb8-432e-b16f-23450e62f642",
+        "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8/8b945230-5f99-4834-98ec-44a11b86c8e7",
+        "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8/b924e033-d20d-4b7d-8c8a-6be6c11f2802",
+        "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8/eaae7191-0144-4728-9382-3abf6e7a2d68"
+      ],
+      "affected_pin_count": 8,
+      "cases": [
+        "properties_flags",
+        "symbol_transform",
+        "create_wire_markers_labels",
+        "update_wire_markers_labels",
+        "delete_wire_markers_labels",
+        "delete_symbol"
+      ],
+      "configuration_unchanged": true,
+      "gui_launched": false,
+      "native_version": "10.0.7",
+      "passed": true,
+      "private_directories_removed": true,
+      "reference": "R19",
+      "source_unchanged": true,
+      "target_file": "channel_strip.kicad_sch",
+      "target_uuid": "00e27837-31c8-486a-bbbd-ccd7845626c8"
+    },
+    {
+      "profile": "ecc83_current",
+      "affected_instances": [
+        "/28f865a0-4433-4a53-bbd7-b62f276848e4"
+      ],
+      "affected_pin_count": 2,
+      "cases": [
+        "properties_flags",
+        "symbol_transform",
+        "create_wire_markers_labels",
+        "update_wire_markers_labels",
+        "delete_wire_markers_labels",
+        "delete_symbol"
+      ],
+      "configuration_unchanged": true,
+      "gui_launched": false,
+      "native_version": "10.0.7",
+      "passed": true,
+      "private_directories_removed": true,
+      "reference": "R1",
+      "source_unchanged": true,
+      "target_file": "ecc83-pp.kicad_sch",
+      "target_uuid": "00000000-0000-0000-0000-00004549f38a"
+    }
+  ],
+  "originals_and_retained_baselines_unchanged": true,
+  "source_hashes": {
+    "crates/kicad-schematic/src/lib.rs": "a2aa6a85dee1a269bfac37d0fe01525d881f02ea2bef79bb2178f0a6c7d05249",
+    "crates/kicad-schematic/src/cst.rs": "47a7d8991479fa7d274fdf6b2314a15beaee0c5331b9d3fc40093ebff0af2a9a",
+    "crates/kicad-schematic/src/editing.rs": "14cad6db230af8b454e7189a980d825482a21f7a20afefde35ae985aa0e51221",
+    "crates/kicad-schematic/src/netlist.rs": "e96e1820f518e890d570a586f9991f4706e98ea3e1ff9263f6dd50bdc8706be4",
+    "crates/kicad-schematic/src/patch.rs": "4fbde81ec9bb745ddf0a5c302ae1363f2cc771a43d3bc2e1aec92933f6e70818",
+    "crates/kicad-schematic/src/pins.rs": "b9f0b0d6eb383f175ba8410365b8911b01bd185a61256619b76ca6d80f65715c",
+    "crates/kicad-schematic/src/probes.rs": "19a44fa78c4fb2d27323a780040f393b37ac9608c6832b83c53abd8cdc575692",
+    "crates/kicad-adapter/examples/check-schematic-edits.rs": "0f983be6805fba0a85ed2e4a6909db87cff4cda11deee9fbc722162b747f539d"
+  },
+  "evidence_trees": {
+    "m5-native-edits-separated": {
+      "files": 673,
+      "sha256": "68314d6e21de11fa7cfea05ae53c128898e1433b7ff5f11f28cd8782c3522f80"
+    },
+    "m5-typed-edits-accepted": {
+      "files": 45,
+      "sha256": "32b6589e809bcdcfe7ea0199d3c100058bf58d8f4d08e8af88efd211885c6f67"
+    },
+    "m5-native-edits": {
+      "files": 51,
+      "sha256": "1633aadeab742711629e1ed4b8e180c8d0aca085941e472e878c0c30b5e31873"
+    },
+    "m5-native-edits-diagnostic": {
+      "files": 51,
+      "sha256": "6d96eb2f9c371b88612a9fa5295c82dca8ec5202bbaa23950a6d165a1fffa0e7"
+    },
+    "m5-native-edits-verified": {
+      "files": 210,
+      "sha256": "b6c6b2aca8f91dc5e165709c694b41f6728932160e3729be1aad1abec7393a44"
+    },
+    "m5-native-edits-final": {
+      "files": 267,
+      "sha256": "5267cc3ae5ebef2f6e117e10a2981ee8d8c580c0b86d4b8df4bb608ea1d33bbc"
+    },
+    "m5-edit-stability": {
+      "files": 35,
+      "sha256": "41681821bd701cb7722d6a03a95d7533ffc8c7fb614643ef6fdf00ca11c89851"
+    }
+  },
+  "gui_launched": false,
+  "public_mcp_changed": false
+}

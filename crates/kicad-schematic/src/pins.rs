@@ -1,11 +1,12 @@
 //! Source-backed logical component pins and complete native net membership.
+use crate::cst::parse_one;
 use crate::{
     NetlistDocument, ParsedSchematicProject, RawSymbol, atom_text,
     geometry::{Point, SymbolTransform},
     identities::{SchematicIdentityIndex, SymbolUnitIdentity, uuid},
     list_items, list_tag, parse_schematic,
 };
-use kiutils_sexpr::{Node, parse_one};
+use kiutils_sexpr::Node;
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
