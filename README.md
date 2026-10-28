@@ -21,6 +21,8 @@ Native backend callers can [create segment/arc Edge.Cuts primitives and replace 
 
 Backend callers can resolve [hierarchical schematic instances and multi-unit component identities](docs/acceptance/schematic-identities.md) against a native CLI netlist. This read-only identity model retains per-instance annotations and embedded library names; it does not enable general schematic authoring or PCB synchronization.
 
+[Complete schematic ERC capture and comparison](docs/acceptance/schematic-erc.md) retains all diagnostics, exclusions, sheet identities and exact native fields. The backend validates KiCad 10.0.7 reports and detects ignored-check policy changes; full source/context binding and general schematic editing remain unavailable.
+
 ## Board workflow
 
 1. Save the PCB and project settings in KiCad.

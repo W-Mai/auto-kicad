@@ -1,4 +1,6 @@
 mod complete_drc;
+pub mod erc;
+mod exact_json;
 pub use complete_drc::CompleteDrcReport;
 
 pub mod connectivity;

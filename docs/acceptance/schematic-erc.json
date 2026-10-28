@@ -1,0 +1,161 @@
+{
+  "date": "2026-10-28",
+  "kicad_version": "10.0.7",
+  "scope": "complete native ERC capture and exact report comparison; source/context binding and schematic editing remain incomplete",
+  "evidence_root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-erc-native-final",
+  "gui_launched": false,
+  "profiles": [
+    {
+      "name": "ecc83",
+      "sheets": 1,
+      "errors": 0,
+      "warnings": 0,
+      "exclusions": 0,
+      "equivalent": true
+    },
+    {
+      "name": "multichannel",
+      "sheets": 5,
+      "errors": 4,
+      "warnings": 32,
+      "exclusions": 0,
+      "equivalent": true
+    }
+  ],
+  "controls": [
+    {
+      "name": "ignore",
+      "counts": {
+        "error": 1,
+        "warning": 32
+      },
+      "equivalence_rejected": true,
+      "inputs_unchanged": true
+    },
+    {
+      "name": "warning",
+      "counts": {
+        "error": 1,
+        "warning": 35
+      },
+      "equivalence_rejected": true,
+      "inputs_unchanged": true
+    },
+    {
+      "name": "exclude",
+      "counts": {
+        "error": 3,
+        "warning": 32,
+        "exclusion": 1
+      },
+      "equivalence_rejected": true,
+      "inputs_unchanged": true
+    }
+  ],
+  "original_and_baseline_copy_inputs_unchanged": true,
+  "quality": {
+    "passed": 493,
+    "failed": 0,
+    "ignored": 15,
+    "format": true,
+    "all_target_clippy_warnings_denied": true,
+    "capability_matrix": true
+  },
+  "existing_cli_mcp_regression": {
+    "test": "tests::production_cli_binds_fixed_circuit_footprints_without_editor",
+    "passed": 1,
+    "failed": 0,
+    "elapsed_seconds": 4.35
+  },
+  "failed_attempts": {
+    "native_exclusion_summary": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-erc-controls",
+    "initial_tests": "retained in evidence logs; short startup timeout corrected and missing-report exit status retained"
+  },
+  "artifacts": {
+    "check-native-erc-controls.py": "b6fd7a4a959c5620d278b9c7303bbed3a081563995603932b922c1da7fc33d28",
+    "ecc83/delta.txt": "e5cd8c8ac750720d562087c6d2765edec4ef42129b4be8efabe26a3041456fb1",
+    "ecc83/report.json": "d9461e381845f3092c4009a4928aebc75a7fba3d48764b6fcdb376f308cc0974",
+    "ecc83/summary.txt": "6dc33ba6bd50646833e33ff33a96e58b0462ebfea5347edab93c5e359403ac98",
+    "ecc83-stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "ecc83-stdout.txt": "21c190edd69062d1d0c099ffe7bf9d73a420c9eda5dc2ed9c3d8aa459aeefd2e",
+    "exclude/capture/delta.txt": "f7862dba01764dca7bc949fb64005ea2bc52ecde2fc0f50bece8632651d37bc5",
+    "exclude/capture/report.json": "9146fd1b0e537d7104ee5d88f3ad95c23f05913db0453931edd1b5b4fcde9357",
+    "exclude/capture/summary.txt": "9c0b2b06b73bc9103da8997ac0bd085aa11a2fd7186c00ea59ae9d1fa7a4b54e",
+    "exclude/project/channel_strip.kicad_sch": "2c98b5d37f5b60c9187474017d7b754e8b4a1d45f4115dcbecf1a745ab175e0e",
+    "exclude/project/fp-lib-table": "8a1e7e5ab227455c8865598b3c4c36db1e75c8abced3b2c0aee4fde54176a328",
+    "exclude/project/multichannel_mixer.kicad_prl": "01533ea460c27198c7171ff081d5b50b944a806a6f8dc6bfa486b809c4872f2d",
+    "exclude/project/multichannel_mixer.kicad_pro": "7ffbe2da25ce34a360c977d78a58861f0e15920d9fe2cdfee61d434f2efc6914",
+    "exclude/project/multichannel_mixer.kicad_sch": "e47aecee9416d51fb5aed36d008a0442d3d6d68abfc5224bcdb5c5bb4a690fcf",
+    "exclude/project/multichannel_mixer.kicad_sym": "7e0793cc48f3a20ea84f3c4c8643ffeb1be79dd05faba8ae1278dc39dbf7cf8b",
+    "exclude/project/multichannel_mixer.pretty/CAPC3216X140N.kicad_mod": "3e6145d55866da5a696cefe075a68d26cf30fde90403ff2e006d2e4ae1461474",
+    "exclude/project/multichannel_mixer.pretty/CAPPRB254-500X840.kicad_mod": "6e1ac6aeba9d1c87ba73b30104162d35ae05625364c80ed204127c90e0542775",
+    "exclude/project/multichannel_mixer.pretty/CLIFF_FC68148(DC-10A).kicad_mod": "96f4e07509d06c0157dfca2b336f761541ed5d2daead790baafe6b90d23e658e",
+    "exclude/project/multichannel_mixer.pretty/Jack_6.35mm_Neutrik_NMJ6HCD2_Horizontal.kicad_mod": "b8a282923219bb3b01bf82278a7ded099fac556385eaf8707d777fc92cc32fc3",
+    "exclude/project/multichannel_mixer.pretty/Potentiometer_Alps_RK09K_Single_Vertical.kicad_mod": "ce94093ebd8cd8cd35a75442db46854414f78ca9be4f3b4234a7819650b938aa",
+    "exclude/project/multichannel_mixer.pretty/RESC3216X65N.kicad_mod": "a12fbb5040e28dd960364f0319773d1450c0610c18ab9844d0671b6bf6c9f6d7",
+    "exclude/project/multichannel_mixer.pretty/SOIC127P600X175-8N.kicad_mod": "0b5f066de991d39015aab71847ce9a17e3a60394391350e46650fa8e7d274f80",
+    "exclude/project/sym-lib-table": "68b0633966d91fd9e81c05b7706abcddc892d1c71c9994c8cb757e38216787f7",
+    "exclude/stderr.txt": "0d47878890c88aa7fc07bb7a418a11ab5c110df67c77d6d3c5c1586bbbfcd79e",
+    "exclude/stdout.txt": "2390f693a459e4a816f69fb363e4bc67f9926356495db70a64dc1045664dbbeb",
+    "failed-contracts.log": "b50ef9435fb7e01e0b5a87b640469453d065911779a19b6e861b430698cae466",
+    "failed-enospc.log": "82b82280f38d2306d9aa6173e1c77b97472b37abed3ecc710c450c6ff49dc221",
+    "failed-quality-initial.log": "e38edc7eac81599f34f810405c9111f3a5289beb6fcc06abbd2d3b6974f8a05c",
+    "fixed-circuit-regression.log": "c8096910fbecb6e122573007f54f4942b283e0ad3d60c88d0abc2b1fde39ccc5",
+    "ignore/capture/delta.txt": "34964eb6f9a9d046c5c0d8b5aa724a3fa5f00af3b4c1c3b368a7a2b9bbbbe5ac",
+    "ignore/capture/report.json": "5c92cd7d404a95e968718a97d8129b4f218bf2ecdf08465964f560779c5a23f8",
+    "ignore/capture/summary.txt": "6b966443b546080b82a907eb61e5268826db038405fa0f19d50519c802687c39",
+    "ignore/project/channel_strip.kicad_sch": "2c98b5d37f5b60c9187474017d7b754e8b4a1d45f4115dcbecf1a745ab175e0e",
+    "ignore/project/fp-lib-table": "8a1e7e5ab227455c8865598b3c4c36db1e75c8abced3b2c0aee4fde54176a328",
+    "ignore/project/multichannel_mixer.kicad_prl": "01533ea460c27198c7171ff081d5b50b944a806a6f8dc6bfa486b809c4872f2d",
+    "ignore/project/multichannel_mixer.kicad_pro": "9e735c64d82d011653c888b9b86cb4c83e4529a1c28d9d42cc7df2a84b4ffa6f",
+    "ignore/project/multichannel_mixer.kicad_sch": "e47aecee9416d51fb5aed36d008a0442d3d6d68abfc5224bcdb5c5bb4a690fcf",
+    "ignore/project/multichannel_mixer.kicad_sym": "7e0793cc48f3a20ea84f3c4c8643ffeb1be79dd05faba8ae1278dc39dbf7cf8b",
+    "ignore/project/multichannel_mixer.pretty/CAPC3216X140N.kicad_mod": "3e6145d55866da5a696cefe075a68d26cf30fde90403ff2e006d2e4ae1461474",
+    "ignore/project/multichannel_mixer.pretty/CAPPRB254-500X840.kicad_mod": "6e1ac6aeba9d1c87ba73b30104162d35ae05625364c80ed204127c90e0542775",
+    "ignore/project/multichannel_mixer.pretty/CLIFF_FC68148(DC-10A).kicad_mod": "96f4e07509d06c0157dfca2b336f761541ed5d2daead790baafe6b90d23e658e",
+    "ignore/project/multichannel_mixer.pretty/Jack_6.35mm_Neutrik_NMJ6HCD2_Horizontal.kicad_mod": "b8a282923219bb3b01bf82278a7ded099fac556385eaf8707d777fc92cc32fc3",
+    "ignore/project/multichannel_mixer.pretty/Potentiometer_Alps_RK09K_Single_Vertical.kicad_mod": "ce94093ebd8cd8cd35a75442db46854414f78ca9be4f3b4234a7819650b938aa",
+    "ignore/project/multichannel_mixer.pretty/RESC3216X65N.kicad_mod": "a12fbb5040e28dd960364f0319773d1450c0610c18ab9844d0671b6bf6c9f6d7",
+    "ignore/project/multichannel_mixer.pretty/SOIC127P600X175-8N.kicad_mod": "0b5f066de991d39015aab71847ce9a17e3a60394391350e46650fa8e7d274f80",
+    "ignore/project/sym-lib-table": "68b0633966d91fd9e81c05b7706abcddc892d1c71c9994c8cb757e38216787f7",
+    "ignore/stderr.txt": "0d47878890c88aa7fc07bb7a418a11ab5c110df67c77d6d3c5c1586bbbfcd79e",
+    "ignore/stdout.txt": "f3655c4002db59c6998203b9459ab81e857051fd8f19e2bae4dd4c8ab3752946",
+    "multichannel/delta.txt": "40fe605f0528a7b665e1099192b7565736677feb31d815344ba3722b4c1528d1",
+    "multichannel/report.json": "83df4bcd13fe38bbb0483f5917ebe909b115e4a650abf9e110a41231ba6038b9",
+    "multichannel/summary.txt": "680e5dcbef5423461cfe0f96c41fc587a0a055c64d9cce7dfdafe0dced0f6103",
+    "multichannel-stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "multichannel-stdout.txt": "2f3aea538f6275b01866c9db3fe68b5bd2dbd50c90f5be469ecdb9c9997f8078",
+    "native-build.log": "928b1719e2e74f8923469f51a9574fed918f4ea31920e6f0b1aeca3a942c1ecd",
+    "quality.log": "a5e5bc58c29802e64bc3eeb1d50fa2720070e2382bdb814cd381396a2fc353bf",
+    "result.json": "40b014532fe59d47d371cd42a40432c901de6ffa2882199f7ee461807696fa4c",
+    "source/Cargo.lock": "53cf2ad1b343af09360e930568297895831f4f7a805c06c786f86a605afe2e4d",
+    "source/README.md": "29a6b7b25b194559e81e4695ea8ddb323c419af261fff9c7d8b40cddf34cabd9",
+    "source/crates/kicad-checks/src/complete_drc.rs": "4c07cd7155bd840b50d29cb1645977bb5f5f1b26c19989e3e130f78aaba33147",
+    "source/crates/kicad-checks/src/erc.rs": "d45e9900ab0af0dee85db41076da297a45e2e3d0f34a2aef3ac547371eff48b8",
+    "source/crates/kicad-checks/src/exact_json.rs": "0bdd05d88e2c44dc82bdf8209245d5b5fa719a0ffc9a903dea1b3808b91d5e57",
+    "source/crates/kicad-checks/src/lib.rs": "3063534398116a16b57bb61fabcea80d20044054f5849dab7944ffed9a7f1248",
+    "source/crates/kicad-schematic/Cargo.toml": "de98d751b93ebf3b92168fe10c668cc6c6db6dd38502a812d6576f78568b0a19",
+    "source/crates/kicad-schematic/examples/check-schematic-erc.rs": "7551056ae4d8da92cbe8ea105f864a2d81aa3b4497b19209acf03e871be59d50",
+    "source/crates/kicad-schematic/src/netlist.rs": "578afab3b2ba0efe72be0986341273eb2ebe4a6ba0b4bf87dc12bead5a1a3253",
+    "source/docs/acceptance/schematic-erc.md": "5a97835fa3f68ad487e0957777ebf949b27879ef994523729a3813e12e5c0e58",
+    "warning/capture/delta.txt": "b0711a31e506b207278362efc050382fda12ba104c8197e629a29075a8abe6cb",
+    "warning/capture/report.json": "c0348aa3a36286bb1ebc67ec95ba494efc0532020134e175ac9750e0b8c3745a",
+    "warning/capture/summary.txt": "47d58ac995330af83a5c38228c7d29ed862335b067422544ec2a88067622df26",
+    "warning/project/channel_strip.kicad_sch": "2c98b5d37f5b60c9187474017d7b754e8b4a1d45f4115dcbecf1a745ab175e0e",
+    "warning/project/fp-lib-table": "8a1e7e5ab227455c8865598b3c4c36db1e75c8abced3b2c0aee4fde54176a328",
+    "warning/project/multichannel_mixer.kicad_prl": "01533ea460c27198c7171ff081d5b50b944a806a6f8dc6bfa486b809c4872f2d",
+    "warning/project/multichannel_mixer.kicad_pro": "6cb6a84c40ca26a85be3cb8e72e2bfba22dbb7f7cf1fea1ba61240072bc31d8a",
+    "warning/project/multichannel_mixer.kicad_sch": "e47aecee9416d51fb5aed36d008a0442d3d6d68abfc5224bcdb5c5bb4a690fcf",
+    "warning/project/multichannel_mixer.kicad_sym": "7e0793cc48f3a20ea84f3c4c8643ffeb1be79dd05faba8ae1278dc39dbf7cf8b",
+    "warning/project/multichannel_mixer.pretty/CAPC3216X140N.kicad_mod": "3e6145d55866da5a696cefe075a68d26cf30fde90403ff2e006d2e4ae1461474",
+    "warning/project/multichannel_mixer.pretty/CAPPRB254-500X840.kicad_mod": "6e1ac6aeba9d1c87ba73b30104162d35ae05625364c80ed204127c90e0542775",
+    "warning/project/multichannel_mixer.pretty/CLIFF_FC68148(DC-10A).kicad_mod": "96f4e07509d06c0157dfca2b336f761541ed5d2daead790baafe6b90d23e658e",
+    "warning/project/multichannel_mixer.pretty/Jack_6.35mm_Neutrik_NMJ6HCD2_Horizontal.kicad_mod": "b8a282923219bb3b01bf82278a7ded099fac556385eaf8707d777fc92cc32fc3",
+    "warning/project/multichannel_mixer.pretty/Potentiometer_Alps_RK09K_Single_Vertical.kicad_mod": "ce94093ebd8cd8cd35a75442db46854414f78ca9be4f3b4234a7819650b938aa",
+    "warning/project/multichannel_mixer.pretty/RESC3216X65N.kicad_mod": "a12fbb5040e28dd960364f0319773d1450c0610c18ab9844d0671b6bf6c9f6d7",
+    "warning/project/multichannel_mixer.pretty/SOIC127P600X175-8N.kicad_mod": "0b5f066de991d39015aab71847ce9a17e3a60394391350e46650fa8e7d274f80",
+    "warning/project/sym-lib-table": "68b0633966d91fd9e81c05b7706abcddc892d1c71c9994c8cb757e38216787f7",
+    "warning/stderr.txt": "0d47878890c88aa7fc07bb7a418a11ab5c110df67c77d6d3c5c1586bbbfcd79e",
+    "warning/stdout.txt": "019c584debd0f9224dbe38e9ca9e164e750de991c963c7176ce781659acd4346"
+  }
+}

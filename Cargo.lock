@@ -502,6 +502,7 @@ name = "kicad-schematic"
 version = "0.1.0"
 dependencies = [
  "hex",
+ "kicad-checks",
  "kicad-model",
  "kiutils_sexpr",
  "libc",

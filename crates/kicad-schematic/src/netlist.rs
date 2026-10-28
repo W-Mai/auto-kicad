@@ -222,6 +222,35 @@ impl NetlistRunner {
         project_root: &Path,
         root_schematic: &Path,
     ) -> Result<(), NetlistRunnerError> {
+        self.run_erc_capture(project_root, root_schematic, false)
+            .map(|_| ())
+    }
+
+    /// Retain every native ERC severity and field. The caller owns full source/library context binding.
+    pub fn run_complete_erc(
+        &self,
+        project_root: &Path,
+        root_schematic: &Path,
+    ) -> Result<kicad_checks::erc::CompleteErcReport, NetlistRunnerError> {
+        let raw = self.run_erc_capture(project_root, root_schematic, true)?;
+        let report = kicad_checks::erc::CompleteErcReport::parse(&raw)?;
+        if report.summary().kicad_version != "10.0.7"
+            || Some(report.summary().source.as_str())
+                != root_schematic.file_name().and_then(|s| s.to_str())
+        {
+            return Err(NetlistRunnerError::OutputRead(
+                "ERC version/source differs from requested schematic".into(),
+            ));
+        }
+        Ok(report)
+    }
+
+    fn run_erc_capture(
+        &self,
+        project_root: &Path,
+        root_schematic: &Path,
+        complete: bool,
+    ) -> Result<String, NetlistRunnerError> {
         if !cfg!(unix) {
             return Err(NetlistRunnerError::UnsupportedPlatform);
         }
@@ -242,9 +271,13 @@ impl NetlistRunner {
             .arg("sch")
             .arg("erc")
             .arg("--format")
-            .arg("report")
-            .arg("--severity-error")
-            .arg("--exit-code-violations")
+            .arg(if complete { "json" } else { "report" });
+        if complete {
+            command.args(["--severity-all", "--units", "mm"]);
+        } else {
+            command.args(["--severity-error", "--exit-code-violations"]);
+        }
+        command
             .arg("-o")
             .arg(&report_path)
             .arg(&schematic)
@@ -264,7 +297,9 @@ impl NetlistRunner {
             self.max_stderr_bytes,
         )?;
 
-        enforce_output_size(&report_path, self.max_stdout_bytes, true)?;
+        if report_path.exists() {
+            enforce_output_size(&report_path, self.max_stdout_bytes, true)?;
+        }
         enforce_output_size(&stderr_path, self.max_stderr_bytes, false)?;
         let stderr = read_utf8_file(&stderr_path, self.max_stderr_bytes)?;
         if !status.success() {
@@ -274,7 +309,7 @@ impl NetlistRunner {
                 stderr,
             });
         }
-        Ok(())
+        read_utf8_file(&report_path, self.max_stdout_bytes)
     }
 }
 
@@ -312,6 +347,8 @@ pub enum NetlistRunnerError {
     OutputRead(String),
     #[error(transparent)]
     Parse(#[from] NetlistParseError),
+    #[error(transparent)]
+    ErcParse(#[from] kicad_checks::erc::ErcError),
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -1044,5 +1081,90 @@ mod tests {
         // latency instead of imposing an unrelated subsecond desktop performance requirement.
         assert!(!completion.exists());
         assert!(started.elapsed() < Duration::from_secs(5));
+    }
+    #[cfg(unix)]
+    #[test]
+    fn complete_erc_requires_fixed_capture_and_complete_versioned_source() {
+        let valid = r#"{"$schema":"https://schemas.kicad.org/erc.v1.json","coordinate_units":"mm","date":"today","source":"root.kicad_sch","kicad_version":"10.0.7","included_severities":["error","warning","exclusion"],"ignored_checks":[],"sheets":[{"path":"/","uuid_path":"/root","violations":[]}]}"#;
+        for (report, accepted) in [
+            (valid.to_owned(), true),
+            (valid.replace("10.0.7", "10.0.6"), false),
+            (valid.replace("root.kicad_sch", "other.kicad_sch"), false),
+            (
+                valid.replace("\"error\",\"warning\",\"exclusion\"", "\"error\""),
+                false,
+            ),
+            ("{}".into(), false),
+        ] {
+            let script = format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > ARGS_FILE\nwhile [ \"$1\" != '-o' ]; do shift; done\nshift\nprintf '%s' '{report}' > \"$1\"\n"
+            );
+            let (_cli, executable, args, _) = fake_cli(&script);
+            let (_project, schematic) = project();
+            let root = schematic.parent().unwrap();
+            assert_eq!(
+                NetlistRunner::new(executable)
+                    .run_complete_erc(root, &schematic)
+                    .is_ok(),
+                accepted
+            );
+            let argv = fs::read_to_string(args).unwrap();
+            let argv = argv.lines().collect::<Vec<_>>();
+            assert_eq!(
+                &argv[..8],
+                &[
+                    "sch",
+                    "erc",
+                    "--format",
+                    "json",
+                    "--severity-all",
+                    "--units",
+                    "mm",
+                    "-o"
+                ]
+            );
+            assert_eq!(argv[9], schematic.to_str().unwrap());
+            assert!(!Path::new(argv[8]).exists());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn complete_erc_reaps_failed_or_unbounded_capture_and_cleans_files() {
+        for (body, expected) in [
+            ("exit 7", "process"),
+            ("sleep 30", "timeout"),
+            (
+                "while [ \"$1\" != '-o' ]; do shift; done\nshift\nprintf '1234567890' > \"$1\"\nsleep 30",
+                "size",
+            ),
+        ] {
+            let script = format!("#!/bin/sh\n{body}\nprintf done > ARGS_FILE\n");
+            let (_cli, executable, completion, _) = fake_cli(&script);
+            let (_project, schematic) = project();
+            let root = schematic.parent().unwrap();
+            let error = NetlistRunner::new(executable)
+                .with_timeout(Duration::from_secs(5))
+                .with_output_limits(3, 100)
+                .run_complete_erc(root, &schematic)
+                .unwrap_err();
+            match expected {
+                "process" => assert!(matches!(
+                    error,
+                    NetlistRunnerError::ProcessFailed {
+                        status: Some(7),
+                        ..
+                    }
+                )),
+                "timeout" => assert!(matches!(error, NetlistRunnerError::Timeout { .. })),
+                "size" => assert!(matches!(
+                    error,
+                    NetlistRunnerError::StdoutTooLarge { limit: 3 }
+                )),
+                _ => unreachable!(),
+            }
+            assert!(!completion.exists());
+            assert_eq!(fs::read_dir(root).unwrap().count(), 1);
+        }
     }
 }
