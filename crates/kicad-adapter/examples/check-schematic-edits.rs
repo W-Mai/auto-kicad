@@ -2,7 +2,8 @@
 use kicad_adapter::schematic_audit::{SchematicAudit, SchematicAuditPolicy};
 use kicad_schematic::editing::{
     EditAction, EditScope, ElectricalShape, Label, LabelKind, NewObject, ObjectKind,
-    SchematicCandidate, SchematicEdit, SymbolFlags, SymbolProperty, compile_edits,
+    ReferenceRequest, SchematicCandidate, SchematicEdit, SymbolFlags, SymbolProperty,
+    allocate_references, compile_edits,
 };
 use kicad_schematic::geometry::{Mirror, Point, QuarterTurn, SymbolTransform};
 use kicad_schematic::probes::ConnectivityPin;
@@ -238,6 +239,58 @@ fn main() -> Result<()> {
     }
     let relative = source.strip_prefix(root)?;
     let mut private = vec![before.private_root().to_owned()];
+    let parsed = load_schematic_project(root, &source, "10.0.7", 1, Limits::default())?;
+    let annotation_request = ReferenceRequest {
+        uuid: id.clone(),
+        instance_path: (instances.len() > 1).then(|| unit.sheet_path.clone()),
+        prefix: "QA".into(),
+        minimum: 900,
+    };
+    let annotation_edits = allocate_references(
+        &parsed,
+        before.netlist(),
+        std::slice::from_ref(&annotation_request),
+    )?;
+    let annotation_edits_again = allocate_references(
+        &parsed,
+        before.netlist(),
+        std::slice::from_ref(&annotation_request),
+    )?;
+    if annotation_edits != annotation_edits_again {
+        return Err("reference allocation is not deterministic".into());
+    }
+    let allocated_reference = match &annotation_edits[0].action {
+        EditAction::SetReference { reference, .. } => reference.clone(),
+        _ => return Err("allocator returned a non-reference edit".into()),
+    };
+    let annotated = compile(root, &source, &before, &annotation_edits)?;
+    let after = capture(
+        root,
+        source.strip_prefix(root)?,
+        &config,
+        &output.join("annotation"),
+        &annotated,
+    )?;
+    if partition(&after)? != baseline {
+        return Err("reference annotation changed pin connectivity".into());
+    }
+    let annotated_unit = after
+        .identities()
+        .units()
+        .iter()
+        .find(|u| {
+            u.source_uuid == id
+                && annotation_request
+                    .instance_path
+                    .as_deref()
+                    .is_none_or(|path| u.sheet_path == path)
+        })
+        .ok_or("annotated identity missing")?;
+    if annotated_unit.reference != allocated_reference {
+        return Err("native reference annotation mismatch".into());
+    }
+    private.push(after.private_root().to_owned());
+    drop(after);
 
     let property_edits = vec![
         edit(EditAction::SetProperty {

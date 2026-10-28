@@ -31,7 +31,7 @@ Backend callers can resolve [hierarchical schematic instances and multi-unit com
 
 [Logical schematic pin observation](docs/acceptance/schematic-pins.md) matches active unit/body-style pins, common pins and stacked numbers to native net membership. Source identities preserve connectivity across reference renaming; omitted power/virtual pins are observed through [private passive native witnesses](docs/acceptance/schematic-connectivity.md), with original ERC and no-connect evidence retained separately. [Exact physical contact positions](docs/acceptance/schematic-contacts.md) retain native-grid coordinates with qualified quarter-turn and mirror transforms.
 
-[Typed schematic edit candidates](docs/acceptance/schematic-edit-candidates.md) modify existing symbols, wires, markers and labels through exact source spans. Native-copy checks cover connectivity changes, repeated sheets, text escaping and baseline restoration; public general schematic editing and publication are not yet available.
+[Typed schematic edit candidates](docs/acceptance/schematic-edit-candidates.md) modify existing symbols, deterministic reference annotations, wires, markers and labels through exact source spans. Native-copy checks cover connectivity changes, repeated sheets, text escaping and baseline restoration; public general schematic editing and publication are not yet available.
 
 ## Board workflow
 

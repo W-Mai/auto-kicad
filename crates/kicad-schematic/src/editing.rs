@@ -124,6 +124,11 @@ pub struct SymbolFlags {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EditAction {
+    SetReference {
+        uuid: String,
+        reference: String,
+        instance_path: Option<String>,
+    },
     SetProperty {
         uuid: String,
         property: SymbolProperty,
@@ -159,6 +164,14 @@ pub enum EditAction {
         key: String,
         object: NewObject,
     },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReferenceRequest {
+    pub uuid: String,
+    pub instance_path: Option<String>,
+    pub prefix: String,
+    pub minimum: u32,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -476,6 +489,7 @@ fn edit_existing(
     format: &str,
 ) -> Result<(String, ObjectKind), String> {
     let (id, kind) = match action {
+        EditAction::SetReference { uuid, .. } => (uuid, ObjectKind::Symbol),
         EditAction::SetProperty { uuid, .. }
         | EditAction::SetFlags { uuid, .. }
         | EditAction::TransformSymbol { uuid, .. } => (uuid, ObjectKind::Symbol),
@@ -489,6 +503,62 @@ fn edit_existing(
     let node = object(root, id, kind)?;
     let items = values(node)?;
     match action {
+        EditAction::SetReference {
+            reference,
+            instance_path,
+            ..
+        } => {
+            validate_reference(reference)?;
+            let property = children(items, "property")
+                .filter(|p| list_items(p).is_some_and(|v| atom_text(v.get(1)) == Some("Reference")))
+                .collect::<Vec<_>>();
+            if property.len() != 1 {
+                return Err("symbol must have one Reference property".into());
+            }
+            let instances = one(items, "instances")?;
+            let project_nodes = values(instances)?
+                .iter()
+                .filter_map(list_items)
+                .filter(|v| list_tag(v) == Some("project"))
+                .collect::<Vec<_>>();
+            if project_nodes.len() != 1 {
+                return Err("symbol must have one instances project".into());
+            }
+            let paths = project_nodes[0]
+                .iter()
+                .skip(2)
+                .filter_map(list_items)
+                .filter(|v| list_tag(v) == Some("path"))
+                .collect::<Vec<_>>();
+            if paths.is_empty() {
+                return Err("symbol has no instance paths".into());
+            }
+            if let Some(target) = instance_path {
+                let matches = paths
+                    .iter()
+                    .filter(|path| atom_text(path.get(1)) == Some(target.as_str()))
+                    .collect::<Vec<_>>();
+                if matches.len() != 1 {
+                    return Err("reference target instance path is missing or ambiguous".into());
+                }
+                patches.claim(id, &format!("reference:{target}"))?;
+                let reference_node = one(matches[0], "reference")?;
+                patches.node(reference_node, format!("(reference {})", quote(reference)))?;
+            } else {
+                patches.claim(id, "reference")?;
+                let property = values(property[0])?;
+                patches.node(
+                    property.get(2).ok_or("missing Reference value")?,
+                    quote(reference),
+                )?;
+                for path in paths {
+                    let path_id = atom(path, 1)?;
+                    patches.claim(id, &format!("reference:{path_id}"))?;
+                    let reference_node = one(path, "reference")?;
+                    patches.node(reference_node, format!("(reference {})", quote(reference)))?;
+                }
+            }
+        }
         EditAction::SetProperty {
             property, value, ..
         } => {
@@ -635,6 +705,188 @@ fn edit_existing(
     Ok((id.clone(), kind))
 }
 
+fn validate_reference(reference: &str) -> Result<(), String> {
+    if reference.is_empty()
+        || reference.len() > 128
+        || !reference.is_ascii()
+        || reference
+            .chars()
+            .any(|c| c.is_ascii_whitespace() || c.is_ascii_control())
+    {
+        return Err("invalid schematic reference".into());
+    }
+    if reference.starts_with('#') {
+        if reference.len() == 1 {
+            return Err("empty private reference".into());
+        }
+    } else if !reference.chars().any(|c| c.is_ascii_digit())
+        || !reference
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '?')
+    {
+        return Err("reference must contain an alphanumeric annotation or # prefix".into());
+    }
+    Ok(())
+}
+
+fn reference_entries(project: &ParsedSchematicProject) -> Vec<(String, String, String)> {
+    project
+        .files
+        .iter()
+        .flat_map(|file| {
+            file.symbols.iter().flat_map(move |symbol| {
+                symbol.instance_paths.iter().filter_map(move |instance| {
+                    instance.reference.as_ref().map(|reference| {
+                        (
+                            instance.path.clone(),
+                            reference.clone(),
+                            symbol.source_uuid.clone(),
+                        )
+                    })
+                })
+            })
+        })
+        .collect()
+}
+
+/// Allocate deterministic references against the complete expanded hierarchy.
+pub fn allocate_references(
+    project: &ParsedSchematicProject,
+    native: &NetlistDocument,
+    requests: &[ReferenceRequest],
+) -> Result<Vec<SchematicEdit>, String> {
+    if requests.is_empty() || requests.len() > 128 {
+        return Err("reference allocation requires 1..128 requests".into());
+    }
+    let _ = SchematicIdentityIndex::resolve(project, native).map_err(|e| e.to_string())?;
+    let mut occupied = reference_entries(project);
+    let mut edits = Vec::new();
+    let mut assigned = BTreeSet::new();
+    for request in requests {
+        if !uuid(&request.uuid) || request.prefix.is_empty() || !request.prefix.is_ascii() {
+            return Err("invalid reference allocation request".into());
+        }
+        let file = project
+            .files
+            .iter()
+            .find(|file| {
+                file.symbols
+                    .iter()
+                    .any(|symbol| symbol.source_uuid == request.uuid)
+            })
+            .ok_or("reference request symbol is not observed")?;
+        let target_paths = file
+            .symbols
+            .iter()
+            .find(|symbol| symbol.source_uuid == request.uuid)
+            .map(|symbol| {
+                symbol
+                    .instance_paths
+                    .iter()
+                    .filter(|instance| {
+                        request
+                            .instance_path
+                            .as_deref()
+                            .is_none_or(|path| path == instance.path)
+                    })
+                    .map(|instance| instance.path.clone())
+                    .collect::<Vec<_>>()
+            })
+            .ok_or("reference request symbol is not observed")?;
+        if target_paths.is_empty() {
+            return Err("reference request instance path is not observed".into());
+        }
+        let mut number = request.minimum.max(1);
+        let reference = loop {
+            let candidate = format!("{}{number}", request.prefix);
+            if !occupied.iter().any(|(path, value, _source)| {
+                target_paths.iter().any(|target| target == path) && value == &candidate
+            }) && target_paths
+                .iter()
+                .all(|path| !assigned.contains(&(path.clone(), candidate.clone())))
+            {
+                break candidate;
+            }
+            number = number
+                .checked_add(1)
+                .ok_or("reference allocation overflow")?;
+        };
+        for path in &target_paths {
+            occupied.push((path.clone(), reference.clone(), request.uuid.clone()));
+            assigned.insert((path.clone(), reference.clone()));
+        }
+        edits.push(SchematicEdit {
+            file: file.artifact.relative_path.clone(),
+            scope: if request.instance_path.is_some() {
+                EditScope::SingleInstance(request.instance_path.clone().unwrap())
+            } else {
+                EditScope::FileAllInstances
+            },
+            action: EditAction::SetReference {
+                uuid: request.uuid.clone(),
+                reference,
+                instance_path: request.instance_path.clone(),
+            },
+        });
+    }
+    Ok(edits)
+}
+
+fn validate_reference_edits(
+    project: &ParsedSchematicProject,
+    edits: &[SchematicEdit],
+) -> Result<(), String> {
+    let mut occupied = BTreeMap::<(String, String), String>::new();
+    for (path, reference, source_uuid) in reference_entries(project) {
+        occupied.entry((path, reference)).or_insert(source_uuid);
+    }
+    for edit in edits {
+        let EditAction::SetReference {
+            uuid,
+            reference,
+            instance_path,
+        } = &edit.action
+        else {
+            continue;
+        };
+        validate_reference(reference)?;
+        let file = project
+            .files
+            .iter()
+            .find(|file| file.artifact.relative_path == edit.file)
+            .ok_or("reference target file is not observed")?;
+        let symbol = file
+            .symbols
+            .iter()
+            .find(|symbol| symbol.source_uuid == *uuid)
+            .ok_or("reference target symbol is not observed")?;
+        let paths = symbol
+            .instance_paths
+            .iter()
+            .filter(|instance| {
+                instance_path
+                    .as_deref()
+                    .is_none_or(|target| target == instance.path)
+            })
+            .map(|instance| instance.path.clone())
+            .collect::<Vec<_>>();
+        if paths.is_empty() {
+            return Err("reference target instance path is not observed".into());
+        }
+        for path in paths {
+            if let Some(existing) = occupied.get(&(path.clone(), reference.clone()))
+                && existing != uuid
+            {
+                return Err(format!(
+                    "reference `{reference}` is already used at instance path `{path}`"
+                ));
+            }
+            occupied.insert((path, reference.clone()), uuid.clone());
+        }
+    }
+    Ok(())
+}
+
 pub fn compile_edits(
     project: &ParsedSchematicProject,
     native: &NetlistDocument,
@@ -661,6 +913,7 @@ pub fn compile_edits(
     if changed.iter().any(|f| !sources.contains_key(*f)) {
         return Err("edit targets unobserved file".into());
     }
+    validate_reference_edits(project, edits)?;
     let mut seen_uuids = BTreeSet::new();
     let mut documents = BTreeMap::new();
     let mut total = 0;
@@ -734,7 +987,18 @@ pub fn compile_edits(
         };
         let mut appended = String::new();
         for (ordinal, edit) in edits.iter().enumerate().filter(|(_, e)| e.file == *name) {
+            let allows_instance_reference = matches!(
+                (&edit.scope, &edit.action),
+                (
+                    EditScope::SingleInstance(scope_path),
+                    EditAction::SetReference {
+                        instance_path: Some(target),
+                        ..
+                    }
+                ) if scope_path == target
+            );
             if let EditScope::SingleInstance(path) = &edit.scope
+                && !allows_instance_reference
                 && (instances.len() != 1 || &instances[0] != path)
             {
                 return Err(format!(
@@ -927,6 +1191,60 @@ mod tests {
         let mut wrong = edit(property("changed"));
         wrong.scope = EditScope::SingleInstance("wrong".into());
         assert!(compile(&p, &n, &b, &[wrong]).is_err());
+    }
+
+    #[test]
+    fn typed_reference_edit_updates_property_and_instance_path() {
+        let (p, n, b) = fixture();
+        let candidate = compile(
+            &p,
+            &n,
+            &b,
+            &[edit(EditAction::SetReference {
+                uuid: SYMBOL.into(),
+                reference: "R101".into(),
+                instance_path: None,
+            })],
+        )
+        .unwrap();
+        let symbol = &candidate.parsed().files[0].symbols[0];
+        assert_eq!(symbol.reference, "R101");
+        assert_eq!(symbol.instance_paths[0].reference.as_deref(), Some("R101"));
+        assert_preserved(&b, &candidate);
+    }
+
+    #[test]
+    fn reference_allocator_is_deterministic_and_rejects_invalid_values() {
+        let (p, n, b) = fixture();
+        let request = ReferenceRequest {
+            uuid: SYMBOL.into(),
+            instance_path: None,
+            prefix: "RA".into(),
+            minimum: 1,
+        };
+        let first = allocate_references(&p, &n, std::slice::from_ref(&request)).unwrap();
+        let second = allocate_references(&p, &n, std::slice::from_ref(&request)).unwrap();
+        assert_eq!(first, second);
+        assert_eq!(
+            first[0].action,
+            EditAction::SetReference {
+                uuid: SYMBOL.into(),
+                reference: "RA1".into(),
+                instance_path: None,
+            }
+        );
+        let unchanged = edit(EditAction::SetReference {
+            uuid: SYMBOL.into(),
+            reference: "R1".into(),
+            instance_path: None,
+        });
+        assert!(compile(&p, &n, &b, &[unchanged]).is_err());
+        let invalid = edit(EditAction::SetReference {
+            uuid: SYMBOL.into(),
+            reference: "R 2".into(),
+            instance_path: None,
+        });
+        assert!(compile(&p, &n, &b, &[invalid]).is_err());
     }
     #[test]
     fn overlapping_and_reserved_writes_reject_even_when_one_is_a_noop() {
