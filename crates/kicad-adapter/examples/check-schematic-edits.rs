@@ -1,19 +1,24 @@
 //! Exercise typed candidate edits on explicitly owned copies using the installed native CLI.
 use kicad_adapter::schematic_audit::{SchematicAudit, SchematicAuditPolicy};
 use kicad_schematic::editing::{
-    EditAction, EditScope, ElectricalShape, Label, LabelKind, NewObject, ObjectKind,
-    ReferenceRequest, SchematicCandidate, SchematicEdit, SymbolFlags, SymbolProperty,
-    allocate_references, compile_edits,
+    EditAction, EditScope, ElectricalShape, FootprintCompatibilityEvidence, Label, LabelKind,
+    NewObject, ObjectKind, ReferenceRequest, SchematicCandidate, SchematicEdit, SymbolFlags,
+    SymbolProperty, allocate_references, compile_edits,
 };
 use kicad_schematic::geometry::{Mirror, Point, QuarterTurn, SymbolTransform};
 use kicad_schematic::probes::ConnectivityPin;
 use kicad_schematic::{Limits, load_schematic_project};
+use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
     env, fs,
     path::{Path, PathBuf},
 };
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+fn digest(path: &Path) -> Result<String> {
+    Ok(format!("{:x}", Sha256::digest(fs::read(path)?)))
+}
 
 fn snapshot(root: &Path) -> Result<BTreeMap<PathBuf, Vec<u8>>> {
     let mut result = BTreeMap::new();
@@ -288,6 +293,49 @@ fn main() -> Result<()> {
         .ok_or("annotated identity missing")?;
     if annotated_unit.reference != allocated_reference {
         return Err("native reference annotation mismatch".into());
+    }
+    private.push(after.private_root().to_owned());
+    drop(after);
+    let footprint_source = Path::new(
+        "/Applications/KiCad/KiCad.app/Contents/SharedSupport/footprints/Resistor_SMD.pretty/R_0603_1608Metric.kicad_mod",
+    );
+    let pin_pad_map = target_pins
+        .iter()
+        .map(|pin| (pin.key.number.clone(), pin.key.number.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let assignment = compile(
+        root,
+        &source,
+        &before,
+        &[edit(EditAction::AssignFootprint {
+            uuid: id.clone(),
+            footprint: "Resistor_SMD:R_0603_1608Metric".into(),
+            evidence: FootprintCompatibilityEvidence {
+                catalog_digest: digest(footprint_source)?,
+                source_digest: digest(footprint_source)?,
+                pad_numbers: pin_pad_map.values().cloned().collect(),
+                pin_pad_map,
+            },
+        })],
+    )?;
+    let after = capture(
+        root,
+        relative,
+        &config,
+        &output.join("footprint_assignment"),
+        &assignment,
+    )?;
+    if partition(&after)? != baseline {
+        return Err("footprint assignment changed pin connectivity".into());
+    }
+    let component = after
+        .netlist()
+        .components
+        .iter()
+        .find(|component| component.reference == reference)
+        .ok_or("assigned component missing")?;
+    if component.footprint.as_deref() != Some("Resistor_SMD:R_0603_1608Metric") {
+        return Err("native footprint assignment mismatch".into());
     }
     private.push(after.private_root().to_owned());
     drop(after);

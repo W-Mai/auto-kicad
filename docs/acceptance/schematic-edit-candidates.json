@@ -1,8 +1,8 @@
 {
-  "scope": "Typed immutable candidates for existing schematic objects, deterministic reference annotations, wires, junctions, no-connect markers and labels; no public general-edit publication",
+  "scope": "Typed immutable candidates for existing schematic objects, deterministic reference annotations, catalog-bound footprint assignments, wires, junctions, no-connect markers and labels; no public general-edit publication",
   "kicad_version": "10.0.7",
   "quality": {
-    "passed": 524,
+    "passed": 525,
     "failed": 0,
     "ignored": 15,
     "fmt": true,
@@ -20,6 +20,7 @@
       "cases": [
         "properties_flags",
         "symbol_transform",
+        "footprint_assignment",
         "create_wire_markers_labels",
         "update_wire_markers_labels",
         "delete_wire_markers_labels",
@@ -45,6 +46,7 @@
       "cases": [
         "properties_flags",
         "symbol_transform",
+        "footprint_assignment",
         "create_wire_markers_labels",
         "update_wire_markers_labels",
         "delete_wire_markers_labels",
@@ -73,6 +75,7 @@
       "cases": [
         "properties_flags",
         "symbol_transform",
+        "footprint_assignment",
         "create_wire_markers_labels",
         "update_wire_markers_labels",
         "delete_wire_markers_labels",
@@ -98,6 +101,7 @@
       "cases": [
         "properties_flags",
         "symbol_transform",
+        "footprint_assignment",
         "create_wire_markers_labels",
         "update_wire_markers_labels",
         "delete_wire_markers_labels",
@@ -119,12 +123,12 @@
   "source_hashes": {
     "crates/kicad-schematic/src/lib.rs": "a2aa6a85dee1a269bfac37d0fe01525d881f02ea2bef79bb2178f0a6c7d05249",
     "crates/kicad-schematic/src/cst.rs": "47a7d8991479fa7d274fdf6b2314a15beaee0c5331b9d3fc40093ebff0af2a9a",
-    "crates/kicad-schematic/src/editing.rs": "5855b63180432894ecd04349382b512a12362ccec39f4857a307821662959f0c",
+    "crates/kicad-schematic/src/editing.rs": "bed93bde74327a1971ed16d037050c2191ae4db11078b21cad25e5e8a851a512",
     "crates/kicad-schematic/src/netlist.rs": "e96e1820f518e890d570a586f9991f4706e98ea3e1ff9263f6dd50bdc8706be4",
     "crates/kicad-schematic/src/patch.rs": "4fbde81ec9bb745ddf0a5c302ae1363f2cc771a43d3bc2e1aec92933f6e70818",
     "crates/kicad-schematic/src/pins.rs": "b9f0b0d6eb383f175ba8410365b8911b01bd185a61256619b76ca6d80f65715c",
     "crates/kicad-schematic/src/probes.rs": "19a44fa78c4fb2d27323a780040f393b37ac9608c6832b83c53abd8cdc575692",
-    "crates/kicad-adapter/examples/check-schematic-edits.rs": "ca7c3dcf5f548e1e63c86acf0c18aab0d1a753855ee192007f2d9f6bab3ed78e"
+    "crates/kicad-adapter/examples/check-schematic-edits.rs": "d93b26fad754bf023deae3a47c570559d30b5ba7291b7a1b9d77b40a33f6a62e"
   },
   "evidence_trees": {
     "m5-native-edits-separated": {
@@ -158,9 +162,13 @@
     "m5-annotation-native": {
       "files": 765,
       "sha256": "3e7946532b85fd17d7c37be06bffb5693494f6225122afe30fa8cd88c0b3c15e"
+    },
+    "m5-footprint-native": {
+      "files": 857,
+      "sha256": "77f72508494f3a8c8ad6cb065b78575df3c848a14123155414a224a006eb79e9"
     }
   },
   "gui_launched": false,
   "public_mcp_changed": false,
-  "native_candidate_cases": 28
+  "native_candidate_cases": 32
 }

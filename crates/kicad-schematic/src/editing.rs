@@ -129,6 +129,11 @@ pub enum EditAction {
         reference: String,
         instance_path: Option<String>,
     },
+    AssignFootprint {
+        uuid: String,
+        footprint: String,
+        evidence: FootprintCompatibilityEvidence,
+    },
     SetProperty {
         uuid: String,
         property: SymbolProperty,
@@ -172,6 +177,14 @@ pub struct ReferenceRequest {
     pub instance_path: Option<String>,
     pub prefix: String,
     pub minimum: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FootprintCompatibilityEvidence {
+    pub catalog_digest: String,
+    pub source_digest: String,
+    pub pad_numbers: Vec<String>,
+    pub pin_pad_map: BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -490,6 +503,7 @@ fn edit_existing(
 ) -> Result<(String, ObjectKind), String> {
     let (id, kind) = match action {
         EditAction::SetReference { uuid, .. } => (uuid, ObjectKind::Symbol),
+        EditAction::AssignFootprint { uuid, .. } => (uuid, ObjectKind::Symbol),
         EditAction::SetProperty { uuid, .. }
         | EditAction::SetFlags { uuid, .. }
         | EditAction::TransformSymbol { uuid, .. } => (uuid, ObjectKind::Symbol),
@@ -557,6 +571,40 @@ fn edit_existing(
                     let reference_node = one(path, "reference")?;
                     patches.node(reference_node, format!("(reference {})", quote(reference)))?;
                 }
+            }
+        }
+        EditAction::AssignFootprint {
+            footprint,
+            evidence,
+            ..
+        } => {
+            validate_footprint_identifier(footprint)?;
+            let property = children(items, "property")
+                .filter(|p| list_items(p).is_some_and(|v| atom_text(v.get(1)) == Some("Footprint")))
+                .collect::<Vec<_>>();
+            if property.len() > 1 {
+                return Err("symbol must have at most one Footprint property".into());
+            }
+            patches.claim(id, "property:Footprint")?;
+            if let Some(property) = property.first() {
+                let property = values(property)?;
+                patches.node(
+                    property.get(2).ok_or("missing Footprint value")?,
+                    quote(footprint),
+                )?;
+            } else {
+                let transform = SymbolTransform::from_cst(items)?;
+                patches.insert(
+                    node_span(node).end - 1,
+                    format!(
+                        "\n(property \"Footprint\" {} {} (effects (font (size 1.27 1.27)) (hide yes)))\n",
+                        quote(footprint),
+                        at(transform.origin, Some(QuarterTurn::Zero))
+                    ),
+                )?;
+            }
+            if evidence.catalog_digest.is_empty() || evidence.source_digest.is_empty() {
+                return Err("footprint assignment evidence is incomplete".into());
             }
         }
         EditAction::SetProperty {
@@ -725,6 +773,89 @@ fn validate_reference(reference: &str) -> Result<(), String> {
             .all(|c| c.is_ascii_alphanumeric() || c == '?')
     {
         return Err("reference must contain an alphanumeric annotation or # prefix".into());
+    }
+    Ok(())
+}
+
+fn validate_footprint_identifier(value: &str) -> Result<(), String> {
+    if value.is_empty()
+        || value.len() > 512
+        || !value.is_ascii()
+        || value
+            .chars()
+            .any(|c| c.is_ascii_whitespace() || c.is_ascii_control())
+        || value.matches(':').count() != 1
+    {
+        return Err("invalid schematic footprint identifier".into());
+    }
+    Ok(())
+}
+
+fn validate_digest(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn validate_footprint_edits(
+    project: &ParsedSchematicProject,
+    edits: &[SchematicEdit],
+) -> Result<(), String> {
+    for edit in edits {
+        let EditAction::AssignFootprint {
+            uuid,
+            footprint,
+            evidence,
+        } = &edit.action
+        else {
+            continue;
+        };
+        validate_footprint_identifier(footprint)?;
+        if !validate_digest(&evidence.catalog_digest) || !validate_digest(&evidence.source_digest) {
+            return Err("footprint assignment evidence digest is invalid".into());
+        }
+        if evidence.pad_numbers.is_empty() || evidence.pad_numbers.len() > 512 {
+            return Err("footprint assignment pad evidence is empty or oversized".into());
+        }
+        let pads = evidence.pad_numbers.iter().collect::<BTreeSet<_>>();
+        if pads.len() != evidence.pad_numbers.len()
+            || pads.iter().any(|pad| {
+                pad.is_empty()
+                    || pad.len() > 32
+                    || !pad.is_ascii()
+                    || pad
+                        .chars()
+                        .any(|c| c.is_ascii_whitespace() || c.is_ascii_control())
+            })
+        {
+            return Err("footprint assignment pad evidence is invalid".into());
+        }
+        let symbol = project
+            .files
+            .iter()
+            .find_map(|file| {
+                file.symbols
+                    .iter()
+                    .find(|symbol| symbol.source_uuid == *uuid)
+            })
+            .ok_or("footprint assignment target symbol is not observed")?;
+        let pins = symbol
+            .pins
+            .iter()
+            .map(|pin| pin.number.as_str())
+            .collect::<BTreeSet<_>>();
+        let mapped_pins = evidence
+            .pin_pad_map
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        let mapped_pads = evidence.pin_pad_map.values().collect::<BTreeSet<_>>();
+        if pins.is_empty()
+            || mapped_pins != pins
+            || mapped_pads.len() != evidence.pin_pad_map.len()
+            || mapped_pads.iter().any(|pad| !pads.contains(pad))
+            || evidence.pin_pad_map.len() != evidence.pad_numbers.len()
+        {
+            return Err("footprint assignment pin-pad evidence is not a complete bijection".into());
+        }
     }
     Ok(())
 }
@@ -914,6 +1045,7 @@ pub fn compile_edits(
         return Err("edit targets unobserved file".into());
     }
     validate_reference_edits(project, edits)?;
+    validate_footprint_edits(project, edits)?;
     let mut seen_uuids = BTreeSet::new();
     let mut documents = BTreeMap::new();
     let mut total = 0;
@@ -1137,6 +1269,18 @@ mod tests {
             value: value.into(),
         }
     }
+    fn footprint() -> EditAction {
+        EditAction::AssignFootprint {
+            uuid: SYMBOL.into(),
+            footprint: "Resistor_SMD:R_0603_1608Metric".into(),
+            evidence: FootprintCompatibilityEvidence {
+                catalog_digest: "a".repeat(64),
+                source_digest: "b".repeat(64),
+                pad_numbers: vec!["1".into()],
+                pin_pad_map: BTreeMap::from([("1".into(), "1".into())]),
+            },
+        }
+    }
     fn point(x: i64, y: i64) -> Point {
         Point::from_nm(x * 1_000_000, y * 1_000_000).unwrap()
     }
@@ -1211,6 +1355,22 @@ mod tests {
         assert_eq!(symbol.reference, "R101");
         assert_eq!(symbol.instance_paths[0].reference.as_deref(), Some("R101"));
         assert_preserved(&b, &candidate);
+    }
+
+    #[test]
+    fn footprint_assignment_requires_complete_pin_pad_evidence() {
+        let (p, n, b) = fixture();
+        let candidate = compile(&p, &n, &b, &[edit(footprint())]).unwrap();
+        assert_eq!(
+            candidate.parsed().files[0].symbols[0].footprint.as_deref(),
+            Some("Resistor_SMD:R_0603_1608Metric")
+        );
+        assert_preserved(&b, &candidate);
+        let mut invalid = footprint();
+        if let EditAction::AssignFootprint { evidence, .. } = &mut invalid {
+            evidence.pin_pad_map.clear();
+        }
+        assert!(compile(&p, &n, &b, &[edit(invalid)]).is_err());
     }
 
     #[test]
