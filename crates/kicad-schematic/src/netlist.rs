@@ -89,6 +89,7 @@ pub struct NetlistRun {
 
 #[derive(Clone, Debug)]
 pub struct NetlistRunner {
+    context: Option<crate::NativeExecutionContext>,
     executable: PathBuf,
     timeout: Duration,
     max_stdout_bytes: u64,
@@ -129,12 +130,36 @@ impl NetlistRunner {
 
     fn from_executable(executable: impl Into<PathBuf>) -> Self {
         Self {
+            context: None,
             executable: executable.into(),
             timeout: Duration::from_secs(30),
             max_stdout_bytes: DEFAULT_MAX_STDOUT_BYTES,
             max_stderr_bytes: DEFAULT_MAX_STDERR_BYTES,
             limits: NetlistLimits::default(),
         }
+    }
+
+    /// Pin executable bytes and process environment, optionally selecting an owned native configuration root. This does not snapshot configuration contents, library files or project inputs.
+    pub fn freeze_context(
+        mut self,
+        configuration_home: Option<&Path>,
+    ) -> Result<Self, NetlistRunnerError> {
+        let executable = canonical_executable(&self.executable)?;
+        let context = crate::NativeExecutionContext::capture(&executable, configuration_home)?;
+        self.executable = executable;
+        self.context = Some(context);
+        Ok(self)
+    }
+
+    pub fn execution_context(&self) -> Option<&crate::NativeExecutionContext> {
+        self.context.as_ref()
+    }
+
+    fn verify_context(&self) -> Result<(), NetlistRunnerError> {
+        if let Some(context) = &self.context {
+            context.verify()?;
+        }
+        Ok(())
     }
 
     pub fn with_timeout(mut self, timeout: Duration) -> Self {
@@ -163,6 +188,7 @@ impl NetlistRunner {
         }
         let root = canonical_directory(project_root)?;
         let schematic = canonical_schematic(&root, root_schematic)?;
+        self.verify_context()?;
         let executable = canonical_executable(&self.executable)?;
         let output_dir = Builder::new()
             .prefix(".auto-kicad-netlist-")
@@ -176,6 +202,9 @@ impl NetlistRunner {
             .map_err(|error| NetlistRunnerError::TemporaryOutput(error.to_string()))?;
 
         let mut command = Command::new(executable);
+        if let Some(context) = &self.context {
+            context.apply(&mut command, &root);
+        }
         command
             .arg("sch")
             .arg("export")
@@ -201,6 +230,7 @@ impl NetlistRunner {
             self.max_stderr_bytes,
         )?;
 
+        self.verify_context()?;
         enforce_output_size(&stdout_path, self.max_stdout_bytes, true)?;
         enforce_output_size(&stderr_path, self.max_stderr_bytes, false)?;
         let stderr = read_utf8_file(&stderr_path, self.max_stderr_bytes)?;
@@ -256,6 +286,7 @@ impl NetlistRunner {
         }
         let root = canonical_directory(project_root)?;
         let schematic = canonical_schematic(&root, root_schematic)?;
+        self.verify_context()?;
         let executable = canonical_executable(&self.executable)?;
         let output_dir = Builder::new()
             .prefix(".auto-kicad-erc-")
@@ -267,6 +298,9 @@ impl NetlistRunner {
             .map_err(|error| NetlistRunnerError::TemporaryOutput(error.to_string()))?;
 
         let mut command = Command::new(executable);
+        if let Some(context) = &self.context {
+            context.apply(&mut command, &root);
+        }
         command
             .arg("sch")
             .arg("erc")
@@ -297,6 +331,7 @@ impl NetlistRunner {
             self.max_stderr_bytes,
         )?;
 
+        self.verify_context()?;
         if report_path.exists() {
             enforce_output_size(&report_path, self.max_stdout_bytes, true)?;
         }
@@ -315,6 +350,8 @@ impl NetlistRunner {
 
 #[derive(Debug, Error)]
 pub enum NetlistRunnerError {
+    #[error("native execution context: {0}")]
+    ExecutionContext(String),
     #[error("netlist export through /dev/stdout is unsupported on this platform")]
     UnsupportedPlatform,
     #[error("project root is not a canonical directory")]
@@ -1166,5 +1203,42 @@ mod tests {
             assert!(!completion.exists());
             assert_eq!(fs::read_dir(root).unwrap().count(), 1);
         }
+    }
+    #[cfg(unix)]
+    #[test]
+    fn frozen_runner_rejects_executable_changes_before_and_after_dispatch() {
+        let script = format!(
+            "#!/bin/sh\nprintf invoked > ARGS_FILE\nprintf '%s' '{}'\n",
+            XML
+        );
+        let (_cli, executable, invoked, _) = fake_cli(&script);
+        let (_project, schematic) = project();
+        let root = schematic.parent().unwrap();
+        let runner = NetlistRunner::new(&executable)
+            .freeze_context(None)
+            .unwrap();
+        let original = fs::read(&executable).unwrap();
+        let mut changed = original.clone();
+        changed.push(b'\n');
+        fs::write(&executable, &changed).unwrap();
+        assert!(matches!(
+            runner.run(root, &schematic),
+            Err(NetlistRunnerError::ExecutionContext(_))
+        ));
+        assert!(!invoked.exists());
+        fs::write(&executable, original).unwrap();
+        assert!(runner.run(root, &schematic).is_ok());
+        assert!(invoked.exists());
+
+        let script = format!(
+            "#!/bin/sh\nprintf '%s' '{}'\nprintf '\\n# changed\\n' >> \"$0\"\n",
+            XML
+        );
+        let (_cli, executable, _, _) = fake_cli(&script);
+        let runner = NetlistRunner::new(executable).freeze_context(None).unwrap();
+        assert!(matches!(
+            runner.run(root, &schematic),
+            Err(NetlistRunnerError::ExecutionContext(_))
+        ));
     }
 }

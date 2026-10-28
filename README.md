@@ -25,6 +25,8 @@ Backend callers can resolve [hierarchical schematic instances and multi-unit com
 
 [Symbol library context](docs/acceptance/symbol-library-context.md) records effective project/global tables and used library-file content or absence. Revalidation detects library changes even when ERC results remain unchanged.
 
+[Fixed schematic CLI execution inputs](docs/acceptance/native-execution.md) bind executable bytes and the captured process environment for netlist export and ERC. Prepared native configuration copies can be selected explicitly; configuration and project-file content binding remain separate requirements.
+
 ## Board workflow
 
 1. Save the PCB and project settings in KiCad.

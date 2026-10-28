@@ -11,6 +11,8 @@ use kiutils_sexpr::{Atom, Node, Span, parse_one};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
+mod execution;
+pub use execution::NativeExecutionContext;
 pub mod identities;
 mod netlist;
 mod patch;
