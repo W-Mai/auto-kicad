@@ -1,10 +1,11 @@
 //! Canonical local footprint sources with bounded table inclusion and provenance.
 mod native_drc;
+pub mod symbols;
 pub use native_drc::NativeDrcLibraries;
 
 use crate::library_table::{
-    LibraryFormat, LibraryTableEntry, LibraryTableEvidence, MAX_TABLE_ENTRIES,
-    read_footprint_library_table, validate_library_component,
+    LibraryFormat, LibraryTableEntry, LibraryTableEvidence, MAX_TABLE_ENTRIES, TableKind,
+    read_library_table, validate_library_component,
 };
 use kicad_model::FootprintLibraryIdentifier;
 use serde::Serialize;
@@ -155,7 +156,7 @@ pub struct FootprintCatalog {
 
 impl FootprintCatalog {
     pub fn load(policy: &LibraryCatalogPolicy) -> Result<Self, String> {
-        let mut loader = TableLoader::new(policy)?;
+        let mut loader = TableLoader::new(policy, TableKind::Footprint)?;
         let global = loader.load_scope(&policy.global_table, LibraryScope::Global)?;
         let mut project_source_roots = vec![policy.project_root.clone()];
         project_source_roots.extend(policy.official_root.iter().cloned());
@@ -325,6 +326,7 @@ impl FootprintCatalog {
 }
 
 struct TableLoader<'a> {
+    kind: TableKind,
     policy: &'a LibraryCatalogPolicy,
     evidence: Vec<LibraryTableEvidence>,
     bytes: u64,
@@ -333,8 +335,9 @@ struct TableLoader<'a> {
 }
 
 impl<'a> TableLoader<'a> {
-    fn new(policy: &'a LibraryCatalogPolicy) -> Result<Self, String> {
+    fn new(policy: &'a LibraryCatalogPolicy, kind: TableKind) -> Result<Self, String> {
         Ok(Self {
+            kind,
             policy,
             evidence: Vec::new(),
             bytes: 0,
@@ -384,7 +387,7 @@ impl<'a> TableLoader<'a> {
                 return Err("library table inclusion cycle".into());
             }
         }
-        let file = read_footprint_library_table(path)?;
+        let file = read_library_table(path, self.kind)?;
         if file.evidence.canonical_path != canonical {
             return Err("library table identity changed before reading".into());
         }
@@ -617,21 +620,25 @@ fn hash_json(value: &impl Serialize) -> Result<String, String> {
 }
 
 pub(crate) fn read_source_digest(path: &Path) -> Result<(u64, String), String> {
+    read_bounded_source_digest(path, MAX_FOOTPRINT_SOURCE_BYTES)
+}
+
+fn read_bounded_source_digest(path: &Path, limit: u64) -> Result<(u64, String), String> {
     let metadata = fs::metadata(path).map_err(|e| e.to_string())?;
-    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_FOOTPRINT_SOURCE_BYTES {
-        return Err("footprint source exceeds regular-file size bounds".into());
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > limit {
+        return Err("library source exceeds regular-file size bounds".into());
     }
     let file = File::open(path).map_err(|e| e.to_string())?;
     let opened = file.metadata().map_err(|e| e.to_string())?;
-    if !opened.is_file() || opened.len() == 0 || opened.len() > MAX_FOOTPRINT_SOURCE_BYTES {
-        return Err("opened footprint source exceeds bounds".into());
+    if !opened.is_file() || opened.len() == 0 || opened.len() > limit {
+        return Err("opened library source exceeds bounds".into());
     }
     let mut bytes = Vec::new();
-    file.take(MAX_FOOTPRINT_SOURCE_BYTES + 1)
+    file.take(limit + 1)
         .read_to_end(&mut bytes)
         .map_err(|e| e.to_string())?;
-    if bytes.len() as u64 != opened.len() || bytes.len() as u64 > MAX_FOOTPRINT_SOURCE_BYTES {
-        return Err("footprint source changed or exceeded read bounds".into());
+    if bytes.len() as u64 != opened.len() || bytes.len() as u64 > limit {
+        return Err("library source changed or exceeded read bounds".into());
     }
     Ok((bytes.len() as u64, hex::encode(Sha256::digest(bytes))))
 }

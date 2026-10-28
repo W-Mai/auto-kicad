@@ -213,7 +213,7 @@ fn absolute_native_path(value: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-fn canonical_with_missing(path: &Path) -> Result<PathBuf, String> {
+pub(super) fn canonical_with_missing(path: &Path) -> Result<PathBuf, String> {
     let mut suffix = Vec::new();
     let mut current = path;
     loop {

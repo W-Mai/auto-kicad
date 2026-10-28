@@ -1,4 +1,4 @@
-//! Bounded, read-only decoding of native footprint library tables.
+//! Bounded, read-only decoding of native symbol and footprint library tables.
 
 use kiutils_sexpr::{Atom, Node, parse_one};
 use serde::Serialize;
@@ -11,6 +11,20 @@ use std::path::{Path, PathBuf};
 pub const MAX_TABLE_BYTES: usize = 1024 * 1024;
 pub const MAX_TABLE_ENTRIES: usize = 4096;
 const MAX_TABLE_NESTING: usize = 32;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TableKind {
+    Footprint,
+    Symbol,
+}
+impl TableKind {
+    fn tag(self) -> &'static str {
+        match self {
+            Self::Footprint => "fp_lib_table",
+            Self::Symbol => "sym_lib_table",
+        }
+    }
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub enum LibraryFormat {
@@ -97,6 +111,10 @@ pub fn validate_library_component(value: &str) -> Result<(), String> {
 
 /// Read one table without expanding paths or granting access to its entries.
 pub fn read_footprint_library_table(path: &Path) -> Result<LibraryTableFile, String> {
+    read_library_table(path, TableKind::Footprint)
+}
+
+pub(crate) fn read_library_table(path: &Path, kind: TableKind) -> Result<LibraryTableFile, String> {
     if !path.is_absolute() {
         return Err("library table path must be absolute".into());
     }
@@ -133,7 +151,7 @@ pub fn read_footprint_library_table(path: &Path) -> Result<LibraryTableFile, Str
     file.take(MAX_TABLE_BYTES as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(|e| e.to_string())?;
-    let table = parse_footprint_library_table(&bytes)?;
+    let table = parse_library_table(&bytes, kind)?;
     if bytes.len() as u64 != opened.len()
         || fs::canonicalize(path).map_err(|e| e.to_string())? != canonical
     {
@@ -153,6 +171,10 @@ pub fn read_footprint_library_table(path: &Path) -> Result<LibraryTableFile, Str
 
 /// Decode table syntax; URI expansion, trust and inclusion policy are separate.
 pub fn parse_footprint_library_table(bytes: &[u8]) -> Result<FootprintLibraryTable, String> {
+    parse_library_table(bytes, TableKind::Footprint)
+}
+
+fn parse_library_table(bytes: &[u8], kind: TableKind) -> Result<FootprintLibraryTable, String> {
     if bytes.len() > MAX_TABLE_BYTES {
         return Err("library table exceeds byte limit".into());
     }
@@ -160,8 +182,8 @@ pub fn parse_footprint_library_table(bytes: &[u8]) -> Result<FootprintLibraryTab
     let text = std::str::from_utf8(bytes).map_err(|_| "library table is not UTF-8")?;
     let cst = parse_one(text).map_err(|e| format!("invalid library table syntax: {e}"))?;
     let root = list(cst.nodes.first().ok_or("missing library table root")?)?;
-    if atom(root.first().ok_or("missing library table tag")?)? != "fp_lib_table" {
-        return Err("expected fp_lib_table root".into());
+    if atom(root.first().ok_or("missing library table tag")?)? != kind.tag() {
+        return Err(format!("expected {} root", kind.tag()));
     }
     let mut version = None;
     let mut entries = Vec::new();

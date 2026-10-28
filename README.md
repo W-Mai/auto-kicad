@@ -23,6 +23,8 @@ Backend callers can resolve [hierarchical schematic instances and multi-unit com
 
 [Complete schematic ERC capture and comparison](docs/acceptance/schematic-erc.md) retains all diagnostics, exclusions, sheet identities and exact native fields. The backend validates KiCad 10.0.7 reports and detects ignored-check policy changes; full source/context binding and general schematic editing remain unavailable.
 
+[Symbol library context](docs/acceptance/symbol-library-context.md) records effective project/global tables and used library-file content or absence. Revalidation detects library changes even when ERC results remain unchanged.
+
 ## Board workflow
 
 1. Save the PCB and project settings in KiCad.
