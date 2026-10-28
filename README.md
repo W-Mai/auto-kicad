@@ -29,6 +29,8 @@ Backend callers can resolve [hierarchical schematic instances and multi-unit com
 
 [Private schematic audit](docs/acceptance/schematic-audit.md) composes source, configuration and used-library snapshots with native netlist/ERC checks. It retains unresolved library states and detects input drift; the read-only backend does not authorize general schematic edits.
 
+[Logical schematic pin observation](docs/acceptance/schematic-pins.md) matches active unit/body-style pins, common pins and stacked numbers to native net membership. Source identities preserve connectivity across reference renaming; power pins omitted by native component export remain explicitly unproven.
+
 ## Board workflow
 
 1. Save the PCB and project settings in KiCad.

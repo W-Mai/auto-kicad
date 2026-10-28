@@ -16,10 +16,11 @@ pub use execution::NativeExecutionContext;
 pub mod identities;
 mod netlist;
 mod patch;
+pub mod pins;
 
 pub use netlist::{
     NetlistComponent, NetlistDocument, NetlistLimits, NetlistNet, NetlistNode, NetlistRun,
-    NetlistRunner, NetlistRunnerError, NetlistSheet, parse_netlist_xml,
+    NetlistRunner, NetlistRunnerError, NetlistSheet, NetlistUnit, parse_netlist_xml,
 };
 pub use patch::{
     SchematicPatchOutcome, SchematicPatchRejection, SchematicPreviewReceipt,
@@ -781,7 +782,10 @@ fn parse_symbol(items: &[Node]) -> Result<RawSymbol, SchematicParseError> {
             Some("lib_name") => lib_name = Some(required_value(values, "lib_name")?.to_owned()),
             Some("at") => position = Some(parse_position(values)?),
             Some("unit") => unit = Some(parse_u32(required_value(values, "unit")?, "unit")?),
-            Some("body_style") => {
+            Some("body_style" | "convert") => {
+                if body_style.is_some() {
+                    return Err(SchematicParseError::InvalidField("duplicate body style"));
+                }
                 body_style = Some(parse_u32(
                     required_value(values, "body_style")?,
                     "body_style",
@@ -1404,6 +1408,7 @@ mod tests {
         footprint: Option<&str>,
     ) -> NetlistComponent {
         NetlistComponent {
+            units: None,
             reference: reference.into(),
             value: "10k".into(),
             footprint: footprint.map(str::to_owned),

@@ -63,6 +63,14 @@ pub struct NetlistComponent {
     pub sheet_uuid_path: String,
     pub library: String,
     pub library_part: String,
+    pub units: Option<Vec<NetlistUnit>>,
+}
+
+/// Ordered native library unit slots, including units not placed in the schematic.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NetlistUnit {
+    pub name: String,
+    pub pins: Vec<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -414,6 +422,7 @@ struct ComponentBuilder {
     sheet_uuid_path: Option<String>,
     library: Option<String>,
     library_part: Option<String>,
+    units: Option<Vec<NetlistUnit>>,
 }
 
 struct NetBuilder {
@@ -737,6 +746,67 @@ fn handle_start(
                 ..ComponentBuilder::default()
             });
         }
+        b"units"
+            if stack.iter().map(Vec::as_slice).eq([
+                b"export".as_slice(),
+                b"components",
+                b"comp",
+            ]) =>
+        {
+            let builder = component
+                .as_mut()
+                .ok_or(NetlistParseError::Schema("unit metadata without component"))?;
+            if builder.units.replace(Vec::new()).is_some() {
+                return Err(NetlistParseError::Schema("duplicate units section"));
+            }
+        }
+        b"unit"
+            if stack.iter().map(Vec::as_slice).eq([
+                b"export".as_slice(),
+                b"components",
+                b"comp",
+                b"units",
+            ]) =>
+        {
+            let units = component
+                .as_mut()
+                .and_then(|c| c.units.as_mut())
+                .ok_or(NetlistParseError::Schema("unit without units section"))?;
+            if units.len() >= 4096 {
+                return Err(NetlistParseError::CountLimit {
+                    kind: "unit",
+                    limit: 4096,
+                });
+            }
+            units.push(NetlistUnit {
+                name: required_attribute(event, b"name", limits)?,
+                pins: Vec::new(),
+            });
+        }
+        b"pin"
+            if stack.iter().map(Vec::as_slice).eq([
+                b"export".as_slice(),
+                b"components",
+                b"comp",
+                b"units",
+                b"unit",
+                b"pins",
+            ]) =>
+        {
+            if *node_count >= limits.max_nodes {
+                return Err(NetlistParseError::CountLimit {
+                    kind: "pin metadata/node",
+                    limit: limits.max_nodes,
+                });
+            }
+            let unit = component
+                .as_mut()
+                .and_then(|c| c.units.as_mut())
+                .and_then(|u| u.last_mut())
+                .ok_or(NetlistParseError::Schema("pin without unit"))?;
+            unit.pins.push(required_attribute(event, b"num", limits)?);
+            *node_count += 1;
+        }
         b"footprint" if component.is_some() => {
             component.as_mut().expect("checked above").footprint = Some(String::new());
         }
@@ -803,6 +873,7 @@ fn handle_end(
                 });
             }
             components.push(NetlistComponent {
+                units: builder.units,
                 reference: builder.reference,
                 value: builder
                     .value
@@ -938,6 +1009,32 @@ mod tests {
     <net code="1" name="N1"><node ref="R1" pin="1" pinfunction="in" pintype="input"/></net>
   </nets>
 </export>"#;
+
+    #[test]
+    fn unit_metadata_preserves_order_and_shares_the_pin_node_budget() {
+        let units = r#"<units><unit name="Custom B"><pins><pin num="2"/></pins></unit><unit name="Custom A"><pins><pin num="1"/></pins></unit></units>"#;
+        let xml = XML.replacen(
+            "<tstamps>u2</tstamps>",
+            &format!("<tstamps>u2</tstamps>{units}"),
+            1,
+        );
+        let parsed = parse_netlist_xml(xml.as_bytes(), NetlistLimits::default()).unwrap();
+        let comp = parsed
+            .components
+            .iter()
+            .find(|c| c.reference == "R2")
+            .unwrap();
+        let metadata = comp.units.as_ref().unwrap();
+        assert_eq!(metadata[0].name, "Custom B");
+        assert_eq!(metadata[1].pins, ["1"]);
+        let duplicate = xml.replacen(units, &format!("{units}{units}"), 1);
+        assert!(parse_netlist_xml(duplicate.as_bytes(), NetlistLimits::default()).is_err());
+        let limits = NetlistLimits {
+            max_nodes: 4,
+            ..NetlistLimits::default()
+        };
+        assert!(parse_netlist_xml(xml.as_bytes(), limits).is_err());
+    }
 
     fn limited_limits() -> NetlistLimits {
         NetlistLimits {

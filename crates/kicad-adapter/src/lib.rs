@@ -3178,6 +3178,7 @@ mod tests {
             export_version: "D".to_owned(),
             sheets: Vec::new(),
             components: vec![NetlistComponent {
+                units: None,
                 reference: "R1".to_owned(),
                 value: "10k".to_owned(),
                 footprint: Some("Resistor_SMD:R_0603".to_owned()),

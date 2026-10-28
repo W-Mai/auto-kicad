@@ -56,7 +56,7 @@ pub enum IdentityError {
 fn invalid(message: &'static str) -> IdentityError {
     IdentityError::Invalid(message)
 }
-fn uuid(value: &str) -> bool {
+pub(crate) fn uuid(value: &str) -> bool {
     value.len() == 36
         && value.bytes().enumerate().all(|(i, c)| {
             if matches!(i, 8 | 13 | 18 | 23) {
@@ -387,6 +387,7 @@ mod tests {
         let components = [("U1", FIRST), ("U2", SECOND)]
             .into_iter()
             .map(|(reference, path)| NetlistComponent {
+                units: None,
                 reference: reference.into(),
                 value: "OpAmp".into(),
                 footprint: None,

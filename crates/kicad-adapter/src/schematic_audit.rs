@@ -355,6 +355,7 @@ pub struct SchematicAudit {
     source_config_names: Vec<PathBuf>,
     private_config: PathBuf,
     private_config_names: Vec<PathBuf>,
+    initialized_local_preferences: Option<PathBuf>,
     policy: SchematicAuditPolicy,
     symbols: SymbolCatalog,
     symbol_context: SymbolLibraryContext,
@@ -367,6 +368,7 @@ pub struct SchematicAudit {
     netlist: NetlistDocument,
     erc: CompleteErcReport,
     identities: SchematicIdentityIndex,
+    pins: kicad_schematic::pins::SchematicPinIndex,
     revision: String,
 }
 impl SchematicAudit {
@@ -381,6 +383,9 @@ impl SchematicAudit {
     }
     pub fn identities(&self) -> &SchematicIdentityIndex {
         &self.identities
+    }
+    pub fn pins(&self) -> &kicad_schematic::pins::SchematicPinIndex {
+        &self.pins
     }
     pub fn private_root(&self) -> &Path {
         self.owner.path()
@@ -423,7 +428,7 @@ impl SchematicAudit {
     }
     pub fn evidence(&self) -> Result<Value, String> {
         Ok(
-            serde_json::json!({"revision":self.revision,"source":self.source,"private_inputs":self.private_inputs,"private_trees":self.private_trees,"symbols":self.symbol_context,"footprints":self.footprint_context,"execution":self.runner.execution_context().ok_or("missing context")?.digest(),"erc":self.erc,"components":self.identities.components().len(),"sheets":self.identities.sheets().len(),"units":self.identities.units().len(),"nets":self.netlist.nets.len()}),
+            serde_json::json!({"revision":self.revision,"source":self.source,"private_inputs":self.private_inputs,"private_trees":self.private_trees,"initialized_local_preferences":self.initialized_local_preferences,"symbols":self.symbol_context,"footprints":self.footprint_context,"execution":self.runner.execution_context().ok_or("missing context")?.digest(),"erc":self.erc,"components":self.identities.components().len(),"sheets":self.identities.sheets().len(),"units":self.identities.units().len(),"nets":self.netlist.nets.len(),"logical_pins":self.pins.pins().len(),"unexported_source_pins":self.pins.unexported().len()}),
         )
     }
 
@@ -663,6 +668,13 @@ impl SchematicAudit {
             .map_err(|e| e.to_string())?;
         private_inputs.verify()?;
         source.verify()?;
+        let preferences = copied_source.with_extension("kicad_prl");
+        let initialized_local_preferences = bind_initialized_preferences(
+            &mut private_inputs,
+            &mut private_trees,
+            &private_project,
+            &preferences,
+        )?;
         let private_config_names = config_names(&private_config)?;
         for path in &private_config_names {
             private_inputs.track(path)?;
@@ -681,6 +693,20 @@ impl SchematicAudit {
         }
         let identities =
             SchematicIdentityIndex::resolve(&parsed, &netlist).map_err(|e| e.to_string())?;
+        let pin_sources = parsed
+            .files
+            .iter()
+            .map(|file| {
+                let bytes = source
+                    .files
+                    .get(&policy.project.join(&file.artifact.relative_path))
+                    .and_then(|f| f.bytes.as_deref())
+                    .ok_or("missing pinned schematic bytes")?;
+                Ok((file.artifact.relative_path.clone(), bytes))
+            })
+            .collect::<Result<BTreeMap<_, _>, String>>()?;
+        let pins =
+            kicad_schematic::pins::SchematicPinIndex::resolve(&parsed, &netlist, &pin_sources)?;
         let revision = hash(
             &serde_json::to_vec(&(
                 source.digest()?,
@@ -703,6 +729,7 @@ impl SchematicAudit {
             source_config_names,
             private_config,
             private_config_names,
+            initialized_local_preferences,
             policy: policy.clone(),
             symbols,
             symbol_context: sym_context,
@@ -715,12 +742,40 @@ impl SchematicAudit {
             netlist,
             erc,
             identities,
+            pins,
             revision,
         };
         result.verify()?;
         Ok(result)
     }
 }
+fn bind_initialized_preferences(
+    inputs: &mut Inputs,
+    trees: &mut BTreeMap<PathBuf, BTreeSet<PathBuf>>,
+    project: &Path,
+    preferences: &Path,
+) -> Result<Option<PathBuf>, String> {
+    let expected = trees
+        .get_mut(project)
+        .ok_or("missing private project namespace")?;
+    let actual = tree_names(project)?;
+    let initialized = !expected.contains(preferences) && actual.contains(preferences);
+    if initialized {
+        if !preferences.starts_with(project)
+            || preferences.extension().and_then(|s| s.to_str()) != Some("kicad_prl")
+            || !preferences.is_file()
+        {
+            return Err("invalid native local-preference initialization".into());
+        }
+        inputs.track(preferences)?;
+        expected.insert(preferences.into());
+    }
+    if &actual != expected {
+        return Err("native initialization changed the private project namespace".into());
+    }
+    Ok(initialized.then(|| preferences.to_owned()))
+}
+
 fn tree_names(root: &Path) -> Result<BTreeSet<PathBuf>, String> {
     let mut names = BTreeSet::new();
     let mut stack = vec![root.to_owned()];
@@ -794,6 +849,26 @@ mod tests {
             std::os::unix::fs::symlink(&root, root.join("cycle")).unwrap();
             assert!(tree_names(&root).is_err());
         }
+    }
+
+    #[test]
+    fn initialization_only_admits_the_named_absent_native_preferences() {
+        let owned = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(owned.path()).unwrap();
+        let preferences = root.join("board.kicad_prl");
+        let mut trees = BTreeMap::from([(root.clone(), tree_names(&root).unwrap())]);
+        let mut inputs = Inputs::default();
+        fs::write(&preferences, b"{}").unwrap();
+        assert_eq!(
+            bind_initialized_preferences(&mut inputs, &mut trees, &root, &preferences).unwrap(),
+            Some(preferences.clone())
+        );
+        fs::write(&preferences, b"changed").unwrap();
+        assert!(inputs.verify().is_err());
+        fs::write(root.join("unexpected.kicad_sch"), b"data").unwrap();
+        assert!(
+            bind_initialized_preferences(&mut inputs, &mut trees, &root, &preferences).is_err()
+        );
     }
 
     #[test]
