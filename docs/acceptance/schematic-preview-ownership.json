@@ -1,0 +1,24 @@
+{
+  "feature": "owned schematic preview evidence",
+  "native_version": "10.0.7",
+  "retained_preview_survives_planning_scope": true,
+  "matching_evidence_moves_to_worker": true,
+  "matching_handles_share_permanent_invalidation": true,
+  "restored_input_does_not_revive_handles": true,
+  "candidate_audit_retains_generated_source_tree": true,
+  "private_directories_removed_after_last_owner": true,
+  "thread_safety_compile_contract": "Send + Sync + static",
+  "native_recovery_and_stdio_mcp_regression": true,
+  "multichannel_preview_regression": {
+    "affected_instances": 4,
+    "baseline_errors": 4,
+    "baseline_warnings": 32,
+    "complete_erc_and_connectivity_preserved": true,
+    "source_configuration_library_drift_controls": true
+  },
+  "quality": {"passed": 536, "failed": 0, "ignored": 15},
+  "gui_launched": false,
+  "general_schematic_publication": false,
+  "user_approval": false,
+  "evidence": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-owned-preview"
+}

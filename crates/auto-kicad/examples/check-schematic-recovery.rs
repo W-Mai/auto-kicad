@@ -134,9 +134,44 @@ fn main() -> Result<()> {
     )?;
     let baseline_private = audit.private_root().to_owned();
     let preview_private = preview.observed().private_root().to_owned();
+    let retained_candidate_audit = preview.observed().clone();
+    let retained = matched.clone();
+    let second = matched.clone();
+    let weak = std::sync::Arc::downgrade(&preview);
     drop(matched);
     drop(preview);
     drop(audit);
+    if !baseline_private.exists() || !preview_private.exists() || weak.upgrade().is_none() {
+        return Err("retained matching evidence lost its source/private snapshots".into());
+    }
+    let retained = std::thread::spawn(move || -> std::result::Result<_, String> {
+        retained.verify()?;
+        Ok(retained)
+    })
+    .join()
+    .map_err(|_| "owned preview worker panicked")??;
+    let original_bytes = fs::read(&source)?;
+    let mut changed_bytes = original_bytes.clone();
+    changed_bytes.extend_from_slice(b"\n");
+    fs::write(&source, changed_bytes)?;
+    let drift_rejected = retained.verify().is_err();
+    fs::write(&source, &original_bytes)?;
+    if !drift_rejected || retained.verify().is_ok() || second.verify().is_ok() {
+        return Err("preview invalidation was not shared and permanent after restoration".into());
+    }
+    drop(retained);
+    if !baseline_private.exists() || !preview_private.exists() {
+        return Err("snapshots were removed while another matching handle remained".into());
+    }
+    drop(second);
+    if weak.upgrade().is_some() {
+        return Err("native preview ownership leaked after final matching handle drop".into());
+    }
+    if baseline_private.exists() || !preview_private.exists() {
+        return Err("independent candidate audit did not retain exactly its own snapshots".into());
+    }
+    retained_candidate_audit.verify()?;
+    drop(retained_candidate_audit);
     if baseline_private.exists() || preview_private.exists() {
         return Err("baseline/preview private cleanup failed".into());
     }
@@ -205,7 +240,10 @@ fn main() -> Result<()> {
     let result = json!({"passed":true,"native_version":"10.0.7","production_stdio_mcp":true,"existing_value_edit_observed_natively":true,
         "new_child_restored_to_absence":true,"complete_native_baseline_restored":true,"source_and_configuration_restored":true,
         "cross_state_directory_write_block":true,"wrong_approval_restart_and_replay_rejected":true,"private_directories_removed":true,
-        "gui_launched":false,"general_schematic_publisher_implemented":false});
+        "gui_launched":false,"general_schematic_publisher_implemented":false,
+        "retained_preview_survives_planning_scope":true,"matching_evidence_moves_to_worker":true,
+        "all_handles_share_permanent_invalidation":true,"snapshots_removed_after_last_owner":true,
+        "candidate_audit_retains_generated_source_tree":true});
     fs::write(
         output.join("result.json"),
         serde_json::to_vec_pretty(&result)?,

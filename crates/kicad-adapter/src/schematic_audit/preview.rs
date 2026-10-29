@@ -12,11 +12,9 @@ pub use expectations::{
 };
 
 /// Immutable typed bytes and complete native before/after evidence. This cannot publish files.
-pub struct SchematicEditPreview<'a> {
-    source: &'a SchematicAudit,
-    // Drop the audit referencing the snapshot before deleting its source tree.
+pub struct SchematicEditPreview {
+    source: SchematicAudit,
     observed: SchematicAudit,
-    _snapshot: tempfile::TempDir,
     candidate: SchematicCandidate,
     before_connectivity: SchematicConnectivityAudit,
     after_connectivity: SchematicConnectivityAudit,
@@ -30,7 +28,7 @@ impl SchematicAudit {
     /// Resolve creation evidence through the same effective catalog as the native baseline.
     pub fn symbol_definition(&self, identifier: &str) -> Result<SymbolDefinitionEvidence, String> {
         self.verify()?;
-        let resolved = self.symbols.resolve_definition(identifier)?;
+        let resolved = self.inner.symbols.resolve_definition(identifier)?;
         self.verify()?;
         Ok(SymbolDefinitionEvidence {
             lib_id: resolved.identifier,
@@ -45,24 +43,26 @@ impl SchematicAudit {
     pub fn preview_edits(
         &self,
         edits: &[SchematicEdit],
-    ) -> Result<SchematicEditPreview<'_>, String> {
+    ) -> Result<Arc<SchematicEditPreview>, String> {
         self.verify()?;
         let sources = self
+            .inner
             .parsed
             .files
             .iter()
             .map(|file| {
                 let bytes = self
+                    .inner
                     .source
                     .files
-                    .get(&self.policy.project.join(&file.artifact.relative_path))
+                    .get(&self.inner.policy.project.join(&file.artifact.relative_path))
                     .and_then(|input| input.bytes.as_deref())
                     .ok_or("missing captured schematic source")?;
                 Ok((file.artifact.relative_path.clone(), bytes))
             })
             .collect::<Result<BTreeMap<_, _>, String>>()?;
         verify_edit_sources(self, edits)?;
-        let candidate = compile_edits(&self.parsed, &self.netlist, &sources, edits)?;
+        let candidate = compile_edits(&self.inner.parsed, &self.inner.netlist, &sources, edits)?;
         let before_connectivity = self.observe_pin_connectivity()?;
         let snapshot = tempfile::Builder::new()
             .prefix("auto-kicad-schematic-preview-")
@@ -71,8 +71,8 @@ impl SchematicAudit {
         let root = fs::canonicalize(snapshot.path()).map_err(|error| error.to_string())?;
         let project = root.join("project");
         // Capture only inputs already selected by the baseline audit. Unrelated files are not copied.
-        for (path, input) in &self.source.files {
-            if let Ok(relative) = path.strip_prefix(&self.policy.project)
+        for (path, input) in &self.inner.source.files {
+            if let Ok(relative) = path.strip_prefix(&self.inner.policy.project)
                 && let Some(bytes) = &input.bytes
                 && path.file_name().and_then(|name| name.to_str()) != Some("sym-lib-table")
                 && path.file_name().and_then(|name| name.to_str()) != Some("fp-lib-table")
@@ -85,9 +85,10 @@ impl SchematicAudit {
                 write_new(&project.join(relative), bytes)?;
             }
         }
-        let schematic = project.join(&self.parsed.root_relative_path);
+        let schematic = project.join(&self.inner.parsed.root_relative_path);
         let table_root = schematic.parent().ok_or("missing schematic parent")?;
         let original_table_root = self
+            .inner
             .policy
             .schematic
             .parent()
@@ -95,7 +96,7 @@ impl SchematicAudit {
         write_new(
             &table_root.join("sym-lib-table"),
             relocate(
-                self.symbols.effective_rows()?,
+                self.inner.symbols.effective_rows()?,
                 &BTreeMap::new(),
                 original_table_root,
                 TableKind::Symbol,
@@ -105,7 +106,7 @@ impl SchematicAudit {
         write_new(
             &table_root.join("fp-lib-table"),
             relocate(
-                self.footprints.effective_rows()?,
+                self.inner.footprints.effective_rows()?,
                 &BTreeMap::new(),
                 original_table_root,
                 TableKind::Footprint,
@@ -113,50 +114,53 @@ impl SchematicAudit {
             .as_bytes(),
         )?;
         // Exact original project resources are allowed, with source bytes checked by both audits.
-        let mut extra_roots = self.policy.extra_roots.clone();
-        extra_roots.push(self.policy.project.clone());
+        let mut extra_roots = self.inner.policy.extra_roots.clone();
+        extra_roots.push(self.inner.policy.project.clone());
         let policy = SchematicAuditPolicy::new(
             &project,
             &schematic,
-            &self.policy.configuration,
-            &self.policy.symbols,
-            &self.policy.footprints,
+            &self.inner.policy.configuration,
+            &self.inner.policy.symbols,
+            &self.inner.policy.footprints,
             &extra_roots,
         )?;
-        let observed = SchematicAudit::prepare(&policy)?;
-        if observed.parsed != *candidate.parsed() {
+        let mut observed = SchematicAudit::prepare(&policy)?;
+        Arc::get_mut(&mut observed.inner)
+            .ok_or("candidate audit unexpectedly shared during initialization")?
+            ._source_owner = Some(Arc::new(snapshot));
+        if observed.inner.parsed != *candidate.parsed() {
             return Err("native candidate source differs from compiled hierarchy".into());
         }
         let after_connectivity = observed.observe_pin_connectivity()?;
         let erc_delta = self
+            .inner
             .erc
-            .compare(&observed.erc)
+            .compare(&observed.inner.erc)
             .map_err(|error| error.to_string())?;
         self.verify()?;
         observed.verify()?;
         verify_edit_sources(self, edits)?;
         let evidence = serde_json::json!({
             "schema_version": 1,
-            "source_revision": self.revision,
+            "source_revision": self.inner.revision,
             "source_artifacts": candidate.source_revision(),
             "candidate_artifacts": candidate.parsed().revision,
             "operation_digest": hash(format!("{:?}", candidate.changes()).as_bytes()),
             "source_context": self.evidence()?,
             "candidate_context": observed.evidence()?,
-            "native_before": format!("{:?}", self.netlist),
-            "native_after": format!("{:?}", observed.netlist),
-            "erc_before": self.erc,
-            "erc_after": observed.erc,
+            "native_before": format!("{:?}", self.inner.netlist),
+            "native_after": format!("{:?}", observed.inner.netlist),
+            "erc_before": self.inner.erc,
+            "erc_after": observed.inner.erc,
             "erc_delta": erc_delta,
             "connectivity_before": connectivity_json(before_connectivity.connectivity()),
             "connectivity_after": connectivity_json(after_connectivity.connectivity()),
             "publication_authorized": false,
         });
         let digest = hash(&serde_json::to_vec(&evidence).map_err(|error| error.to_string())?);
-        Ok(SchematicEditPreview {
-            source: self,
+        Ok(Arc::new(SchematicEditPreview {
+            source: self.clone(),
             observed,
-            _snapshot: snapshot,
             candidate,
             before_connectivity,
             after_connectivity,
@@ -164,11 +168,11 @@ impl SchematicAudit {
             evidence,
             digest,
             valid: AtomicBool::new(true),
-        })
+        }))
     }
 }
 
-impl SchematicEditPreview<'_> {
+impl SchematicEditPreview {
     pub fn candidate(&self) -> &SchematicCandidate {
         &self.candidate
     }
@@ -211,7 +215,7 @@ impl SchematicEditPreview<'_> {
                         action: change.action.clone(),
                     })
                     .collect::<Vec<_>>();
-                verify_edit_sources(self.source, &edits)
+                verify_edit_sources(&self.source, &edits)
             });
         if result.is_err() {
             self.valid.store(false, Ordering::Release);
@@ -244,10 +248,13 @@ fn verify_edit_sources(audit: &SchematicAudit, edits: &[SchematicEdit]) -> Resul
                 let (nickname, entry_name) = footprint
                     .split_once(':')
                     .ok_or("invalid footprint identifier")?;
-                let current = audit.footprints.resolve(&FootprintLibraryIdentifier {
-                    nickname: nickname.into(),
-                    entry_name: entry_name.into(),
-                })?;
+                let current = audit
+                    .inner
+                    .footprints
+                    .resolve(&FootprintLibraryIdentifier {
+                        nickname: nickname.into(),
+                        entry_name: entry_name.into(),
+                    })?;
                 if current.catalog_digest != evidence.catalog_digest
                     || current.source_digest != evidence.source_digest
                 {
@@ -285,4 +292,21 @@ fn connectivity_json(connectivity: &PinConnectivity) -> Value {
         })).collect::<Vec<_>>(),
         "isolated_no_connect": connectivity.isolated_no_connect().iter().map(pin_json).collect::<Vec<_>>(),
     })
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+
+    #[test]
+    fn retained_schematic_evidence_is_owned_and_thread_safe() {
+        fn require_owned<T: Send + Sync + 'static>() {}
+        fn require_clone<T: Clone>() {}
+        require_owned::<SchematicAudit>();
+        require_owned::<SchematicEditPreview>();
+        require_owned::<MatchedSchematicPreview>();
+        require_clone::<SchematicAudit>();
+        require_clone::<Arc<SchematicEditPreview>>();
+        require_clone::<MatchedSchematicPreview>();
+    }
 }

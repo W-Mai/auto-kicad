@@ -24,6 +24,7 @@ use std::{
     fs::{self, OpenOptions},
     io::{Read, Write},
     path::{Component, Path, PathBuf},
+    sync::Arc,
 };
 
 const MAX_FILE: u64 = 32 * 1024 * 1024;
@@ -370,7 +371,12 @@ impl SchematicConnectivityAudit {
 }
 
 /// Native observation only. Pin-level proof and write approval are separate contracts.
+#[derive(Clone)]
 pub struct SchematicAudit {
+    inner: Arc<SchematicAuditState>,
+}
+
+struct SchematicAuditState {
     owner: tempfile::TempDir,
     source: Inputs,
     private_inputs: Inputs,
@@ -393,60 +399,68 @@ pub struct SchematicAudit {
     identities: SchematicIdentityIndex,
     pins: kicad_schematic::pins::SchematicPinIndex,
     revision: String,
+    // Keep internally generated source trees until every audit owner is released.
+    _source_owner: Option<Arc<tempfile::TempDir>>,
 }
 impl SchematicAudit {
     pub fn revision(&self) -> &str {
-        &self.revision
+        &self.inner.revision
     }
     pub fn netlist(&self) -> &NetlistDocument {
-        &self.netlist
+        &self.inner.netlist
     }
     pub fn footprint_catalog_digest(&self) -> &str {
-        self.footprints.digest()
+        self.inner.footprints.digest()
     }
     pub fn erc(&self) -> &CompleteErcReport {
-        &self.erc
+        &self.inner.erc
     }
     pub fn identities(&self) -> &SchematicIdentityIndex {
-        &self.identities
+        &self.inner.identities
     }
     pub fn pins(&self) -> &kicad_schematic::pins::SchematicPinIndex {
-        &self.pins
+        &self.inner.pins
     }
     pub fn private_root(&self) -> &Path {
-        self.owner.path()
+        self.inner.owner.path()
     }
     pub fn verify(&self) -> Result<(), String> {
-        self.source.verify()?;
-        self.private_inputs.verify()?;
-        self.symbols.verify(&self.symbol_context)?;
-        if self.footprints.schematic_files(&self.footprint_ids)? != self.footprint_context {
+        self.inner.source.verify()?;
+        self.inner.private_inputs.verify()?;
+        self.inner.symbols.verify(&self.inner.symbol_context)?;
+        if self
+            .inner
+            .footprints
+            .schematic_files(&self.inner.footprint_ids)?
+            != self.inner.footprint_context
+        {
             return Err("schematic footprint context changed".into());
         }
-        for (root, expected) in &self.private_trees {
+        for (root, expected) in &self.inner.private_trees {
             if &tree_names(root)? != expected {
                 return Err("private project or resource file set changed".into());
             }
         }
-        if config_names(&self.source_config)? != self.source_config_names
-            || config_names(&self.private_config)? != self.private_config_names
+        if config_names(&self.inner.source_config)? != self.inner.source_config_names
+            || config_names(&self.inner.private_config)? != self.inner.private_config_names
         {
             return Err("native configuration file set changed".into());
         }
-        self.runner
+        self.inner
+            .runner
             .execution_context()
             .ok_or("missing fixed execution context")?
             .verify()
             .map_err(|e| e.to_string())?;
         if load_schematic_project(
-            &self.policy.project,
-            &self.policy.schematic,
+            &self.inner.policy.project,
+            &self.inner.policy.schematic,
             "10.0.7",
             1,
             Limits::default(),
         )
         .map_err(|e| e.to_string())?
-            != self.parsed
+            != self.inner.parsed
         {
             return Err("source hierarchy or editor locks changed".into());
         }
@@ -456,28 +470,33 @@ impl SchematicAudit {
     pub fn observe_pin_connectivity(&self) -> Result<SchematicConnectivityAudit, String> {
         self.verify()?;
         let sources = self
+            .inner
             .parsed
             .files
             .iter()
             .map(|file| {
                 let bytes = self
+                    .inner
                     .source
                     .files
-                    .get(&self.policy.project.join(&file.artifact.relative_path))
+                    .get(&self.inner.policy.project.join(&file.artifact.relative_path))
                     .and_then(|f| f.bytes.as_deref())
                     .ok_or("missing bound probe source bytes")?;
                 Ok((file.artifact.relative_path.clone(), bytes))
             })
             .collect::<Result<BTreeMap<_, _>, String>>()?;
-        let plan =
-            kicad_schematic::probes::PinProbePlan::prepare(&self.parsed, &self.netlist, &sources)?;
+        let plan = kicad_schematic::probes::PinProbePlan::prepare(
+            &self.inner.parsed,
+            &self.inner.netlist,
+            &sources,
+        )?;
         if plan.probe_count() == 0 {
-            let connectivity = plan.validate(&self.netlist)?;
+            let connectivity = plan.validate(&self.inner.netlist)?;
             self.verify()?;
             return Ok(SchematicConnectivityAudit {
                 connectivity,
-                native: self.netlist.clone(),
-                evidence: serde_json::json!({"source_revision":self.revision,"probe_count":0,"original_native_reused":true}),
+                native: self.inner.netlist.clone(),
+                evidence: serde_json::json!({"source_revision":self.inner.revision,"probe_count":0,"original_native_reused":true}),
             });
         }
         let owner = tempfile::Builder::new()
@@ -487,10 +506,11 @@ impl SchematicAudit {
         let root = fs::canonicalize(owner.path()).map_err(|e| e.to_string())?;
         let project = root.join("project");
         let configuration = root.join("config");
-        let original_project = fs::canonicalize(self.owner.path())
+        let original_project = fs::canonicalize(self.inner.owner.path())
             .map_err(|e| e.to_string())?
             .join("project");
         let names = self
+            .inner
             .private_trees
             .get(&original_project)
             .ok_or("missing original private namespace")?;
@@ -504,6 +524,7 @@ impl SchematicAudit {
                 let bytes = match plan.files().get(name) {
                     Some(bytes) => bytes.as_slice(),
                     None => self
+                        .inner
                         .private_inputs
                         .files
                         .get(path)
@@ -515,8 +536,9 @@ impl SchematicAudit {
                 inputs.track(&target)?;
             }
         }
-        for path in &self.private_config_names {
+        for path in &self.inner.private_config_names {
             let bytes = self
+                .inner
                 .private_inputs
                 .files
                 .get(path)
@@ -531,11 +553,12 @@ impl SchematicAudit {
         }
         let expected_tree = tree_names(&project)?;
         let runner = self
+            .inner
             .runner
             .clone()
             .freeze_context(Some(&configuration))
             .map_err(|e| e.to_string())?;
-        let schematic = project.join(&self.parsed.root_relative_path);
+        let schematic = project.join(&self.inner.parsed.root_relative_path);
         let first = runner
             .run(&project, &schematic)
             .map_err(|e| e.to_string())?
@@ -563,7 +586,7 @@ impl SchematicAudit {
         if tree_names(&project)? != expected_tree || config_names(&config)? != config_files {
             return Err("probe namespace changed during validation".into());
         }
-        let evidence = serde_json::json!({"source_revision":self.revision,"probe_count":plan.probe_count(),"candidate_files":plan.files().iter().map(|(name,bytes)|(name.clone(),hash(bytes))).collect::<BTreeMap<_,_>>(),"native_digest":hash(format!("{native:?}").as_bytes()),"private_inputs":inputs,"execution":runner.execution_context().ok_or("missing probe execution context")?.digest(),"repeated_native_equal":true,"original_erc_retained":true});
+        let evidence = serde_json::json!({"source_revision":self.inner.revision,"probe_count":plan.probe_count(),"candidate_files":plan.files().iter().map(|(name,bytes)|(name.clone(),hash(bytes))).collect::<BTreeMap<_,_>>(),"native_digest":hash(format!("{native:?}").as_bytes()),"private_inputs":inputs,"execution":runner.execution_context().ok_or("missing probe execution context")?.digest(),"repeated_native_equal":true,"original_erc_retained":true});
         drop(owner);
         if root.exists() {
             return Err("private probe directory was not removed".into());
@@ -577,7 +600,7 @@ impl SchematicAudit {
 
     pub fn evidence(&self) -> Result<Value, String> {
         Ok(
-            serde_json::json!({"revision":self.revision,"source":self.source,"private_inputs":self.private_inputs,"private_trees":self.private_trees,"initialized_local_preferences":self.initialized_local_preferences,"symbols":self.symbol_context,"footprints":self.footprint_context,"execution":self.runner.execution_context().ok_or("missing context")?.digest(),"erc":self.erc,"components":self.identities.components().len(),"sheets":self.identities.sheets().len(),"units":self.identities.units().len(),"nets":self.netlist.nets.len(),"logical_pins":self.pins.pins().len(),"unexported_source_pins":self.pins.unexported().len()}),
+            serde_json::json!({"revision":self.inner.revision,"source":self.inner.source,"private_inputs":self.inner.private_inputs,"private_trees":self.inner.private_trees,"initialized_local_preferences":self.inner.initialized_local_preferences,"symbols":self.inner.symbol_context,"footprints":self.inner.footprint_context,"execution":self.inner.runner.execution_context().ok_or("missing context")?.digest(),"erc":self.inner.erc,"components":self.inner.identities.components().len(),"sheets":self.inner.identities.sheets().len(),"units":self.inner.identities.units().len(),"nets":self.inner.netlist.nets.len(),"logical_pins":self.inner.pins.pins().len(),"unexported_source_pins":self.inner.pins.unexported().len()}),
         )
     }
 
@@ -871,28 +894,31 @@ impl SchematicAudit {
             .map_err(|e| e.to_string())?,
         );
         let result = Self {
-            owner,
-            source,
-            private_inputs,
-            source_config,
-            source_config_names,
-            private_config,
-            private_config_names,
-            initialized_local_preferences,
-            policy: policy.clone(),
-            symbols,
-            symbol_context: sym_context,
-            footprints,
-            footprint_context: fp_context,
-            footprint_ids: ids,
-            private_trees,
-            parsed,
-            runner,
-            netlist,
-            erc,
-            identities,
-            pins,
-            revision,
+            inner: Arc::new(SchematicAuditState {
+                owner,
+                source,
+                private_inputs,
+                source_config,
+                source_config_names,
+                private_config,
+                private_config_names,
+                initialized_local_preferences,
+                policy: policy.clone(),
+                symbols,
+                symbol_context: sym_context,
+                footprints,
+                footprint_context: fp_context,
+                footprint_ids: ids,
+                private_trees,
+                parsed,
+                runner,
+                netlist,
+                erc,
+                identities,
+                pins,
+                revision,
+                _source_owner: None,
+            }),
         };
         result.verify()?;
         Ok(result)

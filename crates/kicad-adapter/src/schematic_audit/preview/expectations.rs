@@ -44,13 +44,14 @@ pub struct SchematicEditExpectation {
 }
 
 /// Constructed only after exact expectation matching. This is not a user approval or a writer.
-pub struct MatchedSchematicPreview<'preview, 'source> {
-    preview: &'preview SchematicEditPreview<'source>,
-    evidence: Value,
+#[derive(Clone)]
+pub struct MatchedSchematicPreview {
+    preview: Arc<SchematicEditPreview>,
+    evidence: Arc<Value>,
     digest: String,
 }
 
-impl MatchedSchematicPreview<'_, '_> {
+impl MatchedSchematicPreview {
     pub fn verify(&self) -> Result<(), String> {
         self.preview.verify()
     }
@@ -62,12 +63,12 @@ impl MatchedSchematicPreview<'_, '_> {
     }
 }
 
-impl<'source> SchematicEditPreview<'source> {
+impl SchematicEditPreview {
     /// Require the complete candidate to equal an explicit change applied to the baseline.
-    pub fn match_expectations<'preview>(
-        &'preview self,
+    pub fn match_expectations(
+        self: &Arc<Self>,
         expected: &SchematicEditExpectation,
-    ) -> Result<MatchedSchematicPreview<'preview, 'source>, String> {
+    ) -> Result<MatchedSchematicPreview, String> {
         self.verify()?;
         let before = State::new(
             self.connectivity_before().nets(),
@@ -94,17 +95,20 @@ impl<'source> SchematicEditPreview<'source> {
         }
         let sources = self
             .source
+            .inner
             .parsed
             .files
             .iter()
             .map(|file| {
                 let bytes = self
                     .source
+                    .inner
                     .source
                     .files
                     .get(
                         &self
                             .source
+                            .inner
                             .policy
                             .project
                             .join(&file.artifact.relative_path),
@@ -143,9 +147,9 @@ impl<'source> SchematicEditPreview<'source> {
         }
         self.verify()?;
         Ok(MatchedSchematicPreview {
-            preview: self,
+            preview: Arc::clone(self),
             digest: hash(&encoded),
-            evidence,
+            evidence: Arc::new(evidence),
         })
     }
 
@@ -156,17 +160,20 @@ impl<'source> SchematicEditPreview<'source> {
         self.verify()?;
         let before = self
             .source
+            .inner
             .parsed
             .files
             .iter()
             .map(|file| {
                 let bytes = self
                     .source
+                    .inner
                     .source
                     .files
                     .get(
                         &self
                             .source
+                            .inner
                             .policy
                             .project
                             .join(&file.artifact.relative_path),
