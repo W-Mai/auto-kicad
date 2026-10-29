@@ -10,6 +10,7 @@ use kicad_model::SchematicArtifactRevision;
 use kiutils_sexpr::{Node, Span};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EditScope {
@@ -124,6 +125,10 @@ pub struct SymbolFlags {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EditAction {
+    CreateSymbol {
+        key: String,
+        symbol: SymbolCreation,
+    },
     SetReference {
         uuid: String,
         reference: String,
@@ -185,6 +190,35 @@ pub struct FootprintCompatibilityEvidence {
     pub source_digest: String,
     pub pad_numbers: Vec<String>,
     pub pin_pad_map: BTreeMap<String, String>,
+}
+
+/// Exact library definition bound to an approved symbol catalog observation.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SymbolDefinitionEvidence {
+    pub lib_id: String,
+    pub catalog_digest: String,
+    pub source_digest: String,
+    pub definition: String,
+}
+
+/// One physical symbol instance path in the expanded schematic hierarchy.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SymbolInstancePath {
+    pub path: String,
+}
+
+/// Typed creation request for one placed symbol and its embedded definition.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SymbolCreation {
+    pub evidence: SymbolDefinitionEvidence,
+    pub transform: SymbolTransform,
+    pub unit: u32,
+    pub body_style: Option<u32>,
+    pub reference: String,
+    pub value: String,
+    pub footprint: Option<String>,
+    pub flags: SymbolFlags,
+    pub instance_paths: Vec<SymbolInstancePath>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -319,7 +353,10 @@ fn points(start: Point, end: Point) -> Result<String, String> {
     ))
 }
 fn generated_uuid(revision: &str, ordinal: usize) -> String {
-    let mut hash = Sha256::digest(format!("schematic-edit-v1:{revision}:{ordinal}"));
+    generated_uuid_seed(&format!("schematic-edit-v1:{revision}:{ordinal}"))
+}
+fn generated_uuid_seed(seed: &str) -> String {
+    let mut hash = Sha256::digest(seed);
     hash[6] = (hash[6] & 15) | 64;
     hash[8] = (hash[8] & 63) | 128;
     let s = hex::encode(&hash[..16]);
@@ -331,6 +368,234 @@ fn generated_uuid(revision: &str, ordinal: usize) -> String {
         &s[16..20],
         &s[20..]
     )
+}
+
+fn valid_digest(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn bool_atom(value: Option<bool>, default: bool) -> &'static str {
+    if value.unwrap_or(default) {
+        "yes"
+    } else {
+        "no"
+    }
+}
+
+fn validate_symbol_creation(symbol: &SymbolCreation) -> Result<(), String> {
+    validate_reference(&symbol.reference)?;
+    text(&symbol.value, true)?;
+    if !valid_digest(&symbol.evidence.catalog_digest)
+        || !valid_digest(&symbol.evidence.source_digest)
+    {
+        return Err("symbol catalog/source evidence is incomplete".into());
+    }
+    validate_library_identifier(&symbol.evidence.lib_id)?;
+    if symbol.evidence.definition.len() > 32 * 1024 * 1024 {
+        return Err("embedded symbol definition exceeds bound".into());
+    }
+    if symbol.unit == 0 || symbol.unit > 1024 {
+        return Err("invalid symbol unit".into());
+    }
+    if symbol.body_style == Some(0) || symbol.body_style.is_some_and(|style| style > 1024) {
+        return Err("invalid symbol body style".into());
+    }
+    if let Some(footprint) = &symbol.footprint {
+        validate_footprint_identifier(footprint)?;
+    }
+    if symbol.instance_paths.is_empty() || symbol.instance_paths.len() > 4096 {
+        return Err("symbol creation requires 1..4096 instance paths".into());
+    }
+    let mut paths = BTreeSet::new();
+    for instance in &symbol.instance_paths {
+        if instance.path.len() > 4096
+            || !instance.path.starts_with('/')
+            || instance.path.contains(['\\', '\n', '\r', '\t'])
+            || !paths.insert(instance.path.clone())
+        {
+            return Err("invalid or repeated symbol instance path".into());
+        }
+    }
+    Ok(())
+}
+
+fn validate_library_identifier(value: &str) -> Result<(), String> {
+    let (nickname, entry) = value
+        .split_once(':')
+        .ok_or("symbol identifier must be nickname:entry")?;
+    if nickname.is_empty()
+        || entry.is_empty()
+        || nickname.len() > 128
+        || entry.len() > 256
+        || !nickname
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.'))
+        || !entry
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'~'))
+    {
+        return Err("invalid symbol library identifier".into());
+    }
+    Ok(())
+}
+
+fn parse_symbol_definition(
+    definition: &str,
+    expected: &str,
+    unit: u32,
+    body_style: Option<u32>,
+) -> Result<(String, String, Vec<String>), String> {
+    let document = parse_one(definition.trim()).map_err(|e| e.to_string())?;
+    if document.nodes.len() != 1 {
+        return Err("symbol definition must contain one node".into());
+    }
+    let root = values(&document.nodes[0])?;
+    if list_tag(root) != Some("symbol") {
+        return Err("symbol definition root must be symbol".into());
+    }
+    let (nickname, entry) = expected
+        .split_once(':')
+        .ok_or("symbol identifier must be nickname:entry")?;
+    let name = atom(root, 1)?.to_owned();
+    if name != expected && name != entry {
+        return Err("symbol definition identifier differs from catalog binding".into());
+    }
+    let normalized = if name == expected {
+        definition.trim().to_owned()
+    } else {
+        let root_items = list_items(&document.nodes[0]).ok_or("invalid symbol definition")?;
+        let atom_span = node_span(root_items.get(1).ok_or("missing symbol identifier")?);
+        let base = definition.trim();
+        let start = atom_span.start;
+        let end = atom_span.end;
+        if end > base.len() || start >= end {
+            return Err("invalid symbol definition identifier span".into());
+        }
+        let mut rendered = base.to_owned();
+        rendered.replace_range(start..end, &quote(expected));
+        rendered
+    };
+    let mut pins = BTreeSet::new();
+    for body in children(root, "symbol") {
+        let body_name = atom(values(body)?, 1)?;
+        let mut parts = body_name.rsplitn(3, '_');
+        let body_number = parts
+            .next()
+            .ok_or("missing embedded body style")?
+            .parse::<u32>()
+            .map_err(|_| "invalid embedded body style")?;
+        let unit_number = parts
+            .next()
+            .ok_or("missing embedded unit")?
+            .parse::<u32>()
+            .map_err(|_| "invalid embedded unit")?;
+        if parts.next().is_none()
+            || (unit_number != 0 && unit_number != unit)
+            || (body_number != 0 && body_number != body_style.unwrap_or(1))
+        {
+            continue;
+        }
+        for pin in children(values(body)?, "pin") {
+            let number = atom(values(one(values(pin)?, "number")?)?, 1)?.to_owned();
+            if number.is_empty() || number.contains(['[', ']', '$']) || !pins.insert(number) {
+                return Err("symbol definition has unsupported or repeated pin number".into());
+            }
+        }
+    }
+    if pins.is_empty() {
+        return Err("symbol definition has no usable pins".into());
+    }
+    let _ = nickname;
+    Ok((name, normalized, pins.into_iter().collect()))
+}
+
+struct CreationAllocation {
+    symbol_uuid: String,
+    pin_uuids: Vec<String>,
+    definition: String,
+    pin_numbers: Vec<String>,
+}
+
+fn render_created_symbol(
+    symbol: &SymbolCreation,
+    allocation: &CreationAllocation,
+    format: &str,
+    project: &str,
+) -> Result<String, String> {
+    let mut result = String::new();
+    result.push_str("\n(symbol\n");
+    result.push_str(&format!("\t(lib_id {})\n", quote(&symbol.evidence.lib_id)));
+    result.push_str(&format!(
+        "\t{}\n",
+        at(symbol.transform.origin, Some(symbol.transform.rotation))
+    ));
+    if symbol.transform.mirror != Mirror::None {
+        result.push_str(&format!(
+            "\t(mirror {})\n",
+            if symbol.transform.mirror == Mirror::X {
+                "x"
+            } else {
+                "y"
+            }
+        ));
+    }
+    result.push_str(&format!("\t(unit {})\n", symbol.unit));
+    if let Some(style) = symbol.body_style {
+        result.push_str(&format!(
+            "\t({} {})\n",
+            if format == "20250114" {
+                "convert"
+            } else {
+                "body_style"
+            },
+            style
+        ));
+    }
+    result.push_str("\t(exclude_from_sim no)\n");
+    result.push_str(&format!(
+        "\t(in_bom {})\n\t(on_board {})\n\t(dnp {})\n",
+        bool_atom(symbol.flags.in_bom, true),
+        bool_atom(symbol.flags.on_board, true),
+        bool_atom(symbol.flags.dnp, false)
+    ));
+    result.push_str(&format!("\t(uuid {})\n", quote(&allocation.symbol_uuid)));
+    result.push_str(&format!(
+        "\t(property \"Reference\" {} {} (effects (font (size 1.27 1.27))))\n",
+        quote(&symbol.reference),
+        at(symbol.transform.origin, Some(QuarterTurn::Zero))
+    ));
+    result.push_str(&format!(
+        "\t(property \"Value\" {} {} (effects (font (size 1.27 1.27))))\n",
+        quote(&symbol.value),
+        at(symbol.transform.origin, Some(QuarterTurn::Zero))
+    ));
+    if let Some(footprint) = &symbol.footprint {
+        result.push_str(&format!(
+            "\t(property \"Footprint\" {} {} (effects (font (size 1.27 1.27)) (hide yes)))\n",
+            quote(footprint),
+            at(symbol.transform.origin, Some(QuarterTurn::Zero))
+        ));
+    }
+    for (number, uuid) in allocation.pin_numbers.iter().zip(&allocation.pin_uuids) {
+        result.push_str(&format!(
+            "\t(pin {} (uuid {}))\n",
+            quote(number),
+            quote(uuid)
+        ));
+    }
+    result.push_str("\t(instances\n\t\t(project ");
+    result.push_str(&quote(project));
+    result.push('\n');
+    for instance in &symbol.instance_paths {
+        result.push_str(&format!(
+            "\t\t\t(path {} (reference {}) (unit {}))\n",
+            quote(&instance.path),
+            quote(&symbol.reference),
+            symbol.unit
+        ));
+    }
+    result.push_str("\t\t)\n\t)\n)\n");
+    Ok(result)
 }
 fn render(object: &NewObject, id: &str) -> Result<String, String> {
     let body = match object {
@@ -512,7 +777,9 @@ fn edit_existing(
             (uuid, *kind)
         }
         EditAction::UpdateLabel { uuid, label } => (uuid, label.kind.object()),
-        EditAction::Create { .. } => return Err("creation requires allocation".into()),
+        EditAction::Create { .. } | EditAction::CreateSymbol { .. } => {
+            return Err("creation requires allocation".into());
+        }
     };
     let node = object(root, id, kind)?;
     let items = values(node)?;
@@ -748,7 +1015,7 @@ fn edit_existing(
             }
         }
         EditAction::Delete { .. } => patches.node(node, String::new())?,
-        EditAction::Create { .. } => unreachable!(),
+        EditAction::Create { .. } | EditAction::CreateSymbol { .. } => unreachable!(),
     }
     Ok((id.clone(), kind))
 }
@@ -1081,18 +1348,98 @@ pub fn compile_edits(
         documents.insert(name.clone(), document);
     }
     let mut allocations = BTreeMap::new();
+    let mut symbol_allocations = BTreeMap::new();
     let mut keys = BTreeSet::new();
+    let mut created_references = BTreeSet::new();
     for (ordinal, edit) in edits.iter().enumerate() {
-        if let EditAction::Create { key, .. } = &edit.action {
-            text(key, false)?;
-            if !keys.insert(key) {
-                return Err("duplicate creation key".into());
+        let key = match &edit.action {
+            EditAction::Create { key, .. } | EditAction::CreateSymbol { key, .. } => key,
+            _ => continue,
+        };
+        text(key, false)?;
+        if !keys.insert(key) {
+            return Err("duplicate creation key".into());
+        }
+        match &edit.action {
+            EditAction::Create { .. } => {
+                let id = generated_uuid(project.revision.digest.as_str(), ordinal);
+                if !seen_uuids.insert(id.clone()) {
+                    return Err("allocated UUID collision".into());
+                }
+                allocations.insert(ordinal, id);
             }
-            let id = generated_uuid(project.revision.digest.as_str(), ordinal);
-            if !seen_uuids.insert(id.clone()) {
-                return Err("allocated UUID collision".into());
+            EditAction::CreateSymbol { symbol, .. } => {
+                if !matches!(edit.scope, EditScope::FileAllInstances) {
+                    return Err("symbol creation requires file_all_instances scope".into());
+                }
+                validate_symbol_creation(symbol)?;
+                let file = project
+                    .files
+                    .iter()
+                    .find(|file| file.artifact.relative_path == edit.file)
+                    .ok_or("symbol creation target file is not observed")?;
+                let expected_paths = identities
+                    .sheets()
+                    .iter()
+                    .filter(|instance| instance.file == edit.file)
+                    .map(|instance| instance.path.clone())
+                    .collect::<BTreeSet<_>>();
+                let supplied_paths = symbol
+                    .instance_paths
+                    .iter()
+                    .map(|instance| instance.path.clone())
+                    .collect::<BTreeSet<_>>();
+                if expected_paths.is_empty() || expected_paths != supplied_paths {
+                    return Err("symbol instance paths do not cover the physical file".into());
+                }
+                let (name, definition, pin_numbers) = parse_symbol_definition(
+                    &symbol.evidence.definition,
+                    &symbol.evidence.lib_id,
+                    symbol.unit,
+                    symbol.body_style,
+                )?;
+                let _ = name;
+                let symbol_uuid = generated_uuid_seed(&format!(
+                    "schematic-edit-v1:{}:{}:symbol",
+                    project.revision.digest, ordinal
+                ));
+                if !seen_uuids.insert(symbol_uuid.clone()) {
+                    return Err("allocated symbol UUID collision".into());
+                }
+                let mut pin_uuids = Vec::with_capacity(pin_numbers.len());
+                for (index, _) in pin_numbers.iter().enumerate() {
+                    let pin_uuid = generated_uuid_seed(&format!(
+                        "schematic-edit-v1:{}:{}:pin:{index}",
+                        project.revision.digest, ordinal
+                    ));
+                    if !seen_uuids.insert(pin_uuid.clone()) {
+                        return Err("allocated pin UUID collision".into());
+                    }
+                    pin_uuids.push(pin_uuid);
+                }
+                let occupied = reference_entries(project);
+                if occupied.iter().any(|(path, reference, _)| {
+                    supplied_paths.contains(path) && reference == &symbol.reference
+                }) {
+                    return Err("created symbol reference is already occupied".into());
+                }
+                if supplied_paths.iter().any(|path| {
+                    !created_references.insert((path.clone(), symbol.reference.clone()))
+                }) {
+                    return Err("created symbol reference is repeated in the edit set".into());
+                }
+                let _ = file;
+                symbol_allocations.insert(
+                    ordinal,
+                    CreationAllocation {
+                        symbol_uuid,
+                        pin_uuids,
+                        definition,
+                        pin_numbers,
+                    },
+                );
             }
-            allocations.insert(ordinal, id);
+            _ => {}
         }
     }
     let mut files = BTreeMap::new();
@@ -1118,6 +1465,20 @@ pub fn compile_edits(
             claims: BTreeSet::new(),
         };
         let mut appended = String::new();
+        let mut embedded = String::new();
+        let lib_symbols = one(root, "lib_symbols")?;
+        let mut embedded_definitions = BTreeMap::new();
+        for node in children(values(lib_symbols)?, "symbol") {
+            let items = values(node)?;
+            let id =
+                atom_text(items.get(1)).ok_or("embedded symbol definition has no identifier")?;
+            let raw = original
+                .get(node_span(node).start..node_span(node).end)
+                .ok_or("invalid embedded symbol definition span")?
+                .trim()
+                .to_owned();
+            embedded_definitions.insert(id.to_owned(), raw);
+        }
         for (ordinal, edit) in edits.iter().enumerate().filter(|(_, e)| e.file == *name) {
             let allows_instance_reference = matches!(
                 (&edit.scope, &edit.action),
@@ -1137,12 +1498,45 @@ pub fn compile_edits(
                     "physical file edit requires file_all_instances; affected instances: {instances:?}"
                 ));
             }
-            let (id, kind) = if let EditAction::Create { object, .. } = &edit.action {
-                let id = &allocations[&ordinal];
-                appended.push_str(&render(object, id)?);
-                (id.clone(), object.kind())
-            } else {
-                edit_existing(root, &edit.action, &mut patches, &file.format_version)?
+            let (id, kind) = match &edit.action {
+                EditAction::Create { object, .. } => {
+                    let id = &allocations[&ordinal];
+                    appended.push_str(&render(object, id)?);
+                    (id.clone(), object.kind())
+                }
+                EditAction::CreateSymbol { symbol, .. } => {
+                    let allocation = &symbol_allocations[&ordinal];
+                    match embedded_definitions.get(symbol.evidence.lib_id.as_str()) {
+                        Some(existing) if existing != &allocation.definition => {
+                            return Err(
+                                "embedded symbol definition differs from catalog evidence".into()
+                            );
+                        }
+                        Some(_) => {}
+                        None => {
+                            embedded_definitions.insert(
+                                symbol.evidence.lib_id.clone(),
+                                allocation.definition.clone(),
+                            );
+                            if !embedded.is_empty() {
+                                embedded.push('\n');
+                            }
+                            embedded.push_str(&allocation.definition);
+                        }
+                    }
+                    let project_name = Path::new(&project.root_relative_path)
+                        .file_stem()
+                        .and_then(|name| name.to_str())
+                        .ok_or("invalid schematic project name")?;
+                    appended.push_str(&render_created_symbol(
+                        symbol,
+                        allocation,
+                        &file.format_version,
+                        project_name,
+                    )?);
+                    (allocation.symbol_uuid.clone(), ObjectKind::Symbol)
+                }
+                _ => edit_existing(root, &edit.action, &mut patches, &file.format_version)?,
             };
             changes.push(ObjectChange {
                 file: name.clone(),
@@ -1151,6 +1545,9 @@ pub fn compile_edits(
                 instance_paths: instances.clone(),
                 action: edit.action.clone(),
             });
+        }
+        if !embedded.is_empty() {
+            patches.insert(node_span(lib_symbols).end - 1, format!("\n{}\n", embedded))?;
         }
         if !appended.is_empty() {
             patches.insert(node_span(root_node).end - 1, appended)?;
@@ -1283,6 +1680,58 @@ mod tests {
     }
     fn point(x: i64, y: i64) -> Point {
         Point::from_nm(x * 1_000_000, y * 1_000_000).unwrap()
+    }
+
+    #[test]
+    fn creates_catalog_bound_symbol_definition_and_instances() {
+        let (project, native, source) = fixture();
+        let symbol = SymbolCreation {
+            evidence: SymbolDefinitionEvidence {
+                lib_id: "Test:New".into(),
+                catalog_digest: "a".repeat(64),
+                source_digest: "b".repeat(64),
+                definition: r#"(symbol "New"
+                    (property "Reference" "R")
+                    (property "Value" "New")
+                    (symbol "New_0_1")
+                    (symbol "New_1_1"
+                        (pin passive line (at 0 0 0) (name "") (number "1")))
+                )"#
+                .into(),
+            },
+            transform: SymbolTransform {
+                origin: point(50, 60),
+                rotation: QuarterTurn::Zero,
+                mirror: Mirror::None,
+            },
+            unit: 1,
+            body_style: None,
+            reference: "R2".into(),
+            value: "1k".into(),
+            footprint: None,
+            flags: SymbolFlags::default(),
+            instance_paths: vec![SymbolInstancePath {
+                path: format!("/{ROOT}"),
+            }],
+        };
+        let candidate = compile(
+            &project,
+            &native,
+            &source,
+            &[edit(EditAction::CreateSymbol {
+                key: "new-resistor".into(),
+                symbol,
+            })],
+        )
+        .unwrap();
+        let bytes = &candidate.files()["test.kicad_sch"];
+        let text = std::str::from_utf8(bytes).unwrap();
+        assert!(text.contains("(symbol \"Test:New\""));
+        assert!(text.contains("(lib_id \"Test:New\")"));
+        assert!(text.contains("(reference \"R2\")"));
+        assert_eq!(candidate.parsed().files[0].symbols.len(), 2);
+        assert_eq!(candidate.changes()[0].kind, ObjectKind::Symbol);
+        assert!(candidate.replacements()["test.kicad_sch"].len() >= 2);
     }
     fn assert_preserved(before: &[u8], candidate: &SchematicCandidate) {
         let before = std::str::from_utf8(before).unwrap();

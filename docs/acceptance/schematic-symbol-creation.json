@@ -1,0 +1,31 @@
+{
+  "feature": "catalog-bound schematic symbol creation",
+  "native_version": "10.0.7",
+  "profiles": [
+    {
+      "profile": "ecc83",
+      "symbol_reference": "R900",
+      "library": "Device",
+      "library_part": "R",
+      "pin_count": 2,
+      "catalog_bound": true,
+      "native_netlist_verified": true,
+      "native_erc_verified": true,
+      "source_unchanged": true,
+      "configuration_unchanged": true,
+      "private_directories_removed": true,
+      "gui_launched": false,
+      "evidence": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-symbol-create-native"
+    }
+  ],
+  "offline_contracts": [
+    "qualified library identifier validation",
+    "catalog/source digest shape validation",
+    "deterministic symbol and pin UUID allocation",
+    "complete instance-path coverage",
+    "definition and reference collision rejection",
+    "exact unrelated-source preservation"
+  ],
+  "public_mcp_publication": false,
+  "schematic_to_pcb_sync": false
+}

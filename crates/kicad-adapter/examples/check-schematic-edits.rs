@@ -1,9 +1,11 @@
 //! Exercise typed candidate edits on explicitly owned copies using the installed native CLI.
+use kicad_adapter::library_catalog::{LibraryCatalogPolicy, symbols::SymbolCatalog};
 use kicad_adapter::schematic_audit::{SchematicAudit, SchematicAuditPolicy};
 use kicad_schematic::editing::{
     EditAction, EditScope, ElectricalShape, FootprintCompatibilityEvidence, Label, LabelKind,
-    NewObject, ObjectKind, ReferenceRequest, SchematicCandidate, SchematicEdit, SymbolFlags,
-    SymbolProperty, allocate_references, compile_edits,
+    NewObject, ObjectKind, ReferenceRequest, SchematicCandidate, SchematicEdit, SymbolCreation,
+    SymbolDefinitionEvidence, SymbolFlags, SymbolInstancePath, SymbolProperty, allocate_references,
+    compile_edits,
 };
 use kicad_schematic::geometry::{Mirror, Point, QuarterTurn, SymbolTransform};
 use kicad_schematic::probes::ConnectivityPin;
@@ -340,6 +342,95 @@ fn main() -> Result<()> {
     private.push(after.private_root().to_owned());
     drop(after);
 
+    let global_symbols = Path::new("/Users/w-mai/Library/Preferences/kicad/10.0/sym-lib-table");
+    let official_symbols =
+        Path::new("/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols");
+    let mut symbol_variables = BTreeMap::new();
+    symbol_variables.insert(
+        "KICAD10_SYMBOL_DIR".into(),
+        official_symbols
+            .to_str()
+            .ok_or("non-UTF8 symbol path")?
+            .into(),
+    );
+    let symbol_policy = LibraryCatalogPolicy::new(
+        root,
+        global_symbols,
+        Some(official_symbols),
+        &[],
+        symbol_variables,
+        vec![],
+    )?;
+    let symbol_catalog = SymbolCatalog::load(&symbol_policy)?;
+    let definition = symbol_catalog.resolve_definition("Device:R")?;
+    let origin = Point::from_nm(
+        (first.x.nm() + second.x.nm()) / 2,
+        (first.y.nm() + second.y.nm()) / 2,
+    )?;
+    let created_symbol = compile(
+        root,
+        &source,
+        &before,
+        &[edit(EditAction::CreateSymbol {
+            key: "catalog-resistor".into(),
+            symbol: SymbolCreation {
+                evidence: SymbolDefinitionEvidence {
+                    lib_id: definition.identifier.clone(),
+                    catalog_digest: definition.catalog_digest.clone(),
+                    source_digest: definition.source_digest.clone(),
+                    definition: definition.definition.clone(),
+                },
+                transform: SymbolTransform {
+                    origin,
+                    rotation: QuarterTurn::Zero,
+                    mirror: Mirror::None,
+                },
+                unit: 1,
+                body_style: None,
+                reference: "R900".into(),
+                value: "1k".into(),
+                footprint: None,
+                flags: SymbolFlags::default(),
+                instance_paths: instances
+                    .iter()
+                    .cloned()
+                    .map(|path| SymbolInstancePath { path })
+                    .collect(),
+            },
+        })],
+    )?;
+    let created_symbol_audit = capture(
+        root,
+        relative,
+        &config,
+        &output.join("symbol_creation"),
+        &created_symbol,
+    )
+    .map_err(|error| format!("symbol creation native capture failed: {error}"))?;
+    let created_component = created_symbol_audit
+        .netlist()
+        .components
+        .iter()
+        .find(|component| component.reference == "R900")
+        .ok_or("catalog-created symbol missing from native netlist")?;
+    if created_component.library != "Device" || created_component.library_part != "R" {
+        return Err("catalog-created symbol library identity mismatch".into());
+    }
+    if created_symbol_audit
+        .pins()
+        .pins()
+        .iter()
+        .filter(|pin| pin.reference == "R900")
+        .count()
+        != 2
+    {
+        return Err("catalog-created symbol pin observation mismatch".into());
+    }
+    let created_symbol_library = created_component.library.clone();
+    let created_symbol_part = created_component.library_part.clone();
+    private.push(created_symbol_audit.private_root().to_owned());
+    drop(created_symbol_audit);
+
     let property_edits = vec![
         edit(EditAction::SetProperty {
             uuid: id.clone(),
@@ -615,7 +706,7 @@ fn main() -> Result<()> {
     {
         return Err("acceptance input or private cleanup mismatch".into());
     }
-    let summary = serde_json::json!({"passed":true,"native_version":"10.0.7","cases":["properties_flags","symbol_transform","create_wire_markers_labels","update_wire_markers_labels","delete_wire_markers_labels","delete_symbol"],"target_file":file,"reference":reference,"affected_instances":instances,"target_uuid":id,"affected_pin_count":selected.len(),"source_unchanged":true,"configuration_unchanged":true,"private_directories_removed":true,"gui_launched":false});
+    let summary = serde_json::json!({"passed":true,"native_version":"10.0.7","cases":["properties_flags","symbol_transform","create_catalog_symbol","create_wire_markers_labels","update_wire_markers_labels","delete_wire_markers_labels","delete_symbol"],"symbol_creation":{"reference":"R900","library":created_symbol_library,"library_part":created_symbol_part,"pin_count":2,"catalog_bound":true,"native_netlist":true,"native_erc_preserved":true},"target_file":file,"reference":reference,"affected_instances":instances,"target_uuid":id,"affected_pin_count":selected.len(),"source_unchanged":true,"configuration_unchanged":true,"private_directories_removed":true,"gui_launched":false});
     fs::write(
         output.join("result.json"),
         serde_json::to_vec_pretty(&summary)?,
