@@ -35,14 +35,9 @@ impl SchematicAudit {
     /// Resolve creation evidence through the same effective catalog as the native baseline.
     pub fn symbol_definition(&self, identifier: &str) -> Result<SymbolDefinitionEvidence, String> {
         self.verify()?;
-        let resolved = self.inner.symbols.resolve_definition(identifier)?;
+        let definition = resolve_embedding(&self.inner.symbols, identifier)?;
         self.verify()?;
-        Ok(SymbolDefinitionEvidence {
-            lib_id: resolved.identifier,
-            catalog_digest: resolved.catalog_digest,
-            source_digest: resolved.source_digest,
-            definition: resolved.definition,
-        })
+        Ok(definition)
     }
 
     /// Compile against captured source bytes, then observe an isolated candidate through KiCad.
@@ -238,20 +233,25 @@ impl SchematicEditPreview {
     }
 }
 
+fn resolve_embedding(
+    catalog: &SymbolCatalog,
+    identifier: &str,
+) -> Result<SymbolDefinitionEvidence, String> {
+    let embedded = catalog.resolve_embedding_definition(identifier)?;
+    let resolved = embedded.source;
+    Ok(SymbolDefinitionEvidence {
+        lib_id: resolved.identifier,
+        catalog_digest: resolved.catalog_digest,
+        source_digest: resolved.source_digest,
+        definition: embedded.definition,
+    })
+}
+
 fn verify_edit_sources(audit: &SchematicAudit, edits: &[SchematicEdit]) -> Result<(), String> {
     for edit in edits {
         match &edit.action {
             EditAction::CreateSymbol { symbol, .. } => {
-                let resolved = audit
-                    .inner
-                    .symbols
-                    .resolve_definition(&symbol.evidence.lib_id)?;
-                let current = SymbolDefinitionEvidence {
-                    lib_id: resolved.identifier,
-                    catalog_digest: resolved.catalog_digest,
-                    source_digest: resolved.source_digest,
-                    definition: resolved.definition,
-                };
+                let current = resolve_embedding(&audit.inner.symbols, &symbol.evidence.lib_id)?;
                 if current != symbol.evidence {
                     return Err(
                         "symbol creation evidence differs from the effective catalog".into(),

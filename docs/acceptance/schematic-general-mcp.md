@@ -47,7 +47,7 @@ Send this to `kicad_plan_schematic_change`. A plan supports 1–128 edits and re
 | Intent | Supported actions |
 | --- | --- |
 | Existing symbols | `set_property`, `set_reference`, `set_flags`, `transform_symbol`, `assign_footprint`, `delete` |
-| Catalog symbols | `create_symbol` for supported non-inherited definitions; server-derived embedded definition and UUIDs |
+| Catalog symbols | `create_symbol` with server-derived definitions/UUIDs and [bounded native inheritance](schematic-symbol-inheritance.md) |
 | Wires | `create_wire`, `update_wire`, `delete` |
 | Markers | `create_junction`, `create_no_connect`, `move_marker`, `delete` |
 | Local/global/hierarchical labels | `create_label`, `update_label`, `delete` |
@@ -70,4 +70,4 @@ Publication journals candidate/original fingerprints and each file operation bef
 
 `scripts/check-schematic-general-interruption.py` kills its own real stdio writer after publication and before terminal evidence. A fresh process rejects replay and new writes, preserves later user bytes, performs fresh approved production MCP recovery, compares exact original files/native observation, and accepts a subsequent normal commit. Owned native children stop before orphaned private snapshots are removed. These checks launch no GUI and do not establish editor undo, GUI cancellation or Codex model qualification.
 
-Full `schematic.general_edit` remains deferred. Sheet geometry/hierarchical pins, hierarchy/child-file creation, inherited symbol creation, GUI/Codex qualification, schematic-to-PCB synchronization and the final three-project product gate remain incomplete. Source examples and user projects are not mutated by these acceptance scripts; only marked copies are accepted.
+Full `schematic.general_edit` remains deferred. Sheet geometry/hierarchical pins, hierarchy/child-file creation, GUI/Codex qualification, schematic-to-PCB synchronization and the final three-project product gate remain incomplete. Inherited symbol creation requires a bounded same-file chain; inherited embedded-file/font resources reject. Source examples and user projects are not mutated by these acceptance scripts; only marked copies are accepted.

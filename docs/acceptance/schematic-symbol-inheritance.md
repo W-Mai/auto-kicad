@@ -1,0 +1,25 @@
+# Source-bound inherited symbol creation
+
+`SymbolCatalog::resolve_embedding_definition` returns the exact selected source definition, complete source/catalog digests, ordered raw ancestor definitions and a standalone embedding definition. `resolve_definition` retains its read-only raw-definition contract. Non-derived embedding bytes remain unchanged.
+
+KiCad 10.0.7 requires standalone definitions in the schematic library cache. A bounded inheritance expansion starts with root geometry and settings, applies successive native field overrides and changes nested unit-name prefixes to the selected leaf. Empty mandatory fields and keyword/filter values retain the inherited value; custom fields can explicitly become empty. Exclusion metadata takes the immediate parent's values and native defaults. The original raw definitions remain available as catalog evidence, and the full source-file digest binds the complete chain.
+
+The resolver checks parent availability, cycles, duplicate declarations, bounded nesting/file size and a maximum chain of 32 definitions. The embedding path rejects ambiguous escaped property identifiers, duplicate fields and unsupported fields. Inherited embedded files/fonts require additional resource support and reject. This leaves ordinary read-only catalog observation available for sources that cannot be embedded safely.
+
+The existing version-1 `create_symbol` MCP action resolves this definition server-side. Requests do not provide raw definitions, parent names, roots, hashes or compatibility proofs. Planning and approval bind the effective bytes and source digests. Candidate validation checks actual native netlist units, complete ERC, pin identities and positions. Publication independently re-resolves catalog evidence while applying the correct before/after source-file checks. Ancestor byte drift invalidates approval permanently. A declared incomplete multi-unit placement can explicitly include its precise `missing_unit` ERC warning; extra library diagnostics reject unless independently addressed.
+
+## Reproducible native qualification
+
+```text
+python3 scripts/check-schematic-inheritance.py SERVER OWNED_SCHEMATIC OWNED_CONFIG NEW_OUTPUT
+```
+
+Inputs require `.auto-kicad-audit-owned` markers and prepared `Inherited_A`/`Inherited_B` project libraries. The acceptance driver uses actual initialize/tools calls and the production stdio executable. It tests `Device:Filter_EMI_C`, two libraries sharing the same base/leaf names with multi-level fields and common/multi-unit pins, and ordinary `Device:R` compatibility. It verifies declared new pin/network/ERC states, source/configuration preservation during preview, raw-ancestor drift, replayed approvals, exact native publication, independently expected pin coordinates/electrical types and private snapshot cleanup.
+
+After closing its MCP process, the driver exports the selected original symbol library and the saved embedded definition through native `sym export svg`, including hidden pins and fields. Native SVG plotting draws the root geometry with the raw leaf's own fields, while its bounding box uses the native flattened symbol. Raw leaf SVG fields therefore cannot serve as a complete inheritance oracle. The driver retains every raw SVG, normalizes only its generated title timestamp, and compares geometry, pin text and complete viewport bounds while identifying symbol-field text separately. These fixtures contain no authored graphical text; their native pin text is retained exactly. It records full-field SVG differences explicitly rather than treating them as equal.
+
+Complete field content is checked by enabled native ERC library comparison, which calls native `LIB_SYMBOL::Flatten` before comparing the cached definition. A separate owned control changes one inherited field, requires exactly one added `lib_symbol_mismatch` diagnostic, restores the exact source and requires the entire native diagnostic baseline again. Rendering and controls use an independent owned configuration copy. These checks do not establish native GUI save/undo or Codex qualification.
+
+Sheet/hierarchical-pin/child-file editing, full GUI/Codex qualification, schematic-to-PCB synchronization and the final product gates remain separate requirements.
+
+Actual KiCad 10.0.7 qualification passed for schematic formats 20250114 and 20260306: 8 committed creations, source-preserving ancestor-drift rejection, complete native pin/network/ERC checks, 12 original/embedded SVG pairs and 2 successful wrong-field/restoration controls. All 32 durable evidence artifacts were independently rehashed. The initial invalid symbol-library format, a source-stage publication regression restored through real stdio recovery, and the raw SVG oracle investigation remain archived as failed controls. Full quality passed 549 tests with zero failures and 16 environment-dependent tests ignored; the existing actual fixed CLI/MCP regression passed in 3.76 seconds. Machine-readable evidence is [schematic-symbol-inheritance.json](schematic-symbol-inheritance.json).

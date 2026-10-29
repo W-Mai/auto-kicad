@@ -1,0 +1,336 @@
+{
+  "feature": "source-bound inherited schematic symbol creation",
+  "native_version": "10.0.7",
+  "schematic_profiles": {
+    "20250114": {
+      "passed": true,
+      "production_stdio": true,
+      "native_version": "10.0.7",
+      "cases": [
+        {
+          "name": "raw-ancestor-drift",
+          "permanent_approval_rejection": true,
+          "source_unchanged": true
+        },
+        {
+          "name": "Device:Filter_EMI_C",
+          "reference": "C9901",
+          "unit": 1,
+          "pin_numbers": [
+            "1",
+            "2",
+            "3"
+          ],
+          "native_committed": true
+        },
+        {
+          "name": "Inherited_A:Leaf",
+          "reference": "U9901",
+          "unit": 1,
+          "pin_numbers": [
+            "1",
+            "2",
+            "3"
+          ],
+          "native_committed": true
+        },
+        {
+          "name": "Inherited_B:Leaf",
+          "reference": "U9902",
+          "unit": 2,
+          "pin_numbers": [
+            "3",
+            "4",
+            "5"
+          ],
+          "native_committed": true
+        },
+        {
+          "name": "Device:R",
+          "reference": "R9903",
+          "unit": 1,
+          "pin_numbers": [
+            "1",
+            "2"
+          ],
+          "native_committed": true
+        }
+      ],
+      "native_svg_geometry_and_bounds": {
+        "Device:Filter_EMI_C": {
+          "original": {
+            "Filter_EMI_C_unit1.svg": {
+              "raw_sha256": "9e8d6e75b71801464c4461ca858cf022846739148279203e40dfe0169a0c0a47",
+              "timestamp_normalized_sha256": "6a4e51fb3d5a145332974ede2d54b2b68ea19fb4803939356c1ea80109203a48",
+              "geometry_sha256": "0eb2feabf5f0a84298669537f9ef49df5bdc4ce3f7734a48843602ccf593689a"
+            }
+          },
+          "embedded": {
+            "Filter_EMI_C_unit1.svg": {
+              "raw_sha256": "9e8d6e75b71801464c4461ca858cf022846739148279203e40dfe0169a0c0a47",
+              "timestamp_normalized_sha256": "6a4e51fb3d5a145332974ede2d54b2b68ea19fb4803939356c1ea80109203a48",
+              "geometry_sha256": "0eb2feabf5f0a84298669537f9ef49df5bdc4ce3f7734a48843602ccf593689a"
+            }
+          },
+          "all_fields_svg_equal": true
+        },
+        "Inherited_A:Leaf": {
+          "original": {
+            "Leaf_unit2.svg": {
+              "raw_sha256": "0508b8a3f92ceea69132deee750bcd8a99a4c80a9fb02e6c92713b8cc7ab8553",
+              "timestamp_normalized_sha256": "6ad41a37399f4b54c5d94b9bec267b762eb52b500fc923714a9d064dbc862341",
+              "geometry_sha256": "ccc0b58ca0296ff381185376e4fbabf392142ee337f763ace0f63749358ba387"
+            },
+            "Leaf_unit1.svg": {
+              "raw_sha256": "2f43721cf9a10c87e068ca802bcfd9fd30c42266ef666fd892ee5f8d21a6d871",
+              "timestamp_normalized_sha256": "802071fb643d1230a5d0f52e7411ebb4e048b0aba05369cc21c47594e1d6f819",
+              "geometry_sha256": "4c6774ecd7c0d145248b758f2af36b002fd5e3240bc10ae167b4dd41470165b2"
+            }
+          },
+          "embedded": {
+            "Leaf_unit2.svg": {
+              "raw_sha256": "f26db5274094df5cedbca53b761ef6e374a1e9d4e29d7f483d3b286c4f6e352e",
+              "timestamp_normalized_sha256": "aec5e0f3acf0c7d25a8e8eef8d46d04a42cf27d3e5268a678b10d2744fbb9e62",
+              "geometry_sha256": "ccc0b58ca0296ff381185376e4fbabf392142ee337f763ace0f63749358ba387"
+            },
+            "Leaf_unit1.svg": {
+              "raw_sha256": "e149c05dac986db0feeb8304bd2f14c564aa1f1b5af077033eeff67cbf322d70",
+              "timestamp_normalized_sha256": "38762beac66024926748d1e3a4b3fa0e8555972ff46117d14714be0567fe9f5e",
+              "geometry_sha256": "4c6774ecd7c0d145248b758f2af36b002fd5e3240bc10ae167b4dd41470165b2"
+            }
+          },
+          "all_fields_svg_equal": false
+        },
+        "Inherited_B:Leaf": {
+          "original": {
+            "Leaf_unit2.svg": {
+              "raw_sha256": "0508b8a3f92ceea69132deee750bcd8a99a4c80a9fb02e6c92713b8cc7ab8553",
+              "timestamp_normalized_sha256": "6ad41a37399f4b54c5d94b9bec267b762eb52b500fc923714a9d064dbc862341",
+              "geometry_sha256": "ccc0b58ca0296ff381185376e4fbabf392142ee337f763ace0f63749358ba387"
+            },
+            "Leaf_unit1.svg": {
+              "raw_sha256": "2f43721cf9a10c87e068ca802bcfd9fd30c42266ef666fd892ee5f8d21a6d871",
+              "timestamp_normalized_sha256": "802071fb643d1230a5d0f52e7411ebb4e048b0aba05369cc21c47594e1d6f819",
+              "geometry_sha256": "4c6774ecd7c0d145248b758f2af36b002fd5e3240bc10ae167b4dd41470165b2"
+            }
+          },
+          "embedded": {
+            "Leaf_unit2.svg": {
+              "raw_sha256": "66f176ec5c156281ea336d7daa20ecfdabaf85509cce1addd1af56f8b2227579",
+              "timestamp_normalized_sha256": "9aff01ffa6d1c8c75d255e23fd06f6c375e2c63779f3e4433fd86406fede8880",
+              "geometry_sha256": "ccc0b58ca0296ff381185376e4fbabf392142ee337f763ace0f63749358ba387"
+            },
+            "Leaf_unit1.svg": {
+              "raw_sha256": "e12b79dd374695fa195cbdae008b666ff688c7c645014c8f1a64cde3e261e749",
+              "timestamp_normalized_sha256": "f2702ba335c864498c09ed39bd79250fff71bf99de8823e02ac6a6ec40e6fab4",
+              "geometry_sha256": "4c6774ecd7c0d145248b758f2af36b002fd5e3240bc10ae167b4dd41470165b2"
+            }
+          },
+          "all_fields_svg_equal": false
+        },
+        "Device:R": {
+          "original": {
+            "R_unit1.svg": {
+              "raw_sha256": "5c9810261e2aac859dd8f8da204c73a05dc19b9e44a31d0862ca0723bc541941",
+              "timestamp_normalized_sha256": "712eefed6cb74d68830246fb2db7dfe46a5965e05779367ca8ab05c1ee303ab1",
+              "geometry_sha256": "712eefed6cb74d68830246fb2db7dfe46a5965e05779367ca8ab05c1ee303ab1"
+            }
+          },
+          "embedded": {
+            "R_unit1.svg": {
+              "raw_sha256": "5c9810261e2aac859dd8f8da204c73a05dc19b9e44a31d0862ca0723bc541941",
+              "timestamp_normalized_sha256": "712eefed6cb74d68830246fb2db7dfe46a5965e05779367ca8ab05c1ee303ab1",
+              "geometry_sha256": "712eefed6cb74d68830246fb2db7dfe46a5965e05779367ca8ab05c1ee303ab1"
+            }
+          },
+          "all_fields_svg_equal": true
+        }
+      },
+      "native_field_comparison_control": {
+        "one_wrong_inherited_field_detected_by_native_comparator": true,
+        "complete_baseline_restored": true
+      },
+      "private_snapshots_removed": true,
+      "configuration_unchanged": true,
+      "gui_launched": false
+    },
+    "20260306": {
+      "passed": true,
+      "production_stdio": true,
+      "native_version": "10.0.7",
+      "cases": [
+        {
+          "name": "raw-ancestor-drift",
+          "permanent_approval_rejection": true,
+          "source_unchanged": true
+        },
+        {
+          "name": "Device:Filter_EMI_C",
+          "reference": "C9901",
+          "unit": 1,
+          "pin_numbers": [
+            "1",
+            "2",
+            "3"
+          ],
+          "native_committed": true
+        },
+        {
+          "name": "Inherited_A:Leaf",
+          "reference": "U9901",
+          "unit": 1,
+          "pin_numbers": [
+            "1",
+            "2",
+            "3"
+          ],
+          "native_committed": true
+        },
+        {
+          "name": "Inherited_B:Leaf",
+          "reference": "U9902",
+          "unit": 2,
+          "pin_numbers": [
+            "3",
+            "4",
+            "5"
+          ],
+          "native_committed": true
+        },
+        {
+          "name": "Device:R",
+          "reference": "R9903",
+          "unit": 1,
+          "pin_numbers": [
+            "1",
+            "2"
+          ],
+          "native_committed": true
+        }
+      ],
+      "native_svg_geometry_and_bounds": {
+        "Device:Filter_EMI_C": {
+          "original": {
+            "Filter_EMI_C_unit1.svg": {
+              "raw_sha256": "bff1aed8c69308b0aa72aeb7a6ce6a694a6437202e42e939def9f9d7ce01db14",
+              "timestamp_normalized_sha256": "6a4e51fb3d5a145332974ede2d54b2b68ea19fb4803939356c1ea80109203a48",
+              "geometry_sha256": "0eb2feabf5f0a84298669537f9ef49df5bdc4ce3f7734a48843602ccf593689a"
+            }
+          },
+          "embedded": {
+            "Filter_EMI_C_unit1.svg": {
+              "raw_sha256": "bff1aed8c69308b0aa72aeb7a6ce6a694a6437202e42e939def9f9d7ce01db14",
+              "timestamp_normalized_sha256": "6a4e51fb3d5a145332974ede2d54b2b68ea19fb4803939356c1ea80109203a48",
+              "geometry_sha256": "0eb2feabf5f0a84298669537f9ef49df5bdc4ce3f7734a48843602ccf593689a"
+            }
+          },
+          "all_fields_svg_equal": true
+        },
+        "Inherited_A:Leaf": {
+          "original": {
+            "Leaf_unit2.svg": {
+              "raw_sha256": "4908e87e4998a03c65b229e5187fd20570ad9d428b108b771f578c36263e63f3",
+              "timestamp_normalized_sha256": "6ad41a37399f4b54c5d94b9bec267b762eb52b500fc923714a9d064dbc862341",
+              "geometry_sha256": "ccc0b58ca0296ff381185376e4fbabf392142ee337f763ace0f63749358ba387"
+            },
+            "Leaf_unit1.svg": {
+              "raw_sha256": "e284c2e4711c38c289effc7c9ca0cec76497d1e0f0146ed146fed07231b30da4",
+              "timestamp_normalized_sha256": "802071fb643d1230a5d0f52e7411ebb4e048b0aba05369cc21c47594e1d6f819",
+              "geometry_sha256": "4c6774ecd7c0d145248b758f2af36b002fd5e3240bc10ae167b4dd41470165b2"
+            }
+          },
+          "embedded": {
+            "Leaf_unit2.svg": {
+              "raw_sha256": "33e56806e7f89f58a6d8eb1fbf063a69d050dc83c6988f6b9da5b7c43b778f5d",
+              "timestamp_normalized_sha256": "aec5e0f3acf0c7d25a8e8eef8d46d04a42cf27d3e5268a678b10d2744fbb9e62",
+              "geometry_sha256": "ccc0b58ca0296ff381185376e4fbabf392142ee337f763ace0f63749358ba387"
+            },
+            "Leaf_unit1.svg": {
+              "raw_sha256": "1607c18a5608cbb44f02f41eb666785aae1b033cd3c67ba89f70114e3c26327f",
+              "timestamp_normalized_sha256": "38762beac66024926748d1e3a4b3fa0e8555972ff46117d14714be0567fe9f5e",
+              "geometry_sha256": "4c6774ecd7c0d145248b758f2af36b002fd5e3240bc10ae167b4dd41470165b2"
+            }
+          },
+          "all_fields_svg_equal": false
+        },
+        "Inherited_B:Leaf": {
+          "original": {
+            "Leaf_unit2.svg": {
+              "raw_sha256": "4908e87e4998a03c65b229e5187fd20570ad9d428b108b771f578c36263e63f3",
+              "timestamp_normalized_sha256": "6ad41a37399f4b54c5d94b9bec267b762eb52b500fc923714a9d064dbc862341",
+              "geometry_sha256": "ccc0b58ca0296ff381185376e4fbabf392142ee337f763ace0f63749358ba387"
+            },
+            "Leaf_unit1.svg": {
+              "raw_sha256": "e284c2e4711c38c289effc7c9ca0cec76497d1e0f0146ed146fed07231b30da4",
+              "timestamp_normalized_sha256": "802071fb643d1230a5d0f52e7411ebb4e048b0aba05369cc21c47594e1d6f819",
+              "geometry_sha256": "4c6774ecd7c0d145248b758f2af36b002fd5e3240bc10ae167b4dd41470165b2"
+            }
+          },
+          "embedded": {
+            "Leaf_unit2.svg": {
+              "raw_sha256": "760842b31cefebeeaaac60d639a7421be14f3393045a0a07a0dd25eb5bc15cb6",
+              "timestamp_normalized_sha256": "9aff01ffa6d1c8c75d255e23fd06f6c375e2c63779f3e4433fd86406fede8880",
+              "geometry_sha256": "ccc0b58ca0296ff381185376e4fbabf392142ee337f763ace0f63749358ba387"
+            },
+            "Leaf_unit1.svg": {
+              "raw_sha256": "b78ba1b81caafbcc121dfd9984e583f314682be6cae828e8069b260655640246",
+              "timestamp_normalized_sha256": "f2702ba335c864498c09ed39bd79250fff71bf99de8823e02ac6a6ec40e6fab4",
+              "geometry_sha256": "4c6774ecd7c0d145248b758f2af36b002fd5e3240bc10ae167b4dd41470165b2"
+            }
+          },
+          "all_fields_svg_equal": false
+        },
+        "Device:R": {
+          "original": {
+            "R_unit1.svg": {
+              "raw_sha256": "aaa7be42c81cbd63eb072f96ef36a1b749f9b92684705d747e8a5da451b8aed6",
+              "timestamp_normalized_sha256": "712eefed6cb74d68830246fb2db7dfe46a5965e05779367ca8ab05c1ee303ab1",
+              "geometry_sha256": "712eefed6cb74d68830246fb2db7dfe46a5965e05779367ca8ab05c1ee303ab1"
+            }
+          },
+          "embedded": {
+            "R_unit1.svg": {
+              "raw_sha256": "aaa7be42c81cbd63eb072f96ef36a1b749f9b92684705d747e8a5da451b8aed6",
+              "timestamp_normalized_sha256": "712eefed6cb74d68830246fb2db7dfe46a5965e05779367ca8ab05c1ee303ab1",
+              "geometry_sha256": "712eefed6cb74d68830246fb2db7dfe46a5965e05779367ca8ab05c1ee303ab1"
+            }
+          },
+          "all_fields_svg_equal": true
+        }
+      },
+      "native_field_comparison_control": {
+        "one_wrong_inherited_field_detected_by_native_comparator": true,
+        "complete_baseline_restored": true
+      },
+      "private_snapshots_removed": true,
+      "configuration_unchanged": true,
+      "gui_launched": false
+    }
+  },
+  "committed_executions": 8,
+  "retained_artifacts_rehashed": 32,
+  "offline_quality": {
+    "passed": 549,
+    "failed": 0,
+    "ignored_environment_tests": 16
+  },
+  "fixed_native_cli_mcp_regression": {
+    "passed": true,
+    "seconds": 3.76
+  },
+  "svg_scope": "Exact native geometry, pin text and Flatten-derived viewport; only generated title time is normalized; raw-derived fields are excluded from this geometric oracle and checked by native ERC flattened-field comparison plus wrong-field control.",
+  "failed_controls_retained": [
+    "symbol-library version mismatch",
+    "post-publication source-stage check with actual stdio recovery",
+    "raw derived SVG field semantics and timestamp investigation"
+  ],
+  "remaining": [
+    "sheet and hierarchical-pin editing",
+    "child-file publication",
+    "GUI and Codex qualification",
+    "schematic-to-PCB synchronization",
+    "release and manufacturing",
+    "final real-project gates"
+  ],
+  "full_product_goal_complete": false
+}

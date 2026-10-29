@@ -4,6 +4,7 @@
 //! source digests that were checked while reading the approved native library file.
 use super::*;
 use kiutils_sexpr::{Atom, Node, Span, parse_one};
+mod embedding;
 
 const MAX_SYMBOL_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_USED_BYTES: u64 = 128 * 1024 * 1024;
@@ -83,6 +84,14 @@ pub struct SymbolDefinitionEvidence {
     pub inheritance: Vec<String>,
 }
 
+/// Standalone cache bytes and exact raw ancestor evidence from the same approved source.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct SymbolEmbeddingEvidence {
+    pub source: SymbolDefinitionEvidence,
+    pub ancestor_definitions: Vec<String>,
+    pub definition: String,
+}
+
 impl SymbolDefinitionEvidence {
     pub fn catalog_digest(&self) -> &str {
         &self.catalog_digest
@@ -153,6 +162,28 @@ impl SymbolCatalog {
     /// top-level `(symbol ...)` span is retained, and every direct `extends` target
     /// is required to exist in the same source file with cycle-free inheritance.
     pub fn resolve_definition(&self, identifier: &str) -> Result<SymbolDefinitionEvidence, String> {
+        self.resolve_source(identifier, |_, _, _| Ok(()))
+            .map(|(source, ())| source)
+    }
+
+    pub fn resolve_embedding_definition(
+        &self,
+        identifier: &str,
+    ) -> Result<SymbolEmbeddingEvidence, String> {
+        let (source, (definition, ancestor_definitions)) =
+            self.resolve_source(identifier, embedding::expand)?;
+        Ok(SymbolEmbeddingEvidence {
+            source,
+            ancestor_definitions,
+            definition,
+        })
+    }
+
+    fn resolve_source<T>(
+        &self,
+        identifier: &str,
+        select: impl FnOnce(&str, &BTreeMap<String, (Span, Vec<String>)>, &str) -> Result<T, String>,
+    ) -> Result<(SymbolDefinitionEvidence, T), String> {
         self.ensure_current()?;
         let (nickname, entry_name) = split_symbol_identifier(identifier)?;
         let entry = self
@@ -229,13 +260,18 @@ impl SymbolCatalog {
             }
             let inheritance = items[2..]
                 .iter()
-                .filter_map(|child| {
-                    let fields = list_items(child)?;
-                    (atom_text(fields.first()) == Some("extends"))
-                        .then(|| atom_text(fields.get(1)).map(str::to_owned))
-                        .flatten()
+                .filter_map(list_items)
+                .filter(|fields| atom_text(fields.first()) == Some("extends"))
+                .map(|fields| {
+                    if fields.len() != 2 {
+                        return Err("symbol extends field must contain one parent".into());
+                    }
+                    let parent =
+                        atom_text(fields.get(1)).ok_or("symbol extends parent is missing")?;
+                    validate_library_component(parent)?;
+                    Ok(parent.to_owned())
                 })
-                .collect::<Vec<_>>();
+                .collect::<Result<Vec<_>, String>>()?;
             if inheritance.len() > 1 {
                 return Err("symbol definition has duplicate extends fields".into());
             }
@@ -250,25 +286,29 @@ impl SymbolCatalog {
             .ok_or("symbol entry is missing from approved library")?;
         let mut state = BTreeMap::new();
         for name in definitions.keys() {
-            check_inheritance(name, &definitions, &mut state)?;
+            check_inheritance(name, &definitions, &mut state, 0)?;
         }
         let definition = text
             .get(span.start..span.end)
             .ok_or("invalid symbol definition span")?
             .to_owned();
+        let selected = select(text, &definitions, entry_name)?;
         self.ensure_current()?;
         let (final_size, final_digest) = read_bounded_source_digest(&canonical, MAX_SYMBOL_BYTES)?;
         if final_size != size || final_digest != source_digest {
             return Err("symbol source changed during resolution".into());
         }
-        Ok(SymbolDefinitionEvidence {
-            identifier: identifier.to_owned(),
-            catalog_digest: self.digest.clone(),
-            source_path: canonical,
-            source_digest,
-            definition,
-            inheritance,
-        })
+        Ok((
+            SymbolDefinitionEvidence {
+                identifier: identifier.to_owned(),
+                catalog_digest: self.digest.clone(),
+                source_path: canonical,
+                source_digest,
+                definition,
+                inheritance,
+            },
+            selected,
+        ))
     }
 
     fn ensure_current(&self) -> Result<(), String> {
@@ -471,7 +511,11 @@ fn check_inheritance(
     name: &str,
     definitions: &BTreeMap<String, (Span, Vec<String>)>,
     state: &mut BTreeMap<String, u8>,
+    depth: usize,
 ) -> Result<(), String> {
+    if depth >= 32 {
+        return Err("symbol inheritance depth exceeds bound".into());
+    }
     match state.get(name).copied() {
         Some(2) => return Ok(()),
         Some(1) => return Err("symbol inheritance cycle".into()),
@@ -485,7 +529,7 @@ fn check_inheritance(
         if !definitions.contains_key(parent) {
             return Err(format!("symbol inheritance target `{parent}` is missing"));
         }
-        check_inheritance(parent, definitions, state)?;
+        check_inheritance(parent, definitions, state, depth + 1)?;
     }
     state.insert(name.to_owned(), 2);
     Ok(())
@@ -593,9 +637,24 @@ mod tests {
         assert_eq!(evidence.identifier, "Used:Derived");
         assert_eq!(evidence.inheritance, vec!["Base"]);
         assert!(evidence.definition.contains("(extends \"Base\")"));
-        assert_eq!(evidence.source_path, fs::canonicalize(file).unwrap());
+        assert_eq!(evidence.source_path, fs::canonicalize(&file).unwrap());
         assert_eq!(evidence.source_digest.len(), 64);
         assert_eq!(evidence.catalog_digest, catalog.digest());
+        let embedded = catalog
+            .resolve_embedding_definition("Used:Derived")
+            .unwrap();
+        assert_eq!(embedded.source, evidence);
+        assert_eq!(embedded.ancestor_definitions.len(), 1);
+        assert!(embedded.ancestor_definitions[0].contains("\"Base_1_1\""));
+        assert!(embedded.definition.contains("\"Derived_1_1\""));
+        assert!(!embedded.definition.contains("extends"));
+        fs::write(&file, r#"(kicad_symbol_lib (symbol "Base") (symbol "Derived" (extends "Base") (embedded_fonts yes)))"#).unwrap();
+        assert!(catalog.resolve_definition("Used:Derived").is_ok());
+        assert!(
+            catalog
+                .resolve_embedding_definition("Used:Derived")
+                .is_err()
+        );
     }
 
     #[test]
@@ -619,6 +678,14 @@ mod tests {
         assert!(catalog.resolve_definition("Used:A").is_err());
         assert!(catalog.resolve_definition("Used").is_err());
         assert!(catalog.resolve_definition("Used:A:extra").is_err());
+        for raw in [
+            r#"(kicad_symbol_lib (symbol "A" (extends)))"#,
+            r#"(kicad_symbol_lib (symbol "A" (extends "B" "C")))"#,
+            r#"(kicad_symbol_lib (symbol "A" (extends "B") (extends "B")) (symbol "B"))"#,
+        ] {
+            fs::write(&file, raw).unwrap();
+            assert!(catalog.resolve_definition("Used:A").is_err());
+        }
     }
     #[test]
     fn nested_symbols_override_global_without_granting_sibling_files() {
