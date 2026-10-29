@@ -5,6 +5,11 @@ use kicad_schematic::editing::{
 };
 use kicad_schematic::probes::{ConnectivityPin, PinConnectivity};
 use std::sync::atomic::{AtomicBool, Ordering};
+mod expectations;
+pub use expectations::{
+    ConnectivityExpectation, ErcExpectation, MatchedSchematicPreview, NoConnectMarker,
+    SchematicEditExpectation,
+};
 
 /// Immutable typed bytes and complete native before/after evidence. This cannot publish files.
 pub struct SchematicEditPreview<'a> {

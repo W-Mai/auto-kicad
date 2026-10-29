@@ -8,7 +8,7 @@ The candidate retains its basename and physical hierarchy in an owned snapshot. 
 
 The KiCad 10.0.7 native profiles use ECC83 and a multichannel mixer with a physical child sheet reused 4 times. Property edits preserve complete ERC and connectivity; the multichannel baseline retains 4 errors and 32 warnings. Catalog-backed `Device:R` creation is observed in the candidate netlist. A floating-label candidate retains its newly introduced ERC diagnostic. Forged catalog evidence rejects, and source/configuration/library drift invalidates the corresponding preview. Original inputs remain unchanged and private audit trees are removed. No GUI is launched.
 
-This API observes candidates and their differences. It does not approve electrical changes, publish source files, provide multi-file recovery or expose general-edit MCP tools. Reviewed connectivity/ERC expectations, publication, recovery and GUI/Codex lifecycle qualification remain required.
+This API observes candidates and their differences. [Explicit electrical/ERC expectations](schematic-expectations.md) compare declared changes against complete native observations and bind the result to the preview digest. Human approval, source publication, multi-file recovery, general-edit MCP tools and GUI/Codex lifecycle qualification remain required.
 
 ```text
 cargo run -p kicad-adapter --example check-schematic-preview -- OWNED_SCHEMATIC OWNED_CONFIG NEW_OUTPUT REFERENCE

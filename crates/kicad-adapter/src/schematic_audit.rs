@@ -11,7 +11,10 @@ use kicad_schematic::{
     Limits, NativeExecutionContext, NetlistDocument, NetlistRunner, ParsedSchematicProject,
     identities::SchematicIdentityIndex, load_schematic_project,
 };
-pub use preview::SchematicEditPreview;
+pub use preview::{
+    ConnectivityExpectation, ErcExpectation, MatchedSchematicPreview, NoConnectMarker,
+    SchematicEditExpectation, SchematicEditPreview,
+};
 use serde::Serialize;
 use serde_json::{Value, value::RawValue};
 use sha2::{Digest, Sha256};

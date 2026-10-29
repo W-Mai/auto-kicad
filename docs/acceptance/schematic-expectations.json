@@ -1,0 +1,44 @@
+{
+  "feature": "explicit schematic electrical and ERC expectations",
+  "native_version": "10.0.7",
+  "public_mcp_publication": false,
+  "user_approval_implemented": false,
+  "profiles": [
+    {
+      "name": "ecc83",
+      "affected_instances": 1,
+      "baseline_errors": 0,
+      "baseline_warnings": 0,
+      "wire_merge": {
+        "independent_baseline_expectation": true,
+        "nets_before": 13,
+        "nets_after": 12,
+        "result_name": "GND",
+        "complete_erc_unchanged": true
+      }
+    },
+    {
+      "name": "multichannel",
+      "affected_instances": 4,
+      "baseline_errors": 4,
+      "baseline_warnings": 32,
+      "wire_merge": null
+    }
+  ],
+  "native_controls": [
+    "default property expectation matches",
+    "undeclared source-pin births reject",
+    "undeclared physical no-connect markers reject",
+    "wrong sheet-aware ERC identities reject",
+    "explicit diagnostic and marker expectations match",
+    "undeclared wire merge rejects",
+    "wrong expected net name rejects",
+    "partial source-net declaration rejects",
+    "matched evidence expires on source and library drift"
+  ],
+  "source_unchanged": true,
+  "configuration_unchanged": true,
+  "private_directories_removed": true,
+  "gui_launched": false,
+  "evidence": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-explicit-expectations"
+}

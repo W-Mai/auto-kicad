@@ -35,6 +35,8 @@ Backend callers can resolve [hierarchical schematic instances and multi-unit com
 
 [Complete native edit previews](docs/acceptance/schematic-native-preview.md) compile from captured source bytes and retain exact source/candidate artifacts, full ERC differences and source-identity connectivity. Source, library or configuration drift permanently invalidates a preview. This backend observation does not grant publication approval.
 
+[Explicit schematic expectations](docs/acceptance/schematic-expectations.md) require complete declared network, pin, physical no-connect-marker and ERC changes to match the native candidate. Unaffected connectivity remains exact, and matching evidence is bound to the full preview digest. Human approval and general source publication remain separate requirements.
+
 ## Board workflow
 
 1. Save the PCB and project settings in KiCad.

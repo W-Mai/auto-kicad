@@ -1,0 +1,18 @@
+# Explicit schematic electrical and ERC expectations
+
+`SchematicEditPreview::match_expectations` applies a typed `SchematicEditExpectation` to the complete baseline and requires exact equality with the native candidate. Empty expectations preserve every network, isolated electrical no-connect pin, physical no-connect marker and complete ERC diagnostic. Changed networks include their exact names, optional classes and complete source-identity pin sets. New and deleted pins require separate explicit declarations. Duplicate membership, stale removals, incomplete merges/splits, omitted changes and redundant declarations reject.
+
+Property, annotation, flag and footprint-assignment-only candidates preserve pin partitions, classes and isolated electrical no-connect states. An explicit expected name change can describe a net rename; it cannot permit an electrical merge for those operations. Physical no-connect markers are tracked separately by physical file, UUID, exact native-grid position and a digest of their full source definition. Marker declarations cannot substitute for electrical pin state.
+
+ERC changes match exact sheet-aware multisets retaining every diagnostic field and numeric token. Duplicate diagnostics retain their multiplicity; excluded warnings remain explicit. Unexpected introductions and resolutions reject. Metadata or sheet-header changes reject for the currently implemented operation families. No wildcard, severity-ignore or generic diagnostic-suppression flag is provided.
+
+Only a successful match constructs `MatchedSchematicPreview`. Its digest binds canonical expected changes and the complete native preview digest, including candidate bytes and original context evidence. Source, configuration, library or private-input drift invalidates both preview and matching evidence, even after exact restoration. This backend result grants no human approval or source publication authority. General MCP approval, multi-file publication/recovery and GUI/Codex lifecycle qualification remain unavailable.
+
+KiCad 10.0.7 acceptance uses owned ECC83 and multichannel copies. Default property expectations preserve the complete baseline, including the multichannel profile's 4 errors and 32 warnings across 4 affected instances. New pins, unlisted markers and wrong diagnostic identities reject. Exact floating-label and no-connect diagnostic exceptions match only with their retained identities. An ECC83 wire joins the selected resistor's pre-observed component net to GND: an independently constructed expected net contains the complete union of both original pin sets; every other net stays exact, network count changes from 13 to 12, and complete ERC stays unchanged. Missing source-net declarations and wrong expected names reject. Original inputs remain unchanged; private snapshots are removed; no GUI is launched.
+
+```text
+cargo run -p kicad-adapter --example check-schematic-preview -- OWNED_ECC83 OWNED_CONFIG NEW_OUTPUT R2 --wire
+cargo run -p kicad-adapter --example check-schematic-preview -- OWNED_MULTICHANNEL OWNED_CONFIG NEW_OUTPUT R8
+```
+
+Inputs require the owned-copy acceptance marker. Architecture contracts also cover explicit pin creation/deletion, isolated pin transitions, net classes, declaration ordering, diagnostic multiplicity and exact numeric tokens, and physical marker identity/position/unknown-field preservation. Native evidence is retained under `/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-explicit-expectations`; the machine-readable record is [schematic-expectations.json](schematic-expectations.json).
