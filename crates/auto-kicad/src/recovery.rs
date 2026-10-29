@@ -291,6 +291,9 @@ fn sync_directory(path: &Path) -> io::Result<()> {
 }
 
 impl ExecutionStore {
+    pub fn check_project_ready(&self, project: &Path) -> io::Result<()> {
+        require_project_ready(&fs::canonicalize(project)?)
+    }
     pub fn open(root: &Path) -> io::Result<Self> {
         let existed = root.exists();
         fs::create_dir_all(root)?;
@@ -403,14 +406,7 @@ fn read_records(root: &Path, project: &Path, limit: usize) -> io::Result<Vec<Exe
 impl ProjectWriter {
     /// Ordinary writers reject pending recovery before source preflight; recovery uses its own checks.
     pub fn ensure_ready(&self) -> io::Result<()> {
-        if pending_geometry(&self.project)?.is_some()
-            || pending_marker(&self.project, SCHEMATIC_PENDING)?.is_some()
-        {
-            return Err(invalid(
-                "execution outcome requires guarded recovery before further project writes",
-            ));
-        }
-        Ok(())
+        require_project_ready(&self.project)
     }
 
     pub fn begin(
@@ -577,6 +573,16 @@ impl ProjectWriter {
         }
         Ok(ExecutionAttempt { path, record })
     }
+}
+
+fn require_project_ready(project: &Path) -> io::Result<()> {
+    if pending_geometry(project)?.is_some() || pending_marker(project, SCHEMATIC_PENDING)?.is_some()
+    {
+        return Err(invalid(
+            "execution outcome requires guarded recovery before further project writes",
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug)]

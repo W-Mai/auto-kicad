@@ -1,4 +1,5 @@
 //! Private native schematic observations with bound source and library inputs.
+mod assignment;
 mod preview;
 use crate::library_catalog::{
     FootprintCatalog, LibraryCatalogPolicy, SchematicFootprintContext,
@@ -418,6 +419,76 @@ impl SchematicAudit {
     }
     pub fn identities(&self) -> &SchematicIdentityIndex {
         &self.inner.identities
+    }
+    pub fn edit_inventory(&self) -> Result<Vec<Value>, String> {
+        self.verify()?;
+        use kiutils_sexpr::{Atom, Node, parse_one};
+        let atom = |node: &Node| match node {
+            Node::Atom {
+                atom: Atom::Symbol(value) | Atom::Quoted(value),
+                ..
+            } => Some(value.clone()),
+            _ => None,
+        };
+        let mut result = Vec::new();
+        for file in &self.inner.parsed.files {
+            let path = self.inner.policy.project.join(&file.artifact.relative_path);
+            let bytes = self
+                .inner
+                .source
+                .files
+                .get(&path)
+                .and_then(|input| input.bytes.as_deref())
+                .ok_or("missing inventory source")?;
+            let text = std::str::from_utf8(bytes).map_err(|error| error.to_string())?;
+            let Node::List { items, .. } = parse_one(text)
+                .map_err(|error| error.to_string())?
+                .nodes
+                .into_iter()
+                .next()
+                .ok_or("missing schematic root")?
+            else {
+                return Err("invalid inventory root".into());
+            };
+            for node in &items {
+                let Node::List { items, span, .. } = node else {
+                    continue;
+                };
+                let Some(kind) = items.first().and_then(atom) else {
+                    continue;
+                };
+                if !matches!(
+                    kind.as_str(),
+                    "symbol"
+                        | "wire"
+                        | "junction"
+                        | "no_connect"
+                        | "label"
+                        | "global_label"
+                        | "hierarchical_label"
+                        | "sheet"
+                ) {
+                    continue;
+                }
+                let uuid = items
+                    .iter()
+                    .filter_map(|item| match item {
+                        Node::List { items, .. }
+                            if items.first().and_then(atom).as_deref() == Some("uuid") =>
+                        {
+                            items.get(1).and_then(atom)
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                if uuid.len() != 1 || result.len() >= 100_000 {
+                    return Err("ambiguous or excessive source object inventory".into());
+                }
+                result.push(serde_json::json!({"file":file.artifact.relative_path,"uuid":uuid[0],"kind":kind,"definition":text.get(span.start..span.end).ok_or("invalid inventory span")?}));
+            }
+        }
+        self.verify()?;
+        Ok(result)
     }
     pub fn pins(&self) -> &kicad_schematic::pins::SchematicPinIndex {
         &self.inner.pins

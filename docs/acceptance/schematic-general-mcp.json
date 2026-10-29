@@ -1,0 +1,306 @@
+{
+  "feature": "bounded native schematic MCP",
+  "native_version": "10.0.7",
+  "production_stdio": true,
+  "accepted_profiles": {
+    "ecc83/evidence-extended": {
+      "passed": true,
+      "production_stdio": true,
+      "cases": [
+        {
+          "name": "stale-input",
+          "input": "/private/tmp/auto-kicad-general-mcp-native/ecc83/project/ecc83-pp.kicad_sch",
+          "rejected_before_write": true
+        },
+        {
+          "name": "stale-input",
+          "input": "/private/tmp/auto-kicad-general-mcp-native/ecc83/config/10.0/kicad_common.json",
+          "rejected_before_write": true
+        },
+        {
+          "name": "stale-input",
+          "input": "/private/tmp/auto-kicad-general-mcp-native/ecc83/project/ecc83-pp.kicad_sym",
+          "rejected_before_write": true
+        },
+        {
+          "name": "restart-approval",
+          "rejected_before_write": true
+        },
+        {
+          "name": "properties",
+          "physical_files": 1,
+          "native_publication_committed": true
+        },
+        {
+          "name": "custom-property",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "flags",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "flags-restore",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "reference",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "footprint",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "symbol-create",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "symbol-transform",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "label-create-local",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "label-update-local",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "label-delete-local",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "label-create-global",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "label-update-global",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "label-delete-global",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "label-create-hierarchical",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "label-update-hierarchical",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "label-delete-hierarchical",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "wire-create",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "wire-update",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "wire-delete",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "marker-create-junction",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "marker-move-junction",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "marker-delete-junction",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "marker-create-no_connect",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "marker-move-no_connect",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "marker-delete-no_connect",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "symbol-delete",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "independent-electrical-wire",
+          "physical_files": 1,
+          "affected_instances": 1
+        }
+      ],
+      "extended": true,
+      "private_snapshots_removed": true,
+      "configuration_unchanged": true,
+      "wrong_approval_restart_and_replay_rejected": true,
+      "gui_launched": false
+    },
+    "multichannel/evidence-controls": {
+      "passed": true,
+      "production_stdio": true,
+      "cases": [
+        {
+          "name": "stale-input",
+          "input": "/private/tmp/auto-kicad-general-mcp-native/multichannel/project/multichannel_mixer.kicad_sch",
+          "rejected_before_write": true
+        },
+        {
+          "name": "stale-input",
+          "input": "/private/tmp/auto-kicad-general-mcp-native/multichannel/config/10.0/kicad_common.json",
+          "rejected_before_write": true
+        },
+        {
+          "name": "stale-input",
+          "input": "/private/tmp/auto-kicad-general-mcp-native/multichannel/project/multichannel_mixer.kicad_sym",
+          "rejected_before_write": true
+        },
+        {
+          "name": "restart-approval",
+          "rejected_before_write": true
+        },
+        {
+          "name": "properties",
+          "physical_files": 2,
+          "native_publication_committed": true
+        }
+      ],
+      "extended": false,
+      "private_snapshots_removed": true,
+      "configuration_unchanged": true,
+      "wrong_approval_restart_and_replay_rejected": true,
+      "gui_launched": false
+    },
+    "multichannel-corrected/evidence": {
+      "passed": true,
+      "production_stdio": true,
+      "cases": [
+        {
+          "name": "stale-input",
+          "input": "/private/tmp/auto-kicad-general-mcp-native/multichannel-corrected/project/multichannel_mixer.kicad_sch",
+          "rejected_before_write": true
+        },
+        {
+          "name": "stale-input",
+          "input": "/private/tmp/auto-kicad-general-mcp-native/multichannel-corrected/config/10.0/kicad_common.json",
+          "rejected_before_write": true
+        },
+        {
+          "name": "stale-input",
+          "input": "/private/tmp/auto-kicad-general-mcp-native/multichannel-corrected/project/multichannel_mixer.kicad_sym",
+          "rejected_before_write": true
+        },
+        {
+          "name": "restart-approval",
+          "rejected_before_write": true
+        },
+        {
+          "name": "properties",
+          "physical_files": 2,
+          "native_publication_committed": true
+        },
+        {
+          "name": "bounded-session-authority-controls",
+          "observation_limit_and_release": true,
+          "schema_version_revision_path_rejected": true,
+          "forged_authority_rejected": true,
+          "undeclared_pin_network_marker_erc_changes_rejected": true,
+          "source_unchanged": true
+        },
+        {
+          "name": "single-instance-reference",
+          "physical_files": 1,
+          "affected_instances": 1
+        },
+        {
+          "name": "shared-child-unrelated-instances-preserved",
+          "only_selected_reference_changed": true
+        }
+      ],
+      "extended": false,
+      "private_snapshots_removed": true,
+      "configuration_unchanged": true,
+      "wrong_approval_restart_and_replay_rejected": true,
+      "gui_launched": false
+    },
+    "interruption/evidence": {
+      "passed": true,
+      "actual_stdio_writer_killed": true,
+      "missing_terminal_and_post_evidence": true,
+      "fresh_process_plan_blocked": true,
+      "later_user_bytes_preserved": true,
+      "actual_stdio_guarded_recovery": true,
+      "exact_original_and_native_observation_restored": true,
+      "subsequent_native_commit": true,
+      "owned_children_stopped": true,
+      "owned_private_directories_removed": true,
+      "gui_launched": false
+    }
+  },
+  "committed_executions": {
+    "ecc83/evidence-extended": 28,
+    "multichannel/evidence-controls": 1,
+    "multichannel-corrected/evidence": 2,
+    "interruption/evidence": 1
+  },
+  "retained_artifacts_rehashed": 133,
+  "offline_quality": {
+    "passed": 547,
+    "failed": 0,
+    "ignored_environment_tests": 16
+  },
+  "fixed_native_cli_mcp_regression": {
+    "passed": true,
+    "seconds": 3.66
+  },
+  "failed_controls_retained": [
+    "premature empty-native-cache cleanup checks",
+    "shared-child annotation affected-instance report"
+  ],
+  "full_general_edit_milestone_complete": false,
+  "remaining": [
+    "sheet and child-file authoring",
+    "inherited symbol creation",
+    "GUI and Codex qualification",
+    "schematic-to-PCB synchronization",
+    "release and manufacturing",
+    "final real-project gates"
+  ]
+}

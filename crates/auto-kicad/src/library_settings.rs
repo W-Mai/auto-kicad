@@ -54,6 +54,7 @@ pub(crate) struct LibrarySettings {
     config_digest: kicad_model::RevisionDigest,
     config_base: Option<PathBuf>,
     official_root: Option<PathBuf>,
+    symbol_root: Option<PathBuf>,
     official_override: bool,
     project_override: Option<PathBuf>,
 }
@@ -93,6 +94,21 @@ pub(crate) fn native_settings_paths(version: &str) -> Result<Vec<PathBuf>, Strin
 }
 
 impl LibrarySettings {
+    pub(crate) fn schematic_available(&self) -> bool {
+        self.config_base.as_ref().is_some_and(|base| {
+            ["kicad_common.json", "sym-lib-table", "fp-lib-table"]
+                .iter()
+                .all(|name| base.join("10.0").join(name).is_file())
+        }) && self
+            .symbol_root
+            .as_ref()
+            .is_some_and(|root| root.is_absolute() && root.is_dir())
+            && self
+                .official_root
+                .as_ref()
+                .is_some_and(|root| root.is_absolute() && root.is_dir())
+            && self.config.extra_roots.iter().all(|root| root.is_dir())
+    }
     fn from_environment() -> Result<Self, String> {
         let (config, config_digest) = match std::env::var_os("AUTO_KICAD_LIBRARY_CONFIG") {
             Some(value) => {
@@ -159,10 +175,43 @@ impl LibrarySettings {
             config_digest,
             config_base,
             official_root,
+            symbol_root: std::env::var_os("AUTO_KICAD_OFFICIAL_SYMBOL_ROOT")
+                .map(PathBuf::from)
+                .or_else(|| {
+                    [
+                        "/Applications/KiCad/KiCad.app/Contents/SharedSupport/symbols",
+                        "/usr/share/kicad/symbols",
+                    ]
+                    .into_iter()
+                    .map(PathBuf::from)
+                    .find(|path| path.is_dir())
+                }),
             official_override,
             project_override: std::env::var_os("AUTO_KICAD_PROJECT_FOOTPRINT_ROOT")
                 .map(PathBuf::from),
         })
+    }
+
+    pub(crate) fn schematic_policy(
+        &self,
+        project: &Path,
+        schematic: &Path,
+    ) -> Result<kicad_adapter::schematic_audit::SchematicAuditPolicy, String> {
+        let canonical = |path: Option<&Path>| {
+            let path = path.ok_or("native schematic resource root unavailable")?;
+            if !path.is_absolute() {
+                return Err("native resource roots must be absolute".into());
+            }
+            fs::canonicalize(path).map_err(|error| error.to_string())
+        };
+        kicad_adapter::schematic_audit::SchematicAuditPolicy::new(
+            project,
+            schematic,
+            &canonical(self.config_base.as_deref())?,
+            &canonical(self.symbol_root.as_deref())?,
+            &canonical(self.official_root.as_deref())?,
+            &self.config.extra_roots,
+        )
     }
 
     fn registry(&self, project: &Path, version: &str) -> Result<FootprintRegistry, String> {

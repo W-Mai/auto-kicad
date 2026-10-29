@@ -434,7 +434,7 @@ fn validate_symbol_depth(nodes: &[Node], depth: usize) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_raw_nesting(bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn validate_raw_nesting(bytes: &[u8]) -> Result<(), String> {
     let mut depth = 0usize;
     let mut quoted = false;
     let mut escaped = false;

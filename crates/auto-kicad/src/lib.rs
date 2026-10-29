@@ -11,6 +11,7 @@ pub use geometry::{GeometryExecution, GeometryPlanningEvidence};
 mod library_settings;
 pub mod recovery;
 pub mod routing_rules;
+pub mod schematic_authoring;
 
 use kicad_adapter::{
     BoardGraphicsCommitOutcome, BoardGraphicsExecutor, DiscoveryInput, DisposablePcbLifecycle,
@@ -2520,6 +2521,7 @@ pub struct CommitRecoveryRequest {
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 pub struct PlanSchematicChangeRequest {
+    pub general: Option<schematic_authoring::protocol::GeneralRequest>,
     pub project_root: String,
     pub root_schematic: String,
     pub source_run_id: String,
@@ -2528,6 +2530,7 @@ pub struct PlanSchematicChangeRequest {
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 pub struct PreviewSchematicChangeRequest {
+    pub expectations: Option<schematic_authoring::protocol::Expectations>,
     pub plan_id: String,
     pub plan_hash: String,
     pub request_id: Option<String>,
@@ -3259,6 +3262,7 @@ struct StoredDrcBaseline {
 
 #[derive(Clone)]
 pub struct Server {
+    general_schematic: Arc<schematic_authoring::Registry>,
     library_settings: library_settings::SharedLibrarySettings,
     execution_store: Option<Arc<recovery::ExecutionStore>>,
     sessions: Arc<Mutex<BTreeMap<String, StoredChangeSession>>>,
@@ -3292,6 +3296,8 @@ pub struct CapabilityRequest {
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 pub struct SchematicAuditRequest {
+    pub release: Option<schematic_authoring::protocol::ReleaseRequest>,
+    pub observe: Option<schematic_authoring::protocol::ObserveRequest>,
     pub request_id: Option<String>,
     pub source_run_id: Option<String>,
     pub plan_id: Option<String>,
@@ -3446,6 +3452,23 @@ impl Server {
             mode: "write",
             status: "verified",
         });
+        if let Some(capability) = self
+            .capabilities
+            .iter_mut()
+            .find(|capability| capability.id == "schematic.bounded_edit")
+        {
+            capability.status = if self.schematic.verified()
+                && self
+                    .library_settings
+                    .as_ref()
+                    .as_ref()
+                    .is_ok_and(|settings| settings.schematic_available())
+            {
+                "verified"
+            } else {
+                "unavailable"
+            };
+        }
         Ok(self)
     }
 
@@ -3555,6 +3578,7 @@ impl Server {
         }
         Self {
             library_settings,
+            general_schematic: Arc::new(schematic_authoring::Registry::default()),
             execution_store: None,
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             schematic_sessions: Arc::new(Mutex::new(BTreeMap::new())),
@@ -3639,6 +3663,12 @@ impl Server {
                         "unavailable"
                     },
                 },
+                Capability {
+                    id: "schematic.bounded_edit",
+                    domain: "schematic",
+                    mode: "write",
+                    status: "unavailable",
+                },
             ],
             discovery,
             execution,
@@ -3722,12 +3752,49 @@ impl Server {
 
     #[tool(
         name = "kicad_schematic_audit",
-        description = "Read the bounded, append-only audit ledger for schematic changes."
+        description = "Inspect a closed native schematic, release private sessions, or read schematic audit history."
     )]
     pub async fn kicad_schematic_audit(
         &self,
         Parameters(arguments): Parameters<SchematicAuditRequest>,
     ) -> Result<CallToolResponse, ErrorData> {
+        if let Some(observe) = arguments.observe {
+            let request_id = arguments
+                .request_id
+                .unwrap_or_else(|| "req_schematic_observe".into());
+            if arguments.release.is_some()
+                || arguments.plan_id.is_some()
+                || arguments.source_run_id.is_some()
+                || arguments.limit.is_some()
+            {
+                return Ok(
+                    self.rejected(request_id, "observe cannot be combined with ledger filters")
+                );
+            }
+            let registry = self.general_schematic.clone();
+            let settings = self.library_settings.clone();
+            let result = tokio::task::spawn_blocking(move || registry.observe(&settings, observe))
+                .await
+                .unwrap_or_else(|error| {
+                    Err(format!("schematic observation worker failed: {error}"))
+                });
+            return self.general_schematic_response(request_id, result);
+        }
+        if let Some(release) = arguments.release {
+            let request_id = arguments
+                .request_id
+                .unwrap_or_else(|| "req_schematic_release".into());
+            if arguments.plan_id.is_some()
+                || arguments.source_run_id.is_some()
+                || arguments.limit.is_some()
+            {
+                return Ok(
+                    self.rejected(request_id, "release cannot be combined with ledger filters")
+                );
+            }
+            return self
+                .general_schematic_response(request_id, self.general_schematic.release(release));
+        }
         if !self.schematic.verified() {
             return Ok(self.rejected(
                 arguments
@@ -3764,7 +3831,7 @@ impl Server {
                 .request_id
                 .unwrap_or_else(|| "req_schematic_audit".into()),
             None,
-            json!({"events": events, "limit": limit}),
+            json!({"events": events, "limit": limit,"general_sessions":self.general_schematic.history(limit,arguments.source_run_id.as_deref(),arguments.plan_id.as_deref())}),
         )
     }
 
@@ -5296,12 +5363,35 @@ impl Server {
 
     #[tool(
         name = "kicad_plan_schematic_change",
-        description = "Plan the fixed two-resistor schematic change against a saved filesystem schematic without writing it."
+        description = "Plan a fixed two-resistor change or a versioned bounded native schematic edit without source writes."
     )]
     pub async fn kicad_plan_schematic_change(
         &self,
         Parameters(arguments): Parameters<PlanSchematicChangeRequest>,
     ) -> Result<CallToolResponse, ErrorData> {
+        if let Some(general) = arguments.general {
+            let Some(store) = self.execution_store.clone() else {
+                return Ok(self.rejected(
+                    arguments.request_id,
+                    "general schematic publication requires durable state",
+                ));
+            };
+            let registry = self.general_schematic.clone();
+            let request_id = arguments.request_id.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                registry.plan(
+                    &store,
+                    &arguments.project_root,
+                    &arguments.root_schematic,
+                    &arguments.source_run_id,
+                    &arguments.request_id,
+                    general,
+                )
+            })
+            .await
+            .unwrap_or_else(|error| Err(format!("schematic planning worker failed: {error}")));
+            return self.general_schematic_response(request_id, result);
+        }
         if !self.schematic.verified() {
             return Ok(self.rejected(arguments.request_id, "capability_not_verified"));
         }
@@ -5409,12 +5499,36 @@ impl Server {
 
     #[tool(
         name = "kicad_preview_schematic_change",
-        description = "Preview the fixed two-resistor filesystem schematic change using production validation, then await approval."
+        description = "Validate a schematic plan and exact declared electrical/ERC expectations, then return bound approval evidence."
     )]
     pub async fn kicad_preview_schematic_change(
         &self,
         Parameters(arguments): Parameters<PreviewSchematicChangeRequest>,
     ) -> Result<CallToolResponse, ErrorData> {
+        if arguments.plan_id.starts_with("schematic-general-plan:") {
+            let registry = self.general_schematic.clone();
+            let request_id = arguments
+                .request_id
+                .unwrap_or_else(|| "req_general_schematic_preview".into());
+            let result = tokio::task::spawn_blocking(move || {
+                registry.preview(
+                    &arguments.plan_id,
+                    &arguments.plan_hash,
+                    arguments.expectations.unwrap_or_default(),
+                )
+            })
+            .await
+            .unwrap_or_else(|error| Err(format!("schematic preview worker failed: {error}")));
+            return self.general_schematic_response(request_id, result);
+        }
+        if arguments.expectations.is_some() {
+            return Ok(self.rejected(
+                arguments
+                    .request_id
+                    .unwrap_or_else(|| "req_preview_schematic_change".into()),
+                "general expectations cannot be used with a legacy plan",
+            ));
+        }
         if !self.schematic.verified() {
             return Ok(self.rejected(
                 arguments
@@ -5527,12 +5641,27 @@ impl Server {
 
     #[tool(
         name = "kicad_commit_schematic_change",
-        description = "Commit an exactly approved fixed two-resistor filesystem schematic preview."
+        description = "Commit an exactly approved schematic preview with durable native result verification."
     )]
     pub async fn kicad_commit_schematic_change(
         &self,
         Parameters(arguments): Parameters<CommitSchematicChangeRequest>,
     ) -> Result<CallToolResponse, ErrorData> {
+        if arguments.plan_id.starts_with("schematic-general-plan:") {
+            let request_id = arguments
+                .request_id
+                .unwrap_or_else(|| "req_general_schematic_commit".into());
+            let Some(store) = self.execution_store.clone() else {
+                return Ok(self.rejected(
+                    request_id,
+                    "general schematic publication requires durable state",
+                ));
+            };
+            let registry = self.general_schematic.clone();
+            let result = tokio::task::spawn_blocking(move || registry.commit(&store, &arguments.plan_id, &arguments.plan_hash, &arguments.approval_hash)).await
+                .unwrap_or_else(|error| Ok(json!({"state":"unknown","reason":format!("schematic worker failed; inspect durable execution history: {error}")})));
+            return self.general_schematic_response(request_id, result);
+        }
         if !self.schematic.verified() {
             return Ok(self.rejected(
                 arguments
@@ -5656,6 +5785,29 @@ impl Server {
 
     fn rejected(&self, request_id: String, reason: &str) -> CallToolResponse {
         self.envelope_sync(request_id, None, json!({ "reason": reason }))
+    }
+
+    fn general_schematic_response(
+        &self,
+        request_id: String,
+        result: Result<Value, String>,
+    ) -> Result<CallToolResponse, ErrorData> {
+        match result {
+            Ok(data)
+                if matches!(
+                    data.get("state").and_then(Value::as_str),
+                    Some("rejected" | "unknown")
+                ) =>
+            {
+                Ok(self.envelope_sync(request_id, None, data))
+            }
+            Ok(data) => self.envelope(request_id, None, data),
+            Err(reason) => Ok(self.envelope_sync(
+                request_id,
+                None,
+                json!({"state":"rejected","reason":reason}),
+            )),
+        }
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -8146,6 +8298,7 @@ mod tests {
         assert!(
             server
                 .kicad_plan_schematic_change(Parameters(PlanSchematicChangeRequest {
+                    general: None,
                     project_root: root.to_string_lossy().into_owned(),
                     root_schematic: schematic.to_string_lossy().into_owned(),
                     source_run_id: "  ".into(),
@@ -8156,6 +8309,7 @@ mod tests {
         );
         let planned = server
             .kicad_plan_schematic_change(Parameters(PlanSchematicChangeRequest {
+                general: None,
                 project_root: root.to_string_lossy().into_owned(),
                 root_schematic: schematic.to_string_lossy().into_owned(),
                 source_run_id: "run-schematic-lifecycle".into(),
@@ -8192,6 +8346,7 @@ mod tests {
         );
         let preview = server
             .kicad_preview_schematic_change(Parameters(PreviewSchematicChangeRequest {
+                expectations: None,
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
                 request_id: None,
@@ -8248,6 +8403,8 @@ mod tests {
         assert_eq!(commit_calls.load(AtomicOrdering::SeqCst), 1);
         let audit = server
             .kicad_schematic_audit(Parameters(SchematicAuditRequest {
+                release: None,
+                observe: None,
                 request_id: Some("audit-read".into()),
                 source_run_id: Some("run-schematic-lifecycle".into()),
                 plan_id: None,

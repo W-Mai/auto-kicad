@@ -244,13 +244,42 @@
       }
     },
     {
+      "id": "schematic.bounded_edit",
+      "domain": "schematic",
+      "mode": "write",
+      "status": "verified",
+      "mcp_tools": [
+        "kicad_schematic_audit",
+        "kicad_plan_schematic_change",
+        "kicad_preview_schematic_change",
+        "kicad_commit_schematic_change"
+      ],
+      "constraints": [
+        "closed saved KiCad 10.0.7 schematics, durable execution store and server-owned native configuration/library roots",
+        "versioned intents bound to a live observation revision; up to 128 typed edits",
+        "4 live observations and 4 live plans per server, 900-second expiry and explicit release",
+        "properties, per-instance references, flags, transforms, compatible footprint assignment, basic catalog symbol creation, wires, markers and labels",
+        "exact declared source-pin/network/no-connect/ERC deltas, session-bound approval and actual-source native verification",
+        "durable multi-file publication intent; interrupted writes require fresh guarded recovery",
+        "hierarchy/child-file authoring, inherited symbol creation and GUI/Codex lifecycle qualification remain unsupported"
+      ],
+      "evidence": {
+        "fixture": "ecc83-all-supported-families-and-shared-multichannel-production-stdio-copies",
+        "tested_versions": [
+          "10.0.7"
+        ],
+        "command": "python3 scripts/check-schematic-general.py SERVER OWNED_SOURCE OWNED_CONFIG NEW_OUTPUT --extended",
+        "record": "docs/acceptance/schematic-general-mcp.md"
+      }
+    },
+    {
       "id": "schematic.general_edit",
       "domain": "schematic",
       "mode": "write",
       "status": "deferred",
       "mcp_tools": [],
       "constraints": [
-        "requires a verified general schematic backend"
+        "complete hierarchy/child-file authoring, inherited symbol creation and GUI/Codex lifecycle qualification remain pending; bounded existing-file editing is recorded separately"
       ],
       "evidence": null
     },

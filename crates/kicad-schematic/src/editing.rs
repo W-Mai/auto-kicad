@@ -1542,7 +1542,13 @@ pub fn compile_edits(
                 file: name.clone(),
                 uuid: id,
                 kind,
-                instance_paths: instances.clone(),
+                instance_paths: match &edit.action {
+                    EditAction::SetReference {
+                        instance_path: Some(path),
+                        ..
+                    } => vec![path.clone()],
+                    _ => instances.clone(),
+                },
                 action: edit.action.clone(),
             });
         }
@@ -1804,6 +1810,31 @@ mod tests {
         assert_eq!(symbol.reference, "R101");
         assert_eq!(symbol.instance_paths[0].reference.as_deref(), Some("R101"));
         assert_preserved(&b, &candidate);
+        let path = symbol.instance_paths[0].path.clone();
+        let scoped = compile(
+            &p,
+            &n,
+            &b,
+            &[SchematicEdit {
+                file: p.files[0].artifact.relative_path.clone(),
+                scope: EditScope::SingleInstance(path.clone()),
+                action: EditAction::SetReference {
+                    uuid: SYMBOL.into(),
+                    reference: "R102".into(),
+                    instance_path: Some(path.clone()),
+                },
+            }],
+        )
+        .unwrap();
+        assert_eq!(scoped.changes()[0].instance_paths, vec![path]);
+        assert_eq!(scoped.parsed().files[0].symbols[0].reference, "R1");
+        assert_eq!(
+            scoped.parsed().files[0].symbols[0].instance_paths[0]
+                .reference
+                .as_deref(),
+            Some("R102")
+        );
+        assert_preserved(&b, &scoped);
     }
 
     #[test]

@@ -14,7 +14,7 @@ Native exclusion testing exposed an incorrect initial summary assumption that ex
 
 ## Scope and reproduction
 
-This backend API does not establish immutable source/library/configuration binding, pin-level connectivity proof, general schematic editing, GUI load/save acceptance or PCB synchronization. Parsing an imported report grants no source authority. Complete project-context capture is required before these reports can authorize a general schematic transaction. Public MCP capabilities are unchanged.
+This backend API does not establish immutable source/library/configuration binding, pin-level connectivity proof, general schematic editing, GUI load/save acceptance or PCB synchronization. Parsing an imported report grants no source authority. [Bounded schematic MCP](schematic-general-mcp.md) composes complete project-context capture and native correspondence before accepting exact source-bound ERC expectations.
 
 Run `cargo run -p kicad-schematic --example check-schematic-erc -- /absolute/owned/project/root.kicad_sch /absolute/new-output-directory /absolute/baseline.json` with KiCad 10.0.7 installed. The output directory must not exist. Omit the baseline argument to capture only. A changed report is retained before the example exits unsuccessfully. Use `python3 scripts/quality.py` for the repository quality gates.
 

@@ -4,7 +4,7 @@
 
 The owned ECC83 acceptance retains two matching handles, drops the original audit/preview/planning handle and verifies retained evidence on another thread. Native private directories remain present. Changing the original source invalidates a matching handle; restoring exact bytes leaves both handles invalid. Dropping one handle preserves the snapshots. Dropping the final matching handle removes the baseline audit and releases the preview. An independently cloned candidate audit still verifies against its retained source tree, then removes its private files when dropped.
 
-The same executable continues with controlled uncertain writes and actual stdio MCP recovery, verifying exact original bytes, new-file removal and restored native netlist/ERC/connectivity. It opens no GUI. This qualifies evidence ownership and cleanup; user approval, general publication and general schematic MCP remain separate unfinished contracts.
+The same executable continues with controlled uncertain writes and actual stdio MCP recovery, verifying exact original bytes, new-file removal and restored native netlist/ERC/connectivity. It opens no GUI. This qualifies evidence ownership and cleanup. [Bounded schematic MCP editing](schematic-general-mcp.md) composes these ownership guarantees with server sessions, exact approval and native publication.
 
 ```sh
 cargo build -p auto-kicad --bin auto-kicad --example check-schematic-recovery
