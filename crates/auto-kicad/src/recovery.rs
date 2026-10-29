@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 const MAX_FILE_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_RECORD_BYTES: u64 = 4 * 1024 * 1024;
 const GEOMETRY_PENDING: &str = ".auto-kicad-geometry-pending";
+const SCHEMATIC_PENDING: &str = ".auto-kicad-schematic-pending";
 
 #[derive(Serialize, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
@@ -19,7 +20,11 @@ struct PendingGeometry {
 }
 
 fn pending_geometry(project: &Path) -> io::Result<Option<PendingGeometry>> {
-    let path = project.join(GEOMETRY_PENDING);
+    pending_marker(project, GEOMETRY_PENDING)
+}
+
+fn pending_marker(project: &Path, marker: &str) -> io::Result<Option<PendingGeometry>> {
+    let path = project.join(marker);
     match fs::symlink_metadata(&path) {
         Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e),
@@ -32,23 +37,54 @@ fn matching_pending_geometry(
     record_path: &Path,
     attempt_id: &str,
 ) -> io::Result<bool> {
-    let Some(pending) = pending_geometry(project)? else {
+    matching_pending_marker(project, GEOMETRY_PENDING, record_path, attempt_id)
+}
+
+fn matching_pending_marker(
+    project: &Path,
+    marker: &str,
+    record_path: &Path,
+    attempt_id: &str,
+) -> io::Result<bool> {
+    let Some(pending) = pending_marker(project, marker)? else {
         return Ok(false);
     };
     if pending.record_path != record_path || pending.attempt_id != attempt_id {
         return Err(invalid(
-            "another geometry attempt requires recovery before project writes",
+            "another execution attempt requires recovery before project writes",
         ));
     }
     Ok(true)
 }
 
 fn clear_pending_geometry(project: &Path, record_path: &Path, attempt_id: &str) -> io::Result<()> {
-    if matching_pending_geometry(project, record_path, attempt_id)? {
-        fs::remove_file(project.join(GEOMETRY_PENDING))?;
+    clear_pending_marker(project, GEOMETRY_PENDING, record_path, attempt_id)
+}
+
+fn clear_pending_marker(
+    project: &Path,
+    marker: &str,
+    record_path: &Path,
+    attempt_id: &str,
+) -> io::Result<()> {
+    if matching_pending_marker(project, marker, record_path, attempt_id)? {
+        fs::remove_file(project.join(marker))?;
         sync_directory(project)?;
     }
     Ok(())
+}
+
+fn clear_execution_pending(
+    project: &Path,
+    record_path: &Path,
+    attempt_id: &str,
+    domain: &str,
+) -> io::Result<()> {
+    if domain == "schematic" {
+        clear_pending_marker(project, SCHEMATIC_PENDING, record_path, attempt_id)
+    } else {
+        clear_pending_geometry(project, record_path, attempt_id)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -72,6 +108,31 @@ pub struct ExecutionRecord {
     pub backups: Vec<Backup>,
     #[serde(default)]
     pub post_attempt: Option<Vec<SourceFingerprint>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub created_sources: Vec<CreatedSchematicSource>,
+}
+
+/// Exact observed existence of a source path; absence never uses an empty hash sentinel.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SourceExistence {
+    Absent,
+    Present { sha256: kicad_model::RevisionDigest },
+}
+
+/// A schematic file proven absent before the attempt. Missing post evidence permits continued absence only.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreatedSchematicSource {
+    pub original: PathBuf,
+    pub post_attempt: Option<SourceExistence>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreatedSchematicRecovery {
+    pub original: PathBuf,
+    pub current: SourceExistence,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -107,6 +168,8 @@ pub struct RecoveryRecord {
     pub approval_hash: Option<String>,
     pub state: String,
     pub files: Vec<RecoveryFile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub created_sources: Vec<CreatedSchematicRecovery>,
     pub outcome: Option<Value>,
 }
 
@@ -154,6 +217,35 @@ fn read_bounded(path: &Path, limit: u64) -> io::Result<Vec<u8>> {
         return Err(invalid("recovery file exceeds size limit"));
     }
     Ok(bytes)
+}
+
+fn schematic_existence(project: &Path, path: &Path) -> io::Result<SourceExistence> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| invalid("schematic source has no parent"))?;
+    if !path.starts_with(project)
+        || path.extension().and_then(|extension| extension.to_str()) != Some("kicad_sch")
+        || fs::canonicalize(parent)? != parent
+        || !parent.is_dir()
+    {
+        return Err(invalid(
+            "new schematic path must have a confined canonical existing parent",
+        ));
+    }
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(SourceExistence::Absent),
+        Err(error) => Err(error),
+        Ok(_) => Ok(SourceExistence::Present {
+            sha256: crate::digest_bytes(&read_bounded(path, 32 * 1024 * 1024)?),
+        }),
+    }
+}
+
+fn valid_execution_schema(record: &ExecutionRecord) -> bool {
+    (record.schema_version == 1 && record.created_sources.is_empty())
+        || (record.schema_version == 2
+            && record.domain == "schematic"
+            && !record.created_sources.is_empty())
 }
 
 fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -269,7 +361,7 @@ fn read_records(root: &Path, project: &Path, limit: usize) -> io::Result<Vec<Exe
         }
         let mut record: ExecutionRecord =
             serde_json::from_slice(&read_bounded(&path, MAX_RECORD_BYTES)?)?;
-        if record.schema_version != 1 || record.project_dir != project {
+        if !valid_execution_schema(&record) || record.project_dir != project {
             return Err(invalid("recovery record schema or project mismatch"));
         }
         if record.state == "in_flight" {
@@ -292,9 +384,11 @@ fn read_records(root: &Path, project: &Path, limit: usize) -> io::Result<Vec<Exe
 impl ProjectWriter {
     /// Ordinary writers reject pending recovery before source preflight; recovery uses its own checks.
     pub fn ensure_ready(&self) -> io::Result<()> {
-        if pending_geometry(&self.project)?.is_some() {
+        if pending_geometry(&self.project)?.is_some()
+            || pending_marker(&self.project, SCHEMATIC_PENDING)?.is_some()
+        {
             return Err(invalid(
-                "geometry outcome requires guarded recovery before further project writes",
+                "execution outcome requires guarded recovery before further project writes",
             ));
         }
         Ok(())
@@ -307,6 +401,65 @@ impl ProjectWriter {
         approval_hash: &str,
         evidence: Value,
         sources: &[PathBuf],
+    ) -> io::Result<ExecutionAttempt> {
+        self.begin_internal(domain, plan_hash, approval_hash, evidence, sources, &[])
+    }
+
+    /// Record existing backups and proven-absent schematic paths before any publication.
+    pub fn begin_schematic(
+        &self,
+        plan_hash: &str,
+        approval_hash: &str,
+        evidence: Value,
+        sources: &[PathBuf],
+        created_sources: &[PathBuf],
+    ) -> io::Result<ExecutionAttempt> {
+        self.ensure_ready()?;
+        if sources.len() + created_sources.len() == 0 || sources.len() + created_sources.len() > 32
+        {
+            return Err(invalid(
+                "schematic publication requires 1..32 changed files",
+            ));
+        }
+        require_closed_project(&self.project)?;
+        let mut paths = std::collections::BTreeSet::new();
+        for path in sources {
+            if !paths.insert(path)
+                || !matches!(
+                    schematic_existence(&self.project, path)?,
+                    SourceExistence::Present { .. }
+                )
+            {
+                return Err(invalid(
+                    "existing schematic sources are missing or repeated",
+                ));
+            }
+        }
+        for path in created_sources {
+            if !paths.insert(path)
+                || schematic_existence(&self.project, path)? != SourceExistence::Absent
+            {
+                return Err(invalid("new schematic sources must be absent and distinct"));
+            }
+        }
+        self.begin_internal(
+            "schematic",
+            plan_hash,
+            approval_hash,
+            evidence,
+            sources,
+            created_sources,
+        )
+    }
+
+    fn begin_internal(
+        &self,
+        domain: &str,
+        plan_hash: &str,
+        approval_hash: &str,
+        evidence: Value,
+        sources: &[PathBuf],
+        created_paths: &[PathBuf],
     ) -> io::Result<ExecutionAttempt> {
         self.ensure_ready()?;
         if read_records(&self.records, &self.project, usize::MAX)?
@@ -343,8 +496,22 @@ impl ProjectWriter {
                 sha256: crate::digest_bytes(&bytes).to_string(),
             });
         }
+        let created_sources = created_paths
+            .iter()
+            .map(|path| {
+                if schematic_existence(&self.project, path)? != SourceExistence::Absent {
+                    return Err(invalid(
+                        "new schematic source appeared during intent preparation",
+                    ));
+                }
+                Ok(CreatedSchematicSource {
+                    original: path.clone(),
+                    post_attempt: None,
+                })
+            })
+            .collect::<io::Result<Vec<_>>>()?;
         let record = ExecutionRecord {
-            schema_version: 1,
+            schema_version: if created_sources.is_empty() { 1 } else { 2 },
             attempt_id: directory
                 .file_name()
                 .expect("execution directory has a name")
@@ -359,6 +526,7 @@ impl ProjectWriter {
             outcome: None,
             backups,
             post_attempt: None,
+            created_sources,
         };
         let path = directory.join("record.json");
         let bytes = serde_json::to_vec(&record)?;
@@ -368,19 +536,23 @@ impl ProjectWriter {
         write_new(&path, &bytes)?;
         sync_directory(&directory)?;
         sync_directory(&self.records)?;
-        if record
+        let marker = if domain == "schematic" {
+            Some(SCHEMATIC_PENDING)
+        } else if record
             .evidence
             .get("geometry_evidence")
             .is_some_and(|value| !value.is_null())
         {
+            Some(GEOMETRY_PENDING)
+        } else {
+            None
+        };
+        if let Some(marker) = marker {
             let pending = PendingGeometry {
                 attempt_id: record.attempt_id.clone(),
                 record_path: path.clone(),
             };
-            write_new(
-                &self.project.join(GEOMETRY_PENDING),
-                &serde_json::to_vec(&pending)?,
-            )?;
+            write_new(&self.project.join(marker), &serde_json::to_vec(&pending)?)?;
             sync_directory(&self.project)?;
         }
         Ok(ExecutionAttempt { path, record })
@@ -413,12 +585,15 @@ fn valid_id(id: &str) -> bool {
 }
 
 fn recovery_hash(record: &RecoveryRecord) -> io::Result<String> {
-    Ok(crate::digest_bytes(&serde_json::to_vec(&serde_json::json!({
+    let mut fields = serde_json::json!({
         "schema_version": record.schema_version, "recovery_id": record.recovery_id,
         "attempt_id": record.attempt_id, "project_dir": record.project_dir,
         "domain": record.domain, "action": record.action, "files": record.files,
-    }))?)
-    .to_string())
+    });
+    if !record.created_sources.is_empty() {
+        fields["created_sources"] = serde_json::to_value(&record.created_sources)?;
+    }
+    Ok(crate::digest_bytes(&serde_json::to_vec(&fields)?).to_string())
 }
 
 // Disk recovery cannot synchronize an editor's unsaved model. Require closed documents.
@@ -466,7 +641,10 @@ impl ExecutionStore {
         if record.attempt_id.is_empty() {
             record.attempt_id = id.into();
         }
-        if record.schema_version != 1 || record.project_dir != project || record.attempt_id != id {
+        if !valid_execution_schema(&record)
+            || record.project_dir != project
+            || record.attempt_id != id
+        {
             return Err(invalid("execution record identity mismatch"));
         }
         Ok(record)
@@ -481,11 +659,15 @@ impl ExecutionStore {
             .records_dir(project)
             .join(&record.attempt_id)
             .join("record.json");
-        let pending = matching_pending_geometry(project, &record_path, &record.attempt_id)?;
+        let pending = if record.domain == "schematic" {
+            matching_pending_marker(project, SCHEMATIC_PENDING, &record_path, &record.attempt_id)?
+        } else {
+            matching_pending_geometry(project, &record_path, &record.attempt_id)?
+        };
         if !(matches!(record.state.as_str(), "unknown" | "in_flight")
             || pending && matches!(record.state.as_str(), "committed" | "rejected"))
             || !matches!(record.domain.as_str(), "pcb" | "schematic")
-            || record.backups.is_empty()
+            || (record.backups.is_empty() && record.created_sources.is_empty())
         {
             return Err(invalid("execution attempt is not recoverable"));
         }
@@ -551,6 +733,50 @@ impl ExecutionStore {
             .collect()
     }
 
+    fn recovery_created_sources(
+        &self,
+        project: &Path,
+        record: &ExecutionRecord,
+    ) -> io::Result<Vec<CreatedSchematicRecovery>> {
+        if record.created_sources.len() + record.backups.len() > 32
+            && !record.created_sources.is_empty()
+        {
+            return Err(invalid(
+                "mixed schematic recovery exceeds changed-file bound",
+            ));
+        }
+        let mut paths = record
+            .backups
+            .iter()
+            .map(|backup| backup.original.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        record
+            .created_sources
+            .iter()
+            .map(|source| {
+                if record.domain != "schematic" || !paths.insert(source.original.clone()) {
+                    return Err(invalid(
+                        "new schematic recovery sources overlap or have the wrong domain",
+                    ));
+                }
+                let current = schematic_existence(project, &source.original)?;
+                let expected = source
+                    .post_attempt
+                    .as_ref()
+                    .unwrap_or(&SourceExistence::Absent);
+                if &current != expected {
+                    return Err(invalid(
+                        "new schematic changed or post-attempt presence evidence is unavailable",
+                    ));
+                }
+                Ok(CreatedSchematicRecovery {
+                    original: source.original.clone(),
+                    current,
+                })
+            })
+            .collect()
+    }
+
     fn read_recovery(&self, project: &Path, id: &str) -> io::Result<RecoveryAttempt> {
         if !valid_id(id) || !id.starts_with("recovery-") {
             return Err(invalid("invalid recovery identity"));
@@ -558,7 +784,10 @@ impl ExecutionStore {
         let path = self.recovery_dir(project).join(id).join("record.json");
         let record: RecoveryRecord =
             serde_json::from_slice(&read_bounded(&path, MAX_RECORD_BYTES)?)?;
-        if record.schema_version != 2
+        if !(record.schema_version == 2 && record.created_sources.is_empty()
+            || record.schema_version == 3
+                && record.domain == "schematic"
+                && !record.created_sources.is_empty())
             || record.project_dir != project
             || record.recovery_id != id
             || record.action != "restore_backups"
@@ -601,6 +830,7 @@ impl ExecutionStore {
         require_closed_project(project)?;
         let execution = self.execution_record(project, attempt_id)?;
         let files = self.recovery_files(project, &execution)?;
+        let created_sources = self.recovery_created_sources(project, &execution)?;
         static SEQUENCE: AtomicU64 = AtomicU64::new(0);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -619,7 +849,7 @@ impl ExecutionStore {
         let directory = root.join(&id);
         fs::create_dir(&directory)?;
         let mut record = RecoveryRecord {
-            schema_version: 2,
+            schema_version: if created_sources.is_empty() { 2 } else { 3 },
             recovery_id: id.clone(),
             attempt_id: execution.attempt_id,
             project_dir: project.clone(),
@@ -629,6 +859,7 @@ impl ExecutionStore {
             approval_hash: None,
             state: "prepared".into(),
             files,
+            created_sources,
             outcome: None,
         };
         record.plan_hash = recovery_hash(&record)?;
@@ -651,7 +882,10 @@ impl ExecutionStore {
         require_closed_project(&record.project_dir)?;
         let execution = self.execution_record(&record.project_dir, &record.attempt_id)?;
         let current = self.recovery_files(&record.project_dir, &execution)?;
-        if serde_json::to_value(current)? != serde_json::to_value(&record.files)? {
+        let created = self.recovery_created_sources(&record.project_dir, &execution)?;
+        if serde_json::to_value(current)? != serde_json::to_value(&record.files)?
+            || created != record.created_sources
+        {
             return Err(invalid(
                 "source or backup changed since recovery preparation",
             ));
@@ -762,11 +996,34 @@ impl ExecutionStore {
                 result?;
                 checkpoint(index)?;
             }
+            for (index, source) in attempt.record.created_sources.iter().enumerate() {
+                require_closed_project(&writer.project)?;
+                if schematic_existence(&writer.project, &source.original)? != source.current {
+                    return Err(invalid("new schematic changed during recovery"));
+                }
+                if matches!(source.current, SourceExistence::Present { .. }) {
+                    fs::remove_file(&source.original)?;
+                    sync_directory(
+                        source
+                            .original
+                            .parent()
+                            .ok_or_else(|| invalid("new source has no parent"))?,
+                    )?;
+                }
+                checkpoint(attempt.record.files.len() + index)?;
+            }
             for file in &attempt.record.files {
                 if crate::digest_bytes(&read_bounded(&file.original, MAX_FILE_BYTES)?).to_string()
                     != file.backup_sha256
                 {
                     return Err(invalid("restored file digest did not match backup"));
+                }
+            }
+            for source in &attempt.record.created_sources {
+                if schematic_existence(&writer.project, &source.original)?
+                    != SourceExistence::Absent
+                {
+                    return Err(invalid("new schematic was not restored to absence"));
                 }
             }
             checkpoint(usize::MAX)?;
@@ -777,7 +1034,12 @@ impl ExecutionStore {
                 .records_dir(&writer.project)
                 .join(&attempt.record.attempt_id)
                 .join("record.json");
-            clear_pending_geometry(&writer.project, &record_path, &attempt.record.attempt_id)
+            clear_execution_pending(
+                &writer.project,
+                &record_path,
+                &attempt.record.attempt_id,
+                &attempt.record.domain,
+            )
         })();
         match result {
             Ok(()) => Ok(attempt.record),
@@ -823,7 +1085,7 @@ impl ExecutionStore {
                 }
                 let mut record: RecoveryRecord =
                     serde_json::from_slice(&read_bounded(&path, MAX_RECORD_BYTES)?)?;
-                if record.project_dir != project || !matches!(record.schema_version, 1 | 2) {
+                if record.project_dir != project || !matches!(record.schema_version, 1..=3) {
                     return Err(invalid("invalid recovery history record"));
                 }
                 if record.state == "in_flight" {
@@ -870,6 +1132,12 @@ impl ExecutionAttempt {
                 })
                 .collect::<io::Result<Vec<_>>>()?,
         );
+        for source in &mut self.record.created_sources {
+            source.post_attempt = Some(schematic_existence(
+                &self.record.project_dir,
+                &source.original,
+            )?);
+        }
         self.record.state = state.into();
         self.record.outcome = Some(outcome);
         let bytes = serde_json::to_vec(&self.record)?;
@@ -881,10 +1149,11 @@ impl ExecutionAttempt {
         fs::rename(&temporary, &self.path)?;
         sync_directory(self.path.parent().expect("record has parent"))?;
         if matches!(state, "committed" | "rejected") {
-            clear_pending_geometry(
+            clear_execution_pending(
                 &self.record.project_dir,
                 &self.path,
                 &self.record.attempt_id,
+                &self.record.domain,
             )?;
         }
         Ok(())
@@ -1390,6 +1659,289 @@ mod tests {
                     .ends_with(".auto-kicad-recovery.tmp")
             }));
         }
+    }
+
+    #[test]
+    fn mixed_schematic_recovery_restores_bytes_absence_and_project_writer_readiness() {
+        let f = Fixture::new(false);
+        let root = f.project.join("root.kicad_sch");
+        let child = f.project.join("child.kicad_sch");
+        fs::write(&root, b"root-before").unwrap();
+        let writer = f.store.acquire(&f.project).unwrap();
+        let attempt = writer
+            .begin_schematic(
+                "mixed-plan",
+                "mixed-approval",
+                Value::Null,
+                std::slice::from_ref(&root),
+                std::slice::from_ref(&child),
+            )
+            .unwrap();
+        assert_eq!(attempt.record.schema_version, 2);
+        assert!(attempt.record.created_sources[0].post_attempt.is_none());
+        let id = attempt.attempt_id().to_owned();
+        let pending = fs::read(f.project.join(SCHEMATIC_PENDING)).unwrap();
+        assert!(
+            clear_pending_marker(&f.project, SCHEMATIC_PENDING, &attempt.path, "foreign").is_err()
+        );
+        assert_eq!(
+            fs::read(f.project.join(SCHEMATIC_PENDING)).unwrap(),
+            pending
+        );
+        fs::write(&root, b"root-after").unwrap();
+        fs::write(&child, b"new-child").unwrap();
+        attempt.finish("unknown", Value::Null).unwrap();
+        drop(writer);
+        let other = ExecutionStore::open(&f.root.join("other-state")).unwrap();
+        for store in [&f.store, &other] {
+            let writer = store.acquire(&f.project).unwrap();
+            assert!(writer.ensure_ready().is_err());
+            assert!(
+                writer
+                    .begin("pcb", "unrelated", "unrelated-approval", Value::Null, &[])
+                    .is_err()
+            );
+        }
+        let plan = f.store.plan_recovery(&f.project, &id).unwrap();
+        assert_eq!(plan.schema_version, 3);
+        assert_eq!(plan.files.len(), 1);
+        assert_eq!(plan.created_sources.len(), 1);
+        assert!(matches!(
+            plan.created_sources[0].current,
+            SourceExistence::Present { .. }
+        ));
+        let approval = f
+            .store
+            .preview_recovery(&f.project, &plan.recovery_id, &plan.plan_hash)
+            .unwrap();
+        assert!(
+            f.store
+                .commit_recovery(&f.project, &plan.recovery_id, &plan.plan_hash, "wrong")
+                .is_err()
+        );
+        f.store
+            .commit_recovery(&f.project, &plan.recovery_id, &plan.plan_hash, &approval)
+            .unwrap();
+        assert_eq!(fs::read(&root).unwrap(), b"root-before");
+        assert!(!child.exists());
+        assert!(
+            pending_marker(&f.project, SCHEMATIC_PENDING)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            f.store
+                .commit_recovery(&f.project, &plan.recovery_id, &plan.plan_hash, &approval)
+                .is_err()
+        );
+        other
+            .acquire(&f.project)
+            .unwrap()
+            .begin("pcb", "subsequent", "subsequent-approval", Value::Null, &[])
+            .unwrap()
+            .finish("committed", Value::Null)
+            .unwrap();
+        let execution = f.store.execution_record(&f.project, &id).unwrap();
+        assert_eq!(execution.state, "unknown");
+        assert!(matches!(
+            execution.created_sources[0].post_attempt,
+            Some(SourceExistence::Present { .. })
+        ));
+    }
+
+    #[test]
+    fn new_schematic_sources_require_confined_distinct_absence_and_observed_post_state() {
+        for mode in 0..7 {
+            let f = Fixture::new(false);
+            let root = f.project.join("root.kicad_sch");
+            let child = f.project.join("child.kicad_sch");
+            fs::write(&root, b"before").unwrap();
+            let writer = f.store.acquire(&f.project).unwrap();
+            let (sources, created) = match mode {
+                0 => (vec![], vec![]),
+                1 => (vec![root.clone()], vec![root.clone()]),
+                2 => (vec![root.clone()], vec![child.clone(), child.clone()]),
+                3 => (vec![], vec![f.root.join("outside.kicad_sch")]),
+                4 => (vec![], vec![f.project.join("child.kicad_pcb")]),
+                5 => (vec![], vec![f.project.join("missing/child.kicad_sch")]),
+                _ => {
+                    #[cfg(unix)]
+                    std::os::unix::fs::symlink(&root, &child).unwrap();
+                    #[cfg(not(unix))]
+                    fs::write(&child, b"collision").unwrap();
+                    (vec![], vec![child])
+                }
+            };
+            assert!(
+                writer
+                    .begin_schematic(
+                        "plan",
+                        "schematic-approval",
+                        Value::Null,
+                        &sources,
+                        &created
+                    )
+                    .is_err()
+            );
+            assert!(
+                pending_marker(&f.project, SCHEMATIC_PENDING)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        for changed in [false, true] {
+            let f = Fixture::new(false);
+            let child = f.project.join("child.kicad_sch");
+            let writer = f.store.acquire(&f.project).unwrap();
+            let attempt = writer
+                .begin_schematic(
+                    "plan",
+                    "schematic-approval",
+                    Value::Null,
+                    &[],
+                    std::slice::from_ref(&child),
+                )
+                .unwrap();
+            let id = attempt.attempt_id().to_owned();
+            if changed {
+                fs::write(&child, b"unobserved-new-file").unwrap();
+            }
+            drop(attempt);
+            drop(writer);
+            if changed {
+                assert!(f.store.plan_recovery(&f.project, &id).is_err());
+                assert_eq!(fs::read(&child).unwrap(), b"unobserved-new-file");
+                assert!(f.store.acquire(&f.project).unwrap().ensure_ready().is_err());
+            } else {
+                let plan = f.store.plan_recovery(&f.project, &id).unwrap();
+                assert_eq!(plan.created_sources[0].current, SourceExistence::Absent);
+                let approval = f
+                    .store
+                    .preview_recovery(&f.project, &plan.recovery_id, &plan.plan_hash)
+                    .unwrap();
+                f.store
+                    .commit_recovery(&f.project, &plan.recovery_id, &plan.plan_hash, &approval)
+                    .unwrap();
+                assert!(!child.exists());
+            }
+        }
+    }
+
+    #[test]
+    fn mixed_recovery_rejects_later_edits_and_preserves_files_on_partial_failure() {
+        for checkpoint in [None, Some(0), Some(1)] {
+            let f = Fixture::new(false);
+            let root = f.project.join("root.kicad_sch");
+            let child = f.project.join("child.kicad_sch");
+            fs::write(&root, b"before").unwrap();
+            let writer = f.store.acquire(&f.project).unwrap();
+            let attempt = writer
+                .begin_schematic(
+                    "plan",
+                    "schematic-approval",
+                    Value::Null,
+                    std::slice::from_ref(&root),
+                    std::slice::from_ref(&child),
+                )
+                .unwrap();
+            let id = attempt.attempt_id().to_owned();
+            fs::write(&root, b"after").unwrap();
+            fs::write(&child, b"child-after").unwrap();
+            attempt.finish("unknown", Value::Null).unwrap();
+            drop(writer);
+            let plan = f.store.plan_recovery(&f.project, &id).unwrap();
+            let approval = f
+                .store
+                .preview_recovery(&f.project, &plan.recovery_id, &plan.plan_hash)
+                .unwrap();
+            if checkpoint.is_none() {
+                fs::write(&child, b"user-edit").unwrap();
+            }
+            let error = f
+                .store
+                .commit_recovery_internal(
+                    &f.project,
+                    &plan.recovery_id,
+                    &plan.plan_hash,
+                    &approval,
+                    |index| {
+                        if checkpoint == Some(index) {
+                            fs::write(&child, b"user-edit")?;
+                        }
+                        Ok(())
+                    },
+                )
+                .unwrap_err();
+            assert_eq!(error.unknown, checkpoint.is_some());
+            assert_eq!(fs::read(&child).unwrap(), b"user-edit");
+            assert_eq!(
+                fs::read(&root).unwrap(),
+                if checkpoint.is_none() {
+                    b"after".as_slice()
+                } else {
+                    b"before".as_slice()
+                }
+            );
+            assert!(f.store.acquire(&f.project).unwrap().ensure_ready().is_err());
+            assert!(
+                f.store
+                    .commit_recovery(&f.project, &plan.recovery_id, &plan.plan_hash, &approval)
+                    .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn schematic_terminal_marker_recovery_and_legacy_json_remain_compatible() {
+        for state in ["committed", "rejected"] {
+            let f = Fixture::new(false);
+            let child = f.project.join("child.kicad_sch");
+            let writer = f.store.acquire(&f.project).unwrap();
+            let attempt = writer
+                .begin_schematic(
+                    "plan",
+                    "schematic-approval",
+                    Value::Null,
+                    &[],
+                    std::slice::from_ref(&child),
+                )
+                .unwrap();
+            let id = attempt.attempt_id().to_owned();
+            let marker = fs::read(f.project.join(SCHEMATIC_PENDING)).unwrap();
+            if state == "committed" {
+                fs::write(&child, b"created").unwrap();
+            }
+            attempt.finish(state, Value::Null).unwrap();
+            assert!(
+                pending_marker(&f.project, SCHEMATIC_PENDING)
+                    .unwrap()
+                    .is_none()
+            );
+            write_new(&f.project.join(SCHEMATIC_PENDING), &marker).unwrap();
+            drop(writer);
+            let plan = f.store.plan_recovery(&f.project, &id).unwrap();
+            let approval = f
+                .store
+                .preview_recovery(&f.project, &plan.recovery_id, &plan.plan_hash)
+                .unwrap();
+            f.store
+                .commit_recovery(&f.project, &plan.recovery_id, &plan.plan_hash, &approval)
+                .unwrap();
+            assert!(!child.exists());
+        }
+        let f = Fixture::new(false);
+        let record = f.store.execution_record(&f.project, &f.id).unwrap();
+        let json = serde_json::to_value(&record).unwrap();
+        assert_eq!(json["schema_version"], 1);
+        assert!(json.get("created_sources").is_none());
+        let (plan, _) = f.ready();
+        assert_eq!(plan.schema_version, 2);
+        assert!(
+            serde_json::to_value(&plan)
+                .unwrap()
+                .get("created_sources")
+                .is_none()
+        );
     }
 
     #[test]

@@ -55,8 +55,17 @@ def main():
         assert history_before["observation"] == "durable_history_only"
         plan, approval = prepare(rpc)
         before = {f["original"]: Path(f["original"]).read_bytes() for f in plan["files"]}
+        created = {
+            source["original"]: Path(source["original"]).read_bytes()
+            if Path(source["original"]).exists() else None
+            for source in plan.get("created_sources", [])
+        }
+        if created:
+            assert plan["schema_version"] == 3
+            assert plan["created_sources_restore_to"] == {"kind": "absent"}
         call(rpc, "kicad_commit_recovery", dict(approval, approval_hash="wrong"), ok=False)
         assert all(Path(p).read_bytes() == data for p, data in before.items())
+        assert all((Path(p).read_bytes() if Path(p).exists() else None) == data for p, data in created.items())
     finally:
         rpc.close()
     rpc = start()
@@ -64,6 +73,7 @@ def main():
         stale = call(rpc, "kicad_commit_recovery", approval, ok=False)
         assert stale["state"] == "rejected"
         assert all(Path(p).read_bytes() == data for p, data in before.items())
+        assert all((Path(p).read_bytes() if Path(p).exists() else None) == data for p, data in created.items())
         plan, approval = prepare(rpc)
         restored = call(rpc, "kicad_commit_recovery", approval)
         assert restored["state"] == "restored", restored
@@ -71,12 +81,14 @@ def main():
             saved = Path(file["original"]).read_bytes()
             assert saved == Path(file["backup"]).read_bytes()
             assert "sha256:" + hashlib.sha256(saved).hexdigest() == file["backup_sha256"]
+        for source in plan.get("created_sources", []):
+            assert not Path(source["original"]).exists(), source
         replay = call(rpc, "kicad_commit_recovery", approval, ok=False)
         assert replay["state"] == "rejected"
         history_after = call(rpc, "kicad_inspect_project", {"endpoint": "", "project_dir": str(project)})
         assert history_after["execution_history"] == history_before["execution_history"]
         assert history_after["recovery_history"][0]["state"] == "restored"
-        args.evidence.write_text(json.dumps({"passed": True, "restored": restored, "restart_rejected": True, "replay_rejected": True, "transcript": transcript}, indent=2) + "\n")
+        args.evidence.write_text(json.dumps({"passed": True, "restored": restored, "restart_rejected": True, "replay_rejected": True, "new_schematic_sources_restored_to_absence": sorted(created), "transcript": transcript}, indent=2) + "\n")
     finally:
         rpc.close()
 

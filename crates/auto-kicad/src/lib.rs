@@ -4134,18 +4134,20 @@ impl Server {
             Ok(record) => record,
             Err(error) => return Ok(self.rejected(request_id, &error.to_string())),
         };
-        self.envelope(
-            request_id,
-            Some(record.plan_hash.clone()),
-            json!({
-                "recovery_id": record.recovery_id,
-                "attempt_id": record.attempt_id,
-                "action": record.action,
-                "recovery_plan_hash": record.plan_hash,
-                "files": record.files,
-                "state": record.state
-            }),
-        )
+        let mut data = json!({
+            "recovery_id": record.recovery_id,
+            "attempt_id": record.attempt_id,
+            "action": record.action,
+            "recovery_plan_hash": record.plan_hash,
+            "files": record.files,
+            "state": record.state
+        });
+        if !record.created_sources.is_empty() {
+            data["schema_version"] = json!(record.schema_version);
+            data["created_sources"] = json!(record.created_sources);
+            data["created_sources_restore_to"] = json!({"kind": "absent"});
+        }
+        self.envelope(request_id, Some(record.plan_hash.clone()), data)
     }
 
     #[tool(
@@ -4184,7 +4186,7 @@ impl Server {
 
     #[tool(
         name = "kicad_commit_recovery",
-        description = "Atomically restore an exactly approved recovery plan after a final source and backup check."
+        description = "Restore backups and remove recorded new schematics using an exactly approved per-file recovery plan."
     )]
     pub async fn kicad_commit_recovery(
         &self,
