@@ -4147,6 +4147,11 @@ impl Server {
             data["created_sources"] = json!(record.created_sources);
             data["created_sources_restore_to"] = json!({"kind": "absent"});
         }
+        if !record.staging_files.is_empty() {
+            data["schema_version"] = json!(record.schema_version);
+            data["staging_files"] = json!(record.staging_files);
+            data["staging_files_restore_to"] = json!({"kind": "absent"});
+        }
         self.envelope(request_id, Some(record.plan_hash.clone()), data)
     }
 

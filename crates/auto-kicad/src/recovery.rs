@@ -6,6 +6,10 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+mod publication;
+pub use publication::{
+    SchematicPublication, SchematicPublicationFile, SchematicPublicationIntent, SchematicWrite,
+};
 
 const MAX_FILE_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_RECORD_BYTES: u64 = 4 * 1024 * 1024;
@@ -110,6 +114,8 @@ pub struct ExecutionRecord {
     pub post_attempt: Option<Vec<SourceFingerprint>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub created_sources: Vec<CreatedSchematicSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication: Option<SchematicPublicationIntent>,
 }
 
 /// Exact observed existence of a source path; absence never uses an empty hash sentinel.
@@ -120,7 +126,7 @@ pub enum SourceExistence {
     Present { sha256: kicad_model::RevisionDigest },
 }
 
-/// A schematic file proven absent before the attempt. Missing post evidence permits continued absence only.
+/// A schematic file proven absent before the attempt. Without publication intent, missing post evidence permits continued absence only.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreatedSchematicSource {
@@ -170,6 +176,8 @@ pub struct RecoveryRecord {
     pub files: Vec<RecoveryFile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub created_sources: Vec<CreatedSchematicRecovery>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub staging_files: Vec<CreatedSchematicRecovery>,
     pub outcome: Option<Value>,
 }
 
@@ -220,14 +228,17 @@ fn read_bounded(path: &Path, limit: u64) -> io::Result<Vec<u8>> {
 }
 
 fn schematic_existence(project: &Path, path: &Path) -> io::Result<SourceExistence> {
+    if path.extension().and_then(|extension| extension.to_str()) != Some("kicad_sch") {
+        return Err(invalid("schematic source extension is required"));
+    }
+    confined_existence(project, path)
+}
+
+fn confined_existence(project: &Path, path: &Path) -> io::Result<SourceExistence> {
     let parent = path
         .parent()
         .ok_or_else(|| invalid("schematic source has no parent"))?;
-    if !path.starts_with(project)
-        || path.extension().and_then(|extension| extension.to_str()) != Some("kicad_sch")
-        || fs::canonicalize(parent)? != parent
-        || !parent.is_dir()
-    {
+    if !path.starts_with(project) || fs::canonicalize(parent)? != parent || !parent.is_dir() {
         return Err(invalid(
             "new schematic path must have a confined canonical existing parent",
         ));
@@ -242,10 +253,16 @@ fn schematic_existence(project: &Path, path: &Path) -> io::Result<SourceExistenc
 }
 
 fn valid_execution_schema(record: &ExecutionRecord) -> bool {
-    (record.schema_version == 1 && record.created_sources.is_empty())
+    (record.schema_version == 1
+        && record.created_sources.is_empty()
+        && record.publication.is_none())
         || (record.schema_version == 2
             && record.domain == "schematic"
-            && !record.created_sources.is_empty())
+            && !record.created_sources.is_empty()
+            && record.publication.is_none())
+        || (record.schema_version == 3
+            && record.domain == "schematic"
+            && record.publication.is_some())
 }
 
 fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -527,6 +544,7 @@ impl ProjectWriter {
             backups,
             post_attempt: None,
             created_sources,
+            publication: None,
         };
         let path = directory.join("record.json");
         let bytes = serde_json::to_vec(&record)?;
@@ -593,6 +611,9 @@ fn recovery_hash(record: &RecoveryRecord) -> io::Result<String> {
     if !record.created_sources.is_empty() {
         fields["created_sources"] = serde_json::to_value(&record.created_sources)?;
     }
+    if !record.staging_files.is_empty() {
+        fields["staging_files"] = serde_json::to_value(&record.staging_files)?;
+    }
     Ok(crate::digest_bytes(&serde_json::to_vec(&fields)?).to_string())
 }
 
@@ -655,6 +676,7 @@ impl ExecutionStore {
         project: &Path,
         record: &ExecutionRecord,
     ) -> io::Result<Vec<RecoveryFile>> {
+        publication::validate_intent(project, record)?;
         let record_path = self
             .records_dir(project)
             .join(&record.attempt_id)
@@ -706,7 +728,8 @@ impl ExecutionStore {
                 if crate::digest_bytes(&saved).to_string() != backup.sha256 {
                     return Err(invalid("recovery backup digest mismatch"));
                 }
-                let current_hash = crate::digest_bytes(&current).to_string();
+                let current_digest = crate::digest_bytes(&current);
+                let current_hash = current_digest.to_string();
                 let expected = match &record.post_attempt {
                     Some(files) => {
                         &files
@@ -718,7 +741,15 @@ impl ExecutionStore {
                     // Legacy or interrupted attempts can only recover an unchanged file.
                     None => &backup.sha256,
                 };
-                if &current_hash != expected {
+                let allowed = publication::intended_state(
+                    record,
+                    &backup.original,
+                    &SourceExistence::Present {
+                        sha256: current_digest,
+                    },
+                )
+                .unwrap_or(&current_hash == expected);
+                if !allowed {
                     return Err(invalid(
                         "source changed after execution or post-attempt evidence is unavailable",
                     ));
@@ -764,7 +795,9 @@ impl ExecutionStore {
                     .post_attempt
                     .as_ref()
                     .unwrap_or(&SourceExistence::Absent);
-                if &current != expected {
+                if !publication::intended_state(record, &source.original, &current)
+                    .unwrap_or(&current == expected)
+                {
                     return Err(invalid(
                         "new schematic changed or post-attempt presence evidence is unavailable",
                     ));
@@ -784,10 +817,16 @@ impl ExecutionStore {
         let path = self.recovery_dir(project).join(id).join("record.json");
         let record: RecoveryRecord =
             serde_json::from_slice(&read_bounded(&path, MAX_RECORD_BYTES)?)?;
-        if !(record.schema_version == 2 && record.created_sources.is_empty()
+        if !(record.schema_version == 2
+            && record.created_sources.is_empty()
+            && record.staging_files.is_empty()
             || record.schema_version == 3
                 && record.domain == "schematic"
-                && !record.created_sources.is_empty())
+                && !record.created_sources.is_empty()
+                && record.staging_files.is_empty()
+            || record.schema_version == 4
+                && record.domain == "schematic"
+                && !record.staging_files.is_empty())
             || record.project_dir != project
             || record.recovery_id != id
             || record.action != "restore_backups"
@@ -831,6 +870,7 @@ impl ExecutionStore {
         let execution = self.execution_record(project, attempt_id)?;
         let files = self.recovery_files(project, &execution)?;
         let created_sources = self.recovery_created_sources(project, &execution)?;
+        let staging_files = publication::recovery_staging(project, &execution)?;
         static SEQUENCE: AtomicU64 = AtomicU64::new(0);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -849,7 +889,13 @@ impl ExecutionStore {
         let directory = root.join(&id);
         fs::create_dir(&directory)?;
         let mut record = RecoveryRecord {
-            schema_version: if created_sources.is_empty() { 2 } else { 3 },
+            schema_version: if !staging_files.is_empty() {
+                4
+            } else if created_sources.is_empty() {
+                2
+            } else {
+                3
+            },
             recovery_id: id.clone(),
             attempt_id: execution.attempt_id,
             project_dir: project.clone(),
@@ -860,6 +906,7 @@ impl ExecutionStore {
             state: "prepared".into(),
             files,
             created_sources,
+            staging_files,
             outcome: None,
         };
         record.plan_hash = recovery_hash(&record)?;
@@ -883,8 +930,10 @@ impl ExecutionStore {
         let execution = self.execution_record(&record.project_dir, &record.attempt_id)?;
         let current = self.recovery_files(&record.project_dir, &execution)?;
         let created = self.recovery_created_sources(&record.project_dir, &execution)?;
+        let staging = publication::recovery_staging(&record.project_dir, &execution)?;
         if serde_json::to_value(current)? != serde_json::to_value(&record.files)?
             || created != record.created_sources
+            || staging != record.staging_files
         {
             return Err(invalid(
                 "source or backup changed since recovery preparation",
@@ -1012,6 +1061,24 @@ impl ExecutionStore {
                 }
                 checkpoint(attempt.record.files.len() + index)?;
             }
+            for (index, stage) in attempt.record.staging_files.iter().enumerate() {
+                require_closed_project(&writer.project)?;
+                if confined_existence(&writer.project, &stage.original)? != stage.current {
+                    return Err(invalid("publication staging changed during recovery"));
+                }
+                if matches!(stage.current, SourceExistence::Present { .. }) {
+                    fs::remove_file(&stage.original)?;
+                    sync_directory(
+                        stage
+                            .original
+                            .parent()
+                            .ok_or_else(|| invalid("staging has no parent"))?,
+                    )?;
+                }
+                checkpoint(
+                    attempt.record.files.len() + attempt.record.created_sources.len() + index,
+                )?;
+            }
             for file in &attempt.record.files {
                 if crate::digest_bytes(&read_bounded(&file.original, MAX_FILE_BYTES)?).to_string()
                     != file.backup_sha256
@@ -1024,6 +1091,12 @@ impl ExecutionStore {
                     != SourceExistence::Absent
                 {
                     return Err(invalid("new schematic was not restored to absence"));
+                }
+            }
+            for stage in &attempt.record.staging_files {
+                if confined_existence(&writer.project, &stage.original)? != SourceExistence::Absent
+                {
+                    return Err(invalid("publication staging was not removed"));
                 }
             }
             checkpoint(usize::MAX)?;
@@ -1085,7 +1158,7 @@ impl ExecutionStore {
                 }
                 let mut record: RecoveryRecord =
                     serde_json::from_slice(&read_bounded(&path, MAX_RECORD_BYTES)?)?;
-                if record.project_dir != project || !matches!(record.schema_version, 1..=3) {
+                if record.project_dir != project || !matches!(record.schema_version, 1..=4) {
                     return Err(invalid("invalid recovery history record"));
                 }
                 if record.state == "in_flight" {
@@ -1115,7 +1188,7 @@ impl ExecutionAttempt {
     }
 
     pub fn finish(mut self, state: &str, outcome: Value) -> io::Result<()> {
-        // Missing evidence leaves an interrupted record; recovery must then be a byte no-op.
+        // Missing final evidence requires unchanged bytes unless durable publication intent binds exact candidate states.
         self.record.post_attempt = Some(
             self.record
                 .backups

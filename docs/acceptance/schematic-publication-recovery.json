@@ -1,0 +1,69 @@
+{
+  "actual_hard_process_exit_cases": [
+    {
+      "actual_stdio_recovery": true,
+      "child_exit_code": 79,
+      "complete_original_native_restored": true,
+      "exact_project_and_configuration_restored": true,
+      "foreign_state_writer_blocked": true,
+      "partial_native_expected": true,
+      "post_attempt_evidence_absent": true,
+      "private_snapshots_removed": true,
+      "published_files": 0
+    },
+    {
+      "actual_stdio_recovery": true,
+      "child_exit_code": 79,
+      "complete_original_native_restored": true,
+      "exact_project_and_configuration_restored": true,
+      "foreign_state_writer_blocked": true,
+      "partial_native_expected": true,
+      "post_attempt_evidence_absent": true,
+      "private_snapshots_removed": true,
+      "published_files": 1
+    },
+    {
+      "actual_stdio_recovery": true,
+      "child_exit_code": 79,
+      "complete_original_native_restored": true,
+      "exact_project_and_configuration_restored": true,
+      "foreign_state_writer_blocked": true,
+      "partial_native_expected": true,
+      "post_attempt_evidence_absent": true,
+      "private_snapshots_removed": true,
+      "published_files": 2
+    },
+    {
+      "actual_stdio_recovery": true,
+      "child_exit_code": 79,
+      "complete_original_native_restored": true,
+      "exact_project_and_configuration_restored": true,
+      "foreign_state_writer_blocked": true,
+      "partial_native_expected": true,
+      "post_attempt_evidence_absent": true,
+      "private_snapshots_removed": true,
+      "published_files": 3
+    }
+  ],
+  "existing_files": 2,
+  "general_native_publisher_implemented": false,
+  "gui_launched": false,
+  "native_version": "10.0.7",
+  "new_unreferenced_files": 1,
+  "passed": true,
+  "feature": "durable schematic file publication and interrupted recovery",
+  "execution_schema_with_intent": 3,
+  "recovery_schema_with_staging": 4,
+  "legacy_mixed_recovery_and_encoding_verified": true,
+  "quality": {
+    "passed": 542,
+    "failed": 0,
+    "ignored": 15
+  },
+  "actual_fixed_cli_mcp_regression_seconds": 4.08,
+  "native_final_publication_gate": false,
+  "public_general_edit_mcp": false,
+  "hierarchy_child_creation": false,
+  "power_loss_qualification": false,
+  "evidence": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-publication-recovery"
+}
