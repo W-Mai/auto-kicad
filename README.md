@@ -33,6 +33,8 @@ Backend callers can resolve [hierarchical schematic instances and multi-unit com
 
 [Typed schematic edit candidates](docs/acceptance/schematic-edit-candidates.md) modify existing symbols, deterministic reference annotations, evidence-bound footprint assignments, wires, markers and labels through exact source spans. [Catalog-bound symbol creation](docs/acceptance/schematic-symbol-creation.md) resolves an approved native library definition, embeds it with deterministic symbol/pin UUIDs and instance records, and passes a KiCad 10.0.7 native netlist/ERC check on an owned copy. Public general schematic editing and publication are not yet available.
 
+[Complete native edit previews](docs/acceptance/schematic-native-preview.md) compile from captured source bytes and retain exact source/candidate artifacts, full ERC differences and source-identity connectivity. Source, library or configuration drift permanently invalidates a preview. This backend observation does not grant publication approval.
+
 ## Board workflow
 
 1. Save the PCB and project settings in KiCad.

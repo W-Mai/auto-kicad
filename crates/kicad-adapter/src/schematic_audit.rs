@@ -1,4 +1,5 @@
 //! Private native schematic observations with bound source and library inputs.
+mod preview;
 use crate::library_catalog::{
     FootprintCatalog, LibraryCatalogPolicy, SchematicFootprintContext,
     symbols::{SymbolCatalog, SymbolLibraryContext},
@@ -10,6 +11,7 @@ use kicad_schematic::{
     Limits, NativeExecutionContext, NetlistDocument, NetlistRunner, ParsedSchematicProject,
     identities::SchematicIdentityIndex, load_schematic_project,
 };
+pub use preview::SchematicEditPreview;
 use serde::Serialize;
 use serde_json::{Value, value::RawValue};
 use sha2::{Digest, Sha256};

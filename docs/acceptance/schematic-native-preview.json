@@ -1,0 +1,33 @@
+{
+  "feature": "complete native schematic edit preview",
+  "native_version": "10.0.7",
+  "public_mcp_publication": false,
+  "profiles": [
+    {
+      "name": "ecc83",
+      "affected_instances": 1,
+      "baseline_errors": 0,
+      "baseline_warnings": 0
+    },
+    {
+      "name": "multichannel",
+      "affected_instances": 4,
+      "baseline_errors": 4,
+      "baseline_warnings": 32
+    }
+  ],
+  "cases": [
+    "property edit preserves complete ERC and source-pin connectivity",
+    "catalog-bound symbol creation is observed natively",
+    "forged catalog digest rejects",
+    "source drift permanently invalidates preview",
+    "configuration drift permanently invalidates preview",
+    "library drift permanently invalidates preview",
+    "introduced ERC diagnostic remains explicit"
+  ],
+  "gui_launched": false,
+  "source_unchanged": true,
+  "configuration_unchanged": true,
+  "private_directories_removed": true,
+  "evidence": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-complete-native-preview"
+}
