@@ -6,7 +6,9 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+mod native_publication;
 mod publication;
+pub use native_publication::{NativeSchematicPublication, SchematicPublicationFailure};
 pub use publication::{
     SchematicPublication, SchematicPublicationFile, SchematicPublicationIntent, SchematicWrite,
 };

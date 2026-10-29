@@ -52,6 +52,9 @@ pub struct MatchedSchematicPreview {
 }
 
 impl MatchedSchematicPreview {
+    pub(super) fn preview(&self) -> &Arc<SchematicEditPreview> {
+        &self.preview
+    }
     pub fn verify(&self) -> Result<(), String> {
         self.preview.verify()
     }

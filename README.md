@@ -39,6 +39,8 @@ Backend callers can resolve [hierarchical schematic instances and multi-unit com
 
 [Explicit schematic expectations](docs/acceptance/schematic-expectations.md) require complete declared network, pin, physical no-connect-marker and ERC changes to match the native candidate. Unaffected connectivity remains exact, and matching evidence is bound to the full preview digest. Human approval and general source publication remain separate requirements.
 
+[Native publication of matched schematic candidates](docs/acceptance/schematic-native-publication.md) consumes a preview, journals exact existing-file changes and verifies the actual saved hierarchy, native netlist, complete ERC, pin connectivity and protected inputs before durable completion. Full preview/matching/verification reports and candidate copies are retained beside the execution record. Public general-edit MCP approval and hierarchy creation remain unavailable.
+
 ## Board workflow
 
 1. Save the PCB and project settings in KiCad.

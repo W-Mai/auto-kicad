@@ -4,8 +4,15 @@ use kicad_schematic::editing::{
     EditAction, SchematicCandidate, SchematicEdit, SymbolDefinitionEvidence, compile_edits,
 };
 use kicad_schematic::probes::{ConnectivityPin, PinConnectivity};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 mod expectations;
+mod publication;
+pub use publication::{
+    SchematicPublicationCheck, SchematicPublicationWrite, VerifiedSchematicPublication,
+};
+const READY: u8 = 0;
+const PUBLISHING: u8 = 1;
+const INVALID: u8 = 2;
 pub use expectations::{
     ConnectivityExpectation, ErcExpectation, MatchedSchematicPreview, NoConnectMarker,
     SchematicEditExpectation,
@@ -21,7 +28,7 @@ pub struct SchematicEditPreview {
     erc_delta: kicad_checks::erc::ErcDelta,
     evidence: Value,
     digest: String,
-    valid: AtomicBool,
+    state: AtomicU8,
 }
 
 impl SchematicAudit {
@@ -167,7 +174,7 @@ impl SchematicAudit {
             erc_delta,
             evidence,
             digest,
-            valid: AtomicBool::new(true),
+            state: AtomicU8::new(READY),
         }))
     }
 }
@@ -197,8 +204,15 @@ impl SchematicEditPreview {
 
     /// Any observed drift permanently invalidates this preview, including after source restoration.
     pub fn verify(&self) -> Result<(), String> {
-        if !self.valid.load(Ordering::Acquire) {
-            return Err("schematic preview was invalidated; prepare a fresh preview".into());
+        match self.state.load(Ordering::Acquire) {
+            READY => {}
+            PUBLISHING => {
+                return Err(
+                    "schematic preview was consumed for publication; prepare a fresh preview"
+                        .into(),
+                );
+            }
+            _ => return Err("schematic preview was invalidated; prepare a fresh preview".into()),
         }
         let result = self
             .source
@@ -218,7 +232,7 @@ impl SchematicEditPreview {
                 verify_edit_sources(&self.source, &edits)
             });
         if result.is_err() {
-            self.valid.store(false, Ordering::Release);
+            self.state.store(INVALID, Ordering::Release);
         }
         result
     }
@@ -228,7 +242,16 @@ fn verify_edit_sources(audit: &SchematicAudit, edits: &[SchematicEdit]) -> Resul
     for edit in edits {
         match &edit.action {
             EditAction::CreateSymbol { symbol, .. } => {
-                let current = audit.symbol_definition(&symbol.evidence.lib_id)?;
+                let resolved = audit
+                    .inner
+                    .symbols
+                    .resolve_definition(&symbol.evidence.lib_id)?;
+                let current = SymbolDefinitionEvidence {
+                    lib_id: resolved.identifier,
+                    catalog_digest: resolved.catalog_digest,
+                    source_digest: resolved.source_digest,
+                    definition: resolved.definition,
+                };
                 if current != symbol.evidence {
                     return Err(
                         "symbol creation evidence differs from the effective catalog".into(),
@@ -305,6 +328,8 @@ mod ownership_tests {
         require_owned::<SchematicAudit>();
         require_owned::<SchematicEditPreview>();
         require_owned::<MatchedSchematicPreview>();
+        require_owned::<SchematicPublicationCheck>();
+        require_owned::<VerifiedSchematicPublication>();
         require_clone::<SchematicAudit>();
         require_clone::<Arc<SchematicEditPreview>>();
         require_clone::<MatchedSchematicPreview>();

@@ -220,6 +220,92 @@ impl SchematicPublication<'_> {
     pub fn record_unknown(self, outcome: Value) -> io::Result<()> {
         self.attempt.finish("unknown", outcome)
     }
+
+    pub(super) fn retain_artifact(&mut self, name: &str, bytes: &[u8]) -> io::Result<()> {
+        self.check_progress(
+            self.next
+                .ok_or_else(|| invalid("publication is uncertain"))?,
+        )?;
+        if name.len() > 80
+            || Path::new(name).file_name().and_then(|value| value.to_str()) != Some(name)
+            || !name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_'))
+            || bytes.len() > 128 * 1024 * 1024
+        {
+            return Err(invalid("invalid or oversized publication artifact"));
+        }
+        let previous = self
+            .attempt
+            .record
+            .evidence
+            .get("artifacts")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let total = previous
+            .iter()
+            .filter_map(|entry| entry.get("bytes").and_then(Value::as_u64))
+            .sum::<u64>();
+        if total + bytes.len() as u64 > 256 * 1024 * 1024 {
+            return Err(invalid("publication artifact budget exceeded"));
+        }
+        let path = self
+            .attempt
+            .path
+            .parent()
+            .expect("record parent")
+            .join(name);
+        write_new(&path, bytes)?;
+        sync_directory(path.parent().expect("artifact parent"))?;
+        let mut artifacts = previous;
+        artifacts.push(serde_json::json!({"name":name,"path":path,"bytes":bytes.len(),"sha256":crate::digest_bytes(bytes)}));
+        self.attempt.record.evidence["artifacts"] = serde_json::json!(artifacts);
+        self.attempt.persist()
+    }
+
+    pub(super) fn finish_verified(
+        self,
+        proof: &kicad_adapter::schematic_audit::VerifiedSchematicPublication,
+    ) -> io::Result<()> {
+        self.verify_complete()?;
+        proof.verify().map_err(io::Error::other)?;
+        if proof.project_dir() != self.writer.project
+            || self
+                .attempt
+                .record
+                .evidence
+                .get("matched_preview_digest")
+                .and_then(Value::as_str)
+                != Some(proof.matched_digest())
+            || self.attempt.record.evidence.get("candidate_artifacts")
+                != Some(&serde_json::to_value(proof.revision())?)
+        {
+            return Err(invalid(
+                "native proof does not match the publication intent",
+            ));
+        }
+        for file in self.files() {
+            let relative = file
+                .original
+                .strip_prefix(&self.writer.project)
+                .map_err(io::Error::other)?
+                .to_str()
+                .ok_or_else(|| invalid("invalid source path"))?;
+            if !proof.revision().files.iter().any(|artifact| {
+                artifact.relative_path == relative
+                    && artifact.content_digest == file.candidate_sha256
+            }) {
+                return Err(invalid(
+                    "native proof omits a publication file or candidate digest",
+                ));
+            }
+        }
+        self.attempt.finish("committed", serde_json::json!({
+            "kind":"committed", "native_verification_digest":proof.digest(),
+            "matched_preview_digest":proof.matched_digest(), "candidate_artifacts":proof.revision(),
+        }))
+    }
 }
 
 impl ExecutionAttempt {
@@ -627,6 +713,54 @@ mod tests {
         assert!(stages[0].exists());
         assert!(!stages[1].exists());
         owned.restore(&record.attempt_id);
+        owned.assert_restored(&writes, &stages);
+    }
+
+    #[test]
+    fn native_evidence_artifacts_remain_confined_and_digest_bound() {
+        let owned = Owned::new();
+        let writes = owned.writes();
+        let writer = owned.store.acquire(&owned.project).unwrap();
+        let mut publication = writer
+            .prepare_schematic_publication(
+                "plan",
+                "approval",
+                serde_json::json!({"artifacts":[]}),
+                &writes,
+            )
+            .unwrap();
+        let id = publication.attempt_id().to_owned();
+        let stages = publication
+            .files()
+            .iter()
+            .map(|file| file.staging.clone())
+            .collect::<Vec<_>>();
+        for name in ["../escape", ".", "..", "nested/file", "/absolute", ""] {
+            assert!(publication.retain_artifact(name, b"evidence").is_err());
+        }
+        for name in [
+            "preview.json",
+            "matching.json",
+            "candidate-0.kicad_sch",
+            "verification.json",
+        ] {
+            publication.retain_artifact(name, b"evidence").unwrap();
+        }
+        publication.check_progress(0).unwrap();
+        for artifact in publication.attempt.record.evidence["artifacts"]
+            .as_array()
+            .unwrap()
+        {
+            let path = Path::new(artifact["path"].as_str().unwrap());
+            assert_eq!(path.parent(), publication.attempt.path.parent());
+            assert_eq!(
+                artifact["sha256"],
+                serde_json::json!(crate::digest_bytes(&fs::read(path).unwrap()))
+            );
+        }
+        publication.record_unknown(Value::Null).unwrap();
+        drop(writer);
+        owned.restore(&id);
         owned.assert_restored(&writes, &stages);
     }
 

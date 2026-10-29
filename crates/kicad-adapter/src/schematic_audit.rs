@@ -13,7 +13,8 @@ use kicad_schematic::{
 };
 pub use preview::{
     ConnectivityExpectation, ErcExpectation, MatchedSchematicPreview, NoConnectMarker,
-    SchematicEditExpectation, SchematicEditPreview,
+    SchematicEditExpectation, SchematicEditPreview, SchematicPublicationCheck,
+    SchematicPublicationWrite, VerifiedSchematicPublication,
 };
 use serde::Serialize;
 use serde_json::{Value, value::RawValue};
@@ -426,6 +427,11 @@ impl SchematicAudit {
     }
     pub fn verify(&self) -> Result<(), String> {
         self.inner.source.verify()?;
+        self.verify_context()?;
+        self.verify_hierarchy(&self.inner.parsed)
+    }
+
+    fn verify_context(&self) -> Result<(), String> {
         self.inner.private_inputs.verify()?;
         self.inner.symbols.verify(&self.inner.symbol_context)?;
         if self
@@ -452,6 +458,10 @@ impl SchematicAudit {
             .ok_or("missing fixed execution context")?
             .verify()
             .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    fn verify_hierarchy(&self, expected: &ParsedSchematicProject) -> Result<(), String> {
         if load_schematic_project(
             &self.inner.policy.project,
             &self.inner.policy.schematic,
@@ -460,7 +470,7 @@ impl SchematicAudit {
             Limits::default(),
         )
         .map_err(|e| e.to_string())?
-            != self.inner.parsed
+            != *expected
         {
             return Err("source hierarchy or editor locks changed".into());
         }

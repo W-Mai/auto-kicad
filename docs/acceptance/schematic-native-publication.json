@@ -1,0 +1,153 @@
+{
+  "feature": "native publication of matched schematic candidates",
+  "native_version": "10.0.7",
+  "profiles": [
+    {
+      "affected_instances": 5,
+      "changed_files": 2,
+      "complete_actual_native_result_matched": true,
+      "consumed_preview_and_replay_rejected": true,
+      "controls": [
+        "wrong_project_rejected",
+        "stale_input_rejected:/private/tmp/auto-kicad-native-publication-acceptance/properties/project/multichannel_mixer.kicad_sch",
+        "stale_input_rejected:/private/tmp/auto-kicad-native-publication-acceptance/properties/config/10.0/kicad_common.json",
+        "stale_input_rejected:/private/tmp/auto-kicad-native-publication-acceptance/properties/project/multichannel_mixer.kicad_sym"
+      ],
+      "durable_native_evidence_and_candidates_retained": true,
+      "exact_candidate_published": true,
+      "gui_launched": false,
+      "mode": "properties",
+      "native_version": "10.0.7",
+      "passed": true,
+      "private_snapshots_removed": true,
+      "protected_inputs_unchanged": true,
+      "public_general_edit_mcp": false,
+      "nets_before": 80,
+      "nets_after": 80,
+      "erc_before": {
+        "errors": 4,
+        "exclusions": 0,
+        "kicad_version": "10.0.7",
+        "sheets": 5,
+        "source": "multichannel_mixer.kicad_sch",
+        "warnings": 32
+      },
+      "erc_after": {
+        "errors": 4,
+        "exclusions": 0,
+        "kicad_version": "10.0.7",
+        "sheets": 5,
+        "source": "multichannel_mixer.kicad_sch",
+        "warnings": 32
+      }
+    },
+    {
+      "affected_instances": 1,
+      "changed_files": 1,
+      "complete_actual_native_result_matched": true,
+      "consumed_preview_and_replay_rejected": true,
+      "controls": [],
+      "durable_native_evidence_and_candidates_retained": true,
+      "exact_candidate_published": true,
+      "gui_launched": false,
+      "mode": "wire",
+      "native_version": "10.0.7",
+      "passed": true,
+      "private_snapshots_removed": true,
+      "protected_inputs_unchanged": true,
+      "public_general_edit_mcp": false,
+      "nets_before": 13,
+      "nets_after": 12,
+      "erc_before": {
+        "errors": 0,
+        "exclusions": 0,
+        "kicad_version": "10.0.7",
+        "sheets": 1,
+        "source": "ecc83-pp.kicad_sch",
+        "warnings": 0
+      },
+      "erc_after": {
+        "errors": 0,
+        "exclusions": 0,
+        "kicad_version": "10.0.7",
+        "sheets": 1,
+        "source": "ecc83-pp.kicad_sch",
+        "warnings": 0
+      }
+    },
+    {
+      "affected_instances": 1,
+      "changed_files": 1,
+      "complete_actual_native_result_matched": true,
+      "consumed_preview_and_replay_rejected": true,
+      "controls": [],
+      "durable_native_evidence_and_candidates_retained": true,
+      "exact_candidate_published": true,
+      "gui_launched": false,
+      "mode": "symbol",
+      "native_version": "10.0.7",
+      "passed": true,
+      "private_snapshots_removed": true,
+      "protected_inputs_unchanged": true,
+      "public_general_edit_mcp": false,
+      "nets_before": 13,
+      "nets_after": 15,
+      "erc_before": {
+        "errors": 0,
+        "exclusions": 0,
+        "kicad_version": "10.0.7",
+        "sheets": 1,
+        "source": "ecc83-pp.kicad_sch",
+        "warnings": 0
+      },
+      "erc_after": {
+        "errors": 2,
+        "exclusions": 0,
+        "kicad_version": "10.0.7",
+        "sheets": 1,
+        "source": "ecc83-pp.kicad_sch",
+        "warnings": 0
+      }
+    }
+  ],
+  "native_failure_controls": [
+    {
+      "mode": "lost-final-check",
+      "native_baseline_restored": true,
+      "private_snapshots_removed": true,
+      "unknown": true
+    },
+    {
+      "mode": "configuration-drift",
+      "native_baseline_restored": true,
+      "private_snapshots_removed": true,
+      "unknown": true
+    },
+    {
+      "mode": "user-source-edit",
+      "native_baseline_restored": true,
+      "private_snapshots_removed": true,
+      "unknown": true
+    }
+  ],
+  "quality": {
+    "passed": 544,
+    "failed": 0,
+    "ignored": 16
+  },
+  "actual_fixed_cli_mcp_regression_seconds": 3.74,
+  "native_failure_test_seconds": 91.08,
+  "backend_native_publication": true,
+  "existing_source_candidates_only": true,
+  "public_general_edit_mcp": false,
+  "human_approval_integration": false,
+  "hierarchy_child_creation": false,
+  "inherited_symbol_creation": false,
+  "gui_launched": false,
+  "private_directories_removed": true,
+  "evidence": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-native-publication",
+  "failed_controls": [
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-native-publication-failed",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-native-publication-metadata-control"
+  ]
+}
