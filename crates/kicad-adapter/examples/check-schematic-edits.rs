@@ -311,7 +311,7 @@ fn main() -> Result<()> {
             uuid: id.clone(),
             footprint: "Resistor_SMD:R_0603_1608Metric".into(),
             evidence: FootprintCompatibilityEvidence {
-                catalog_digest: digest(footprint_source)?,
+                catalog_digest: before.footprint_catalog_digest().to_owned(),
                 source_digest: digest(footprint_source)?,
                 pad_numbers: pin_pad_map.values().cloned().collect(),
                 pin_pad_map,

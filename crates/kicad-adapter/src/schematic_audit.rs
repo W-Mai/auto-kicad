@@ -396,6 +396,9 @@ impl SchematicAudit {
     pub fn netlist(&self) -> &NetlistDocument {
         &self.netlist
     }
+    pub fn footprint_catalog_digest(&self) -> &str {
+        self.footprints.digest()
+    }
     pub fn erc(&self) -> &CompleteErcReport {
         &self.erc
     }

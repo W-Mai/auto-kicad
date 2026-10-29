@@ -128,7 +128,8 @@
     "crates/kicad-schematic/src/patch.rs": "4fbde81ec9bb745ddf0a5c302ae1363f2cc771a43d3bc2e1aec92933f6e70818",
     "crates/kicad-schematic/src/pins.rs": "b9f0b0d6eb383f175ba8410365b8911b01bd185a61256619b76ca6d80f65715c",
     "crates/kicad-schematic/src/probes.rs": "19a44fa78c4fb2d27323a780040f393b37ac9608c6832b83c53abd8cdc575692",
-    "crates/kicad-adapter/examples/check-schematic-edits.rs": "d93b26fad754bf023deae3a47c570559d30b5ba7291b7a1b9d77b40a33f6a62e"
+    "crates/kicad-adapter/src/schematic_audit.rs": "1673d4e8e8b53a79c56f63db8263035a2121289c518d4e0ba2a532f046abf493",
+    "crates/kicad-adapter/examples/check-schematic-edits.rs": "fba243b61f98eda55aa86ae54569bb54d37f6cd820f3bdb4282f4a55623fdca1"
   },
   "evidence_trees": {
     "m5-native-edits-separated": {
@@ -166,6 +167,10 @@
     "m5-footprint-native": {
       "files": 857,
       "sha256": "77f72508494f3a8c8ad6cb065b78575df3c848a14123155414a224a006eb79e9"
+    },
+    "m5-catalog-native": {
+      "files": 857,
+      "sha256": "775d5c34ffa06e4c588b7cb5b9f786f351f87de4f553d2dbb5e654a9540ed2cc"
     }
   },
   "gui_launched": false,
