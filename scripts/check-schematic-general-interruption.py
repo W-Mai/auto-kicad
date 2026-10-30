@@ -98,7 +98,7 @@ def main():
     try:
         start()
         baseline = observe()
-        planned = plan(baseline, "AK_INTERRUPTED_STDIO")
+        planned = plan(baseline, "AK_INTERRUPTED_STDIO_" + hashlib.sha256(baseline["observation_id"].encode()).hexdigest()[:16])
         identity = {"plan_id": planned["plan_id"], "plan_hash": planned["plan_hash"]}
         preview = call("kicad_preview_schematic_change", identity)
         assert snapshot(project) == before
@@ -169,7 +169,7 @@ def main():
         start()
         restored = observe()
         assert restored["connectivity"] == baseline["connectivity"] and restored["objects"] == baseline["objects"]
-        subsequent = plan(restored, "AK_AFTER_RECOVERY")
+        subsequent = plan(restored, "AK_AFTER_RECOVERY_" + hashlib.sha256(restored["observation_id"].encode()).hexdigest()[:16])
         identity = {"plan_id": subsequent["plan_id"], "plan_hash": subsequent["plan_hash"]}
         approved = call("kicad_preview_schematic_change", identity)
         committed = call("kicad_commit_schematic_change", dict(identity, approval_hash=approved["approval_hash"]))

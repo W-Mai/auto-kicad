@@ -314,6 +314,7 @@ pub(super) fn insert_unit(
         },
         &mut patches,
         &file.format_version,
+        None,
     )?;
     let mut stack = items
         .iter()

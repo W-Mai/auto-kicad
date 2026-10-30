@@ -1,0 +1,93 @@
+{
+  "feature": "complete observed-component editing",
+  "native_version": "10.0.7",
+  "schematic_formats": [
+    "20250114",
+    "20260306"
+  ],
+  "production_stdio": true,
+  "server_sha256": "e201cb77eb34f498fc05099792472b45e49d4924b751b9cce728bf91d3aa712d",
+  "component_commits": 27,
+  "component_artifacts_rehashed": 108,
+  "recovery_artifacts_rehashed": 7,
+  "profiles": {
+    "current": {
+      "passed": true,
+      "instances": 1,
+      "committed_cases": 9,
+      "configuration_unchanged": true,
+      "private_snapshots_removed": true
+    },
+    "legacy": {
+      "passed": true,
+      "instances": 1,
+      "committed_cases": 9,
+      "configuration_unchanged": true,
+      "private_snapshots_removed": true
+    },
+    "shared": {
+      "passed": true,
+      "instances": 4,
+      "committed_cases": 9,
+      "configuration_unchanged": true,
+      "private_snapshots_removed": true
+    }
+  },
+  "accepted": [
+    "complete two-/three-unit reference, footprint, Value and flag edits",
+    "instance-scoped annotations across 4 reused physical-sheet instances",
+    "explicit reference swaps preserving component membership",
+    "foreign/inactive/trailing-slash annotation preservation",
+    "canonical active component pins, common-pin deduplication and literal native mapping",
+    "partial/conflicting/colliding/unrepresentable intents rejected before writes",
+    "exact approval/replay/source-drift controls",
+    "independent saved native grouping and full ERC"
+  ],
+  "changed_erc_target_membership_verified": {
+    "passed": true,
+    "all_changed_erc_items_bound_to_explicit_target_pin_uuids": true,
+    "unrelated_diagnostics_unchanged": true,
+    "diagnostic_deltas_checked": {
+      "current": 40,
+      "legacy": 40,
+      "shared": 0
+    }
+  },
+  "actual_interruption_and_recovery": {
+    "passed": true,
+    "actual_stdio_writer_killed": true,
+    "missing_terminal_and_post_evidence": true,
+    "fresh_process_plan_blocked": true,
+    "later_user_bytes_preserved": true,
+    "actual_stdio_guarded_recovery": true,
+    "exact_original_and_native_observation_restored": true,
+    "subsequent_native_commit": true,
+    "owned_children_stopped": true,
+    "owned_private_directories_removed": true,
+    "gui_launched": false
+  },
+  "offline_quality": {
+    "passed": 556,
+    "failed": 0,
+    "ignored": 16
+  },
+  "actual_fixed_cli_mcp_regression": {
+    "passed": true,
+    "seconds": 4.23
+  },
+  "failed_controls_retained": [
+    "initial CLI planning timeout, source unchanged; root cause unestablished",
+    "fixed recovery sentinel matched the original value; runner now uses observation-derived values"
+  ],
+  "remaining": [
+    "hierarchical sheets/pins and confined child-file authoring",
+    "complete GUI/Codex/family qualification",
+    "schematic-to-PCB synchronization",
+    "installation/release/manufacturing",
+    "remaining M4 and final real-project gates"
+  ],
+  "gui_launched": false,
+  "full_m5a_complete": false,
+  "full_product_goal_complete": false,
+  "evidence_directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-component-edits"
+}

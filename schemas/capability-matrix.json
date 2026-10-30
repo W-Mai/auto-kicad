@@ -258,7 +258,7 @@
         "closed saved KiCad 10.0.7 schematics, durable execution store and server-owned native configuration/library roots",
         "versioned intents bound to a live observation revision; up to 128 typed edits",
         "4 live observations and 4 live plans per server, 900-second expiry and explicit release",
-        "properties, per-instance references, flags, transforms, compatible footprint assignment, catalog symbol creation with bounded native inheritance, compatible component-unit groups, observed-source unit insertion, wires, markers and labels",
+        "properties, per-instance references, flags, transforms, compatible footprint assignment, catalog symbol creation with bounded native inheritance, compatible component-unit groups, observed-source unit insertion, explicit complete-component reference/property/footprint edits, wires, markers and labels",
         "complete explicit instance references on reused-sheet creation; unit insertion declares complete logical-pin membership migration",
         "exact declared source-pin/network/no-connect/ERC deltas, session-bound approval and actual-source native verification",
         "durable multi-file publication intent; interrupted writes require fresh guarded recovery",

@@ -388,6 +388,16 @@ fn source_inventory(
     Ok(result)
 }
 
+pub(crate) fn active_source_pin_numbers(
+    project: &ParsedSchematicProject,
+    sources: &BTreeMap<String, &[u8]>,
+) -> Result<BTreeMap<(String, String), BTreeSet<String>>, String> {
+    Ok(source_inventory(project, sources)?
+        .into_iter()
+        .map(|(key, unit)| (key, unit.active.into_iter().map(|pin| pin.number).collect()))
+        .collect())
+}
+
 fn occurrence(unit: &SymbolUnitIdentity, pin: &SourcePin) -> PinOccurrence {
     PinOccurrence {
         source: unit.into(),

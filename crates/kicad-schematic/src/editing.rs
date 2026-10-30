@@ -11,6 +11,7 @@ use kiutils_sexpr::{Node, Span};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+mod components;
 mod creation;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -770,6 +771,7 @@ fn edit_existing(
     action: &EditAction,
     patches: &mut Patches<'_>,
     format: &str,
+    annotation_scope: Option<(&str, &[String])>,
 ) -> Result<(String, ObjectKind), String> {
     let (id, kind) = match action {
         EditAction::SetReference { uuid, .. } => (uuid, ObjectKind::Symbol),
@@ -803,20 +805,31 @@ fn edit_existing(
             if property.len() != 1 {
                 return Err("symbol must have one Reference property".into());
             }
+            let (project_name, observed_paths) =
+                annotation_scope.ok_or("reference edit requires observed annotation scope")?;
             let instances = one(items, "instances")?;
             let project_nodes = values(instances)?
                 .iter()
                 .filter_map(list_items)
-                .filter(|v| list_tag(v) == Some("project"))
+                .filter(|v| {
+                    list_tag(v) == Some("project") && atom_text(v.get(1)) == Some(project_name)
+                })
                 .collect::<Vec<_>>();
             if project_nodes.len() != 1 {
-                return Err("symbol must have one instances project".into());
+                return Err("symbol must have one current instances project".into());
             }
             let paths = project_nodes[0]
                 .iter()
                 .skip(2)
                 .filter_map(list_items)
-                .filter(|v| list_tag(v) == Some("path"))
+                .filter(|v| {
+                    list_tag(v) == Some("path")
+                        && atom_text(v.get(1)).is_some_and(|path| {
+                            observed_paths
+                                .iter()
+                                .any(|observed| observed == path.trim_end_matches('/'))
+                        })
+                })
                 .collect::<Vec<_>>();
             if paths.is_empty() {
                 return Err("symbol has no instance paths".into());
@@ -824,7 +837,10 @@ fn edit_existing(
             if let Some(target) = instance_path {
                 let matches = paths
                     .iter()
-                    .filter(|path| atom_text(path.get(1)) == Some(target.as_str()))
+                    .filter(|path| {
+                        atom_text(path.get(1))
+                            .is_some_and(|path| path.trim_end_matches('/') == target)
+                    })
                     .collect::<Vec<_>>();
                 if matches.len() != 1 {
                     return Err("reference target instance path is missing or ambiguous".into());
@@ -1071,227 +1087,13 @@ fn validate_digest(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
-fn validate_footprint_edits(
-    project: &ParsedSchematicProject,
-    edits: &[SchematicEdit],
-) -> Result<(), String> {
-    for edit in edits {
-        let EditAction::AssignFootprint {
-            uuid,
-            footprint,
-            evidence,
-        } = &edit.action
-        else {
-            continue;
-        };
-        validate_footprint_identifier(footprint)?;
-        if !validate_digest(&evidence.catalog_digest) || !validate_digest(&evidence.source_digest) {
-            return Err("footprint assignment evidence digest is invalid".into());
-        }
-        if evidence.pad_numbers.is_empty() || evidence.pad_numbers.len() > 512 {
-            return Err("footprint assignment pad evidence is empty or oversized".into());
-        }
-        let pads = evidence.pad_numbers.iter().collect::<BTreeSet<_>>();
-        if pads.len() != evidence.pad_numbers.len()
-            || pads.iter().any(|pad| {
-                pad.is_empty()
-                    || pad.len() > 32
-                    || !pad.is_ascii()
-                    || pad
-                        .chars()
-                        .any(|c| c.is_ascii_whitespace() || c.is_ascii_control())
-            })
-        {
-            return Err("footprint assignment pad evidence is invalid".into());
-        }
-        let symbol = project
-            .files
-            .iter()
-            .find_map(|file| {
-                file.symbols
-                    .iter()
-                    .find(|symbol| symbol.source_uuid == *uuid)
-            })
-            .ok_or("footprint assignment target symbol is not observed")?;
-        let pins = symbol
-            .pins
-            .iter()
-            .map(|pin| pin.number.as_str())
-            .collect::<BTreeSet<_>>();
-        let mapped_pins = evidence
-            .pin_pad_map
-            .keys()
-            .map(String::as_str)
-            .collect::<BTreeSet<_>>();
-        let mapped_pads = evidence.pin_pad_map.values().collect::<BTreeSet<_>>();
-        if pins.is_empty()
-            || mapped_pins != pins
-            || mapped_pads.len() != evidence.pin_pad_map.len()
-            || mapped_pads.iter().any(|pad| !pads.contains(pad))
-            || evidence.pin_pad_map.len() != evidence.pad_numbers.len()
-        {
-            return Err("footprint assignment pin-pad evidence is not a complete bijection".into());
-        }
-    }
-    Ok(())
-}
-
-fn reference_entries(project: &ParsedSchematicProject) -> Vec<(String, String, String)> {
-    project
-        .files
-        .iter()
-        .flat_map(|file| {
-            file.symbols.iter().flat_map(move |symbol| {
-                symbol.instance_paths.iter().filter_map(move |instance| {
-                    instance.reference.as_ref().map(|reference| {
-                        (
-                            instance.path.clone(),
-                            reference.clone(),
-                            symbol.source_uuid.clone(),
-                        )
-                    })
-                })
-            })
-        })
-        .collect()
-}
-
 /// Allocate deterministic references against the complete expanded hierarchy.
 pub fn allocate_references(
     project: &ParsedSchematicProject,
     native: &NetlistDocument,
     requests: &[ReferenceRequest],
 ) -> Result<Vec<SchematicEdit>, String> {
-    if requests.is_empty() || requests.len() > 128 {
-        return Err("reference allocation requires 1..128 requests".into());
-    }
-    let _ = SchematicIdentityIndex::resolve(project, native).map_err(|e| e.to_string())?;
-    let mut occupied = reference_entries(project);
-    let mut edits = Vec::new();
-    let mut assigned = BTreeSet::new();
-    for request in requests {
-        if !uuid(&request.uuid) || request.prefix.is_empty() || !request.prefix.is_ascii() {
-            return Err("invalid reference allocation request".into());
-        }
-        let file = project
-            .files
-            .iter()
-            .find(|file| {
-                file.symbols
-                    .iter()
-                    .any(|symbol| symbol.source_uuid == request.uuid)
-            })
-            .ok_or("reference request symbol is not observed")?;
-        let target_paths = file
-            .symbols
-            .iter()
-            .find(|symbol| symbol.source_uuid == request.uuid)
-            .map(|symbol| {
-                symbol
-                    .instance_paths
-                    .iter()
-                    .filter(|instance| {
-                        request
-                            .instance_path
-                            .as_deref()
-                            .is_none_or(|path| path == instance.path)
-                    })
-                    .map(|instance| instance.path.clone())
-                    .collect::<Vec<_>>()
-            })
-            .ok_or("reference request symbol is not observed")?;
-        if target_paths.is_empty() {
-            return Err("reference request instance path is not observed".into());
-        }
-        let mut number = request.minimum.max(1);
-        let reference = loop {
-            let candidate = format!("{}{number}", request.prefix);
-            if !occupied.iter().any(|(path, value, _source)| {
-                target_paths.iter().any(|target| target == path) && value == &candidate
-            }) && target_paths
-                .iter()
-                .all(|path| !assigned.contains(&(path.clone(), candidate.clone())))
-            {
-                break candidate;
-            }
-            number = number
-                .checked_add(1)
-                .ok_or("reference allocation overflow")?;
-        };
-        for path in &target_paths {
-            occupied.push((path.clone(), reference.clone(), request.uuid.clone()));
-            assigned.insert((path.clone(), reference.clone()));
-        }
-        edits.push(SchematicEdit {
-            file: file.artifact.relative_path.clone(),
-            scope: if request.instance_path.is_some() {
-                EditScope::SingleInstance(request.instance_path.clone().unwrap())
-            } else {
-                EditScope::FileAllInstances
-            },
-            action: EditAction::SetReference {
-                uuid: request.uuid.clone(),
-                reference,
-                instance_path: request.instance_path.clone(),
-            },
-        });
-    }
-    Ok(edits)
-}
-
-fn validate_reference_edits(
-    project: &ParsedSchematicProject,
-    edits: &[SchematicEdit],
-) -> Result<(), String> {
-    let mut occupied = BTreeMap::<(String, String), String>::new();
-    for (path, reference, source_uuid) in reference_entries(project) {
-        occupied.entry((path, reference)).or_insert(source_uuid);
-    }
-    for edit in edits {
-        let EditAction::SetReference {
-            uuid,
-            reference,
-            instance_path,
-        } = &edit.action
-        else {
-            continue;
-        };
-        validate_reference(reference)?;
-        let file = project
-            .files
-            .iter()
-            .find(|file| file.artifact.relative_path == edit.file)
-            .ok_or("reference target file is not observed")?;
-        let symbol = file
-            .symbols
-            .iter()
-            .find(|symbol| symbol.source_uuid == *uuid)
-            .ok_or("reference target symbol is not observed")?;
-        let paths = symbol
-            .instance_paths
-            .iter()
-            .filter(|instance| {
-                instance_path
-                    .as_deref()
-                    .is_none_or(|target| target == instance.path)
-            })
-            .map(|instance| instance.path.clone())
-            .collect::<Vec<_>>();
-        if paths.is_empty() {
-            return Err("reference target instance path is not observed".into());
-        }
-        for path in paths {
-            if let Some(existing) = occupied.get(&(path.clone(), reference.clone()))
-                && existing != uuid
-            {
-                return Err(format!(
-                    "reference `{reference}` is already used at instance path `{path}`"
-                ));
-            }
-            occupied.insert((path, reference.clone()), uuid.clone());
-        }
-    }
-    Ok(())
+    components::allocate(project, native, requests)
 }
 
 pub fn compile_edits(
@@ -1320,8 +1122,6 @@ pub fn compile_edits(
     if changed.iter().any(|f| !sources.contains_key(*f)) {
         return Err("edit targets unobserved file".into());
     }
-    validate_reference_edits(project, edits)?;
-    validate_footprint_edits(project, edits)?;
     let mut seen_uuids = BTreeSet::new();
     let mut documents = BTreeMap::new();
     let mut total = 0;
@@ -1356,6 +1156,7 @@ pub fn compile_edits(
         }
         documents.insert(name.clone(), document);
     }
+    components::validate(project, &identities, sources, edits)?;
     let mut allocations = BTreeMap::new();
     let mut symbol_allocations = BTreeMap::new();
     let mut keys = BTreeSet::new();
@@ -1593,7 +1394,19 @@ pub fn compile_edits(
                     appended.push_str(rendered);
                     (symbol_uuid.clone(), ObjectKind::Symbol)
                 }
-                _ => edit_existing(root, &edit.action, &mut patches, &file.format_version)?,
+                _ => edit_existing(
+                    root,
+                    &edit.action,
+                    &mut patches,
+                    &file.format_version,
+                    Some((
+                        Path::new(&project.root_relative_path)
+                            .file_stem()
+                            .and_then(|name| name.to_str())
+                            .ok_or("invalid project basename")?,
+                        &instances,
+                    )),
+                )?,
             };
             changes.push(ObjectChange {
                 file: name.clone(),
@@ -2016,6 +1829,381 @@ mod tests {
             *unit = 1;
         }
         assert!(compile(&project, &native, &bytes, &[occupied]).is_err());
+    }
+
+    fn component_fixture() -> (
+        ParsedSchematicProject,
+        NetlistDocument,
+        Vec<u8>,
+        Vec<String>,
+    ) {
+        let (project, mut native, bytes) = fixture();
+        let edits = (1..=2)
+            .map(|unit| {
+                edit(EditAction::CreateSymbol {
+                    key: format!("member-{unit}"),
+                    symbol: multiunit_creation(unit),
+                })
+            })
+            .collect::<Vec<_>>();
+        let created = compile(&project, &native, &bytes, &edits).unwrap();
+        let ids = created.parsed().files[0]
+            .symbols
+            .iter()
+            .filter(|s| s.reference == "U2")
+            .map(|s| s.source_uuid.clone())
+            .collect::<Vec<_>>();
+        native.components.push(NetlistComponent {
+            reference: "U2".into(),
+            value: "Pair".into(),
+            footprint: None,
+            symbol_uuid: Some(ids.join(" ")),
+            sheet_path: "/".into(),
+            sheet_uuid_path: "/".into(),
+            library: "Test".into(),
+            library_part: "Pair".into(),
+            units: Some(vec![
+                NetlistUnit {
+                    name: "A".into(),
+                    pins: vec!["1".into(), "3".into()],
+                },
+                NetlistUnit {
+                    name: "B".into(),
+                    pins: vec!["2".into(), "3".into()],
+                },
+            ]),
+        });
+        (
+            created.parsed().clone(),
+            native,
+            created.files()["test.kicad_sch"].clone(),
+            ids,
+        )
+    }
+    fn reparsed(project: &ParsedSchematicProject, bytes: &[u8]) -> ParsedSchematicProject {
+        let mut project = project.clone();
+        project.files[0] = parse_schematic("test.kicad_sch", bytes).unwrap();
+        project.revision = SchematicArtifactRevision::new(
+            vec![project.files[0].artifact.clone()],
+            "10.0.7",
+            1,
+            false,
+        )
+        .unwrap();
+        project
+    }
+    fn component_assignment(uuid: &str, numbers: &[&str]) -> SchematicEdit {
+        edit(EditAction::AssignFootprint {
+            uuid: uuid.into(),
+            footprint: "Test:Assigned".into(),
+            evidence: FootprintCompatibilityEvidence {
+                catalog_digest: "a".repeat(64),
+                source_digest: "b".repeat(64),
+                pad_numbers: numbers.iter().map(|n| (*n).into()).collect(),
+                pin_pad_map: numbers.iter().map(|n| ((*n).into(), (*n).into())).collect(),
+            },
+        })
+    }
+
+    #[test]
+    fn component_references_preserve_membership_and_reject_partial_or_merged_groups() {
+        let (project, native, bytes, ids) = component_fixture();
+        let rename = |id: &str, reference: &str| {
+            edit(EditAction::SetReference {
+                uuid: id.into(),
+                reference: reference.into(),
+                instance_path: None,
+            })
+        };
+        let edits = ids.iter().map(|id| rename(id, "U20")).collect::<Vec<_>>();
+        let candidate = compile(&project, &native, &bytes, &edits).unwrap();
+        assert_preserved(&bytes, &candidate);
+        assert_eq!(
+            candidate.parsed().files[0]
+                .symbols
+                .iter()
+                .filter(|s| s.reference == "U20")
+                .map(|s| &s.source_uuid)
+                .collect::<BTreeSet<_>>(),
+            ids.iter().collect()
+        );
+        assert!(compile(&project, &native, &bytes, &edits[..1]).is_err());
+        assert!(
+            compile(
+                &project,
+                &native,
+                &bytes,
+                &[rename(&ids[0], "U20"), rename(&ids[1], "U21")]
+            )
+            .is_err()
+        );
+        assert!(
+            compile(
+                &project,
+                &native,
+                &bytes,
+                &ids.iter().map(|id| rename(id, "R1")).collect::<Vec<_>>()
+            )
+            .is_err()
+        );
+        let swapped = compile(
+            &project,
+            &native,
+            &bytes,
+            &[
+                rename(SYMBOL, "U2"),
+                rename(&ids[0], "R1"),
+                rename(&ids[1], "R1"),
+            ],
+        )
+        .unwrap();
+        assert_preserved(&bytes, &swapped);
+        assert_eq!(
+            swapped.parsed().files[0]
+                .symbols
+                .iter()
+                .filter(|s| s.reference == "R1")
+                .count(),
+            2
+        );
+    }
+
+    #[test]
+    fn component_metadata_and_assignment_require_consistent_complete_members() {
+        let (project, native, bytes, ids) = component_fixture();
+        let assignments = ids
+            .iter()
+            .map(|id| component_assignment(id, &["1", "2", "3"]))
+            .collect::<Vec<_>>();
+        let candidate = compile(&project, &native, &bytes, &assignments).unwrap();
+        assert_preserved(&bytes, &candidate);
+        assert!(
+            candidate.parsed().files[0]
+                .symbols
+                .iter()
+                .filter(|s| ids.contains(&s.source_uuid))
+                .all(|s| s.footprint.as_deref() == Some("Test:Assigned"))
+        );
+        assert!(compile(&project, &native, &bytes, &assignments[..1]).is_err());
+        let mut remapped = assignments.clone();
+        for change in &mut remapped {
+            if let EditAction::AssignFootprint { evidence, .. } = &mut change.action {
+                evidence.pin_pad_map.insert("1".into(), "2".into());
+                evidence.pin_pad_map.insert("2".into(), "1".into());
+            }
+        }
+        assert!(compile(&project, &native, &bytes, &remapped).is_err());
+        let values = ids
+            .iter()
+            .map(|id| {
+                edit(EditAction::SetProperty {
+                    uuid: id.clone(),
+                    property: SymbolProperty::Value,
+                    value: "changed".into(),
+                })
+            })
+            .collect::<Vec<_>>();
+        assert!(compile(&project, &native, &bytes, &values[..1]).is_err());
+        assert!(compile(&project, &native, &bytes, &values).is_ok());
+        let flags = ids
+            .iter()
+            .map(|id| {
+                edit(EditAction::SetFlags {
+                    uuid: id.clone(),
+                    flags: SymbolFlags {
+                        dnp: Some(true),
+                        ..Default::default()
+                    },
+                })
+            })
+            .collect::<Vec<_>>();
+        assert!(compile(&project, &native, &bytes, &flags[..1]).is_err());
+        assert!(compile(&project, &native, &bytes, &flags).is_ok());
+        let mut removed = assignments;
+        removed.push(edit(EditAction::Delete {
+            uuid: ids[0].clone(),
+            kind: ObjectKind::Symbol,
+        }));
+        assert!(compile(&project, &native, &bytes, &removed).is_err());
+    }
+
+    #[test]
+    fn component_assignment_uses_active_expanded_pins_and_ignores_inactive_records() {
+        let (project, mut native, bytes, ids) = component_fixture();
+        let unit_one_id = &project.files[0]
+            .symbols
+            .iter()
+            .find(|symbol| symbol.reference == "U2" && symbol.unit == 1)
+            .unwrap()
+            .source_uuid;
+        let text = std::str::from_utf8(&bytes).unwrap();
+        let doc = parse_one(text).unwrap();
+        let root = values(&doc.nodes[0]).unwrap();
+        let cache = values(one(root, "lib_symbols").unwrap()).unwrap();
+        let definition = children(cache, "symbol")
+            .find(|node| atom(values(node).unwrap(), 1).unwrap() == "Test:Pair")
+            .unwrap();
+        let body = children(values(definition).unwrap(), "symbol")
+            .find(|node| atom(values(node).unwrap(), 1).unwrap() == "Pair_1_1")
+            .unwrap();
+        let pin = children(values(body).unwrap(), "pin").next().unwrap();
+        let unit = values(object(root, unit_one_id, ObjectKind::Symbol).unwrap()).unwrap();
+        let record = children(unit, "pin")
+            .find(|p| atom(values(p).unwrap(), 1).unwrap() == "1")
+            .unwrap();
+        let mut patches = Patches {
+            text,
+            replacements: Vec::new(),
+            claims: BTreeSet::new(),
+        };
+        patches
+            .node(
+                one(values(pin).unwrap(), "number").unwrap(),
+                "(number \"[1,4]\")".into(),
+            )
+            .unwrap();
+        patches
+            .node(&values(record).unwrap()[1], "\"[1,4]\"".into())
+            .unwrap();
+        patches.insert(node_span(definition).end - 1, "(symbol \"Pair_1_2\" (pin passive line (at 0 0 0) (name \"inactive\") (number \"9\")))".into()).unwrap();
+        patches
+            .insert(
+                node_span(object(root, unit_one_id, ObjectKind::Symbol).unwrap()).end - 1,
+                "(pin \"9\" (uuid \"99999999-9999-4999-8999-999999999999\"))".into(),
+            )
+            .unwrap();
+        let (bytes, _) = patches.finish().unwrap();
+        let project = reparsed(&project, &bytes);
+        native.components[1].units.as_mut().unwrap()[0]
+            .pins
+            .push("4".into());
+        let edits = ids
+            .iter()
+            .map(|id| component_assignment(id, &["1", "2", "3", "4"]))
+            .collect::<Vec<_>>();
+        let candidate = compile(&project, &native, &bytes, &edits).unwrap();
+        assert_preserved(&bytes, &candidate);
+        assert!(
+            compile(
+                &project,
+                &native,
+                &bytes,
+                &ids.iter()
+                    .map(|id| component_assignment(id, &["1", "2", "3", "4", "9"]))
+                    .collect::<Vec<_>>()
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn reference_changes_preserve_foreign_and_inactive_annotations() {
+        let (project, native, bytes, ids) = component_fixture();
+        let text = std::str::from_utf8(&bytes).unwrap();
+        let doc = parse_one(text).unwrap();
+        let root = values(&doc.nodes[0]).unwrap();
+        let mut patches = Patches {
+            text,
+            replacements: Vec::new(),
+            claims: BTreeSet::new(),
+        };
+        for id in &ids {
+            let unit = values(object(root, id, ObjectKind::Symbol).unwrap()).unwrap();
+            let number = atom(values(one(unit, "unit").unwrap()).unwrap(), 1).unwrap();
+            let instances = one(unit, "instances").unwrap();
+            let project_node = children(values(instances).unwrap(), "project")
+                .next()
+                .unwrap();
+            patches
+                .insert(
+                    node_span(project_node).end - 1,
+                    format!("(path \"/obsolete\" (reference \"U90\") (unit {number}))"),
+                )
+                .unwrap();
+            patches.insert(node_span(instances).end - 1, format!("(project \"foreign\" (path \"/elsewhere\" (reference \"U80\") (unit {number})))")).unwrap();
+        }
+        let (bytes, _) = patches.finish().unwrap();
+        let bytes = String::from_utf8(bytes)
+            .unwrap()
+            .replace(
+                &format!("(path \"/{ROOT}\""),
+                &format!("(path \"/{ROOT}/\""),
+            )
+            .into_bytes();
+        let project = reparsed(&project, &bytes);
+        let candidate = compile(
+            &project,
+            &native,
+            &bytes,
+            &ids.iter()
+                .map(|id| {
+                    edit(EditAction::SetReference {
+                        uuid: id.clone(),
+                        reference: "U20".into(),
+                        instance_path: None,
+                    })
+                })
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
+        assert_preserved(&bytes, &candidate);
+        for unit in candidate.parsed().files[0]
+            .symbols
+            .iter()
+            .filter(|s| ids.contains(&s.source_uuid))
+        {
+            assert_eq!(unit.reference, "U20");
+            assert_eq!(
+                unit.instance_paths
+                    .iter()
+                    .find(|i| i.path == "/obsolete")
+                    .unwrap()
+                    .reference
+                    .as_deref(),
+                Some("U90")
+            );
+            assert_eq!(
+                unit.instance_paths
+                    .iter()
+                    .find(|i| i.project == "foreign")
+                    .unwrap()
+                    .reference
+                    .as_deref(),
+                Some("U80")
+            );
+        }
+    }
+
+    #[test]
+    fn component_annotation_allocator_coalesces_members_and_reserves_global_names() {
+        let (project, native, bytes, ids) = component_fixture();
+        let requests = ids
+            .iter()
+            .map(|id| ReferenceRequest {
+                uuid: id.clone(),
+                instance_path: None,
+                prefix: "R".into(),
+                minimum: 1,
+            })
+            .collect::<Vec<_>>();
+        let edits = allocate_references(&project, &native, &requests).unwrap();
+        assert_eq!(edits.len(), 2);
+        assert!(edits.iter().all(
+            |e| matches!(&e.action, EditAction::SetReference { reference, .. } if reference == "R2")
+        ));
+        assert!(compile(&project, &native, &bytes, &edits).is_ok());
+        assert_eq!(
+            edits,
+            allocate_references(
+                &project,
+                &native,
+                &requests.iter().rev().cloned().collect::<Vec<_>>()
+            )
+            .unwrap()
+        );
+        let mut invalid = requests;
+        invalid[1].prefix = "U".into();
+        assert!(allocate_references(&project, &native, &invalid).is_err());
     }
 
     fn assert_preserved(before: &[u8], candidate: &SchematicCandidate) {

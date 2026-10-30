@@ -70,8 +70,6 @@
     "three concurrent processes and one reused-sheet serial process exited 120 without terminal reports; cause unestablished"
   ],
   "remaining": [
-    "complete multi-unit reference annotation",
-    "complete multi-unit footprint assignment",
     "sheet/hierarchical-pin/child-file authoring",
     "GUI/Codex/full-family qualification",
     "schematic-to-PCB synchronization",
@@ -81,5 +79,6 @@
   "gui_launched": false,
   "full_m5a_complete": false,
   "full_product_goal_complete": false,
-  "evidence_directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-symbol-multiunit"
+  "evidence_directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-symbol-multiunit",
+  "complete_component_edits_record": "schematic-component-edits.json"
 }
