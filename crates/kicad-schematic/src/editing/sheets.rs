@@ -167,9 +167,14 @@ pub(super) fn validate_names(
 ) -> Result<(), String> {
     let mut final_names = BTreeSet::new();
     let mut touched = false;
+    let mut remaining = 0;
     for node in children(root, "sheet") {
         let items = values(node)?;
         let uuid = atom(values(one(items, "uuid")?)?, 1)?;
+        if edits.iter().any(|edit| edit.file == file && matches!(&edit.action, EditAction::RemoveSheet { uuid: removed } if removed == uuid)) {
+            continue;
+        }
+        remaining += 1;
         let requested = edits.iter().find_map(|edit| match &edit.action {
             EditAction::UpdateSheet { uuid: id, update } if edit.file == file && id == uuid => {
                 touched = true;
@@ -186,7 +191,7 @@ pub(super) fn validate_names(
         let name = requested.unwrap_or(atom(values(properties[0])?, 2)?);
         final_names.insert(name);
     }
-    if touched && final_names.len() != children(root, "sheet").count() {
+    if touched && final_names.len() != remaining {
         return Err("resulting sibling sheet names must be unique".into());
     }
     Ok(())

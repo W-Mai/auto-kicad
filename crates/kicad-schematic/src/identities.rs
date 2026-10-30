@@ -93,6 +93,49 @@ fn child_path(parent: &str, child: &str) -> Result<String, IdentityError> {
     Ok(result)
 }
 
+/// Expand the final root-reachable graph without granting native or filesystem authority.
+pub(crate) fn expand_source_graph(
+    root_path: &str,
+    files: &BTreeMap<&str, &crate::ParsedSchematic>,
+) -> Result<Vec<SheetInstance>, IdentityError> {
+    let root = files.get(root_path).ok_or(invalid("missing root"))?;
+    if files.is_empty() || files.len() > 128 {
+        return Err(invalid("physical file bound"));
+    }
+    let mut sheets = Vec::new();
+    let mut expanded = BTreeSet::new();
+    let mut stack = vec![(
+        root_path.to_owned(),
+        format!("/{}", root.file_uuid),
+        Vec::<String>::new(),
+    )];
+    while let Some((file_path, instance_path, mut ancestors)) = stack.pop() {
+        if sheets.len() >= MAX_INSTANCES || ancestors.len() > 32 {
+            return Err(invalid("instance/depth bound"));
+        }
+        if ancestors.contains(&file_path) || !expanded.insert(instance_path.clone()) {
+            return Err(invalid("cycle or repeated instance"));
+        }
+        let file = files
+            .get(file_path.as_str())
+            .ok_or(invalid("unobserved child file"))?;
+        ancestors.push(file_path.clone());
+        sheets.push(SheetInstance {
+            file: file_path.clone(),
+            path: instance_path.clone(),
+        });
+        for child in &file.sheets {
+            stack.push((
+                child_path(&file_path, &child.file)?,
+                format!("{instance_path}/{}", child.source_uuid),
+                ancestors.clone(),
+            ));
+        }
+    }
+    sheets.sort();
+    Ok(sheets)
+}
+
 impl SchematicIdentityIndex {
     pub fn sheets(&self) -> &[SheetInstance] {
         &self.sheets
@@ -167,36 +210,11 @@ impl SchematicIdentityIndex {
                 }
             }
         }
-        let mut sheets = Vec::new();
-        let mut expanded = BTreeSet::new();
-        let mut stack = vec![(
-            project.root_relative_path.clone(),
-            format!("/{}", root.file_uuid),
-            Vec::<String>::new(),
-        )];
-        while let Some((file_path, instance_path, mut ancestors)) = stack.pop() {
-            if sheets.len() >= MAX_INSTANCES || ancestors.len() > 32 {
-                return Err(invalid("instance/depth bound"));
-            }
-            if ancestors.contains(&file_path) || !expanded.insert(instance_path.clone()) {
-                return Err(invalid("cycle or repeated instance"));
-            }
-            let file = files
-                .get(file_path.as_str())
-                .ok_or(invalid("unobserved child file"))?;
-            ancestors.push(file_path.clone());
-            sheets.push(SheetInstance {
-                file: file_path.clone(),
-                path: instance_path.clone(),
-            });
-            for child in &file.sheets {
-                stack.push((
-                    child_path(&file_path, &child.file)?,
-                    format!("{instance_path}/{}", child.source_uuid),
-                    ancestors.clone(),
-                ));
-            }
-        }
+        let sheets = expand_source_graph(&project.root_relative_path, &files)?;
+        let expanded = sheets
+            .iter()
+            .map(|sheet| sheet.path.clone())
+            .collect::<BTreeSet<_>>();
         if sheets
             .iter()
             .map(|s| s.file.as_str())
@@ -206,7 +224,6 @@ impl SchematicIdentityIndex {
         {
             return Err(invalid("unreachable observed file"));
         }
-        sheets.sort();
         let native_sheets: Vec<_> = netlist
             .sheets
             .iter()
@@ -562,5 +579,110 @@ mod tests {
             SchematicIdentityIndex::resolve(&project, &netlist),
             Err(IdentityError::Invalid("instance/depth bound"))
         );
+    }
+
+    #[test]
+    fn placement_removal_keeps_physical_children_but_verifies_only_reachable_edits() {
+        use crate::editing::{EditAction, EditScope, SchematicEdit, SymbolProperty, compile_edits};
+        let (owned, _, native) = fixture();
+        let root = std::fs::canonicalize(owned.path()).unwrap();
+        for name in ["root.kicad_sch", "child.kicad_sch"] {
+            let path = root.join(name);
+            let text = std::fs::read_to_string(&path)
+                .unwrap()
+                .replace("(generator eeschema)", "(generator eeschema) (lib_symbols)")
+                .replace("(sheet (uuid", "(sheet (at 10 10) (size 20 10) (uuid");
+            std::fs::write(path, text).unwrap();
+        }
+        let project = load_schematic_project(
+            &root,
+            &root.join("root.kicad_sch"),
+            "10.0.7",
+            1,
+            Limits::default(),
+        )
+        .unwrap();
+        let bytes = project
+            .files
+            .iter()
+            .map(|file| {
+                (
+                    file.artifact.relative_path.clone(),
+                    std::fs::read(root.join(&file.artifact.relative_path)).unwrap(),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let sources = bytes
+            .iter()
+            .map(|(file, bytes)| (file.clone(), bytes.as_slice()))
+            .collect();
+        let remove = |uuid: &str| SchematicEdit {
+            file: "root.kicad_sch".into(),
+            scope: EditScope::FileAllInstances,
+            action: EditAction::RemoveSheet { uuid: uuid.into() },
+        };
+        let one = compile_edits(&project, &native, &sources, &[remove(FIRST)]).unwrap();
+        assert_eq!(one.parsed().files.len(), 2);
+        assert_eq!(one.files()["child.kicad_sch"], bytes["child.kicad_sch"]);
+        assert_eq!(one.replacements().len(), 1);
+        let rename = SchematicEdit {
+            file: "root.kicad_sch".into(),
+            scope: EditScope::FileAllInstances,
+            action: EditAction::UpdateSheet {
+                uuid: SECOND.into(),
+                update: crate::editing::SheetUpdate {
+                    name: Some("One".into()),
+                    ..Default::default()
+                },
+            },
+        };
+        let swapped = compile_edits(&project, &native, &sources, &[remove(FIRST), rename]).unwrap();
+        let root_after = swapped
+            .parsed()
+            .files
+            .iter()
+            .find(|file| file.artifact.relative_path == "root.kicad_sch")
+            .unwrap();
+        assert_eq!(root_after.sheets.len(), 1);
+        assert_eq!(root_after.sheets[0].name, "One");
+        let removed = [remove(FIRST), remove(SECOND)];
+        let both = compile_edits(&project, &native, &sources, &removed).unwrap();
+        assert_eq!(both.parsed().files.len(), 1);
+        assert_eq!(both.parsed().revision.files.len(), 1);
+        assert_eq!(both.files().len(), 2);
+        assert_eq!(both.files()["child.kicad_sch"], bytes["child.kicad_sch"]);
+        assert_eq!(both.source_revision(), &project.revision);
+        let mut detached = removed.to_vec();
+        detached.push(SchematicEdit {
+            file: "child.kicad_sch".into(),
+            scope: EditScope::FileAllInstances,
+            action: EditAction::SetProperty {
+                uuid: UNIT_A.into(),
+                property: SymbolProperty::Named("Note".into()),
+                value: "detached".into(),
+            },
+        });
+        assert!(
+            compile_edits(&project, &native, &sources, &detached)
+                .err()
+                .unwrap()
+                .contains("detached")
+        );
+        assert!(
+            compile_edits(&project, &native, &sources, &[remove(FIRST), remove(FIRST)]).is_err()
+        );
+        let mut mixed = vec![remove(FIRST)];
+        mixed.push(SchematicEdit {
+            file: "root.kicad_sch".into(),
+            scope: EditScope::FileAllInstances,
+            action: EditAction::UpdateSheet {
+                uuid: FIRST.into(),
+                update: crate::editing::SheetUpdate {
+                    name: Some("Changed".into()),
+                    ..Default::default()
+                },
+            },
+        });
+        assert!(compile_edits(&project, &native, &sources, &mixed).is_err());
     }
 }

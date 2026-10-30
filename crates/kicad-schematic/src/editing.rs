@@ -131,6 +131,9 @@ pub struct SymbolFlags {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EditAction {
+    RemoveSheet {
+        uuid: String,
+    },
     UpdateSheet {
         uuid: String,
         update: SheetUpdate,
@@ -782,6 +785,9 @@ fn edit_existing(
     annotation_scope: Option<(&str, &[String])>,
 ) -> Result<(String, ObjectKind), String> {
     let (id, kind) = match action {
+        EditAction::RemoveSheet { .. } => {
+            return Err("sheet removal requires complete graph projection".into());
+        }
         EditAction::UpdateSheet { .. } => {
             return Err("sheet update requires complete projection".into());
         }
@@ -807,7 +813,7 @@ fn edit_existing(
     let node = object(root, id, kind)?;
     let items = values(node)?;
     match action {
-        EditAction::UpdateSheet { .. } => unreachable!(),
+        EditAction::UpdateSheet { .. } | EditAction::RemoveSheet { .. } => unreachable!(),
         EditAction::SetReference {
             reference,
             instance_path,
@@ -1370,6 +1376,10 @@ pub fn compile_edits(
                 ));
             }
             let (id, kind) = match &edit.action {
+                EditAction::RemoveSheet { uuid } => {
+                    patches.node(object(root, uuid, ObjectKind::Sheet)?, String::new())?;
+                    (uuid.clone(), ObjectKind::Sheet)
+                }
                 EditAction::UpdateSheet { uuid, update } => sheets::edit(
                     root,
                     uuid,
@@ -1477,6 +1487,25 @@ pub fn compile_edits(
     if replacements.is_empty() {
         return Err("schematic edits have no effect".into());
     }
+    let graph = crate::identities::expand_source_graph(
+        &project.root_relative_path,
+        &parsed
+            .iter()
+            .map(|file| (file.artifact.relative_path.as_str(), file))
+            .collect(),
+    )
+    .map_err(|error| error.to_string())?;
+    let reachable = graph
+        .iter()
+        .map(|sheet| sheet.file.as_str())
+        .collect::<BTreeSet<_>>();
+    if replacements
+        .keys()
+        .any(|file| !reachable.contains(file.as_str()))
+    {
+        return Err("candidate would edit a detached schematic without native verification".into());
+    }
+    parsed.retain(|file| reachable.contains(file.artifact.relative_path.as_str()));
     let revision = SchematicArtifactRevision::new(
         parsed.iter().map(|f| f.artifact.clone()).collect(),
         &project.revision.kicad_cli_version,

@@ -59,7 +59,10 @@ def main():
         parser.add_argument(name, type=Path)
     parser.add_argument("--sheet-name")
     parser.add_argument("--file")
+    parser.add_argument("--remove-sheet", action="store_true")
     args = parser.parse_args()
+    if args.remove_sheet and not args.sheet_name:
+        parser.error("--remove-sheet requires --sheet-name")
     binary, source, config = (path.resolve(strict=True) for path in (args.binary, args.source, args.config))
     project = source.parent
     for root in (project, config):
@@ -101,7 +104,7 @@ def main():
                     and f'(property "Sheetname" "{args.sheet_name}"' in obj["definition"])
                 sheet_uuid = target["uuid"]
             file = args.file or source.name
-            action = {"kind": "update_sheet", "uuid": sheet_uuid, "update": {"name": value}}
+            action = {"kind": "remove_sheet", "uuid": sheet_uuid} if args.remove_sheet else {"kind": "update_sheet", "uuid": sheet_uuid, "update": {"name": value}}
         else:
             unit = next(unit for unit in observation["units"] if unit["reference"].startswith("R"))
             file = unit["file"]
@@ -116,9 +119,15 @@ def main():
         from schematic_general_cases import reviewed
         native = planned["native_preview"]
         before, after = native["connectivity_before"], native["connectivity_after"]
-        assert before["isolated_no_connect"] == after["isolated_no_connect"]
+        def all_pins(state):
+            return {json.dumps(pin, sort_keys=True): pin for pin in state["isolated_no_connect"] + [p for n in state["nets"] for p in n["pins"]]}
+        old_pins, new_pins = all_pins(before), all_pins(after)
         expected = reviewed(planned, {"removed_nets": [n for n in before["nets"] if n not in after["nets"]],
-            "added_nets": [n for n in after["nets"] if n not in before["nets"]]})
+            "added_nets": [n for n in after["nets"] if n not in before["nets"]],
+            "removed_isolated": [p for p in before["isolated_no_connect"] if p not in after["isolated_no_connect"]],
+            "added_isolated": [p for p in after["isolated_no_connect"] if p not in before["isolated_no_connect"]],
+            "removed_pins": [old_pins[p] for p in old_pins.keys() - new_pins.keys()],
+            "added_pins": [new_pins[p] for p in new_pins.keys() - old_pins.keys()]})
         for key in ("removed_sheet_headers", "added_sheet_headers"):
             expected["erc"][key] = native["erc_delta"][key]
         return call("kicad_preview_schematic_change", dict(identity, expectations=expected))
@@ -211,7 +220,7 @@ def main():
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
     module.cleanup_native_cache(temporary)
-    result = {"passed": True, "family": "sheet" if args.sheet_name else "property", "server_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "actual_stdio_writer_killed": True, "missing_terminal_and_post_evidence": True, "fresh_process_plan_blocked": True, "later_user_bytes_preserved": True,
+    result = {"passed": True, "family": "sheet_removal" if args.remove_sheet else "sheet" if args.sheet_name else "property", "server_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "actual_stdio_writer_killed": True, "missing_terminal_and_post_evidence": True, "fresh_process_plan_blocked": True, "later_user_bytes_preserved": True,
               "actual_stdio_guarded_recovery": True, "exact_original_and_native_observation_restored": True, "subsequent_native_commit": True, "owned_children_stopped": True, "owned_private_directories_removed": True, "gui_launched": False}
     (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result))

@@ -49,7 +49,7 @@ Send this to `kicad_plan_schematic_change`. A plan supports 1–128 edits and re
 | Existing symbols | `set_property`, `set_reference`, `set_flags`, `transform_symbol`, `assign_footprint`, `delete` |
 | Catalog symbols | `create_symbol` with server-derived definitions/UUIDs and [bounded native inheritance](schematic-symbol-inheritance.md) |
 | Existing component units | `add_symbol_unit` from observed source metadata and exact instance annotations |
-| Existing sheets and hierarchical pins | `update_sheet` with explicit name, rectangle and nested pin create/update/delete |
+| Existing sheets and hierarchical pins | `update_sheet` with explicit name, rectangle and nested pin create/update/delete; `remove_sheet` retaining child files |
 | Wires | `create_wire`, `update_wire`, `delete` |
 | Markers | `create_junction`, `create_no_connect`, `move_marker`, `delete` |
 | Local/global/hierarchical labels | `create_label`, `update_label`, `delete` |
@@ -80,4 +80,4 @@ Publication journals candidate/original fingerprints and each file operation bef
 
 Full `schematic.general_edit` remains deferred. Sheet geometry/hierarchical pins, hierarchy/child-file creation, GUI/Codex qualification, schematic-to-PCB synchronization and the final three-project product gate remain incomplete. Inherited symbol creation requires a bounded same-file chain; inherited embedded-file/font resources reject. Source examples and user projects are not mutated by these acceptance scripts; only marked copies are accepted.
 
-[Existing sheet qualification](schematic-sheets.md) passed both formats and a parent reused in 4 instances through production stdio, independent saved native network/ERC comparison, exact rectangle/field checks and actual interruption/recovery. Placement creation/removal, confined child-file authoring and full GUI/Codex qualification remain incomplete.
+[Existing sheet qualification](schematic-sheets.md) passed both formats and a parent reused in 4 instances through production stdio, independent saved native network/ERC comparison, exact rectangle/field checks and actual interruption/recovery. [Exact placement removal](schematic-sheet-removal.md) passed both formats, reused parents and actual interruption/recovery while retaining shared/orphan child files. Placement creation, confined child-file authoring and full GUI/Codex qualification remain incomplete.

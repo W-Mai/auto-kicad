@@ -1,0 +1,91 @@
+{
+  "feature": "exact schematic placement removal",
+  "native_version": "10.0.7",
+  "formats": [
+    "20250114",
+    "20260306"
+  ],
+  "production_stdio": true,
+  "server_sha256": "88580e5d9ed76d10d3a37c71f27827041e8354fde6cce1e266f12649c1eaf61b",
+  "profiles": {
+    "current": {
+      "passed": true,
+      "shared_parent": false,
+      "commits": 2,
+      "child_files_and_annotations_unchanged": true,
+      "complete_independent_native_after_each_commit": true,
+      "private_snapshots_removed": true,
+      "configuration_unchanged": true
+    },
+    "legacy": {
+      "passed": true,
+      "shared_parent": false,
+      "commits": 2,
+      "child_files_and_annotations_unchanged": true,
+      "complete_independent_native_after_each_commit": true,
+      "private_snapshots_removed": true,
+      "configuration_unchanged": true
+    },
+    "shared": {
+      "passed": true,
+      "shared_parent": true,
+      "commits": 1,
+      "child_files_and_annotations_unchanged": true,
+      "complete_independent_native_after_each_commit": true,
+      "private_snapshots_removed": true,
+      "configuration_unchanged": true
+    }
+  },
+  "commits": 5,
+  "artifacts_rehashed": 20,
+  "recovery_artifacts_rehashed": 7,
+  "accepted": [
+    "shared bounded source graph for identity resolution and compiled candidates",
+    "physical source retention separated from reachable hierarchy revision",
+    "single/shared/final placement removal with exact retained child and annotation bytes",
+    "changed detached files rejected before publication",
+    "complete explicit native network/pin/isolation/ERC/header deltas",
+    "exact source-node subtraction independently verified from immutable backups/candidates",
+    "wrong approval/replay/orphan-source-drift/isolation rejection"
+  ],
+  "actual_interruption_and_recovery": {
+    "passed": true,
+    "family": "sheet_removal",
+    "server_sha256": "88580e5d9ed76d10d3a37c71f27827041e8354fde6cce1e266f12649c1eaf61b",
+    "actual_stdio_writer_killed": true,
+    "missing_terminal_and_post_evidence": true,
+    "fresh_process_plan_blocked": true,
+    "later_user_bytes_preserved": true,
+    "actual_stdio_guarded_recovery": true,
+    "exact_original_and_native_observation_restored": true,
+    "subsequent_native_commit": true,
+    "owned_children_stopped": true,
+    "owned_private_directories_removed": true,
+    "gui_launched": false
+  },
+  "offline_quality": {
+    "passed": 562,
+    "failed": 0,
+    "ignored": 16
+  },
+  "actual_fixed_cli_mcp_regression": {
+    "passed": true,
+    "seconds": 5.93
+  },
+  "original_sources_unchanged": true,
+  "gui_launched": false,
+  "remaining": [
+    "placement creation and child-file creation/attachment/retargeting",
+    "complete GUI/Codex/family qualification",
+    "schematic-to-PCB synchronization",
+    "installation/release/manufacturing",
+    "remaining M4 and final real-project gates"
+  ],
+  "full_m5a_complete": false,
+  "full_product_goal_complete": false,
+  "evidence_directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-hierarchy-children",
+  "build_cleanup": {
+    "removed": true,
+    "unique_inode_allocated_bytes_removed": 1555034112
+  }
+}

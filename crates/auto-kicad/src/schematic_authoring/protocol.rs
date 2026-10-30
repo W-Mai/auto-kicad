@@ -309,6 +309,9 @@ pub struct EditRequest {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    RemoveSheet {
+        uuid: String,
+    },
     UpdateSheet {
         uuid: String,
         update: SheetUpdateRequest,
@@ -418,6 +421,7 @@ impl EditRequest {
             }
         }
         let action = match &self.action {
+            Action::RemoveSheet { uuid } => EditAction::RemoveSheet { uuid: uuid.clone() },
             Action::UpdateSheet { uuid, update } => EditAction::UpdateSheet {
                 uuid: uuid.clone(),
                 update: update.native()?,
