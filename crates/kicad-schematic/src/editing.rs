@@ -13,7 +13,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 mod components;
 mod creation;
+mod hierarchy;
+pub use hierarchy::configured_sheet_pages;
 mod sheets;
+pub use hierarchy::{
+    NewSheetPin, SheetChild, SheetCreation, SheetPage, SheetReference, SheetRetarget,
+    validate_child_file,
+};
 pub use sheets::{SheetPin, SheetPinEdit, SheetRectangle, SheetUpdate};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -131,6 +137,22 @@ pub struct SymbolFlags {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EditAction {
+    SetSheetPage {
+        uuid: Option<String>,
+        pages: Vec<SheetPage>,
+    },
+    CreateSheet {
+        key: String,
+        sheet: SheetCreation,
+    },
+    RetargetSheet {
+        uuid: String,
+        target: SheetRetarget,
+    },
+    BindHierarchyRows {
+        uuid: String,
+        kind: ObjectKind,
+    },
     RemoveSheet {
         uuid: String,
     },
@@ -269,12 +291,20 @@ pub struct SourceReplacement {
 /// A source-bound candidate only; native validation and publication approval are separate.
 pub struct SchematicCandidate {
     source_revision: SchematicArtifactRevision,
+    created_files: BTreeSet<String>,
+    sheet_pages: BTreeMap<String, String>,
     parsed: ParsedSchematicProject,
     files: BTreeMap<String, Vec<u8>>,
     changes: Vec<ObjectChange>,
     replacements: BTreeMap<String, Vec<SourceReplacement>>,
 }
 impl SchematicCandidate {
+    pub fn created_files(&self) -> &BTreeSet<String> {
+        &self.created_files
+    }
+    pub fn sheet_pages(&self) -> &BTreeMap<String, String> {
+        &self.sheet_pages
+    }
     pub fn source_revision(&self) -> &SchematicArtifactRevision {
         &self.source_revision
     }
@@ -785,6 +815,12 @@ fn edit_existing(
     annotation_scope: Option<(&str, &[String])>,
 ) -> Result<(String, ObjectKind), String> {
     let (id, kind) = match action {
+        EditAction::SetSheetPage { .. }
+        | EditAction::CreateSheet { .. }
+        | EditAction::RetargetSheet { .. }
+        | EditAction::BindHierarchyRows { .. } => {
+            return Err("hierarchy edits require complete projection".into());
+        }
         EditAction::RemoveSheet { .. } => {
             return Err("sheet removal requires complete graph projection".into());
         }
@@ -813,7 +849,12 @@ fn edit_existing(
     let node = object(root, id, kind)?;
     let items = values(node)?;
     match action {
-        EditAction::UpdateSheet { .. } | EditAction::RemoveSheet { .. } => unreachable!(),
+        EditAction::SetSheetPage { .. }
+        | EditAction::CreateSheet { .. }
+        | EditAction::RetargetSheet { .. }
+        | EditAction::BindHierarchyRows { .. }
+        | EditAction::UpdateSheet { .. }
+        | EditAction::RemoveSheet { .. } => unreachable!(),
         EditAction::SetReference {
             reference,
             instance_path,
@@ -1123,6 +1164,17 @@ pub fn compile_edits(
     sources: &BTreeMap<String, &[u8]>,
     edits: &[SchematicEdit],
 ) -> Result<SchematicCandidate, String> {
+    compile_edits_with_children(project, native, sources, &BTreeMap::new(), edits)
+}
+
+/// Compile captured child sources; filesystem authority remains with the native adapter.
+pub fn compile_edits_with_children(
+    project: &ParsedSchematicProject,
+    native: &NetlistDocument,
+    sources: &BTreeMap<String, &[u8]>,
+    child_sources: &BTreeMap<String, &[u8]>,
+    edits: &[SchematicEdit],
+) -> Result<SchematicCandidate, String> {
     if edits.is_empty() || edits.len() > 128 {
         return Err("schematic edits require 1..128 operations".into());
     }
@@ -1143,12 +1195,25 @@ pub fn compile_edits(
     if changed.iter().any(|f| !sources.contains_key(*f)) {
         return Err("edit targets unobserved file".into());
     }
+    let mut input_files = project.files.clone();
+    let mut all_sources = sources.clone();
+    for (file, bytes) in child_sources {
+        validate_child_file(file)?;
+        if all_sources.insert(file.clone(), *bytes).is_some() {
+            return Err("captured child duplicates an observed source".into());
+        }
+        input_files.push(parse_schematic(file, bytes).map_err(|e| e.to_string())?);
+    }
+    if input_files.len() > 128 {
+        return Err("physical source file bound exceeded".into());
+    }
+    input_files.sort_by(|a, b| a.artifact.relative_path.cmp(&b.artifact.relative_path));
     let mut seen_uuids = BTreeSet::new();
     let mut documents = BTreeMap::new();
     let mut total = 0;
-    for file in &project.files {
+    for file in &input_files {
         let name = &file.artifact.relative_path;
-        let bytes = *sources.get(name).ok_or("missing observed source")?;
+        let bytes = *all_sources.get(name).ok_or("missing captured source")?;
         total += bytes.len();
         if bytes.len() > 32 * 1024 * 1024 || total > 128 * 1024 * 1024 {
             return Err("source byte bound exceeded".into());
@@ -1313,14 +1378,23 @@ pub fn compile_edits(
         &mut seen_uuids,
         &mut keys,
     )?;
+    let hierarchy = hierarchy::prepare(
+        project,
+        &identities,
+        &input_files,
+        &documents,
+        edits,
+        &mut seen_uuids,
+        &mut keys,
+    )?;
     let mut files = BTreeMap::new();
     let mut parsed = Vec::new();
     let mut changes = Vec::new();
     let mut replacements = BTreeMap::new();
     let mut total = 0;
-    for file in &project.files {
+    for file in &input_files {
         let name = &file.artifact.relative_path;
-        let original = std::str::from_utf8(sources[name]).map_err(|e| e.to_string())?;
+        let original = std::str::from_utf8(all_sources[name]).map_err(|e| e.to_string())?;
         let document = &documents[name];
         let root_node = document.nodes.first().ok_or("missing root")?;
         let root = values(root_node)?;
@@ -1341,11 +1415,27 @@ pub fn compile_edits(
             replacements: Vec::new(),
             claims: BTreeSet::new(),
         };
+        changes.extend(
+            hierarchy.apply(
+                name,
+                root_node,
+                Path::new(&project.root_relative_path)
+                    .file_stem()
+                    .and_then(|v| v.to_str())
+                    .ok_or("invalid project name")?,
+                &mut patches,
+            )?,
+        );
         let mut appended = String::new();
         let mut embedded = String::new();
-        let lib_symbols = one(root, "lib_symbols")?;
+        let lib_symbols = optional(root, "lib_symbols")?;
         let mut embedded_definitions = BTreeMap::new();
-        for node in children(values(lib_symbols)?, "symbol") {
+        for node in lib_symbols
+            .map(values)
+            .transpose()?
+            .into_iter()
+            .flat_map(|items| children(items, "symbol"))
+        {
             let items = values(node)?;
             let id =
                 atom_text(items.get(1)).ok_or("embedded symbol definition has no identifier")?;
@@ -1376,6 +1466,32 @@ pub fn compile_edits(
                 ));
             }
             let (id, kind) = match &edit.action {
+                EditAction::SetSheetPage { uuid, .. } => (
+                    uuid.clone().unwrap_or_else(|| file.file_uuid.clone()),
+                    ObjectKind::Sheet,
+                ),
+                EditAction::CreateSheet { .. } => {
+                    let placement = &hierarchy.placements[&ordinal];
+                    appended.push_str(
+                        placement
+                            .rendered
+                            .as_deref()
+                            .ok_or("missing created placement")?,
+                    );
+                    (placement.uuid.clone(), ObjectKind::Sheet)
+                }
+                EditAction::RetargetSheet { uuid, .. } => {
+                    let placement = &hierarchy.placements[&ordinal];
+                    let node = object(root, uuid, ObjectKind::Sheet)?;
+                    let property = children(values(node)?, "property")
+                        .find(|n| values(n).is_ok_and(|p| atom_text(p.get(1)) == Some("Sheetfile")))
+                        .ok_or("missing Sheetfile")?;
+                    patches.node(
+                        values(property)?.get(2).ok_or("missing Sheetfile value")?,
+                        quote(&placement.child),
+                    )?;
+                    (uuid.clone(), ObjectKind::Sheet)
+                }
                 EditAction::RemoveSheet { uuid } => {
                     patches.node(object(root, uuid, ObjectKind::Sheet)?, String::new())?;
                     (uuid.clone(), ObjectKind::Sheet)
@@ -1468,7 +1584,14 @@ pub fn compile_edits(
             });
         }
         if !embedded.is_empty() {
-            patches.insert(node_span(lib_symbols).end - 1, format!("\n{}\n", embedded))?;
+            if let Some(lib_symbols) = lib_symbols {
+                patches.insert(node_span(lib_symbols).end - 1, format!("\n{}\n", embedded))?;
+            } else {
+                patches.insert(
+                    node_span(root_node).end - 1,
+                    format!("\n(lib_symbols {embedded})\n"),
+                )?;
+            }
         }
         if !appended.is_empty() {
             patches.insert(node_span(root_node).end - 1, appended)?;
@@ -1484,8 +1607,19 @@ pub fn compile_edits(
         }
         files.insert(name.clone(), bytes);
     }
-    if replacements.is_empty() {
+    for (name, bytes) in &hierarchy.created {
+        total += bytes.len();
+        if files.len() >= 128 || total > 128 * 1024 * 1024 {
+            return Err("candidate physical file/byte bound exceeded".into());
+        }
+        parsed.push(parse_schematic(name, bytes).map_err(|e| e.to_string())?);
+        files.insert(name.clone(), bytes.clone());
+    }
+    if replacements.is_empty() && hierarchy.created.is_empty() {
         return Err("schematic edits have no effect".into());
+    }
+    if replacements.len() + hierarchy.created.len() > 32 {
+        return Err("changed schematic file bound exceeded".into());
     }
     let graph = crate::identities::expand_source_graph(
         &project.root_relative_path,
@@ -1505,7 +1639,24 @@ pub fn compile_edits(
     {
         return Err("candidate would edit a detached schematic without native verification".into());
     }
+    if hierarchy
+        .created
+        .keys()
+        .any(|file| !reachable.contains(file.as_str()))
+    {
+        return Err("created child would be detached".into());
+    }
     parsed.retain(|file| reachable.contains(file.artifact.relative_path.as_str()));
+    parsed.sort_by(|a, b| a.artifact.relative_path.cmp(&b.artifact.relative_path));
+    if parsed
+        .iter()
+        .map(|f| &f.file_uuid)
+        .collect::<BTreeSet<_>>()
+        .len()
+        != parsed.len()
+    {
+        return Err("repeated active file UUID".into());
+    }
     let revision = SchematicArtifactRevision::new(
         parsed.iter().map(|f| f.artifact.clone()).collect(),
         &project.revision.kicad_cli_version,
@@ -1513,14 +1664,18 @@ pub fn compile_edits(
         false,
     )
     .map_err(|e| e.to_string())?;
+    let parsed = ParsedSchematicProject {
+        root_relative_path: project.root_relative_path.clone(),
+        files: parsed,
+        revision,
+        editor_lock_present: false,
+    };
+    hierarchy.validate_final(&parsed, &files)?;
     Ok(SchematicCandidate {
         source_revision: project.revision.clone(),
-        parsed: ParsedSchematicProject {
-            root_relative_path: project.root_relative_path.clone(),
-            files: parsed,
-            revision,
-            editor_lock_present: false,
-        },
+        created_files: hierarchy.created.keys().cloned().collect(),
+        sheet_pages: hierarchy.pages().clone(),
+        parsed,
         files,
         changes,
         replacements,
@@ -2620,5 +2775,237 @@ mod tests {
                 assert_eq!(p, expected);
             }
         }
+    }
+
+    #[test]
+    fn child_creation_and_retargeting_keep_absence_and_retained_sources_distinct() {
+        let (project, native, bytes) = fixture();
+        let parent = format!("/{ROOT}");
+        let creation = SheetCreation {
+            name: "Child".into(),
+            rectangle: SheetRectangle {
+                position: point(50, 50),
+                width: Coordinate::parse_mm("20").unwrap(),
+                height: Coordinate::parse_mm("10").unwrap(),
+            },
+            child: SheetChild::CreateEmpty {
+                file: "child.kicad_sch".into(),
+            },
+            pins: vec![],
+            pages: vec![SheetPage {
+                parent_instance: parent.clone(),
+                relative_path: "/".into(),
+                page: "2".into(),
+            }],
+            references: vec![],
+        };
+        let action = edit(EditAction::CreateSheet {
+            key: "child".into(),
+            sheet: creation.clone(),
+        });
+        assert!(compile(&project, &native, &bytes, std::slice::from_ref(&action)).is_err());
+        assert_eq!(
+            configured_sheet_pages(
+                &project,
+                &BTreeMap::from([("test.kicad_sch".into(), bytes.as_slice())])
+            )
+            .unwrap()[&parent],
+            None
+        );
+        let root_page = edit(EditAction::SetSheetPage {
+            uuid: None,
+            pages: vec![SheetPage {
+                parent_instance: parent.clone(),
+                relative_path: "/".into(),
+                page: "1".into(),
+            }],
+        });
+        let candidate = compile(
+            &project,
+            &native,
+            &bytes,
+            &[root_page.clone(), action.clone()],
+        )
+        .unwrap();
+        assert_eq!(
+            candidate.created_files(),
+            &BTreeSet::from(["child.kicad_sch".into()])
+        );
+        assert_eq!(candidate.parsed().files.len(), 2);
+        assert_eq!(candidate.replacements().len(), 1);
+        assert!(candidate.files()["child.kicad_sch"].starts_with(b"(kicad_sch (version 20260306)"));
+        let id = candidate
+            .changes()
+            .iter()
+            .find(|change| matches!(change.action, EditAction::CreateSheet { .. }))
+            .unwrap()
+            .uuid
+            .clone();
+        assert_eq!(
+            candidate.sheet_pages(),
+            &BTreeMap::from([
+                (parent.clone(), "1".into()),
+                (format!("{parent}/{id}"), "2".into())
+            ])
+        );
+        let original_native = native.clone();
+        let mut native = native;
+        native.sheets.push(NetlistSheet {
+            number: "2".into(),
+            name: "/Child/".into(),
+            uuid_path: format!("/{id}/"),
+        });
+        let sources = candidate
+            .files()
+            .iter()
+            .map(|(file, bytes)| (file.clone(), bytes.as_slice()))
+            .collect();
+        let target = edit(EditAction::RetargetSheet {
+            uuid: id.clone(),
+            target: SheetRetarget {
+                child: SheetChild::CreateEmpty {
+                    file: "replacement.kicad_sch".into(),
+                },
+                pages: creation.pages.clone(),
+                references: vec![],
+            },
+        });
+        let result = compile_edits(candidate.parsed(), &native, &sources, &[target]).unwrap();
+        assert_eq!(
+            result.created_files(),
+            &BTreeSet::from(["replacement.kicad_sch".into()])
+        );
+        assert_eq!(result.files().len(), 3);
+        assert_eq!(result.parsed().files.len(), 2);
+        assert_eq!(
+            result.files()["child.kicad_sch"],
+            candidate.files()["child.kicad_sch"]
+        );
+        assert!(
+            !result
+                .parsed()
+                .files
+                .iter()
+                .any(|f| f.artifact.relative_path == "child.kicad_sch")
+        );
+        for (bad_pages, bad_child) in [
+            (vec![], creation.child.clone()),
+            (
+                vec![SheetPage {
+                    parent_instance: parent.clone(),
+                    relative_path: "/".into(),
+                    page: "1".into(),
+                }],
+                creation.child.clone(),
+            ),
+            (
+                creation.pages.clone(),
+                SheetChild::CreateEmpty {
+                    file: "../escape.kicad_sch".into(),
+                },
+            ),
+            (
+                creation.pages.clone(),
+                SheetChild::CreateEmpty {
+                    file: "test.kicad_sch".into(),
+                },
+            ),
+        ] {
+            let mut bad = creation.clone();
+            bad.pages = bad_pages;
+            bad.child = bad_child;
+            assert!(
+                compile(
+                    &project,
+                    &original_native,
+                    &bytes,
+                    &[edit(EditAction::CreateSheet {
+                        key: "bad".into(),
+                        sheet: bad
+                    })]
+                )
+                .is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn attached_sources_bind_exact_revisions_and_complete_new_instance_references() {
+        let (project, native, bytes) = fixture();
+        let child_bytes = String::from_utf8(bytes.clone())
+            .unwrap()
+            .replace(ROOT, "cccccccc-cccc-4ccc-8ccc-cccccccccccc")
+            .into_bytes();
+        let child = parse_schematic("orphan.kicad_sch", &child_bytes).unwrap();
+        let revision =
+            SchematicArtifactRevision::new(vec![child.artifact.clone()], "10.0.7", 1, false)
+                .unwrap();
+        let parent = format!("/{ROOT}");
+        let creation = SheetCreation {
+            name: "Attached".into(),
+            rectangle: SheetRectangle {
+                position: point(50, 50),
+                width: Coordinate::parse_mm("20").unwrap(),
+                height: Coordinate::parse_mm("10").unwrap(),
+            },
+            child: SheetChild::AttachExisting {
+                file: "orphan.kicad_sch".into(),
+                source_revision: format!("sha256:{}", revision.digest.as_str()),
+            },
+            pins: vec![],
+            pages: vec![SheetPage {
+                parent_instance: parent.clone(),
+                relative_path: "/".into(),
+                page: "2".into(),
+            }],
+            references: vec![SheetReference {
+                parent_instance: parent,
+                relative_path: "/".into(),
+                symbol_uuid: SYMBOL.into(),
+                reference: "R20".into(),
+            }],
+        };
+        let compile_child = |sheet: SheetCreation| {
+            compile_edits_with_children(
+                &project,
+                &native,
+                &BTreeMap::from([("test.kicad_sch".into(), bytes.as_slice())]),
+                &BTreeMap::from([("orphan.kicad_sch".into(), child_bytes.as_slice())]),
+                &[
+                    edit(EditAction::SetSheetPage {
+                        uuid: None,
+                        pages: vec![SheetPage {
+                            parent_instance: format!("/{ROOT}"),
+                            relative_path: "/".into(),
+                            page: "1".into(),
+                        }],
+                    }),
+                    edit(EditAction::CreateSheet {
+                        key: "attach".into(),
+                        sheet,
+                    }),
+                ],
+            )
+        };
+        let candidate = compile_child(creation.clone()).unwrap();
+        assert!(candidate.created_files().is_empty());
+        assert_eq!(candidate.replacements().len(), 2);
+        let child = std::str::from_utf8(&candidate.files()["orphan.kicad_sch"]).unwrap();
+        assert!(child.contains("(reference \"R20\")"));
+        assert!(child.contains("/cccccccc-cccc-4ccc-8ccc-cccccccccccc"));
+        let mut missing = creation.clone();
+        missing.references.clear();
+        assert!(compile_child(missing).is_err());
+        let mut colliding = creation.clone();
+        colliding.references[0].reference = "R1".into();
+        assert!(compile_child(colliding).is_err());
+        let mut stale = creation;
+        if let SheetChild::AttachExisting {
+            source_revision, ..
+        } = &mut stale.child
+        {
+            *source_revision = "sha256:wrong".into();
+        }
+        assert!(compile_child(stale).is_err());
     }
 }

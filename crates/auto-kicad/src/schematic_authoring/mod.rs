@@ -49,6 +49,7 @@ struct State {
     plans: BTreeMap<String, Arc<Plan>>,
     busy_observations: usize,
     busy_plans: usize,
+    busy_inspections: usize,
 }
 pub(crate) struct Registry {
     state: Mutex<State>,
@@ -140,6 +141,32 @@ impl Registry {
             match &*phase {Phase::Terminal(data)=>{let mut data=data.clone();data["plan_id"]=json!(id);data["source_run_id"]=json!(plan.source_run);data["plan_hash"]=json!(plan.hash);data},_=>json!({"plan_id":id,"plan_hash":plan.hash,"source_run_id":plan.source_run,"state":match &*phase {Phase::Planned(_)=>"planned",Phase::Awaiting{..}=>"awaiting_approval",_=>"in_flight"}})}
         }).collect()
     }
+    pub fn inspect_child(&self, request: protocol::InspectChildRequest) -> Result<Value, String> {
+        bounded(&request)?;
+        let observation = {
+            let mut state = self.state.lock().expect("schematic registry");
+            state.prune();
+            if state.busy_inspections >= LIVE_LIMIT {
+                return Err("child inspection worker limit reached".into());
+            }
+            let observation = state
+                .observations
+                .get(&request.observation_id)
+                .cloned()
+                .ok_or("unknown or expired schematic observation")?;
+            if observation.audit.revision() != request.observed_revision {
+                return Err("child inspection observation revision mismatch".into());
+            }
+            state.busy_inspections += 1;
+            observation
+        };
+        let result = observation.audit.inspect_child(&request.file);
+        self.state
+            .lock()
+            .expect("schematic registry")
+            .busy_inspections -= 1;
+        result
+    }
     pub fn release(&self, request: protocol::ReleaseRequest) -> Result<Value, String> {
         bounded(&request)?;
         if request.observation_ids.len() + request.plan_ids.len() > 64 {
@@ -203,7 +230,7 @@ impl Registry {
             let id = self.id("observation");
             let units=audit.identities().units().iter().map(|unit|json!({"file":unit.file,"sheet_path":unit.sheet_path,"symbol_uuid":unit.source_uuid,"reference":unit.reference,"unit":unit.unit})).collect::<Vec<_>>();
             let contacts=audit.pins().pins().iter().map(|pin|json!({"pin":Pin::from(&kicad_schematic::probes::ConnectivityPin::Component(pin.key.clone())),"reference":pin.reference,"contacts":pin.occurrences.iter().map(|occurrence|json!({"file":occurrence.source.file,"symbol_uuid":occurrence.source.symbol_uuid,"sheet_path":occurrence.source.sheet_path,"position":{"x_nm":occurrence.position.x.nm(),"y_nm":occurrence.position.y.nm()},"unit":occurrence.unit,"name":occurrence.name,"electrical_type":occurrence.electrical_type})).collect::<Vec<_>>()})).collect::<Vec<_>>();
-            let data = json!({"schema_version":1,"observation":"native_schematic","observation_id":id,"revision":audit.revision(),"project_root":project,"root_schematic":schematic,"expires_in_seconds":TTL.as_secs(),"units":units,"contacts":contacts,"objects":audit.edit_inventory()?,"connectivity":{"nets":connectivity.connectivity().nets().iter().map(Net::from).collect::<Vec<_>>(),"isolated_no_connect":connectivity.connectivity().isolated_no_connect().iter().map(Pin::from).collect::<Vec<_>>()},"erc":audit.erc(),"source_context":audit.evidence()?});
+            let data = json!({"schema_version":1,"observation":"native_schematic","observation_id":id,"revision":audit.revision(),"project_root":project,"root_schematic":schematic,"expires_in_seconds":TTL.as_secs(),"units":units,"sheets":audit.sheet_inventory()?,"contacts":contacts,"objects":audit.edit_inventory()?,"connectivity":{"nets":connectivity.connectivity().nets().iter().map(Net::from).collect::<Vec<_>>(),"isolated_no_connect":connectivity.connectivity().isolated_no_connect().iter().map(Pin::from).collect::<Vec<_>>()},"erc":audit.erc(),"source_context":audit.evidence()?});
             audit.verify()?;
             Ok((
                 id,

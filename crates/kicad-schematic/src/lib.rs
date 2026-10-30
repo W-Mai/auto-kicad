@@ -356,7 +356,8 @@ pub fn join_netlist_components(
     Ok(joined)
 }
 
-fn normalize_netlist_instance_path(path: &str, root_uuid: &str) -> Option<String> {
+/// Normalize native sheet UUID paths against a captured root identity.
+pub fn normalize_netlist_instance_path(path: &str, root_uuid: &str) -> Option<String> {
     if !path.starts_with('/') || path.contains("//") {
         return None;
     }

@@ -1,10 +1,12 @@
 //! Complete native candidate observation; source publication requires a separate approval.
 use super::*;
 use kicad_schematic::editing::{
-    EditAction, SchematicCandidate, SchematicEdit, SymbolDefinitionEvidence, compile_edits,
+    EditAction, SchematicCandidate, SchematicEdit, SymbolDefinitionEvidence,
+    compile_edits_with_children,
 };
 use kicad_schematic::probes::{ConnectivityPin, PinConnectivity};
 use std::sync::atomic::{AtomicU8, Ordering};
+mod children;
 mod expectations;
 mod publication;
 pub use publication::{
@@ -21,6 +23,7 @@ pub use expectations::{
 /// Immutable typed bytes and complete native before/after evidence. This cannot publish files.
 pub struct SchematicEditPreview {
     source: SchematicAudit,
+    additional: children::ChildInputs,
     observed: SchematicAudit,
     candidate: SchematicCandidate,
     before_connectivity: SchematicConnectivityAudit,
@@ -64,7 +67,28 @@ impl SchematicAudit {
             })
             .collect::<Result<BTreeMap<_, _>, String>>()?;
         verify_edit_sources(self, edits)?;
-        let candidate = compile_edits(&self.inner.parsed, &self.inner.netlist, &sources, edits)?;
+        let mut additional = children::ChildInputs::capture(self, edits)?;
+        let child_sources = additional
+            .schematics
+            .iter()
+            .map(|file| {
+                let bytes = additional
+                    .inputs
+                    .files
+                    .get(&self.inner.policy.project.join(file))
+                    .and_then(|input| input.bytes.as_deref())
+                    .ok_or("missing captured child bytes")?;
+                Ok((file.clone(), bytes))
+            })
+            .collect::<Result<BTreeMap<_, _>, String>>()?;
+        let candidate = compile_edits_with_children(
+            &self.inner.parsed,
+            &self.inner.netlist,
+            &sources,
+            &child_sources,
+            edits,
+        )?;
+        additional.verify()?;
         let before_connectivity = self.observe_pin_connectivity()?;
         let snapshot = tempfile::Builder::new()
             .prefix("auto-kicad-schematic-preview-")
@@ -72,18 +96,22 @@ impl SchematicAudit {
             .map_err(|error| error.to_string())?;
         let root = fs::canonicalize(snapshot.path()).map_err(|error| error.to_string())?;
         let project = root.join("project");
-        // Capture only inputs already selected by the baseline audit. Unrelated files are not copied.
+        for (relative, bytes) in candidate.files() {
+            write_new(&project.join(relative), bytes)?;
+        }
+        // Copy protected resources separately from the exact schematic candidates.
         for (path, input) in &self.inner.source.files {
             if let Ok(relative) = path.strip_prefix(&self.inner.policy.project)
                 && let Some(bytes) = &input.bytes
                 && path.file_name().and_then(|name| name.to_str()) != Some("sym-lib-table")
                 && path.file_name().and_then(|name| name.to_str()) != Some("fp-lib-table")
             {
-                let bytes = relative
+                if relative
                     .to_str()
-                    .and_then(|name| candidate.files().get(name))
-                    .map(Vec::as_slice)
-                    .unwrap_or(bytes);
+                    .is_some_and(|name| candidate.files().contains_key(name))
+                {
+                    continue;
+                }
                 write_new(&project.join(relative), bytes)?;
             }
         }
@@ -133,6 +161,8 @@ impl SchematicAudit {
         if observed.inner.parsed != *candidate.parsed() {
             return Err("native candidate source differs from compiled hierarchy".into());
         }
+        children::verify_candidate_pages(&candidate, &observed)?;
+        additional.capture_resources(self, &observed, &project)?;
         let after_connectivity = observed.observe_pin_connectivity()?;
         let erc_delta = self
             .inner
@@ -147,6 +177,10 @@ impl SchematicAudit {
             "source_revision": self.inner.revision,
             "source_artifacts": candidate.source_revision(),
             "candidate_artifacts": candidate.parsed().revision,
+            "created_files": candidate.created_files(),
+            "additional_source_context": additional.evidence(),
+            "sheets_before": self.sheet_inventory()?,
+            "sheets_after": observed.sheet_inventory()?,
             "operation_digest": hash(format!("{:?}", candidate.changes()).as_bytes()),
             "source_context": self.evidence()?,
             "candidate_context": observed.evidence()?,
@@ -162,6 +196,7 @@ impl SchematicAudit {
         let digest = hash(&serde_json::to_vec(&evidence).map_err(|error| error.to_string())?);
         Ok(Arc::new(SchematicEditPreview {
             source: self.clone(),
+            additional,
             observed,
             candidate,
             before_connectivity,
@@ -212,6 +247,7 @@ impl SchematicEditPreview {
         let result = self
             .source
             .verify()
+            .and_then(|()| self.additional.verify())
             .and_then(|()| self.observed.verify())
             .and_then(|()| {
                 let edits = self

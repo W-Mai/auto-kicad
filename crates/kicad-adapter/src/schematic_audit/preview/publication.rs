@@ -2,10 +2,10 @@
 use super::*;
 use kicad_model::{RevisionDigest, SchematicArtifactRevision};
 
-/// Exact existing-source changes from a compiled and matched candidate.
+/// Exact existing/new-source changes from a compiled and matched candidate.
 pub struct SchematicPublicationWrite<'a> {
     pub original: PathBuf,
-    pub before_sha256: RevisionDigest,
+    pub before_sha256: Option<RevisionDigest>,
     pub bytes: &'a [u8],
 }
 
@@ -89,16 +89,19 @@ impl SchematicPublicationCheck {
     pub fn verify_before_write(&self) -> Result<(), String> {
         self.checked(|| {
             self.preview().source.verify()?;
+            self.preview().additional.verify()?;
             self.preview().observed.verify()?;
             self.verify_catalogs()
         })
     }
 
     pub fn writes(&self) -> Result<Vec<SchematicPublicationWrite<'_>>, String> {
+        // Publish created children before references to them; per-file atomicity still applies.
         self.preview()
             .candidate
-            .replacements()
-            .keys()
+            .created_files()
+            .iter()
+            .chain(self.preview().candidate.replacements().keys())
             .map(|relative| {
                 let original = self.project_dir().join(relative);
                 let input = self
@@ -108,15 +111,23 @@ impl SchematicPublicationCheck {
                     .source
                     .files
                     .get(&original)
+                    .or_else(|| self.preview().additional.inputs.files.get(&original))
                     .ok_or("publication source was not captured")?;
-                let bytes = input
+                let before_sha256 = input
                     .bytes
                     .as_deref()
-                    .ok_or("publication source was absent")?;
+                    .map(|bytes| {
+                        RevisionDigest::new(hash(bytes)).map_err(|error| error.to_string())
+                    })
+                    .transpose()?;
+                if before_sha256.is_none()
+                    != self.preview().candidate.created_files().contains(relative)
+                {
+                    return Err("source existence differs from compiled creation intent".into());
+                }
                 Ok(SchematicPublicationWrite {
                     original,
-                    before_sha256: RevisionDigest::new(hash(bytes))
-                        .map_err(|error| error.to_string())?,
+                    before_sha256,
                     bytes: &self.preview().candidate.files()[relative],
                 })
             })
@@ -126,10 +137,12 @@ impl SchematicPublicationCheck {
     fn verify_published_inputs(&self) -> Result<(), String> {
         self.checked(|| {
             let preview = self.preview();
+            preview.additional.verify_directories()?;
             verify_candidate_inputs(
-                &preview.source.inner.source,
+                &[&preview.source.inner.source, &preview.additional.inputs],
                 self.project_dir(),
                 preview.candidate.files(),
+                preview.candidate.created_files(),
             )?;
             preview.source.verify_context()?;
             preview
@@ -216,27 +229,48 @@ impl VerifiedSchematicPublication {
 }
 
 fn verify_candidate_inputs(
-    inputs: &Inputs,
+    captures: &[&Inputs],
     project: &Path,
     candidates: &BTreeMap<String, Vec<u8>>,
+    created: &BTreeSet<String>,
 ) -> Result<(), String> {
-    for relative in candidates.keys() {
-        if inputs
-            .files
-            .get(&project.join(relative))
-            .is_none_or(|input| input.bytes.is_none())
-        {
-            return Err("candidate source was not captured as an existing file".into());
+    if created.iter().any(|file| !candidates.contains_key(file)) {
+        return Err("creation set differs from candidate files".into());
+    }
+    let mut inputs = BTreeMap::new();
+    for capture in captures {
+        for (path, input) in &capture.files {
+            if let Some(old) = inputs.insert(path, input)
+                && (old.canonical != input.canonical
+                    || old.digest != input.digest
+                    || old.size != input.size)
+            {
+                return Err("conflicting captured source authority".into());
+            }
         }
     }
-    for (path, input) in &inputs.files {
+    for relative in candidates.keys() {
+        let input = inputs
+            .get(&project.join(relative))
+            .ok_or("candidate source was not captured")?;
+        if input.bytes.is_none() != created.contains(relative) {
+            return Err("candidate existence differs from captured authority".into());
+        }
+    }
+    for (path, input) in inputs {
         let actual = Inputs::read(path)?;
-        let candidate = path
-            .strip_prefix(project)
-            .ok()
-            .and_then(Path::to_str)
-            .and_then(|relative| candidates.get(relative));
-        if actual.canonical != input.canonical {
+        let relative = path.strip_prefix(project).ok().and_then(Path::to_str);
+        let candidate = relative.and_then(|relative| candidates.get(relative));
+        let is_created = relative.is_some_and(|relative| created.contains(relative));
+        if if is_created {
+            actual.canonical.as_ref() != Some(path)
+                || fs::symlink_metadata(path)
+                    .map_err(|e| e.to_string())?
+                    .file_type()
+                    .is_symlink()
+        } else {
+            actual.canonical != input.canonical
+        } {
             return Err("published source/context path changed".into());
         }
         if let Some(bytes) = candidate {
@@ -273,13 +307,15 @@ mod tests {
             inputs.track(path).unwrap();
         }
         let mut candidate = BTreeMap::from([("root.kicad_sch".into(), b"candidate".to_vec())]);
-        assert!(verify_candidate_inputs(&inputs, &root, &candidate).is_err());
+        assert!(verify_candidate_inputs(&[&inputs], &root, &candidate, &BTreeSet::new()).is_err());
         fs::write(&source, b"candidate").unwrap();
-        verify_candidate_inputs(&inputs, &root, &candidate).unwrap();
+        verify_candidate_inputs(&[&inputs], &root, &candidate, &BTreeSet::new()).unwrap();
         for path in [&child, &config, &absent] {
             let original = fs::read(path).ok();
             fs::write(path, b"unexpected").unwrap();
-            assert!(verify_candidate_inputs(&inputs, &root, &candidate).is_err());
+            assert!(
+                verify_candidate_inputs(&[&inputs], &root, &candidate, &BTreeSet::new()).is_err()
+            );
             if let Some(bytes) = original {
                 fs::write(path, bytes).unwrap();
             } else {
@@ -287,13 +323,40 @@ mod tests {
             }
         }
         candidate.insert("new.kicad_sch".into(), b"new".to_vec());
-        assert!(verify_candidate_inputs(&inputs, &root, &candidate).is_err());
+        assert!(verify_candidate_inputs(&[&inputs], &root, &candidate, &BTreeSet::new()).is_err());
         candidate.remove("new.kicad_sch");
         #[cfg(unix)]
         {
             fs::rename(&source, root.join("redirected")).unwrap();
             std::os::unix::fs::symlink(root.join("redirected"), &source).unwrap();
-            assert!(verify_candidate_inputs(&inputs, &root, &candidate).is_err());
+            assert!(
+                verify_candidate_inputs(&[&inputs], &root, &candidate, &BTreeSet::new()).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn new_source_transition_requires_captured_absence_and_exact_creation_intent() {
+        let owned = tempfile::tempdir().unwrap();
+        let root = fs::canonicalize(owned.path()).unwrap();
+        let target = root.join("child.kicad_sch");
+        let mut inputs = Inputs::default();
+        inputs.track(&target).unwrap();
+        let candidates = BTreeMap::from([("child.kicad_sch".into(), b"candidate".to_vec())]);
+        let created = BTreeSet::from(["child.kicad_sch".into()]);
+        assert!(verify_candidate_inputs(&[&inputs], &root, &candidates, &created).is_err());
+        fs::write(&target, b"candidate").unwrap();
+        verify_candidate_inputs(&[&inputs], &root, &candidates, &created).unwrap();
+        assert!(verify_candidate_inputs(&[&inputs], &root, &candidates, &BTreeSet::new()).is_err());
+        fs::write(&target, b"later-user-bytes").unwrap();
+        assert!(verify_candidate_inputs(&[&inputs], &root, &candidates, &created).is_err());
+        #[cfg(unix)]
+        {
+            let redirected = root.join("redirected.kicad_sch");
+            fs::write(&redirected, b"candidate").unwrap();
+            fs::remove_file(&target).unwrap();
+            std::os::unix::fs::symlink(&redirected, &target).unwrap();
+            assert!(verify_candidate_inputs(&[&inputs], &root, &candidates, &created).is_err());
         }
     }
 }

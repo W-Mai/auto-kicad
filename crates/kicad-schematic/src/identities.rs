@@ -136,6 +136,75 @@ pub(crate) fn expand_source_graph(
     Ok(sheets)
 }
 
+/// Validate a complete captured source hierarchy without native component authority.
+pub fn source_instances(
+    project: &ParsedSchematicProject,
+) -> Result<Vec<SheetInstance>, IdentityError> {
+    project
+        .revision
+        .validate()
+        .map_err(|_| invalid("invalid project revision"))?;
+    if project.files.is_empty() || project.files.len() > 128 {
+        return Err(invalid("physical file bound"));
+    }
+    let files: BTreeMap<_, _> = project
+        .files
+        .iter()
+        .map(|f| (f.artifact.relative_path.as_str(), f))
+        .collect();
+    if files.len() != project.files.len() {
+        return Err(invalid("duplicate physical file"));
+    }
+    let artifacts: BTreeSet<_> = project
+        .files
+        .iter()
+        .map(|f| {
+            (
+                &f.artifact.relative_path,
+                f.artifact.content_digest.as_str(),
+                f.artifact.size,
+            )
+        })
+        .collect();
+    let expected: BTreeSet<_> = project
+        .revision
+        .files
+        .iter()
+        .map(|f| (&f.relative_path, f.content_digest.as_str(), f.size))
+        .collect();
+    if artifacts != expected {
+        return Err(invalid("file set differs from revision"));
+    }
+    let mut file_ids = BTreeSet::new();
+    for file in files.values() {
+        if !uuid(&file.file_uuid) || !file_ids.insert(&file.file_uuid) {
+            return Err(invalid("invalid or repeated file UUID"));
+        }
+        let mut ids = BTreeSet::new();
+        for id in file
+            .sheets
+            .iter()
+            .map(|s| &s.source_uuid)
+            .chain(file.symbols.iter().map(|s| &s.source_uuid))
+        {
+            if !uuid(id) || !ids.insert(id) {
+                return Err(invalid("invalid or repeated object UUID"));
+            }
+        }
+    }
+    let sheets = expand_source_graph(&project.root_relative_path, &files)?;
+    if sheets
+        .iter()
+        .map(|s| s.file.as_str())
+        .collect::<BTreeSet<_>>()
+        .len()
+        != files.len()
+    {
+        return Err(invalid("unreachable observed file"));
+    }
+    Ok(sheets)
+}
+
 impl SchematicIdentityIndex {
     pub fn sheets(&self) -> &[SheetInstance] {
         &self.sheets
@@ -151,41 +220,12 @@ impl SchematicIdentityIndex {
         project: &ParsedSchematicProject,
         netlist: &NetlistDocument,
     ) -> Result<Self, IdentityError> {
-        project
-            .revision
-            .validate()
-            .map_err(|_| invalid("invalid project revision"))?;
-        if project.files.is_empty() || project.files.len() > 128 {
-            return Err(invalid("physical file bound"));
-        }
-        let files: BTreeMap<_, _> = project
+        let sheets = source_instances(project)?;
+        let files = project
             .files
             .iter()
             .map(|f| (f.artifact.relative_path.as_str(), f))
-            .collect();
-        if files.len() != project.files.len() {
-            return Err(invalid("duplicate physical file"));
-        }
-        let artifacts: BTreeSet<_> = project
-            .files
-            .iter()
-            .map(|f| {
-                (
-                    &f.artifact.relative_path,
-                    f.artifact.content_digest.as_str(),
-                    f.artifact.size,
-                )
-            })
-            .collect();
-        let expected: BTreeSet<_> = project
-            .revision
-            .files
-            .iter()
-            .map(|f| (&f.relative_path, f.content_digest.as_str(), f.size))
-            .collect();
-        if artifacts != expected {
-            return Err(invalid("file set differs from revision"));
-        }
+            .collect::<BTreeMap<_, _>>();
         let root = files
             .get(project.root_relative_path.as_str())
             .ok_or(invalid("missing root"))?;
@@ -193,37 +233,10 @@ impl SchematicIdentityIndex {
             .file_stem()
             .and_then(|s| s.to_str())
             .ok_or(invalid("invalid project name"))?;
-        let mut file_ids = BTreeSet::new();
-        for file in files.values() {
-            if !uuid(&file.file_uuid) || !file_ids.insert(&file.file_uuid) {
-                return Err(invalid("invalid or repeated file UUID"));
-            }
-            let mut ids = BTreeSet::new();
-            for id in file
-                .sheets
-                .iter()
-                .map(|s| &s.source_uuid)
-                .chain(file.symbols.iter().map(|s| &s.source_uuid))
-            {
-                if !uuid(id) || !ids.insert(id) {
-                    return Err(invalid("invalid or repeated object UUID"));
-                }
-            }
-        }
-        let sheets = expand_source_graph(&project.root_relative_path, &files)?;
         let expanded = sheets
             .iter()
             .map(|sheet| sheet.path.clone())
             .collect::<BTreeSet<_>>();
-        if sheets
-            .iter()
-            .map(|s| s.file.as_str())
-            .collect::<BTreeSet<_>>()
-            .len()
-            != files.len()
-        {
-            return Err(invalid("unreachable observed file"));
-        }
         let native_sheets: Vec<_> = netlist
             .sheets
             .iter()

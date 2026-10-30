@@ -21,6 +21,14 @@ pub struct ObserveRequest {
     pub root_schematic: String,
 }
 
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InspectChildRequest {
+    pub observation_id: String,
+    pub observed_revision: String,
+    pub file: String,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct ReleaseRequest {
@@ -300,6 +308,72 @@ impl SheetUpdateRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum ChildRequest {
+    CreateEmpty {
+        file: String,
+    },
+    AttachExisting {
+        file: String,
+        source_revision: String,
+    },
+}
+impl ChildRequest {
+    fn native(&self) -> SheetChild {
+        match self {
+            Self::CreateEmpty { file } => SheetChild::CreateEmpty { file: file.clone() },
+            Self::AttachExisting {
+                file,
+                source_revision,
+            } => SheetChild::AttachExisting {
+                file: file.clone(),
+                source_revision: source_revision.clone(),
+            },
+        }
+    }
+}
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NewSheetPinRequest {
+    pub key: String,
+    pub pin: SheetPinRequest,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SheetPageRequest {
+    pub parent_instance: String,
+    pub relative_path: String,
+    pub page: String,
+}
+impl SheetPageRequest {
+    fn native(&self) -> SheetPage {
+        SheetPage {
+            parent_instance: self.parent_instance.clone(),
+            relative_path: self.relative_path.clone(),
+            page: self.page.clone(),
+        }
+    }
+}
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SheetReferenceRequest {
+    pub parent_instance: String,
+    pub relative_path: String,
+    pub symbol_uuid: String,
+    pub reference: String,
+}
+impl SheetReferenceRequest {
+    fn native(&self) -> SheetReference {
+        SheetReference {
+            parent_instance: self.parent_instance.clone(),
+            relative_path: self.relative_path.clone(),
+            symbol_uuid: self.symbol_uuid.clone(),
+            reference: self.reference.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct EditRequest {
     pub file: String,
@@ -309,6 +383,28 @@ pub struct EditRequest {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    SetSheetPage {
+        uuid: Option<String>,
+        pages: Vec<SheetPageRequest>,
+    },
+    CreateSheet {
+        key: String,
+        name: String,
+        rectangle: SheetRectangleRequest,
+        child: ChildRequest,
+        #[serde(default)]
+        pins: Vec<NewSheetPinRequest>,
+        pages: Vec<SheetPageRequest>,
+        #[serde(default)]
+        references: Vec<SheetReferenceRequest>,
+    },
+    RetargetSheet {
+        uuid: String,
+        child: ChildRequest,
+        pages: Vec<SheetPageRequest>,
+        #[serde(default)]
+        references: Vec<SheetReferenceRequest>,
+    },
     RemoveSheet {
         uuid: String,
     },
@@ -421,6 +517,56 @@ impl EditRequest {
             }
         }
         let action = match &self.action {
+            Action::SetSheetPage { uuid, pages } => EditAction::SetSheetPage {
+                uuid: uuid.clone(),
+                pages: pages.iter().map(SheetPageRequest::native).collect(),
+            },
+            Action::CreateSheet {
+                key,
+                name,
+                rectangle,
+                child,
+                pins,
+                pages,
+                references,
+            } => EditAction::CreateSheet {
+                key: key.clone(),
+                sheet: SheetCreation {
+                    name: name.clone(),
+                    rectangle: rectangle.native()?,
+                    child: child.native(),
+                    pins: pins
+                        .iter()
+                        .map(|pin| {
+                            Ok(NewSheetPin {
+                                key: pin.key.clone(),
+                                pin: pin.pin.native()?,
+                            })
+                        })
+                        .collect::<Result<_, String>>()?,
+                    pages: pages.iter().map(SheetPageRequest::native).collect(),
+                    references: references
+                        .iter()
+                        .map(SheetReferenceRequest::native)
+                        .collect(),
+                },
+            },
+            Action::RetargetSheet {
+                uuid,
+                child,
+                pages,
+                references,
+            } => EditAction::RetargetSheet {
+                uuid: uuid.clone(),
+                target: SheetRetarget {
+                    child: child.native(),
+                    pages: pages.iter().map(SheetPageRequest::native).collect(),
+                    references: references
+                        .iter()
+                        .map(SheetReferenceRequest::native)
+                        .collect(),
+                },
+            },
             Action::RemoveSheet { uuid } => EditAction::RemoveSheet { uuid: uuid.clone() },
             Action::UpdateSheet { uuid, update } => EditAction::UpdateSheet {
                 uuid: uuid.clone(),

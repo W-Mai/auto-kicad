@@ -61,9 +61,10 @@ impl ProjectWriter {
             .into_iter()
             .map(|write| SchematicWrite {
                 original: write.original,
-                before: SourceExistence::Present {
-                    sha256: write.before_sha256,
-                },
+                before: write
+                    .before_sha256
+                    .map(|sha256| SourceExistence::Present { sha256 })
+                    .unwrap_or(SourceExistence::Absent),
                 bytes: write.bytes.to_vec(),
             })
             .collect::<Vec<_>>();

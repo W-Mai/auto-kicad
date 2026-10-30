@@ -21,7 +21,7 @@ Observe canonical absolute paths:
 }
 ```
 
-Send this to `kicad_schematic_audit`. The result contains `observation_id`, `revision`, units with source UUIDs and sheet paths, physical pin contacts in nanometres, editable object inventory, full source-pin connectivity, ERC and source/context evidence. Retain the returned identities when constructing a plan:
+Send this to `kicad_schematic_audit`. The result contains `observation_id`, `revision`, units with source UUIDs and sheet paths, sheet inventory with configured page labels and separate native ordinals, physical pin contacts in nanometres, editable object inventory, full source-pin connectivity, ERC and source/context evidence. Retain the returned identities when constructing a plan:
 
 ```json
 {
@@ -50,6 +50,7 @@ Send this to `kicad_plan_schematic_change`. A plan supports 1–128 edits and re
 | Catalog symbols | `create_symbol` with server-derived definitions/UUIDs and [bounded native inheritance](schematic-symbol-inheritance.md) |
 | Existing component units | `add_symbol_unit` from observed source metadata and exact instance annotations |
 | Existing sheets and hierarchical pins | `update_sheet` with explicit name, rectangle and nested pin create/update/delete; `remove_sheet` retaining child files |
+| Child placements and configured pages | `create_sheet`, `retarget_sheet`, `set_sheet_page` with exact page/reference maps and inspected child revisions |
 | Wires | `create_wire`, `update_wire`, `delete` |
 | Markers | `create_junction`, `create_no_connect`, `move_marker`, `delete` |
 | Local/global/hierarchical labels | `create_label`, `update_label`, `delete` |
@@ -66,7 +67,7 @@ Call `kicad_preview_schematic_change` with `plan_id` and `plan_hash`. Its option
 
 After reviewing and authorizing the preview, call `kicad_commit_schematic_change` with the exact `plan_id`, `plan_hash` and returned `approval_hash`. These identify server-owned matching evidence; client-supplied candidate proofs cannot substitute for it. The CLI validates actual published sources, complete connectivity/ERC, hierarchy and protected inputs before `committed`. The durable execution record retains rehashable preview, matching, verification and candidate sidecars. Observed source/configuration/library drift invalidates approval permanently, even if the bytes are restored. Plans and approvals expire on process restart; completed or uncertain attempts cannot replay.
 
-Release handles with `kicad_schematic_audit` using `{"release":{"observation_ids":["..."],"plan_ids":["..."]}}`. It refuses releasing an in-flight plan. Observation/release requests are mutually exclusive with legacy ledger filters. General sessions appear separately in `general_sessions`; the existing ledger response remains compatible.
+Release handles with `kicad_schematic_audit` using `{"release":{"observation_ids":["..."],"plan_ids":["..."]}}`. It refuses releasing an in-flight plan. Observation, read-only `inspect_child` and release requests are mutually exclusive with each other and legacy ledger filters. [Child inspection and authoring](schematic-children.md) bind detached source inventories to the current observation without granting publication authority. General sessions appear separately in `general_sessions`; the existing ledger response remains compatible.
 
 ## Interrupted publication
 
@@ -78,6 +79,6 @@ Publication journals candidate/original fingerprints and each file operation bef
 
 `scripts/check-schematic-general-interruption.py` kills its own real stdio writer after publication and before terminal evidence. A fresh process rejects replay and new writes, preserves later user bytes, performs fresh approved production MCP recovery, compares exact original files/native observation, and accepts a subsequent normal commit. Owned native children stop before orphaned private snapshots are removed. These checks launch no GUI and do not establish editor undo, GUI cancellation or Codex model qualification.
 
-Full `schematic.general_edit` remains deferred. Sheet geometry/hierarchical pins, hierarchy/child-file creation, GUI/Codex qualification, schematic-to-PCB synchronization and the final three-project product gate remain incomplete. Inherited symbol creation requires a bounded same-file chain; inherited embedded-file/font resources reject. Source examples and user projects are not mutated by these acceptance scripts; only marked copies are accepted.
+Full `schematic.general_edit` remains deferred. Complete GUI/Codex/family qualification, schematic-to-PCB synchronization and the final three-project product gate remain incomplete. Inherited symbol creation requires a bounded same-file chain; inherited embedded-file/font resources reject. Source examples and user projects are not mutated by these acceptance scripts; only marked copies are accepted.
 
-[Existing sheet qualification](schematic-sheets.md) passed both formats and a parent reused in 4 instances through production stdio, independent saved native network/ERC comparison, exact rectangle/field checks and actual interruption/recovery. [Exact placement removal](schematic-sheet-removal.md) passed both formats, reused parents and actual interruption/recovery while retaining shared/orphan child files. Placement creation, confined child-file authoring and full GUI/Codex qualification remain incomplete.
+[Existing sheet qualification](schematic-sheets.md) passed both formats and a parent reused in 4 instances through production stdio, independent saved native network/ERC comparison, exact rectangle/field checks and actual interruption/recovery. [Exact placement removal](schematic-sheet-removal.md) passed both formats, reused parents and actual interruption/recovery while retaining shared/orphan child files. [Child creation/attachment/retargeting](schematic-children.md) bind complete page/reference maps, retained inactive sources and exact new-file authority. Full GUI/Codex/family qualification remains incomplete.

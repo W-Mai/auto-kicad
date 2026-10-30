@@ -1,0 +1,312 @@
+{
+  "scope": "Bounded child creation, populated hierarchy attachment, explicit placement retargeting, page/reference maps and guarded mixed-file publication",
+  "tested_versions": [
+    "10.0.7"
+  ],
+  "source_formats": [
+    "20250114",
+    "20260306"
+  ],
+  "server_sha256": "8c0cceb4e1cb364e6a51ee0055cde388bf6b4e53002ab524d056f172043671f6",
+  "profiles": [
+    {
+      "passed": true,
+      "profile": "current",
+      "server_sha256": "8c0cceb4e1cb364e6a51ee0055cde388bf6b4e53002ab524d056f172043671f6",
+      "cases": [
+        {
+          "name": "missing-pages",
+          "rejected": true
+        },
+        {
+          "name": "extra-page",
+          "rejected": true
+        },
+        {
+          "name": "collision-page",
+          "rejected": true
+        },
+        {
+          "name": "external",
+          "rejected": true
+        },
+        {
+          "name": "missing-parent",
+          "rejected": true
+        },
+        {
+          "name": "create-empty-child",
+          "committed": true,
+          "new_files": [
+            "created.kicad_sch"
+          ],
+          "changed_files": [
+            "multichannel_mixer.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        },
+        {
+          "name": "create-symbol-in-new-child",
+          "committed": true,
+          "new_files": [],
+          "changed_files": [
+            "created.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        },
+        {
+          "name": "retarget-populated-multiunit-child",
+          "committed": true,
+          "new_files": [],
+          "changed_files": [
+            "multichannel_mixer.kicad_sch",
+            "orphan.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        },
+        {
+          "name": "retarget-to-second-empty-child",
+          "committed": true,
+          "new_files": [
+            "second.kicad_sch"
+          ],
+          "changed_files": [
+            "multichannel_mixer.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        },
+        {
+          "name": "reattach-with-existing-annotations",
+          "committed": true,
+          "new_files": [],
+          "changed_files": [
+            "multichannel_mixer.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        },
+        {
+          "name": "remove-retain-all-child-files",
+          "committed": true,
+          "new_files": [],
+          "changed_files": [
+            "multichannel_mixer.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        }
+      ],
+      "configuration_unchanged": true,
+      "private_snapshots_removed": true,
+      "gui_launched": false,
+      "original_parent_forms_exact_after_lifecycle": true
+    },
+    {
+      "passed": true,
+      "profile": "legacy",
+      "server_sha256": "8c0cceb4e1cb364e6a51ee0055cde388bf6b4e53002ab524d056f172043671f6",
+      "cases": [
+        {
+          "name": "missing-pages",
+          "rejected": true
+        },
+        {
+          "name": "extra-page",
+          "rejected": true
+        },
+        {
+          "name": "collision-page",
+          "rejected": true
+        },
+        {
+          "name": "external",
+          "rejected": true
+        },
+        {
+          "name": "missing-parent",
+          "rejected": true
+        },
+        {
+          "name": "create-empty-child",
+          "committed": true,
+          "new_files": [
+            "created.kicad_sch"
+          ],
+          "changed_files": [
+            "multichannel_mixer.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        },
+        {
+          "name": "create-symbol-in-new-child",
+          "committed": true,
+          "new_files": [],
+          "changed_files": [
+            "created.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        },
+        {
+          "name": "retarget-populated-multiunit-child",
+          "committed": true,
+          "new_files": [],
+          "changed_files": [
+            "multichannel_mixer.kicad_sch",
+            "orphan.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        },
+        {
+          "name": "retarget-to-second-empty-child",
+          "committed": true,
+          "new_files": [
+            "second.kicad_sch"
+          ],
+          "changed_files": [
+            "multichannel_mixer.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        },
+        {
+          "name": "reattach-with-existing-annotations",
+          "committed": true,
+          "new_files": [],
+          "changed_files": [
+            "multichannel_mixer.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        },
+        {
+          "name": "remove-retain-all-child-files",
+          "committed": true,
+          "new_files": [],
+          "changed_files": [
+            "multichannel_mixer.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        }
+      ],
+      "configuration_unchanged": true,
+      "private_snapshots_removed": true,
+      "gui_launched": false,
+      "original_parent_forms_exact_after_lifecycle": true
+    },
+    {
+      "passed": true,
+      "profile": "shared",
+      "server_sha256": "8c0cceb4e1cb364e6a51ee0055cde388bf6b4e53002ab524d056f172043671f6",
+      "cases": [
+        {
+          "name": "missing-pages",
+          "rejected": true
+        },
+        {
+          "name": "extra-page",
+          "rejected": true
+        },
+        {
+          "name": "collision-page",
+          "rejected": true
+        },
+        {
+          "name": "external",
+          "rejected": true
+        },
+        {
+          "name": "missing-parent",
+          "rejected": true
+        },
+        {
+          "name": "create-empty-child",
+          "committed": true,
+          "new_files": [
+            "created.kicad_sch"
+          ],
+          "changed_files": [
+            "channel_strip.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        },
+        {
+          "name": "create-symbol-in-new-child",
+          "committed": true,
+          "new_files": [],
+          "changed_files": [
+            "created.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        },
+        {
+          "name": "retarget-populated-multiunit-child",
+          "committed": true,
+          "new_files": [],
+          "changed_files": [
+            "channel_strip.kicad_sch",
+            "orphan.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        },
+        {
+          "name": "retarget-to-second-empty-child",
+          "committed": true,
+          "new_files": [
+            "second.kicad_sch"
+          ],
+          "changed_files": [
+            "channel_strip.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        },
+        {
+          "name": "reattach-with-existing-annotations",
+          "committed": true,
+          "new_files": [],
+          "changed_files": [
+            "channel_strip.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        },
+        {
+          "name": "remove-retain-all-child-files",
+          "committed": true,
+          "new_files": [],
+          "changed_files": [
+            "channel_strip.kicad_sch"
+          ],
+          "saved_native_netlist_erc": true
+        }
+      ],
+      "configuration_unchanged": true,
+      "private_snapshots_removed": true,
+      "gui_launched": false,
+      "original_parent_forms_exact_after_lifecycle": true
+    }
+  ],
+  "committed_native_stdio_executions": 23,
+  "rehashable_artifacts": 108,
+  "verified_backups": 29,
+  "transitive_populated_attachment_and_hierarchical_pin": true,
+  "source_library_absence_drift_permanently_revoked": true,
+  "root_page_display_svg": [
+    "1",
+    "10",
+    "1"
+  ],
+  "actual_writer_interruption_and_guarded_absence_recovery": true,
+  "source_originals_unchanged": true,
+  "quality": {
+    "passed": 566,
+    "failed": 0,
+    "ignored": 16
+  },
+  "fixed_two_resistor_native_stdio_regression": true,
+  "gui_launched": false,
+  "remaining": [
+    "nested displayed-page GUI qualification",
+    "complete schematic operation-family GUI/Codex qualification",
+    "schematic-to-PCB synchronization",
+    "remaining geometry qualification",
+    "installation release and manufacturing exports",
+    "final three-real-project gate"
+  ],
+  "failed_attempts_are_separate": true,
+  "full_product_goal_complete": false
+}

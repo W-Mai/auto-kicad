@@ -30,7 +30,7 @@ pub struct SheetUpdate {
     pub pins: Vec<SheetPinEdit>,
 }
 
-fn segment(name: &str) -> Result<(), String> {
+pub(super) fn segment(name: &str) -> Result<(), String> {
     text(name, false)?;
     if name.trim().is_empty()
         || name
@@ -42,7 +42,7 @@ fn segment(name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn pin_text(name: &str) -> Result<(), String> {
+pub(super) fn pin_text(name: &str) -> Result<(), String> {
     text(name, false)?;
     if name.trim().is_empty()
         || name == "~"
@@ -56,7 +56,7 @@ fn pin_text(name: &str) -> Result<(), String> {
 }
 
 impl SheetRectangle {
-    fn validate(&self) -> Result<(), String> {
+    pub(super) fn validate(&self) -> Result<(), String> {
         if self.width.nm() <= 0 || self.height.nm() <= 0 {
             return Err("sheet dimensions must be positive".into());
         }
@@ -66,7 +66,7 @@ impl SheetRectangle {
         )?;
         Ok(())
     }
-    fn contains_pin(&self, pin: &SheetPin) -> bool {
+    pub(super) fn contains_pin(&self, pin: &SheetPin) -> bool {
         let (x, y) = (pin.position.x.nm(), pin.position.y.nm());
         let (left, top) = (self.position.x.nm(), self.position.y.nm());
         let (right, bottom) = (left + self.width.nm(), top + self.height.nm());

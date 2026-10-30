@@ -69,6 +69,47 @@ impl MatchedSchematicPreview {
 }
 
 impl SchematicEditPreview {
+    // Physical marker state includes selected existing child files before attachment.
+    fn captured_schematic_sources(&self) -> Result<BTreeMap<String, &[u8]>, String> {
+        let mut sources = self
+            .source
+            .inner
+            .parsed
+            .files
+            .iter()
+            .map(|file| {
+                let bytes = self
+                    .source
+                    .inner
+                    .source
+                    .files
+                    .get(
+                        &self
+                            .source
+                            .inner
+                            .policy
+                            .project
+                            .join(&file.artifact.relative_path),
+                    )
+                    .and_then(|input| input.bytes.as_deref())
+                    .ok_or("missing captured schematic source")?;
+                Ok((file.artifact.relative_path.clone(), bytes))
+            })
+            .collect::<Result<BTreeMap<_, _>, String>>()?;
+        for file in &self.additional.schematics {
+            let bytes = self
+                .additional
+                .inputs
+                .files
+                .get(&self.source.inner.policy.project.join(file))
+                .and_then(|input| input.bytes.as_deref())
+                .ok_or("missing captured child marker source")?;
+            if sources.insert(file.clone(), bytes).is_some() {
+                return Err("repeated captured marker source".into());
+            }
+        }
+        Ok(sources)
+    }
     /// Require the complete candidate to equal an explicit change applied to the baseline.
     pub fn match_expectations(
         self: &Arc<Self>,
@@ -98,31 +139,7 @@ impl SchematicEditPreview {
         {
             return Err("property/annotation/flag/assignment edits must preserve pin partitions and classes".into());
         }
-        let sources = self
-            .source
-            .inner
-            .parsed
-            .files
-            .iter()
-            .map(|file| {
-                let bytes = self
-                    .source
-                    .inner
-                    .source
-                    .files
-                    .get(
-                        &self
-                            .source
-                            .inner
-                            .policy
-                            .project
-                            .join(&file.artifact.relative_path),
-                    )
-                    .and_then(|input| input.bytes.as_deref())
-                    .ok_or("missing captured marker source")?;
-                Ok((file.artifact.relative_path.clone(), bytes))
-            })
-            .collect::<Result<BTreeMap<_, _>, String>>()?;
+        let sources = self.captured_schematic_sources()?;
         let before_markers = markers(sources.into_iter())?;
         let after_markers = markers(
             self.candidate
@@ -163,31 +180,7 @@ impl SchematicEditPreview {
         &self,
     ) -> Result<(Vec<NoConnectMarker>, Vec<NoConnectMarker>), String> {
         self.verify()?;
-        let before = self
-            .source
-            .inner
-            .parsed
-            .files
-            .iter()
-            .map(|file| {
-                let bytes = self
-                    .source
-                    .inner
-                    .source
-                    .files
-                    .get(
-                        &self
-                            .source
-                            .inner
-                            .policy
-                            .project
-                            .join(&file.artifact.relative_path),
-                    )
-                    .and_then(|input| input.bytes.as_deref())
-                    .ok_or("missing marker source")?;
-                Ok((file.artifact.relative_path.clone(), bytes))
-            })
-            .collect::<Result<Vec<_>, String>>()?;
+        let before = self.captured_schematic_sources()?;
         Ok((
             markers(before.into_iter())?.into_values().collect(),
             markers(

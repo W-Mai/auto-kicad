@@ -3296,6 +3296,7 @@ pub struct CapabilityRequest {
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 pub struct SchematicAuditRequest {
+    pub inspect_child: Option<schematic_authoring::protocol::InspectChildRequest>,
     pub release: Option<schematic_authoring::protocol::ReleaseRequest>,
     pub observe: Option<schematic_authoring::protocol::ObserveRequest>,
     pub request_id: Option<String>,
@@ -3752,12 +3753,42 @@ impl Server {
 
     #[tool(
         name = "kicad_schematic_audit",
-        description = "Inspect a closed native schematic, release private sessions, or read schematic audit history."
+        description = "Inspect closed schematics or confined child sources, release sessions, or read audit history."
     )]
     pub async fn kicad_schematic_audit(
         &self,
         Parameters(arguments): Parameters<SchematicAuditRequest>,
     ) -> Result<CallToolResponse, ErrorData> {
+        let modes = usize::from(arguments.observe.is_some())
+            + usize::from(arguments.release.is_some())
+            + usize::from(arguments.inspect_child.is_some());
+        if modes > 1 {
+            return Ok(self.rejected(
+                arguments
+                    .request_id
+                    .unwrap_or_else(|| "req_schematic_audit".into()),
+                "observation, child inspection and release are exclusive",
+            ));
+        }
+        if let Some(inspect) = arguments.inspect_child {
+            let request_id = arguments
+                .request_id
+                .unwrap_or_else(|| "req_schematic_child_inspect".into());
+            if arguments.plan_id.is_some()
+                || arguments.source_run_id.is_some()
+                || arguments.limit.is_some()
+            {
+                return Ok(self.rejected(
+                    request_id,
+                    "child inspection cannot be combined with ledger filters",
+                ));
+            }
+            let registry = self.general_schematic.clone();
+            let result = tokio::task::spawn_blocking(move || registry.inspect_child(inspect))
+                .await
+                .unwrap_or_else(|error| Err(format!("child inspection worker failed: {error}")));
+            return self.general_schematic_response(request_id, result);
+        }
         if let Some(observe) = arguments.observe {
             let request_id = arguments
                 .request_id
@@ -8403,6 +8434,7 @@ mod tests {
         assert_eq!(commit_calls.load(AtomicOrdering::SeqCst), 1);
         let audit = server
             .kicad_schematic_audit(Parameters(SchematicAuditRequest {
+                inspect_child: None,
                 release: None,
                 observe: None,
                 request_id: Some("audit-read".into()),
