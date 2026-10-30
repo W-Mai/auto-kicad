@@ -34,6 +34,13 @@ try:
         "kicad_preview_change",
         "kicad_commit_change",
         "kicad_validate_project",
+        "kicad_schematic_audit",
+        "kicad_plan_schematic_change",
+        "kicad_preview_schematic_change",
+        "kicad_commit_schematic_change",
+        "kicad_plan_recovery",
+        "kicad_preview_recovery",
+        "kicad_commit_recovery",
     }
     assert required <= set(server["tools"]), sorted(server["tools"])
     args.output.write_text(json.dumps(server, indent=2))

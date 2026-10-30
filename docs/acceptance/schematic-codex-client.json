@@ -1,0 +1,91 @@
+{
+  "scope": "Deterministic schematic intent acceptance through actual Codex app-server MCP connections",
+  "passed_client_scope": true,
+  "codex_version": "0.165.0",
+  "native_version": "10.0.7",
+  "server_sha256": "8c0cceb4e1cb364e6a51ee0055cde388bf6b4e53002ab524d056f172043671f6",
+  "profiles": [
+    {
+      "profile": "codex-single-lifecycle",
+      "committed_executions": 28,
+      "execution_records": 28,
+      "rehashable_artifacts": 112,
+      "actual_codex_mcp_calls": 216,
+      "explicit_owner_cleanup": true,
+      "original_runner_postconditions_continued": false
+    },
+    {
+      "profile": "codex-component",
+      "committed_executions": 9,
+      "execution_records": 9,
+      "rehashable_artifacts": 36,
+      "actual_codex_mcp_calls": 86,
+      "explicit_owner_cleanup": true,
+      "original_runner_postconditions_continued": true
+    },
+    {
+      "profile": "codex-children",
+      "committed_executions": 6,
+      "execution_records": 6,
+      "rehashable_artifacts": 27,
+      "actual_codex_mcp_calls": 82,
+      "explicit_owner_cleanup": true,
+      "original_runner_postconditions_continued": true
+    },
+    {
+      "profile": "codex-shared",
+      "committed_executions": 9,
+      "execution_records": 9,
+      "rehashable_artifacts": 36,
+      "actual_codex_mcp_calls": 84,
+      "explicit_owner_cleanup": true,
+      "original_runner_postconditions_continued": false
+    },
+    {
+      "profile": "codex-interruption",
+      "committed_executions": 1,
+      "execution_records": 2,
+      "rehashable_artifacts": 9,
+      "actual_codex_mcp_calls": 21,
+      "explicit_owner_cleanup": true,
+      "original_runner_postconditions_continued": false
+    }
+  ],
+  "committed_executions": 53,
+  "rehashable_artifacts": 220,
+  "actual_codex_mcp_calls": 489,
+  "configuration_environment_bound_explicitly": true,
+  "actual_mcp_writer_interruption_and_codex_recovery": true,
+  "model_turn_started": false,
+  "ephemeral_contexts_only": true,
+  "manual_owner_cleanup_recorded_separately": true,
+  "earlier_wrong_environment_and_teardown_failures_retained": true,
+  "source_originals_unchanged": true,
+  "quality": {
+    "passed": 566,
+    "failed": 0,
+    "ignored": 16
+  },
+  "gui": {
+    "qualified": false,
+    "reason": "Accessibility access denied despite granted query and user reauthorization",
+    "owned_editor_closed": true,
+    "successful_load_save_not_claimed": true
+  },
+  "full_schematic_milestone_complete": false,
+  "full_product_goal_complete": false,
+  "build_cleanup": {
+    "target": "/private/tmp/auto-kicad-codex-target",
+    "allocated_bytes_reclaimed": 1394438144,
+    "quality_process_terminal": true
+  },
+  "remaining": [
+    "native GUI load/save for owned single-sheet, complete component and hierarchical results",
+    "nested displayed-page GUI qualification",
+    "remaining complete schematic operation-family gates",
+    "schematic-to-PCB synchronization",
+    "remaining geometry gates",
+    "installation/release and manufacturing exports",
+    "final three-real-project gate"
+  ]
+}
