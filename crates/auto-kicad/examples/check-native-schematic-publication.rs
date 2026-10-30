@@ -327,6 +327,8 @@ fn main() -> Result<()> {
             );
         }
         expected.erc = ErcExpectation {
+            removed_sheet_headers: vec![],
+            added_sheet_headers: vec![],
             introduced: preview.erc_delta().introduced.clone(),
             resolved: vec![],
         };

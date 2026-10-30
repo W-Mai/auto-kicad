@@ -57,6 +57,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("binary", "source", "config", "output"):
         parser.add_argument(name, type=Path)
+    parser.add_argument("--sheet-name")
+    parser.add_argument("--file")
     args = parser.parse_args()
     binary, source, config = (path.resolve(strict=True) for path in (args.binary, args.source, args.config))
     project = source.parent
@@ -70,6 +72,7 @@ def main():
     env = dict(os.environ, AUTO_KICAD_STATE_DIR=str(state), KICAD_CONFIG_HOME=str(config), TMPDIR=str(temporary), PYTHONDONTWRITEBYTECODE="1")
     before, configuration = snapshot(project), snapshot(config)
     transcript, launches = [], 0
+    sheet_uuid = None
     rpc = None
 
     def start():
@@ -91,16 +94,41 @@ def main():
         return call("kicad_schematic_audit", {"observe": {"project_root": str(project), "root_schematic": str(source)}})
 
     def plan(observation, value, ok=True):
-        unit = next(unit for unit in observation["units"] if unit["reference"].startswith("R"))
+        nonlocal sheet_uuid
+        if args.sheet_name:
+            if sheet_uuid is None:
+                target = next(obj for obj in observation["objects"] if obj["kind"] == "sheet" and obj["file"] == (args.file or source.name)
+                    and f'(property "Sheetname" "{args.sheet_name}"' in obj["definition"])
+                sheet_uuid = target["uuid"]
+            file = args.file or source.name
+            action = {"kind": "update_sheet", "uuid": sheet_uuid, "update": {"name": value}}
+        else:
+            unit = next(unit for unit in observation["units"] if unit["reference"].startswith("R"))
+            file = unit["file"]
+            action = {"kind": "set_property", "uuid": unit["symbol_uuid"], "name": "Value", "value": value}
         return call("kicad_plan_schematic_change", {"project_root": str(project), "root_schematic": str(source), "source_run_id": "interrupted-stdio", "request_id": "plan-" + value,
-            "general": {"schema_version": 1, "observation_id": observation["observation_id"], "observed_revision": observation["revision"], "edits": [{"file": unit["file"], "scope": {"kind": "file_all_instances"}, "action": {"kind": "set_property", "uuid": unit["symbol_uuid"], "name": "Value", "value": value}}]}}, ok=ok)
+            "general": {"schema_version": 1, "observation_id": observation["observation_id"], "observed_revision": observation["revision"], "edits": [{"file": file, "scope": {"kind": "file_all_instances"}, "action": action}]}}, ok=ok)
+
+    def approve(planned):
+        identity = {"plan_id": planned["plan_id"], "plan_hash": planned["plan_hash"]}
+        if not args.sheet_name:
+            return call("kicad_preview_schematic_change", identity)
+        from schematic_general_cases import reviewed
+        native = planned["native_preview"]
+        before, after = native["connectivity_before"], native["connectivity_after"]
+        assert before["isolated_no_connect"] == after["isolated_no_connect"]
+        expected = reviewed(planned, {"removed_nets": [n for n in before["nets"] if n not in after["nets"]],
+            "added_nets": [n for n in after["nets"] if n not in before["nets"]]})
+        for key in ("removed_sheet_headers", "added_sheet_headers"):
+            expected["erc"][key] = native["erc_delta"][key]
+        return call("kicad_preview_schematic_change", dict(identity, expectations=expected))
 
     try:
         start()
         baseline = observe()
         planned = plan(baseline, "AK_INTERRUPTED_STDIO_" + hashlib.sha256(baseline["observation_id"].encode()).hexdigest()[:16])
         identity = {"plan_id": planned["plan_id"], "plan_hash": planned["plan_hash"]}
-        preview = call("kicad_preview_schematic_change", identity)
+        preview = approve(planned)
         assert snapshot(project) == before
         completed, reply = threading.Event(), []
 
@@ -171,7 +199,7 @@ def main():
         assert restored["connectivity"] == baseline["connectivity"] and restored["objects"] == baseline["objects"]
         subsequent = plan(restored, "AK_AFTER_RECOVERY_" + hashlib.sha256(restored["observation_id"].encode()).hexdigest()[:16])
         identity = {"plan_id": subsequent["plan_id"], "plan_hash": subsequent["plan_hash"]}
-        approved = call("kicad_preview_schematic_change", identity)
+        approved = approve(subsequent)
         committed = call("kicad_commit_schematic_change", dict(identity, approval_hash=approved["approval_hash"]))
         assert committed["state"] == "committed" and snapshot(config) == configuration
     finally:
@@ -183,7 +211,7 @@ def main():
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
     module.cleanup_native_cache(temporary)
-    result = {"passed": True, "actual_stdio_writer_killed": True, "missing_terminal_and_post_evidence": True, "fresh_process_plan_blocked": True, "later_user_bytes_preserved": True,
+    result = {"passed": True, "family": "sheet" if args.sheet_name else "property", "server_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(), "actual_stdio_writer_killed": True, "missing_terminal_and_post_evidence": True, "fresh_process_plan_blocked": True, "later_user_bytes_preserved": True,
               "actual_stdio_guarded_recovery": True, "exact_original_and_native_observation_restored": True, "subsequent_native_commit": True, "owned_children_stopped": True, "owned_private_directories_removed": True, "gui_launched": False}
     (output / "result.json").write_text(json.dumps(result, indent=2) + "\n")
     print(json.dumps(result))

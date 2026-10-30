@@ -28,9 +28,11 @@ pub struct NoConnectMarker {
     pub definition_digest: String,
 }
 
-/// Exact sheet-aware diagnostic multisets. Metadata/header changes are not implicitly permitted.
+/// Exact sheet-aware diagnostics and complete header transitions. Metadata changes reject.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ErcExpectation {
+    pub removed_sheet_headers: Vec<String>,
+    pub added_sheet_headers: Vec<String>,
     pub introduced: Vec<ErcDiagnostic>,
     pub resolved: Vec<ErcDiagnostic>,
 }
@@ -480,8 +482,26 @@ fn diagnostic_keys(diagnostics: &[ErcDiagnostic]) -> Result<Vec<(&str, &str, &st
     Ok(keys)
 }
 fn match_erc(delta: &ErcDelta, expected: &ErcExpectation) -> Result<Value, String> {
-    if delta.metadata_changed || delta.sheet_headers_changed {
-        return Err("ERC metadata or sheet headers changed".into());
+    if delta.metadata_changed {
+        return Err("ERC metadata changed".into());
+    }
+    let headers = |values: &[String]| -> Result<BTreeSet<String>, String> {
+        let unique = values.iter().cloned().collect::<BTreeSet<_>>();
+        if values.len() > 4096
+            || unique.len() != values.len()
+            || values.iter().any(|value| value.len() > 65_536)
+        {
+            return Err("duplicate or excessive ERC sheet header declarations".into());
+        }
+        Ok(unique)
+    };
+    let removed = headers(&expected.removed_sheet_headers)?;
+    let added = headers(&expected.added_sheet_headers)?;
+    if removed != headers(&delta.removed_sheet_headers)?
+        || added != headers(&delta.added_sheet_headers)?
+        || delta.sheet_headers_changed != (!removed.is_empty() || !added.is_empty())
+    {
+        return Err("complete ERC sheet headers differ from explicit expectations".into());
     }
     let introduced = diagnostic_keys(&expected.introduced)?;
     let resolved = diagnostic_keys(&expected.resolved)?;
@@ -490,7 +510,9 @@ fn match_erc(delta: &ErcDelta, expected: &ErcExpectation) -> Result<Value, Strin
     {
         return Err("complete ERC differs from explicit diagnostic expectations".into());
     }
-    Ok(serde_json::json!({"introduced": introduced, "resolved": resolved}))
+    Ok(
+        serde_json::json!({"introduced": introduced, "resolved": resolved, "removed_sheet_headers":removed,"added_sheet_headers":added}),
+    )
 }
 
 #[cfg(test)]
@@ -607,11 +629,15 @@ mod tests {
         let delta = ErcDelta {
             metadata_changed: false,
             sheet_headers_changed: false,
+            removed_sheet_headers: vec![],
+            added_sheet_headers: vec![],
             introduced: vec![diagnostic.clone(), diagnostic.clone()],
             resolved: vec![],
             unchanged: 12,
         };
         let expected = ErcExpectation {
+            removed_sheet_headers: vec![],
+            added_sheet_headers: vec![],
             introduced: delta.introduced.clone(),
             resolved: vec![],
         };
@@ -651,6 +677,8 @@ mod tests {
             match_erc(
                 &resolved,
                 &ErcExpectation {
+                    removed_sheet_headers: vec![],
+                    added_sheet_headers: vec![],
                     introduced: vec![],
                     resolved: vec![diagnostic]
                 }
@@ -715,5 +743,45 @@ mod tests {
             )))
             .is_err()
         );
+    }
+
+    #[test]
+    fn sheet_header_changes_require_exact_bounded_declarations_without_metadata_bypass() {
+        let delta = ErcDelta {
+            metadata_changed: false,
+            sheet_headers_changed: true,
+            removed_sheet_headers: vec![
+                r#"{"path":"/Old/","uuid_path":"/root/child","unknown":0.12345678901234567890}"#
+                    .into(),
+            ],
+            added_sheet_headers: vec![
+                r#"{"path":"/New/","uuid_path":"/root/child","unknown":0.12345678901234567890}"#
+                    .into(),
+            ],
+            introduced: vec![],
+            resolved: vec![],
+            unchanged: 0,
+        };
+        assert!(match_erc(&delta, &Default::default()).is_err());
+        let expected = ErcExpectation {
+            removed_sheet_headers: delta.removed_sheet_headers.clone(),
+            added_sheet_headers: delta.added_sheet_headers.clone(),
+            ..Default::default()
+        };
+        match_erc(&delta, &expected).unwrap();
+        let mut wrong = expected.clone();
+        wrong.added_sheet_headers[0] = wrong.added_sheet_headers[0].replace("67890", "67891");
+        assert!(match_erc(&delta, &wrong).is_err());
+        let mut duplicate = expected.clone();
+        duplicate
+            .added_sheet_headers
+            .push(expected.added_sheet_headers[0].clone());
+        assert!(match_erc(&delta, &duplicate).is_err());
+        let mut extra = expected.clone();
+        extra.removed_sheet_headers.push("{}".into());
+        assert!(match_erc(&delta, &extra).is_err());
+        let mut metadata = delta;
+        metadata.metadata_changed = true;
+        assert!(match_erc(&metadata, &expected).is_err());
     }
 }

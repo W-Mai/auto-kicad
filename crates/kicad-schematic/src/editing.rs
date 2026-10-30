@@ -13,6 +13,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 mod components;
 mod creation;
+mod sheets;
+pub use sheets::{SheetPin, SheetPinEdit, SheetRectangle, SheetUpdate};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EditScope {
@@ -22,6 +24,7 @@ pub enum EditScope {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ObjectKind {
+    Sheet,
     Symbol,
     Wire,
     Junction,
@@ -33,6 +36,7 @@ pub enum ObjectKind {
 impl ObjectKind {
     fn tag(self) -> &'static str {
         match self {
+            Self::Sheet => "sheet",
             Self::Symbol => "symbol",
             Self::Wire => "wire",
             Self::Junction => "junction",
@@ -127,6 +131,10 @@ pub struct SymbolFlags {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EditAction {
+    UpdateSheet {
+        uuid: String,
+        update: SheetUpdate,
+    },
     CreateSymbol {
         key: String,
         symbol: SymbolCreation,
@@ -774,6 +782,9 @@ fn edit_existing(
     annotation_scope: Option<(&str, &[String])>,
 ) -> Result<(String, ObjectKind), String> {
     let (id, kind) = match action {
+        EditAction::UpdateSheet { .. } => {
+            return Err("sheet update requires complete projection".into());
+        }
         EditAction::SetReference { uuid, .. } => (uuid, ObjectKind::Symbol),
         EditAction::AssignFootprint { uuid, .. } => (uuid, ObjectKind::Symbol),
         EditAction::SetProperty { uuid, .. }
@@ -790,9 +801,13 @@ fn edit_existing(
             return Err("creation requires allocation".into());
         }
     };
+    if kind == ObjectKind::Sheet {
+        return Err("sheet placement deletion requires its own hierarchy contract".into());
+    }
     let node = object(root, id, kind)?;
     let items = values(node)?;
     match action {
+        EditAction::UpdateSheet { .. } => unreachable!(),
         EditAction::SetReference {
             reference,
             instance_path,
@@ -1286,6 +1301,12 @@ pub fn compile_edits(
             _ => {}
         }
     }
+    let sheet_allocations = sheets::allocate(
+        project.revision.digest.as_str(),
+        edits,
+        &mut seen_uuids,
+        &mut keys,
+    )?;
     let mut files = BTreeMap::new();
     let mut parsed = Vec::new();
     let mut changes = Vec::new();
@@ -1297,6 +1318,12 @@ pub fn compile_edits(
         let document = &documents[name];
         let root_node = document.nodes.first().ok_or("missing root")?;
         let root = values(root_node)?;
+        if edits
+            .iter()
+            .any(|edit| edit.file == *name && matches!(edit.action, EditAction::UpdateSheet { .. }))
+        {
+            sheets::validate_names(root, name, edits)?;
+        }
         let instances = identities
             .sheets()
             .iter()
@@ -1343,6 +1370,14 @@ pub fn compile_edits(
                 ));
             }
             let (id, kind) = match &edit.action {
+                EditAction::UpdateSheet { uuid, update } => sheets::edit(
+                    root,
+                    uuid,
+                    update,
+                    ordinal,
+                    &sheet_allocations,
+                    &mut patches,
+                )?,
                 EditAction::Create { object, .. } => {
                     let id = &allocations[&ordinal];
                     appended.push_str(&render(object, id)?);

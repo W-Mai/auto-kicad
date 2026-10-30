@@ -260,9 +260,10 @@
         "4 live observations and 4 live plans per server, 900-second expiry and explicit release",
         "properties, per-instance references, flags, transforms, compatible footprint assignment, catalog symbol creation with bounded native inheritance, compatible component-unit groups, observed-source unit insertion, explicit complete-component reference/property/footprint edits, wires, markers and labels",
         "complete explicit instance references on reused-sheet creation; unit insertion declares complete logical-pin membership migration",
-        "exact declared source-pin/network/no-connect/ERC deltas, session-bound approval and actual-source native verification",
+        "existing sheet names/rectangles and hierarchical pin CRUD with explicit absolute contacts and complete final edge validation",
+        "exact declared source-pin/network/no-connect/ERC diagnostic and complete sheet-header deltas, session-bound approval and actual-source native verification",
         "durable multi-file publication intent; interrupted writes require fresh guarded recovery",
-        "inherited embedded-file/font resources, hierarchy/child-file authoring and GUI/Codex lifecycle qualification remain unsupported"
+        "inherited embedded-file/font resources, sheet placement/child-file authoring and GUI/Codex lifecycle qualification remain unsupported"
       ],
       "evidence": {
         "fixture": "ecc83-all-supported-families-and-shared-multichannel-production-stdio-copies",

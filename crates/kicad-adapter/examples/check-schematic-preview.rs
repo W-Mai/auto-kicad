@@ -288,6 +288,8 @@ fn main() -> Result<()> {
     }
     let expected_diagnostic = SchematicEditExpectation {
         erc: ErcExpectation {
+            removed_sheet_headers: vec![],
+            added_sheet_headers: vec![],
             introduced: diagnostic.erc_delta().introduced.clone(),
             resolved: diagnostic.erc_delta().resolved.clone(),
         },

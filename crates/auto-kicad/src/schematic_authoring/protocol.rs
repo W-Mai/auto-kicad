@@ -217,6 +217,90 @@ impl Flags {
 
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
+pub struct SheetRectangleRequest {
+    pub position: PointRequest,
+    pub width_nm: i64,
+    pub height_nm: i64,
+}
+impl SheetRectangleRequest {
+    fn native(&self) -> Result<SheetRectangle, String> {
+        Ok(SheetRectangle {
+            position: self.position.point()?,
+            width: kicad_schematic::geometry::Coordinate::from_nm(self.width_nm)?,
+            height: kicad_schematic::geometry::Coordinate::from_nm(self.height_nm)?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SheetPinRequest {
+    pub name: String,
+    pub shape: Shape,
+    pub position: PointRequest,
+    pub rotation: Rotation,
+}
+impl SheetPinRequest {
+    fn native(&self) -> Result<SheetPin, String> {
+        Ok(SheetPin {
+            name: self.name.clone(),
+            shape: self.shape.native(),
+            position: self.position.point()?,
+            rotation: self.rotation.native(),
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+pub enum SheetPinEditRequest {
+    Create { key: String, pin: SheetPinRequest },
+    Update { uuid: String, pin: SheetPinRequest },
+    Delete { uuid: String },
+}
+impl SheetPinEditRequest {
+    fn native(&self) -> Result<SheetPinEdit, String> {
+        Ok(match self {
+            Self::Create { key, pin } => SheetPinEdit::Create {
+                key: key.clone(),
+                pin: pin.native()?,
+            },
+            Self::Update { uuid, pin } => SheetPinEdit::Update {
+                uuid: uuid.clone(),
+                pin: pin.native()?,
+            },
+            Self::Delete { uuid } => SheetPinEdit::Delete { uuid: uuid.clone() },
+        })
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields)]
+pub struct SheetUpdateRequest {
+    pub name: Option<String>,
+    pub rectangle: Option<SheetRectangleRequest>,
+    pub pins: Vec<SheetPinEditRequest>,
+}
+impl SheetUpdateRequest {
+    fn native(&self) -> Result<SheetUpdate, String> {
+        Ok(SheetUpdate {
+            name: self.name.clone(),
+            rectangle: self
+                .rectangle
+                .as_ref()
+                .map(SheetRectangleRequest::native)
+                .transpose()?,
+            pins: self
+                .pins
+                .iter()
+                .map(SheetPinEditRequest::native)
+                .collect::<Result<_, _>>()?,
+        })
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct EditRequest {
     pub file: String,
     pub scope: ScopeRequest,
@@ -225,6 +309,10 @@ pub struct EditRequest {
 #[derive(Clone, Debug, Deserialize, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Action {
+    UpdateSheet {
+        uuid: String,
+        update: SheetUpdateRequest,
+    },
     SetProperty {
         uuid: String,
         name: String,
@@ -330,6 +418,10 @@ impl EditRequest {
             }
         }
         let action = match &self.action {
+            Action::UpdateSheet { uuid, update } => EditAction::UpdateSheet {
+                uuid: uuid.clone(),
+                update: update.native()?,
+            },
             Action::SetProperty { uuid, name, value } => EditAction::SetProperty {
                 uuid: uuid.clone(),
                 property: if name == "Value" {
@@ -595,6 +687,8 @@ impl Diagnostic {
 #[derive(Clone, Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct Erc {
+    pub removed_sheet_headers: Vec<String>,
+    pub added_sheet_headers: Vec<String>,
     pub introduced: Vec<Diagnostic>,
     pub resolved: Vec<Diagnostic>,
 }
@@ -639,6 +733,8 @@ impl Expectations {
                 .map(Marker::native)
                 .collect::<Result<_, _>>()?,
             erc: ErcExpectation {
+                removed_sheet_headers: self.erc.removed_sheet_headers.clone(),
+                added_sheet_headers: self.erc.added_sheet_headers.clone(),
                 introduced: self.erc.introduced.iter().map(Diagnostic::native).collect(),
                 resolved: self.erc.resolved.iter().map(Diagnostic::native).collect(),
             },

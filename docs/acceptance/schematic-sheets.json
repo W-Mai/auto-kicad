@@ -1,0 +1,104 @@
+{
+  "feature": "existing sheet geometry, names and hierarchical pins",
+  "native_version": "10.0.7",
+  "schematic_formats": [
+    "20250114",
+    "20260306"
+  ],
+  "production_stdio": true,
+  "server_sha256": "101af139117108b61dd6eee40e57041f0213121f0f1cd45b7766c30dcefa61ab",
+  "profiles": {
+    "current": {
+      "passed": true,
+      "instances": 1,
+      "committed_cases": 11,
+      "configuration_unchanged": true,
+      "private_snapshots_removed": true,
+      "independent_native_after_every_commit": true,
+      "exact_geometry_and_fields_verified": true
+    },
+    "legacy": {
+      "passed": true,
+      "instances": 1,
+      "committed_cases": 11,
+      "configuration_unchanged": true,
+      "private_snapshots_removed": true,
+      "independent_native_after_every_commit": true,
+      "exact_geometry_and_fields_verified": true
+    },
+    "shared": {
+      "passed": true,
+      "instances": 4,
+      "committed_cases": 9,
+      "configuration_unchanged": true,
+      "private_snapshots_removed": true,
+      "independent_native_after_every_commit": true,
+      "exact_geometry_and_fields_verified": true
+    }
+  },
+  "sheet_commits": 31,
+  "sheet_artifacts_rehashed": 124,
+  "recovery_artifacts_rehashed": 7,
+  "accepted": [
+    "complete final sheet/pin projection",
+    "explicit absolute pin positions and property translation",
+    "exact source interval, UUID, annotation and child association preservation",
+    "complete explicit ERC sheet-header transitions with exact numeric tokens",
+    "default preservation, partial/extra/duplicate declaration rejection",
+    "wrong approval, replay, source drift and reused-parent isolation rejection",
+    "independent complete saved native component networks and ERC after each commit",
+    "exact source rectangle/field checks from rehashed before/candidate records"
+  ],
+  "actual_interruption_and_recovery": {
+    "passed": true,
+    "family": "sheet",
+    "server_sha256": "101af139117108b61dd6eee40e57041f0213121f0f1cd45b7766c30dcefa61ab",
+    "actual_stdio_writer_killed": true,
+    "missing_terminal_and_post_evidence": true,
+    "fresh_process_plan_blocked": true,
+    "later_user_bytes_preserved": true,
+    "actual_stdio_guarded_recovery": true,
+    "exact_original_and_native_observation_restored": true,
+    "subsequent_native_commit": true,
+    "owned_children_stopped": true,
+    "owned_private_directories_removed": true,
+    "gui_launched": false
+  },
+  "offline_quality": {
+    "passed": 561,
+    "failed": 0,
+    "ignored": 16
+  },
+  "actual_fixed_cli_mcp_regression": {
+    "passed": true,
+    "seconds": 4.6
+  },
+  "original_evidence_unchanged": true,
+  "qualification_notes": [
+    "nested empty child/placement created manually before initial observation; no child-authoring credit",
+    "optional native stderr observer encountered concurrently removed directories; traversal fixed, primary native assertions remained active",
+    "supplementary immutable-artifact checks independently verified all requested rectangles and translated property positions"
+  ],
+  "failed_controls_retained": [
+    "initial test-only Clippy format warning",
+    "exact-number test fixture replaced multiple substrings; corrected to exact token",
+    "two sandbox-native attempts rejected opening /dev/stdout; qualified runs executed outside sandbox",
+    "initial artifact checker assumed publication schema for recovery records; schemas now distinguished"
+  ],
+  "remaining": [
+    "sheet placement creation/removal",
+    "confined child-file creation/attachment",
+    "complete GUI/Codex/family qualification",
+    "schematic-to-PCB synchronization",
+    "installation/release/manufacturing",
+    "remaining M4 and final real-project gates"
+  ],
+  "gui_launched": false,
+  "full_m5a_complete": false,
+  "full_product_goal_complete": false,
+  "evidence_directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sheet-edit-research",
+  "build_cleanup": {
+    "removed": true,
+    "unique_inode_allocated_bytes_removed": 1728716800
+  }
+}

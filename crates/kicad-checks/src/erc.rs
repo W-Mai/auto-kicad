@@ -65,6 +65,9 @@ pub struct ErcDiagnostic {
 pub struct ErcDelta {
     pub metadata_changed: bool,
     pub sheet_headers_changed: bool,
+    /// Exact canonical sheet headers, including unknown fields and numeric tokens.
+    pub removed_sheet_headers: Vec<String>,
+    pub added_sheet_headers: Vec<String>,
     pub introduced: Vec<ErcDiagnostic>,
     pub resolved: Vec<ErcDiagnostic>,
     pub unchanged: usize,
@@ -325,6 +328,16 @@ impl CompleteErcReport {
         let mut delta = ErcDelta {
             metadata_changed: before.metadata != after.metadata,
             sheet_headers_changed: before.headers != after.headers,
+            removed_sheet_headers: before
+                .headers
+                .difference(&after.headers)
+                .map(node_json)
+                .collect(),
+            added_sheet_headers: after
+                .headers
+                .difference(&before.headers)
+                .map(node_json)
+                .collect(),
             introduced: vec![],
             resolved: vec![],
             unchanged: 0,
@@ -492,5 +505,29 @@ mod tests {
         );
         assert!(CompleteErcReport::parse(&duplicate).is_err());
         assert!(CompleteErcReport::parse(&" ".repeat(MAX_REPORT + 1)).is_err());
+    }
+
+    #[test]
+    fn sheet_header_deltas_retain_complete_exact_unknown_content() {
+        let input = serde_json::to_string(&fixture()).unwrap().replace(
+            "\"unknown_sheet\":\"preserved\"",
+            "\"unknown_sheet\":0.12345678901234567890",
+        );
+        let renamed = input.replace("/Child/", "/Renamed/");
+        let before = CompleteErcReport::parse(&input).unwrap();
+        let after = CompleteErcReport::parse(&renamed).unwrap();
+        let delta = before.compare(&after).unwrap();
+        assert!(delta.sheet_headers_changed && !delta.metadata_changed);
+        assert_eq!(delta.removed_sheet_headers.len(), 1);
+        assert_eq!(delta.added_sheet_headers.len(), 1);
+        assert!(delta.removed_sheet_headers[0].contains("/Child/"));
+        assert!(delta.added_sheet_headers[0].contains("/Renamed/"));
+        let changed_unknown = input.replace("0.12345678901234567890", "0.12345678901234567891");
+        let delta = before
+            .compare(&CompleteErcReport::parse(&changed_unknown).unwrap())
+            .unwrap();
+        assert!(delta.removed_sheet_headers[0].contains("0.12345678901234567890"));
+        assert!(delta.added_sheet_headers[0].contains("0.12345678901234567891"));
+        assert!(delta.introduced.is_empty() && delta.resolved.is_empty());
     }
 }

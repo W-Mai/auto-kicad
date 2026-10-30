@@ -49,6 +49,7 @@ Send this to `kicad_plan_schematic_change`. A plan supports 1–128 edits and re
 | Existing symbols | `set_property`, `set_reference`, `set_flags`, `transform_symbol`, `assign_footprint`, `delete` |
 | Catalog symbols | `create_symbol` with server-derived definitions/UUIDs and [bounded native inheritance](schematic-symbol-inheritance.md) |
 | Existing component units | `add_symbol_unit` from observed source metadata and exact instance annotations |
+| Existing sheets and hierarchical pins | `update_sheet` with explicit name, rectangle and nested pin create/update/delete |
 | Wires | `create_wire`, `update_wire`, `delete` |
 | Markers | `create_junction`, `create_no_connect`, `move_marker`, `delete` |
 | Local/global/hierarchical labels | `create_label`, `update_label`, `delete` |
@@ -58,6 +59,8 @@ Coordinates are exact native-grid nanometres; rotations are `zero`, `ccw90`, `ha
 [Component unit creation and insertion](schematic-multiunit.md) permit compatible new units to share a new component reference. Reused-sheet creation requires a complete `instance_references` mapping; insertion inherits existing annotations. Native common-pin nets must be unambiguous, and unit insertion requires explicit old-to-expanded logical-pin membership deltas.
 
 [Complete component reference/footprint edits](schematic-component-edits.md) require consistent final shared fields across all units, retain immutable membership and use canonical active component pins for compatibility. Per-instance annotation preserves foreign/inactive rows and other instances; explicit reference swaps retain distinct component ownership.
+
+[Existing sheet and hierarchical pin edits](schematic-sheets.md) validate complete final edge contacts and require explicit pin movement. Sheet names use complete explicit removed/added ERC header declarations; metadata changes remain rejected. Outer and nested operations share the 128-operation bound.
 
 Call `kicad_preview_schematic_change` with `plan_id` and `plan_hash`. Its optional `expectations` contains typed `connectivity`, `removed_markers`, `added_markers` and `erc` deltas. Omission means every one of these remains unchanged. Electrical changes require exact declared removed/added networks and pin births/deaths, physical no-connect changes require explicit marker identities/positions/digests, and ERC changes require complete diagnostic identities including exact `diagnostic_json`. Review the [expectation contract](schematic-expectations.md) and returned native evidence. A mismatch produces no approval; it permits correcting expectations against the same intact plan. Re-preview revokes the previous approval. Legacy plans reject the new expectations field.
 
@@ -76,3 +79,5 @@ Publication journals candidate/original fingerprints and each file operation bef
 `scripts/check-schematic-general-interruption.py` kills its own real stdio writer after publication and before terminal evidence. A fresh process rejects replay and new writes, preserves later user bytes, performs fresh approved production MCP recovery, compares exact original files/native observation, and accepts a subsequent normal commit. Owned native children stop before orphaned private snapshots are removed. These checks launch no GUI and do not establish editor undo, GUI cancellation or Codex model qualification.
 
 Full `schematic.general_edit` remains deferred. Sheet geometry/hierarchical pins, hierarchy/child-file creation, GUI/Codex qualification, schematic-to-PCB synchronization and the final three-project product gate remain incomplete. Inherited symbol creation requires a bounded same-file chain; inherited embedded-file/font resources reject. Source examples and user projects are not mutated by these acceptance scripts; only marked copies are accepted.
+
+[Existing sheet qualification](schematic-sheets.md) passed both formats and a parent reused in 4 instances through production stdio, independent saved native network/ERC comparison, exact rectangle/field checks and actual interruption/recovery. Placement creation/removal, confined child-file authoring and full GUI/Codex qualification remain incomplete.
