@@ -1,6 +1,6 @@
 # auto-kicad
 
-A Rust MCP server for inspecting KiCad PCB state and applying bounded, approval-bound changes over IPC.
+A Rust MCP server for inspecting KiCad designs and applying bounded, approval-bound PCB and schematic changes.
 
 ## Build and run
 
@@ -31,7 +31,7 @@ Backend callers can resolve [hierarchical schematic instances and multi-unit com
 
 [Logical schematic pin observation](docs/acceptance/schematic-pins.md) matches active unit/body-style pins, common pins and stacked numbers to native net membership. Source identities preserve connectivity across reference renaming; omitted power/virtual pins are observed through [private passive native witnesses](docs/acceptance/schematic-connectivity.md), with original ERC and no-connect evidence retained separately. [Exact physical contact positions](docs/acceptance/schematic-contacts.md) retain native-grid coordinates with qualified quarter-turn and mirror transforms.
 
-[Typed schematic edit candidates](docs/acceptance/schematic-edit-candidates.md) modify existing symbols, deterministic reference annotations, evidence-bound footprint assignments, wires, markers and labels through exact source spans. [Catalog-bound symbol creation](docs/acceptance/schematic-symbol-creation.md) resolves an approved native library definition and embeds it with deterministic symbol/pin UUIDs and instance records. [Inherited symbol creation](docs/acceptance/schematic-symbol-inheritance.md) expands bounded source-file chains into standalone cache definitions with native field/pin/ERC and geometry checks. These supported families are exposed through [bounded schematic MCP editing](docs/acceptance/schematic-general-mcp.md).
+[Typed schematic edit candidates](docs/acceptance/schematic-edit-candidates.md) modify existing symbols, deterministic reference annotations, evidence-bound footprint assignments, wires, markers and labels through exact source spans. [Catalog-bound symbol creation](docs/acceptance/schematic-symbol-creation.md) resolves an approved native library definition and embeds it with deterministic symbol/pin UUIDs and instance records. [Inherited symbol creation](docs/acceptance/schematic-symbol-inheritance.md) expands bounded source-file chains into standalone cache definitions with native field/pin/ERC and geometry checks. [Component unit creation and insertion](docs/acceptance/schematic-multiunit.md) support compatible new component groups, missing units from observed metadata and explicit annotations on reused sheets. These supported families are exposed through [bounded schematic MCP editing](docs/acceptance/schematic-general-mcp.md).
 
 [Complete native edit previews](docs/acceptance/schematic-native-preview.md) compile from captured source bytes and retain exact source/candidate artifacts, full ERC differences and source-identity connectivity. Source, library or configuration drift permanently invalidates a preview. This backend observation does not grant publication approval.
 

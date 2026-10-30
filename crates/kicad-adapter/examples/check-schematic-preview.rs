@@ -171,6 +171,7 @@ fn main() -> Result<()> {
         .filter(|sheet| sheet.file == root_file)
         .map(|sheet| SymbolInstancePath {
             path: sheet.path.clone(),
+            reference: None,
         })
         .collect::<Vec<_>>();
     let create = SchematicEdit {

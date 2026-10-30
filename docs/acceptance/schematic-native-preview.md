@@ -17,3 +17,5 @@ cargo run -p kicad-adapter --example check-schematic-preview -- OWNED_SCHEMATIC 
 ```
 
 Owned project and configuration inputs require the `.auto-kicad-audit-owned` acceptance marker. The machine-readable record is [schematic-native-preview.json](schematic-native-preview.json).
+
+[Component unit creation and insertion](schematic-multiunit.md) use the same complete native preview, matching and publication checks, including explicit logical-pin membership changes and source-metadata preservation.

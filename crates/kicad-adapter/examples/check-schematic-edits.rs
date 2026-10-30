@@ -394,7 +394,10 @@ fn main() -> Result<()> {
                 instance_paths: instances
                     .iter()
                     .cloned()
-                    .map(|path| SymbolInstancePath { path })
+                    .map(|path| SymbolInstancePath {
+                        path,
+                        reference: None,
+                    })
                     .collect(),
             },
         })],

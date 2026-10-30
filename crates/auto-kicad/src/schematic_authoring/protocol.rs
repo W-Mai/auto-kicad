@@ -258,6 +258,14 @@ pub enum Action {
         transform: TransformRequest,
         #[serde(default)]
         flags: Flags,
+        #[serde(default)]
+        instance_references: BTreeMap<String, String>,
+    },
+    AddSymbolUnit {
+        key: String,
+        uuid: String,
+        unit: u32,
+        transform: TransformRequest,
     },
     CreateWire {
         key: String,
@@ -297,6 +305,30 @@ pub enum Action {
 }
 impl EditRequest {
     pub fn resolve(&self, audit: &SchematicAudit) -> Result<SchematicEdit, String> {
+        if let Action::CreateSymbol {
+            instance_references,
+            ..
+        } = &self.action
+            && !instance_references.is_empty()
+        {
+            let expected = audit
+                .identities()
+                .sheets()
+                .iter()
+                .filter(|sheet| sheet.file == self.file)
+                .map(|sheet| sheet.path.as_str())
+                .collect::<std::collections::BTreeSet<_>>();
+            if instance_references
+                .keys()
+                .map(String::as_str)
+                .collect::<std::collections::BTreeSet<_>>()
+                != expected
+            {
+                return Err(
+                    "instance reference map must exactly cover the observed physical sheet".into(),
+                );
+            }
+        }
         let action = match &self.action {
             Action::SetProperty { uuid, name, value } => EditAction::SetProperty {
                 uuid: uuid.clone(),
@@ -346,6 +378,7 @@ impl EditRequest {
                 body_style,
                 transform,
                 flags,
+                instance_references,
             } => EditAction::CreateSymbol {
                 key: key.clone(),
                 symbol: SymbolCreation {
@@ -364,9 +397,21 @@ impl EditRequest {
                         .filter(|sheet| sheet.file == self.file)
                         .map(|sheet| SymbolInstancePath {
                             path: sheet.path.clone(),
+                            reference: instance_references.get(&sheet.path).cloned(),
                         })
                         .collect(),
                 },
+            },
+            Action::AddSymbolUnit {
+                key,
+                uuid,
+                unit,
+                transform,
+            } => EditAction::AddSymbolUnit {
+                key: key.clone(),
+                uuid: uuid.clone(),
+                unit: *unit,
+                transform: transform.native()?,
             },
             Action::CreateWire { key, start, end } => EditAction::Create {
                 key: key.clone(),

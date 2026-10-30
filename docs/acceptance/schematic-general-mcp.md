@@ -48,11 +48,14 @@ Send this to `kicad_plan_schematic_change`. A plan supports 1–128 edits and re
 | --- | --- |
 | Existing symbols | `set_property`, `set_reference`, `set_flags`, `transform_symbol`, `assign_footprint`, `delete` |
 | Catalog symbols | `create_symbol` with server-derived definitions/UUIDs and [bounded native inheritance](schematic-symbol-inheritance.md) |
+| Existing component units | `add_symbol_unit` from observed source metadata and exact instance annotations |
 | Wires | `create_wire`, `update_wire`, `delete` |
 | Markers | `create_junction`, `create_no_connect`, `move_marker`, `delete` |
 | Local/global/hierarchical labels | `create_label`, `update_label`, `delete` |
 
 Coordinates are exact native-grid nanometres; rotations are `zero`, `ccw90`, `half`, `ccw270`, with `none`, `x` or `y` reflection axes for symbols. File-wide edits must explicitly use `file_all_instances`. Reference annotation can select `single_instance` with its observed sheet `path`. Shared physical source changes affect every instance and report those paths. Footprint assignment derives the actual distinct numbered library pads and requires a complete bijection with observed symbol pin numbers; duplicated physical pads with the same number are supported. An omitted mapping requests equal pin/pad numbers.
+
+[Component unit creation and insertion](schematic-multiunit.md) permit compatible new units to share a new component reference. Reused-sheet creation requires a complete `instance_references` mapping; insertion inherits existing annotations. Native common-pin nets must be unambiguous, and unit insertion requires explicit old-to-expanded logical-pin membership deltas.
 
 Call `kicad_preview_schematic_change` with `plan_id` and `plan_hash`. Its optional `expectations` contains typed `connectivity`, `removed_markers`, `added_markers` and `erc` deltas. Omission means every one of these remains unchanged. Electrical changes require exact declared removed/added networks and pin births/deaths, physical no-connect changes require explicit marker identities/positions/digests, and ERC changes require complete diagnostic identities including exact `diagnostic_json`. Review the [expectation contract](schematic-expectations.md) and returned native evidence. A mismatch produces no approval; it permits correcting expectations against the same intact plan. Re-preview revokes the previous approval. Legacy plans reject the new expectations field.
 

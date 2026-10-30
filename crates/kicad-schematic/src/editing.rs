@@ -11,6 +11,7 @@ use kiutils_sexpr::{Node, Span};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
+mod creation;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EditScope {
@@ -129,6 +130,12 @@ pub enum EditAction {
         key: String,
         symbol: SymbolCreation,
     },
+    AddSymbolUnit {
+        key: String,
+        uuid: String,
+        unit: u32,
+        transform: SymbolTransform,
+    },
     SetReference {
         uuid: String,
         reference: String,
@@ -205,6 +212,7 @@ pub struct SymbolDefinitionEvidence {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SymbolInstancePath {
     pub path: String,
+    pub reference: Option<String>,
 }
 
 /// Typed creation request for one placed symbol and its embedded definition.
@@ -415,6 +423,25 @@ fn validate_symbol_creation(symbol: &SymbolCreation) -> Result<(), String> {
         {
             return Err("invalid or repeated symbol instance path".into());
         }
+        validate_reference(instance.reference.as_deref().unwrap_or(&symbol.reference))?;
+    }
+    if symbol.instance_paths.len() > 1
+        && symbol
+            .instance_paths
+            .iter()
+            .any(|instance| instance.reference.is_none())
+    {
+        return Err("reused-sheet symbol creation requires explicit instance references".into());
+    }
+    if symbol
+        .instance_paths
+        .iter()
+        .min_by_key(|instance| &instance.path)
+        .is_some_and(|instance| {
+            instance.reference.as_deref().unwrap_or(&symbol.reference) != symbol.reference
+        })
+    {
+        return Err("displayed reference must match the first observed instance".into());
     }
     Ok(())
 }
@@ -475,38 +502,9 @@ fn parse_symbol_definition(
         rendered.replace_range(start..end, &quote(expected));
         rendered
     };
-    let mut pins = BTreeSet::new();
-    for body in children(root, "symbol") {
-        let body_name = atom(values(body)?, 1)?;
-        let mut parts = body_name.rsplitn(3, '_');
-        let body_number = parts
-            .next()
-            .ok_or("missing embedded body style")?
-            .parse::<u32>()
-            .map_err(|_| "invalid embedded body style")?;
-        let unit_number = parts
-            .next()
-            .ok_or("missing embedded unit")?
-            .parse::<u32>()
-            .map_err(|_| "invalid embedded unit")?;
-        if parts.next().is_none()
-            || (unit_number != 0 && unit_number != unit)
-            || (body_number != 0 && body_number != body_style.unwrap_or(1))
-        {
-            continue;
-        }
-        for pin in children(values(body)?, "pin") {
-            let number = atom(values(one(values(pin)?, "number")?)?, 1)?.to_owned();
-            if number.is_empty() || number.contains(['[', ']', '$']) || !pins.insert(number) {
-                return Err("symbol definition has unsupported or repeated pin number".into());
-            }
-        }
-    }
-    if pins.is_empty() {
-        return Err("symbol definition has no usable pins".into());
-    }
+    let pins = creation::selected_pins(root, unit, body_style)?;
     let _ = nickname;
-    Ok((name, normalized, pins.into_iter().collect()))
+    Ok((name, normalized, pins))
 }
 
 struct CreationAllocation {
@@ -514,6 +512,13 @@ struct CreationAllocation {
     pin_uuids: Vec<String>,
     definition: String,
     pin_numbers: Vec<String>,
+}
+enum SymbolAllocation {
+    Catalog(CreationAllocation),
+    Unit {
+        symbol_uuid: String,
+        rendered: String,
+    },
 }
 
 fn render_created_symbol(
@@ -590,7 +595,7 @@ fn render_created_symbol(
         result.push_str(&format!(
             "\t\t\t(path {} (reference {}) (unit {}))\n",
             quote(&instance.path),
-            quote(&symbol.reference),
+            quote(instance.reference.as_deref().unwrap_or(&symbol.reference)),
             symbol.unit
         ));
     }
@@ -777,7 +782,9 @@ fn edit_existing(
             (uuid, *kind)
         }
         EditAction::UpdateLabel { uuid, label } => (uuid, label.kind.object()),
-        EditAction::Create { .. } | EditAction::CreateSymbol { .. } => {
+        EditAction::Create { .. }
+        | EditAction::CreateSymbol { .. }
+        | EditAction::AddSymbolUnit { .. } => {
             return Err("creation requires allocation".into());
         }
     };
@@ -1015,7 +1022,9 @@ fn edit_existing(
             }
         }
         EditAction::Delete { .. } => patches.node(node, String::new())?,
-        EditAction::Create { .. } | EditAction::CreateSymbol { .. } => unreachable!(),
+        EditAction::Create { .. }
+        | EditAction::CreateSymbol { .. }
+        | EditAction::AddSymbolUnit { .. } => unreachable!(),
     }
     Ok((id.clone(), kind))
 }
@@ -1350,10 +1359,12 @@ pub fn compile_edits(
     let mut allocations = BTreeMap::new();
     let mut symbol_allocations = BTreeMap::new();
     let mut keys = BTreeSet::new();
-    let mut created_references = BTreeSet::new();
+    creation::validate_groups(project, &identities, edits)?;
     for (ordinal, edit) in edits.iter().enumerate() {
         let key = match &edit.action {
-            EditAction::Create { key, .. } | EditAction::CreateSymbol { key, .. } => key,
+            EditAction::Create { key, .. }
+            | EditAction::CreateSymbol { key, .. }
+            | EditAction::AddSymbolUnit { key, .. } => key,
             _ => continue,
         };
         text(key, false)?;
@@ -1417,25 +1428,57 @@ pub fn compile_edits(
                     }
                     pin_uuids.push(pin_uuid);
                 }
-                let occupied = reference_entries(project);
-                if occupied.iter().any(|(path, reference, _)| {
-                    supplied_paths.contains(path) && reference == &symbol.reference
-                }) {
-                    return Err("created symbol reference is already occupied".into());
-                }
-                if supplied_paths.iter().any(|path| {
-                    !created_references.insert((path.clone(), symbol.reference.clone()))
-                }) {
-                    return Err("created symbol reference is repeated in the edit set".into());
-                }
                 let _ = file;
                 symbol_allocations.insert(
                     ordinal,
-                    CreationAllocation {
+                    SymbolAllocation::Catalog(CreationAllocation {
                         symbol_uuid,
                         pin_uuids,
                         definition,
                         pin_numbers,
+                    }),
+                );
+            }
+            EditAction::AddSymbolUnit {
+                uuid,
+                unit,
+                transform,
+                ..
+            } => {
+                let file = project
+                    .files
+                    .iter()
+                    .find(|file| file.artifact.relative_path == edit.file)
+                    .ok_or("unit target file is not observed")?;
+                let bytes = sources[&edit.file];
+                let document = &documents[&edit.file];
+                let symbol_uuid = generated_uuid_seed(&format!(
+                    "schematic-edit-v1:{}:{}:symbol",
+                    project.revision.digest, ordinal
+                ));
+                if !seen_uuids.insert(symbol_uuid.clone()) {
+                    return Err("allocated symbol UUID collision".into());
+                }
+                let inserted = creation::insert_unit(
+                    creation::Insertion {
+                        project,
+                        identities: &identities,
+                        file,
+                        document,
+                        bytes,
+                        anchor_uuid: uuid,
+                        unit: *unit,
+                        transform: *transform,
+                        symbol_uuid: &symbol_uuid,
+                        ordinal,
+                    },
+                    &mut seen_uuids,
+                )?;
+                symbol_allocations.insert(
+                    ordinal,
+                    SymbolAllocation::Unit {
+                        symbol_uuid,
+                        rendered: inserted,
                     },
                 );
             }
@@ -1505,7 +1548,10 @@ pub fn compile_edits(
                     (id.clone(), object.kind())
                 }
                 EditAction::CreateSymbol { symbol, .. } => {
-                    let allocation = &symbol_allocations[&ordinal];
+                    let SymbolAllocation::Catalog(allocation) = &symbol_allocations[&ordinal]
+                    else {
+                        unreachable!("catalog allocation")
+                    };
                     match embedded_definitions.get(symbol.evidence.lib_id.as_str()) {
                         Some(existing) if existing != &allocation.definition => {
                             return Err(
@@ -1535,6 +1581,17 @@ pub fn compile_edits(
                         project_name,
                     )?);
                     (allocation.symbol_uuid.clone(), ObjectKind::Symbol)
+                }
+                EditAction::AddSymbolUnit { .. } => {
+                    let SymbolAllocation::Unit {
+                        symbol_uuid,
+                        rendered,
+                    } = &symbol_allocations[&ordinal]
+                    else {
+                        unreachable!("unit allocation")
+                    };
+                    appended.push_str(rendered);
+                    (symbol_uuid.clone(), ObjectKind::Symbol)
                 }
                 _ => edit_existing(root, &edit.action, &mut patches, &file.format_version)?,
             };
@@ -1718,6 +1775,7 @@ mod tests {
             flags: SymbolFlags::default(),
             instance_paths: vec![SymbolInstancePath {
                 path: format!("/{ROOT}"),
+                reference: None,
             }],
         };
         let candidate = compile(
@@ -1739,6 +1797,227 @@ mod tests {
         assert_eq!(candidate.changes()[0].kind, ObjectKind::Symbol);
         assert!(candidate.replacements()["test.kicad_sch"].len() >= 2);
     }
+
+    fn multiunit_creation(unit: u32) -> SymbolCreation {
+        SymbolCreation {
+            evidence: SymbolDefinitionEvidence {
+                lib_id: "Test:Pair".into(),
+                catalog_digest: "a".repeat(64),
+                source_digest: "b".repeat(64),
+                definition: r#"(symbol "Pair"
+                    (property "Reference" "U") (property "Value" "Pair")
+                    (symbol "Pair_0_1" (pin passive line (at 0 0 0) (name "COM") (number "3")))
+                    (symbol "Pair_1_1" (pin passive line (at 1 0 0) (name "A") (number "1")))
+                    (symbol "Pair_2_1" (pin passive line (at -1 0 0) (name "B") (number "2"))))"#
+                    .into(),
+            },
+            transform: SymbolTransform {
+                origin: point(50 + 10 * i64::from(unit), 60),
+                rotation: QuarterTurn::Zero,
+                mirror: Mirror::None,
+            },
+            unit,
+            body_style: None,
+            reference: "U2".into(),
+            value: "Pair".into(),
+            footprint: None,
+            flags: SymbolFlags::default(),
+            instance_paths: vec![SymbolInstancePath {
+                path: format!("/{ROOT}"),
+                reference: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn complete_components_reserve_compatible_unique_unit_slots() {
+        let (project, native, bytes) = fixture();
+        let action = |symbol: SymbolCreation| {
+            edit(EditAction::CreateSymbol {
+                key: format!("unit-{}", symbol.unit),
+                symbol,
+            })
+        };
+        let first = multiunit_creation(1);
+        let second = multiunit_creation(2);
+        let candidate = compile(
+            &project,
+            &native,
+            &bytes,
+            &[action(first.clone()), action(second.clone())],
+        )
+        .unwrap();
+        assert_preserved(&bytes, &candidate);
+        assert_eq!(
+            candidate.parsed().files[0].symbols[0],
+            project.files[0].symbols[0]
+        );
+        let members = &candidate.parsed().files[0].symbols[1..];
+        assert_eq!(
+            members.iter().map(|s| s.unit).collect::<BTreeSet<_>>(),
+            BTreeSet::from([1, 2])
+        );
+        assert_ne!(members[0].source_uuid, members[1].source_uuid);
+        assert_eq!(members[0].pins.len(), 2);
+        assert_eq!(members[1].pins.len(), 2);
+        let ids = members
+            .iter()
+            .flat_map(|s| s.pins.iter().map(|p| &p.source_uuid))
+            .collect::<BTreeSet<_>>();
+        assert_eq!(ids.len(), 4);
+        let mut conflicts = vec![first.clone()];
+        let mut changed = second.clone();
+        changed.value = "different".into();
+        conflicts.push(changed);
+        let mut changed = second.clone();
+        changed.flags.dnp = Some(true);
+        conflicts.push(changed);
+        let mut changed = second.clone();
+        changed.evidence.source_digest = "c".repeat(64);
+        conflicts.push(changed);
+        let mut changed = second.clone();
+        changed.evidence.definition.push(' ');
+        conflicts.push(changed);
+        let mut changed = second.clone();
+        changed.unit = 3;
+        conflicts.push(changed);
+        for conflict in conflicts {
+            let mut conflicting_action = action(conflict);
+            if let EditAction::CreateSymbol { key, .. } = &mut conflicting_action.action {
+                *key = "conflict".into();
+            }
+            assert!(
+                compile(
+                    &project,
+                    &native,
+                    &bytes,
+                    &[action(first.clone()), conflicting_action]
+                )
+                .is_err()
+            );
+        }
+        assert!(
+            compile(
+                &project,
+                &native,
+                &bytes,
+                &[
+                    action(first),
+                    edit(EditAction::SetReference {
+                        uuid: SYMBOL.into(),
+                        reference: "U2".into(),
+                        instance_path: None,
+                    })
+                ]
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn inserted_units_preserve_source_metadata_and_component_authority() {
+        let (_, mut native, bytes) = fixture();
+        let text = String::from_utf8(bytes).unwrap().replace(
+            "(symbol \"R_1_1\" (pin passive line (at 0 0 0) (name \"\") (number \"1\")))",
+            "(symbol \"R_1_1\" (pin passive line (at 0 0 0) (name \"\") (number \"1\"))) (symbol \"R_2_1\" (pin passive line (at 1 0 0) (name \"\") (number \"2\")))",
+        ).replace("(dnp no)", "(dnp yes)").replace(
+            "(property \"Custom\"",
+            "(property \"Footprint\" \"Test:Assigned\" (at 10 20 0) (effects (font (size 1 1)))) (property \"Custom\"",
+        );
+        let bytes = text.into_bytes();
+        let parsed = parse_schematic("test.kicad_sch", &bytes).unwrap();
+        let project = ParsedSchematicProject {
+            root_relative_path: "test.kicad_sch".into(),
+            revision: SchematicArtifactRevision::new(
+                vec![parsed.artifact.clone()],
+                "10.0.7",
+                1,
+                false,
+            )
+            .unwrap(),
+            files: vec![parsed],
+            editor_lock_present: false,
+        };
+        native.components[0].footprint = Some("Test:Assigned".into());
+        let insertion = edit(EditAction::AddSymbolUnit {
+            key: "missing-unit".into(),
+            uuid: SYMBOL.into(),
+            unit: 2,
+            transform: SymbolTransform {
+                origin: point(50, 60),
+                rotation: QuarterTurn::Zero,
+                mirror: Mirror::None,
+            },
+        });
+        let candidate =
+            compile(&project, &native, &bytes, std::slice::from_ref(&insertion)).unwrap();
+        assert_preserved(&bytes, &candidate);
+        assert_eq!(
+            candidate.parsed().files[0].symbols[0],
+            project.files[0].symbols[0]
+        );
+        let added = &candidate.parsed().files[0].symbols[1];
+        assert_eq!(added.unit, 2);
+        assert_eq!(added.footprint.as_deref(), Some("Test:Assigned"));
+        assert_eq!(added.dnp, Some(true));
+        assert_eq!(added.pins.len(), 1);
+        assert_eq!(added.pins[0].number, "2");
+        assert_ne!(
+            added.pins[0].source_uuid,
+            project.files[0].symbols[0].pins[0].source_uuid
+        );
+        let doc =
+            parse_one(std::str::from_utf8(&candidate.files()["test.kicad_sch"]).unwrap()).unwrap();
+        let inserted = values(
+            object(
+                values(&doc.nodes[0]).unwrap(),
+                &added.source_uuid,
+                ObjectKind::Symbol,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let custom = children(inserted, "property")
+            .find(|p| atom(values(p).unwrap(), 1).unwrap() == "Custom")
+            .unwrap();
+        assert_eq!(atom(values(custom).unwrap(), 2).unwrap(), "keep");
+        assert_eq!(
+            Point::from_at(values(one(values(custom).unwrap(), "at").unwrap()).unwrap()).unwrap(),
+            point(49, 59)
+        );
+        assert_eq!(
+            added.instance_paths,
+            project.files[0].symbols[0]
+                .instance_paths
+                .iter()
+                .cloned()
+                .map(|mut i| {
+                    i.unit = Some(2);
+                    i
+                })
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            compile(
+                &project,
+                &native,
+                &bytes,
+                &[insertion.clone(), edit(property("changed"))]
+            )
+            .is_err()
+        );
+        let mut duplicate = insertion.clone();
+        if let EditAction::AddSymbolUnit { key, .. } = &mut duplicate.action {
+            *key = "duplicate".into();
+        }
+        assert!(compile(&project, &native, &bytes, &[insertion.clone(), duplicate]).is_err());
+        let mut occupied = insertion;
+        if let EditAction::AddSymbolUnit { unit, .. } = &mut occupied.action {
+            *unit = 1;
+        }
+        assert!(compile(&project, &native, &bytes, &[occupied]).is_err());
+    }
+
     fn assert_preserved(before: &[u8], candidate: &SchematicCandidate) {
         let before = std::str::from_utf8(before).unwrap();
         let after = std::str::from_utf8(&candidate.files()["test.kicad_sch"]).unwrap();

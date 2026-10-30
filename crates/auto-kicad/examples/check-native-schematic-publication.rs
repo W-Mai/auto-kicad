@@ -266,6 +266,7 @@ fn main() -> Result<()> {
                             .filter(|sheet| sheet.file == root)
                             .map(|sheet| SymbolInstancePath {
                                 path: sheet.path.clone(),
+                                reference: None,
                             })
                             .collect(),
                     },

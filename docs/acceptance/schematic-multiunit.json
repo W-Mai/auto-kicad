@@ -1,0 +1,85 @@
+{
+  "feature": "component unit creation and source-bound insertion",
+  "native_version": "10.0.7",
+  "schematic_formats": [
+    "20250114",
+    "20260306"
+  ],
+  "production_stdio": true,
+  "committed_executions": 10,
+  "profiles": {
+    "current": {
+      "passed": true,
+      "instances": 1,
+      "configuration_unchanged": true,
+      "private_snapshots_removed": true,
+      "published_cases": [
+        "complete-two-unit-group",
+        "complete-three-unit-group",
+        "insert-missing-unit-with-observed-metadata"
+      ]
+    },
+    "legacy": {
+      "passed": true,
+      "instances": 1,
+      "configuration_unchanged": true,
+      "private_snapshots_removed": true,
+      "published_cases": [
+        "complete-two-unit-group",
+        "complete-three-unit-group",
+        "insert-missing-unit-with-observed-metadata"
+      ]
+    },
+    "shared": {
+      "passed": true,
+      "instances": 4,
+      "configuration_unchanged": true,
+      "private_snapshots_removed": true,
+      "published_cases": [
+        "complete-two-unit-group",
+        "complete-three-unit-group",
+        "insert-missing-unit-with-observed-metadata"
+      ]
+    }
+  },
+  "verified_artifacts": 40,
+  "offline_quality": {
+    "passed": 551,
+    "failed": 0,
+    "ignored": 16
+  },
+  "fixed_cli_mcp_regression": {
+    "passed": true,
+    "seconds": 3.96
+  },
+  "accepted": [
+    "compatible two- and three-unit component creation",
+    "missing-unit insertion preserving original assigned footprint and custom metadata",
+    "complete annotations across 4 reused physical-sheet instances",
+    "explicit common-pin wires and unambiguous native membership",
+    "exact original source/cache preservation",
+    "duplicate, conflicting, missing/extra-instance and unwired-common-net rejection",
+    "exact approval and replay refusal",
+    "independent saved native grouping/pins/ERC"
+  ],
+  "failed_controls_retained": [
+    "initial runner type assertion",
+    "native oracle configuration isolation and temporary cache",
+    "absent assigned-footprint fixture field",
+    "shared physical-source ERC count assumption",
+    "three concurrent processes and one reused-sheet serial process exited 120 without terminal reports; cause unestablished"
+  ],
+  "remaining": [
+    "complete multi-unit reference annotation",
+    "complete multi-unit footprint assignment",
+    "sheet/hierarchical-pin/child-file authoring",
+    "GUI/Codex/full-family qualification",
+    "schematic-to-PCB synchronization",
+    "installation/release/manufacturing",
+    "remaining M4 and final real-project gates"
+  ],
+  "gui_launched": false,
+  "full_m5a_complete": false,
+  "full_product_goal_complete": false,
+  "evidence_directory": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-symbol-multiunit"
+}
