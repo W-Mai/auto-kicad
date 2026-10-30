@@ -579,6 +579,54 @@ impl LiveBoardText {
         })
     }
 
+    /// Refuse full-item transforms when native unit metadata is absent from the IPC schema.
+    ///
+    /// Only the selected direct footprint is checked; unrelated unit metadata remains untouched.
+    pub fn require_supported_footprint_transform(&self, source_uuid: &str) -> Result<(), String> {
+        let root = self.cst.nodes.first().ok_or("missing native board root")?;
+        let mut identities = std::collections::BTreeSet::new();
+        let mut selected = None;
+        for footprint in &items(root)?[1..] {
+            if tag(footprint)? != "footprint" {
+                continue;
+            }
+            let mut identity = None;
+            let mut has_units = false;
+            // The footprint library identifier is an atom, not a child form.
+            let fields = items(footprint)?;
+            atom(
+                fields
+                    .get(1)
+                    .ok_or("missing native footprint library identifier")?,
+            )?;
+            for field in fields.get(2..).ok_or("missing native footprint fields")? {
+                match tag(field)? {
+                    "uuid" => {
+                        if identity.replace(scalar(field)?).is_some() {
+                            return Err("duplicate native footprint identity field".into());
+                        }
+                    }
+                    "units" => has_units = true,
+                    _ => {}
+                }
+            }
+            let identity = identity.ok_or("missing native footprint identity")?;
+            if identity.is_empty() || !identities.insert(identity) {
+                return Err("empty or duplicate native footprint identity".into());
+            }
+            if identity == source_uuid {
+                selected = Some(has_units);
+            }
+        }
+        match selected {
+            Some(false) => Ok(()),
+            Some(true) => {
+                Err("footprint units cannot be preserved by native full-item updates".into())
+            }
+            None => Err("native footprint transform target is missing".into()),
+        }
+    }
+
     /// Hash board definitions excluding direct zone fill results and an empty setup zone-defaults container.
     /// This preserves all unknown definition fields and does not verify the omitted copper.
     pub fn refill_definition_digest(&self) -> Result<String, String> {
@@ -768,6 +816,17 @@ pub fn observe_live_geometry<T: KiCadTransport>(
     Ok(LiveGeometryEvidence { native, text })
 }
 
+/// Establish the complete native-text support gate before a full footprint update.
+pub fn require_supported_footprint_transform<T: KiCadTransport>(
+    client: &mut KiCadClient<T>,
+    filename: &str,
+    source_uuid: &str,
+) -> Result<(), String> {
+    observe_live_geometry(client, filename)?
+        .text
+        .require_supported_footprint_transform(source_uuid)
+}
+
 pub(crate) fn capture_geometry_text<T: KiCadTransport>(
     client: &mut KiCadClient<T>,
     filename: &str,
@@ -816,6 +875,35 @@ pub(crate) fn capture_geometry_text<T: KiCadTransport>(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn footprint_transform_support_requires_one_exact_native_target_without_units() {
+        let parse = |body: &str| {
+            super::LiveBoardText::parse(&format!("(kicad_pcb (version 20260206) {body})")).unwrap()
+        };
+        let text = parse(
+            r#"(footprint "Test:A" (uuid a) (property "units" "retained"))
+            (footprint "Test:B" (uuid b) (units (unit (name "A") (pins "1"))))"#,
+        );
+        assert!(text.require_supported_footprint_transform("a").is_ok());
+        assert!(text.require_supported_footprint_transform("b").is_err());
+        assert!(
+            text.require_supported_footprint_transform("missing")
+                .is_err()
+        );
+        for body in [
+            r#"(footprint "Test:A" (uuid a) (units))"#,
+            r#"(footprint "Test:A" (uuid a)) (footprint "Test:B" (uuid a))"#,
+            r#"(footprint "Test:A" (uuid a) (uuid b))"#,
+            r#"(footprint "Test:A" (property "Reference" "a"))"#,
+        ] {
+            assert!(
+                parse(body)
+                    .require_supported_footprint_transform("a")
+                    .is_err()
+            );
+        }
+    }
+
     #[test]
     fn closed_copy_display_projection_never_weakens_live_or_authored_text() {
         let a = r#"(kicad_pcb (version 20260206) (footprint "x" (dimension (type orthogonal)

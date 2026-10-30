@@ -1484,6 +1484,13 @@ pub trait BoardGraphicsIpc {
         board_filename: &str,
         routing_ids: &[String],
     ) -> Result<IpcBoardRoutingItems, String>;
+    fn require_supported_footprint_transform(
+        &mut self,
+        _board_filename: &str,
+        _source_uuid: &str,
+    ) -> Result<(), String> {
+        Err("native footprint metadata support is unavailable".into())
+    }
     fn update_footprint_instance(
         &mut self,
         board_filename: &str,
@@ -1845,6 +1852,14 @@ impl<T: KiCadTransport> BoardGraphicsIpc for KiCadClient<T> {
             .map_err(|error| error.to_string())
     }
 
+    fn require_supported_footprint_transform(
+        &mut self,
+        board_filename: &str,
+        source_uuid: &str,
+    ) -> Result<(), String> {
+        live_geometry::require_supported_footprint_transform(self, board_filename, source_uuid)
+    }
+
     fn update_footprint_instance(
         &mut self,
         board_filename: &str,
@@ -1963,6 +1978,11 @@ impl BoardGraphicsExecutor {
                 };
             }
         };
+        if let Err(reason) =
+            ipc.require_supported_footprint_transform(board_filename, source_uuid.as_str())
+        {
+            return BoardGraphicsCommitOutcome::Rejected { reason };
+        }
         let before_footprints = match read_move_footprints(ipc, board, board_filename) {
             Ok(items) => items,
             Err(reason) => return BoardGraphicsCommitOutcome::Rejected { reason },
@@ -4404,6 +4424,7 @@ mod tests {
 
     struct FakeGraphicsIpc {
         move_group: Option<ObservedFootprintWithPads>,
+        move_metadata_error: Option<String>,
         update_error: Option<String>,
         corrupt_move: bool,
         begin: Result<String, String>,
@@ -4426,6 +4447,7 @@ mod tests {
         fn default() -> Self {
             Self {
                 move_group: None,
+                move_metadata_error: None,
                 update_error: None,
                 corrupt_move: false,
                 begin: Ok("c1".into()),
@@ -4447,6 +4469,17 @@ mod tests {
     }
 
     impl BoardGraphicsIpc for FakeGraphicsIpc {
+        fn require_supported_footprint_transform(
+            &mut self,
+            _: &str,
+            _: &str,
+        ) -> Result<(), String> {
+            match &self.move_metadata_error {
+                Some(reason) => Err(reason.clone()),
+                None => Ok(()),
+            }
+        }
+
         fn read_unsupported_move_copper(&mut self, _: &str) -> Result<Vec<String>, String> {
             Ok(vec![])
         }
@@ -4725,7 +4758,7 @@ mod tests {
             idempotency_key: "move".into(),
             source_run_id: "test".into(),
         };
-        for fault in 0..6 {
+        for fault in 0..7 {
             let mut ipc = FakeGraphicsIpc {
                 move_group: Some(group.clone()),
                 routing_observed: Some(Ok(empty.clone())),
@@ -4740,6 +4773,7 @@ mod tests {
                     ipc.drop = Err("drop failed".into());
                 }
                 5 => ipc.commit = Err("editor process exited".into()),
+                6 => ipc.move_metadata_error = Some("native unit metadata is unsupported".into()),
                 _ => {}
             }
             let outcome = BoardGraphicsExecutor::default().execute_bound_batch(
@@ -4752,6 +4786,17 @@ mod tests {
             );
             match fault {
                 0 => assert_eq!(outcome, BoardGraphicsCommitOutcome::CommittedAndSaved),
+                6 => {
+                    assert!(matches!(
+                        outcome,
+                        BoardGraphicsCommitOutcome::Rejected { .. }
+                    ));
+                    assert!(
+                        ipc.calls.is_empty(),
+                        "metadata rejection must precede BeginCommit"
+                    );
+                    continue;
+                }
                 1 => {
                     assert!(matches!(
                         outcome,

@@ -1,0 +1,587 @@
+{
+  "date": "2026-10-30",
+  "native_version": "10.0.7",
+  "passed": true,
+  "installed_runtime_reproduction": {
+    "phase": "before",
+    "public_mcp_move_committed": true,
+    "native_units_preserved": false,
+    "source_fixture_owned": true
+  },
+  "corrected_production_mcp": {
+    "phase": "after",
+    "public_mcp_move_and_rotation_rejected_before_mutation": true,
+    "rejected_source_bytes_preserved": true,
+    "ordinary_neighbor_move_and_rotation_committed": true,
+    "unrelated_units_exactly_preserved": true,
+    "no_introduced_drc": true,
+    "research_only": false
+  },
+  "full_lifecycle": {
+    "source_pid": 35602,
+    "source_editor_reused": true,
+    "same_process_reload_verified": true,
+    "owned_editors_closed": true,
+    "fixture_cleaned": true,
+    "native_unit_move_rotation_rejected": true,
+    "unrelated_native_units_preserved": true
+  },
+  "full_lifecycle_seconds": 58.42,
+  "drc": {
+    "baseline": {
+      "ignored_checks": 5,
+      "kicad_version": "10.0.7",
+      "parser_version": "kicad-drc-v1",
+      "schema": "https://schemas.kicad.org/drc.v1.json",
+      "source": "board.kicad_pcb",
+      "unconnected_items": 4,
+      "violations": [
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000001"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J1",
+              "position": {
+                "x": 5.0,
+                "y": 5.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000001"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000002"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J2",
+              "position": {
+                "x": 10.0,
+                "y": 5.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000002"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000003"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J3",
+              "position": {
+                "x": 7.5,
+                "y": 8.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000003"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000004"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J4",
+              "position": {
+                "x": 13.0,
+                "y": 10.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000004"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+          "identity": {
+            "Uuids": {
+              "rule_type": "lib_footprint_issues",
+              "uuids": [
+                "10000000-0000-4000-8000-000000000005"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u5c01\u88c5 J5",
+              "position": {
+                "x": 16.0,
+                "y": 5.0
+              },
+              "uuid": "10000000-0000-4000-8000-000000000005"
+            }
+          ],
+          "rule_type": "lib_footprint_issues",
+          "severity": "warning"
+        },
+        {
+          "description": "Track has unconnected end",
+          "identity": {
+            "Uuids": {
+              "rule_type": "track_dangling",
+              "uuids": [
+                "40000000-0000-4000-8000-000000000001"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u8d70\u7ebf [GND] (B.Cu), \u957f\u5ea6: 3.0000 mm",
+              "position": {
+                "x": 7.5,
+                "y": 5.0
+              },
+              "uuid": "40000000-0000-4000-8000-000000000001"
+            }
+          ],
+          "rule_type": "track_dangling",
+          "severity": "warning"
+        },
+        {
+          "description": "Via is not connected or connected on only one layer",
+          "identity": {
+            "Uuids": {
+              "rule_type": "via_dangling",
+              "uuids": [
+                "40000000-0000-4000-8000-000000000002"
+              ]
+            }
+          },
+          "items": [
+            {
+              "description": "\u8fc7\u5b54 [GND] (F.Cu - B.Cu)",
+              "position": {
+                "x": 7.5,
+                "y": 8.0
+              },
+              "uuid": "40000000-0000-4000-8000-000000000002"
+            }
+          ],
+          "rule_type": "via_dangling",
+          "severity": "warning"
+        }
+      ]
+    },
+    "final": {
+      "baseline_id": "drc-baseline:0",
+      "captured_revision": "sha256:7001a61bf9397ce6bcb9483d9b6fcab2fb03769556f2e9af6446a857caab0b6a",
+      "current_revision": "sha256:b39f5ac04075353bebc0af4c7df89c9db95e1f3c7fbdd675e6632918e01dd86b",
+      "delta": {
+        "introduced": [],
+        "resolved": [],
+        "unchanged": [
+          {
+            "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+            "identity": {
+              "Uuids": {
+                "rule_type": "lib_footprint_issues",
+                "uuids": [
+                  "10000000-0000-4000-8000-000000000001"
+                ]
+              }
+            },
+            "items": [
+              {
+                "description": "\u5c01\u88c5 J1",
+                "position": {
+                  "x": 5.0,
+                  "y": 5.0
+                },
+                "uuid": "10000000-0000-4000-8000-000000000001"
+              }
+            ],
+            "rule_type": "lib_footprint_issues",
+            "severity": "warning"
+          },
+          {
+            "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+            "identity": {
+              "Uuids": {
+                "rule_type": "lib_footprint_issues",
+                "uuids": [
+                  "10000000-0000-4000-8000-000000000002"
+                ]
+              }
+            },
+            "items": [
+              {
+                "description": "\u5c01\u88c5 J2",
+                "position": {
+                  "x": 10.0,
+                  "y": 5.0
+                },
+                "uuid": "10000000-0000-4000-8000-000000000002"
+              }
+            ],
+            "rule_type": "lib_footprint_issues",
+            "severity": "warning"
+          },
+          {
+            "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+            "identity": {
+              "Uuids": {
+                "rule_type": "lib_footprint_issues",
+                "uuids": [
+                  "10000000-0000-4000-8000-000000000003"
+                ]
+              }
+            },
+            "items": [
+              {
+                "description": "\u5c01\u88c5 J3",
+                "position": {
+                  "x": 7.5,
+                  "y": 8.0
+                },
+                "uuid": "10000000-0000-4000-8000-000000000003"
+              }
+            ],
+            "rule_type": "lib_footprint_issues",
+            "severity": "warning"
+          },
+          {
+            "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+            "identity": {
+              "Uuids": {
+                "rule_type": "lib_footprint_issues",
+                "uuids": [
+                  "10000000-0000-4000-8000-000000000004"
+                ]
+              }
+            },
+            "items": [
+              {
+                "description": "\u5c01\u88c5 J4",
+                "position": {
+                  "x": 13.0,
+                  "y": 10.0
+                },
+                "uuid": "10000000-0000-4000-8000-000000000004"
+              }
+            ],
+            "rule_type": "lib_footprint_issues",
+            "severity": "warning"
+          },
+          {
+            "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+            "identity": {
+              "Uuids": {
+                "rule_type": "lib_footprint_issues",
+                "uuids": [
+                  "10000000-0000-4000-8000-000000000005"
+                ]
+              }
+            },
+            "items": [
+              {
+                "description": "\u5c01\u88c5 J5",
+                "position": {
+                  "x": 16.0,
+                  "y": 5.0
+                },
+                "uuid": "10000000-0000-4000-8000-000000000005"
+              }
+            ],
+            "rule_type": "lib_footprint_issues",
+            "severity": "warning"
+          },
+          {
+            "description": "Track has unconnected end",
+            "identity": {
+              "Uuids": {
+                "rule_type": "track_dangling",
+                "uuids": [
+                  "40000000-0000-4000-8000-000000000001"
+                ]
+              }
+            },
+            "items": [
+              {
+                "description": "\u8d70\u7ebf [GND] (B.Cu), \u957f\u5ea6: 3.0000 mm",
+                "position": {
+                  "x": 7.5,
+                  "y": 5.0
+                },
+                "uuid": "40000000-0000-4000-8000-000000000001"
+              }
+            ],
+            "rule_type": "track_dangling",
+            "severity": "warning"
+          },
+          {
+            "description": "Via is not connected or connected on only one layer",
+            "identity": {
+              "Uuids": {
+                "rule_type": "via_dangling",
+                "uuids": [
+                  "40000000-0000-4000-8000-000000000002"
+                ]
+              }
+            },
+            "items": [
+              {
+                "description": "\u8fc7\u5b54 [GND] (F.Cu - B.Cu)",
+                "position": {
+                  "x": 7.5,
+                  "y": 8.0
+                },
+                "uuid": "40000000-0000-4000-8000-000000000002"
+              }
+            ],
+            "rule_type": "via_dangling",
+            "severity": "warning"
+          }
+        ]
+      },
+      "report": {
+        "ignored_checks": 5,
+        "kicad_version": "10.0.7",
+        "parser_version": "kicad-drc-v1",
+        "schema": "https://schemas.kicad.org/drc.v1.json",
+        "source": "board.kicad_pcb",
+        "unconnected_items": 4,
+        "violations": [
+          {
+            "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+            "identity": {
+              "Uuids": {
+                "rule_type": "lib_footprint_issues",
+                "uuids": [
+                  "10000000-0000-4000-8000-000000000001"
+                ]
+              }
+            },
+            "items": [
+              {
+                "description": "\u5c01\u88c5 J1",
+                "position": {
+                  "x": 6.0,
+                  "y": 5.0
+                },
+                "uuid": "10000000-0000-4000-8000-000000000001"
+              }
+            ],
+            "rule_type": "lib_footprint_issues",
+            "severity": "warning"
+          },
+          {
+            "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+            "identity": {
+              "Uuids": {
+                "rule_type": "lib_footprint_issues",
+                "uuids": [
+                  "10000000-0000-4000-8000-000000000002"
+                ]
+              }
+            },
+            "items": [
+              {
+                "description": "\u5c01\u88c5 J2",
+                "position": {
+                  "x": 10.0,
+                  "y": 5.0
+                },
+                "uuid": "10000000-0000-4000-8000-000000000002"
+              }
+            ],
+            "rule_type": "lib_footprint_issues",
+            "severity": "warning"
+          },
+          {
+            "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+            "identity": {
+              "Uuids": {
+                "rule_type": "lib_footprint_issues",
+                "uuids": [
+                  "10000000-0000-4000-8000-000000000003"
+                ]
+              }
+            },
+            "items": [
+              {
+                "description": "\u5c01\u88c5 J3",
+                "position": {
+                  "x": 7.5,
+                  "y": 8.0
+                },
+                "uuid": "10000000-0000-4000-8000-000000000003"
+              }
+            ],
+            "rule_type": "lib_footprint_issues",
+            "severity": "warning"
+          },
+          {
+            "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+            "identity": {
+              "Uuids": {
+                "rule_type": "lib_footprint_issues",
+                "uuids": [
+                  "10000000-0000-4000-8000-000000000004"
+                ]
+              }
+            },
+            "items": [
+              {
+                "description": "\u5c01\u88c5 J4",
+                "position": {
+                  "x": 14.0,
+                  "y": 10.0
+                },
+                "uuid": "10000000-0000-4000-8000-000000000004"
+              }
+            ],
+            "rule_type": "lib_footprint_issues",
+            "severity": "warning"
+          },
+          {
+            "description": "\u5f53\u524d\u914d\u7f6e\u4e2d\u4e0d\u5305\u542b\u5c01\u88c5\u5e93 'Test'",
+            "identity": {
+              "Uuids": {
+                "rule_type": "lib_footprint_issues",
+                "uuids": [
+                  "10000000-0000-4000-8000-000000000005"
+                ]
+              }
+            },
+            "items": [
+              {
+                "description": "\u5c01\u88c5 J5",
+                "position": {
+                  "x": 16.0,
+                  "y": 5.0
+                },
+                "uuid": "10000000-0000-4000-8000-000000000005"
+              }
+            ],
+            "rule_type": "lib_footprint_issues",
+            "severity": "warning"
+          },
+          {
+            "description": "Track has unconnected end",
+            "identity": {
+              "Uuids": {
+                "rule_type": "track_dangling",
+                "uuids": [
+                  "40000000-0000-4000-8000-000000000001"
+                ]
+              }
+            },
+            "items": [
+              {
+                "description": "\u8d70\u7ebf [GND] (B.Cu), \u957f\u5ea6: 3.0000 mm",
+                "position": {
+                  "x": 7.5,
+                  "y": 5.0
+                },
+                "uuid": "40000000-0000-4000-8000-000000000001"
+              }
+            ],
+            "rule_type": "track_dangling",
+            "severity": "warning"
+          },
+          {
+            "description": "Via is not connected or connected on only one layer",
+            "identity": {
+              "Uuids": {
+                "rule_type": "via_dangling",
+                "uuids": [
+                  "40000000-0000-4000-8000-000000000002"
+                ]
+              }
+            },
+            "items": [
+              {
+                "description": "\u8fc7\u5b54 [GND] (F.Cu - B.Cu)",
+                "position": {
+                  "x": 7.5,
+                  "y": 8.0
+                },
+                "uuid": "40000000-0000-4000-8000-000000000002"
+              }
+            ],
+            "rule_type": "via_dangling",
+            "severity": "warning"
+          }
+        ]
+      }
+    }
+  },
+  "quality": {
+    "passed": 567,
+    "failed": 0,
+    "ignored": 16,
+    "matrix_fmt_clippy": "passed"
+  },
+  "tested_binary_sha256": "4ed847e0b898ac408e38153b78ab379496d8eb29c335bd2ac65dda2249b814cd",
+  "source_sha256": {
+    "crates/auto-kicad/src/lib.rs": "5782a3772d78c6460cebcbb5222376b28f8a2e65f824d87b537ca0b6e9985f9b",
+    "crates/kicad-adapter/src/lib.rs": "d238f9dd8b7236b18c7ecef237d4371e674d69a76ebae4c9292c84aa5aad9bf4",
+    "crates/kicad-adapter/src/live_geometry.rs": "fe09a93867960a5c765137285b4918e39167bee3359ba34e2953222a68e9bc53",
+    "crates/auto-kicad/src/tests/existing_footprint_acceptance.rs": "89977dba17d67636b47e54afa9f828a3aa3cf17aee7259daf9eb2c04983bafd1",
+    "scripts/check-footprint-move.py": "946f41ed148891ebfb0c4de7f92a0a37400f584d00b14b1fea363940e90a1a80"
+  },
+  "evidence_sha256": {
+    "before/transcript.json": "d74ef4159c8151d8dd7c654ef059d6c3cce672e4592ebd7cfeea09f368fe1258",
+    "before/before.kicad_pcb": "36c98a0c84f97168ecb22b6f900aca2444dcd4f0c2450aa7863213f636df875b",
+    "before/after.kicad_pcb": "79387b5fc78d75d7e52ffb99ebf5aaf42cf098dab53699435d91ad9271471350",
+    "after/transcript.json": "1a972e53d2314ee443df040fbf8e8f25e8833fdb00b1e50a5e74fab5634c4b6c",
+    "after/after.kicad_pcb": "7e767a94c6094aee2963f927048dcfed579519052b4a75e13292dbf8818f1603",
+    "full-lifecycle.json": "1f5c779c20e280ca8b697813beb1fd7ef34c2fa8b3e65d8b34480198fd4ebfa2",
+    "quality-final.log": "8c2659316db61e2374e4a1ac9672878f3a2c27a08661e760e203c77b7fca17f8",
+    "quality-commit.log": "790a64d5d113d7e766c6feafda8575a32ab2ed97a23ad4ff4cfe8a3d640221af"
+  },
+  "counts_as_real_project_profile": false,
+  "general_sync_accepted": false,
+  "source_hash_scope": "Final source; production logic matches the native-tested executable.",
+  "installed_runtime_updated": true,
+  "fresh_installed_stdio_tools": 13,
+  "long_lived_clients_need_reconnection": true,
+  "cleanup": {
+    "source_editor_pids_absent": [
+      7472,
+      35602
+    ],
+    "all_recorded_build_native_sessions_terminal": true,
+    "target": "/private/tmp/auto-kicad-m1-metadata-target",
+    "unique_allocated_bytes": 1701285888,
+    "removed": true,
+    "installed_runtime_retained": true
+  }
+}

@@ -1,6 +1,6 @@
 # Existing footprint movement and rotation
 
-`move_footprint` moves or rotates one unlocked existing footprint through the PCB inspect, plan, preview and commit tools. KiCad 10.0.6 is the tested native backend. The operation preserves the footprint side, native identities, reference/value, schematic association, pad definitions and networks. Connected tracks/vias, zones, unsupported copper and unsupported target geometry reject the operation. Flip, deletion and copper rerouting are separate unsupported operations.
+`move_footprint` moves or rotates one unlocked existing footprint through the PCB inspect, plan, preview and commit tools. KiCad 10.0.7 is the qualified native-text backend. The operation preserves the footprint side, native identities, reference/value, schematic association, pad definitions and networks. Connected tracks/vias, zones, unsupported copper, unsupported target geometry and selected native unit metadata reject the operation. Flip, deletion and copper rerouting are separate unsupported operations.
 
 ## Request and approval
 
@@ -45,3 +45,8 @@ env CARGO_TARGET_DIR=/tmp/auto-kicad-move-target CARGO_INCREMENTAL=0 CARGO_PROFI
 The [result record](existing-footprint-transform-result.json) summarizes the 2026-10-26 successful run through the actual stdio executable and native IPC. 4 footprints, 5 pads, a track and a through via exercise front translation, front rotation and back translation/rotation. Locked and connected targets reject both movement and rotation. Stale revisions, wrong approvals and repeated commits reject. A foreign-net collision produces a failed DRC preview with no approval and unchanged source. Full native payloads, normalized snapshots, saved reload and protected files pass. Six baseline DRC violations and three unconnected items remain, with zero introduced violations; the fixture is not a manufacturing-clean board. Owned editors and files were cleaned. This synthetic fixture does not count as a real-project delivery profile.
 
 Offline workspace contracts independently cover circular arc contact, offset/corner envelopes, foreign-net contact, through-via layer spans, native item statuses and child preservation, update/commit/save/readback failures, failed cleanup and denial of approval for uncertain shadows. Transport/process failures are injected at the adapter boundary; the live run does not deliberately crash KiCad. Run `python3 scripts/quality.py` for matrix validation, format, warnings-denied Clippy and the offline workspace suite. Other ignored GUI tests are not implied to have run by this acceptance.
+
+
+## Native unit metadata support gate
+
+[Native unit metadata protection](footprint-unit-metadata.md) verifies a complete live-text support gate at planning and before execution begins a transaction. A selected direct `units` form rejects because it is absent from the full-item IPC schema. An unrelated footprint may retain units while supported ordinary movement proceeds. Actual 10.0.7 stdio rejection, ordinary neighbor commits and the extended complete front/back lifecycle pass; exact native forms, snapshots, DRC and source protection are checked. The older 10.0.6 record above remains historical evidence, not a qualification of omitted unit metadata.

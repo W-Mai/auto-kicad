@@ -29,6 +29,16 @@ fn live_existing_footprint_stdio_lifecycle() {
             "(net 1 \"GND\") (uuid \"20000000-0000-4000-8000-000000000002\")",
             "(net 2 \"OTHER\") (uuid \"20000000-0000-4000-8000-000000000002\")",
         );
+    let mut board = board;
+    let end = board.rfind(')').unwrap();
+    board.insert_str(end, r#"
+          (footprint "Test:UnitMetadata" (layer "F.Cu") (uuid "10000000-0000-4000-8000-000000000005") (at 16 5)
+            (property "Reference" "J5" (at 0 -1) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))))
+            (property "Value" "UnitMetadata" (at 0 1) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))))
+            (attr smd)
+            (units (unit (name "A") (pins "1")))
+            (pad "1" smd rect (at 0 0) (size 0.5 0.3) (layers "F.Cu" "F.Paste" "F.Mask") (net 1 "GND") (uuid "20000000-0000-4000-8000-000000000006")))
+    "#);
     std::fs::write(
         input.with_extension("kicad_dru"),
         r#"(version 1) (rule "Fixture clearance" (constraint clearance (min 0.25mm)))"#,

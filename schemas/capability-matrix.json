@@ -232,7 +232,8 @@
         "exact approval, full saved reload, protected source files and no DRC/connectivity regression",
         "native and stdio acceptance on KiCad 10.0.6",
         "flips require normal front/back pad stacks and supported child geometry; fixed paired layers only",
-        "deletion is high risk; only observed tracks/arcs, through vias, Dwgs.User segments and free unassociated footprints; surviving pad connections remain intact"
+        "deletion is high risk; only observed tracks/arcs, through vias, Dwgs.User segments and free unassociated footprints; surviving pad connections remain intact",
+        "move/rotate requires KiCad 10.0.7 repeated native-text qualification; selected units metadata rejects before mutation, unrelated units remain exact; see docs/acceptance/footprint-unit-metadata.md"
       ],
       "evidence": {
         "fixture": "native-footprint-and-item-edits-with-populated-copy",

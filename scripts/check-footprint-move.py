@@ -4,6 +4,7 @@ import argparse
 import copy
 import json
 import os
+import re
 from pathlib import Path
 
 from stdio_rpc import Rpc
@@ -55,10 +56,14 @@ def main():
         baseline = call("kicad_validate_project", {"endpoint": args.endpoint})
         protected = {args.board.with_suffix(ext): args.board.with_suffix(ext).read_bytes() if args.board.with_suffix(ext).exists() else None for ext in (".kicad_pro", ".kicad_sch", ".kicad_dru")}
         source_bytes = args.board.read_bytes()
-        for reference, reason in [("J2", "target_locked"), ("J3", "connected_copper_requires_separate_edit")]:
+        unit_metadata = re.findall(rb'\(units\s+\(unit\s+\(name "A"\)\s+\(pins "1"\)\s*\)\s*\)', source_bytes)
+        assert len(unit_metadata) == 1, "missing native unit metadata control"
+        for reference, reason in [("J2", "target_locked"), ("J3", "connected_copper_requires_separate_edit"), ("J5", "footprint_transform_unavailable")]:
             for field in ({"x_nm": 6_000_000, "y_nm": 6_000_000}, {"orientation_mdeg": 90000}):
                 rejection = plan(original, reference, f"reject-{reference}-{len(transcript)}", field, ok=False)
                 assert reason in rejection["reason"], rejection
+                if reference == "J5":
+                    assert "units" in rejection["detail"], rejection
                 if reference == "J3":
                     assert len(rejection["affected_ids"]) >= 2, rejection
                 assert args.board.read_bytes() == source_bytes
@@ -95,6 +100,7 @@ def main():
             assert without_revisions(after["snapshot"]) == without_revisions(expected), {"expected": expected, "actual": after}
             assert after["revision"] != before["revision"]
             saved = args.board.read_bytes()
+            assert all(saved.count(value) == 1 for value in unit_metadata), "unrelated native unit metadata changed"
             try:
                 call("kicad_commit_change", approval)
                 raise AssertionError("committed approval was reusable")
@@ -118,7 +124,7 @@ def main():
         assert final_drc["delta"]["introduced"] == [], final_drc
         assert final_drc["report"]["unconnected_items"] <= baseline["report"]["unconnected_items"]
         assert all((path.read_bytes() if path.exists() else None) == content for path, content in protected.items())
-        result = {"passed": True, "before": original["snapshot"], "after": inspect()["snapshot"], "baseline_drc": baseline["report"], "final_drc": final_drc, "transcript": transcript}
+        result = {"passed": True, "before": original["snapshot"], "after": inspect()["snapshot"], "baseline_drc": baseline["report"], "final_drc": final_drc, "transcript": transcript, "native_unit_move_rotation_rejected": True, "unrelated_native_units_preserved": True}
         args.evidence.write_text(json.dumps(result, indent=2) + "\n")
     finally:
         rpc.close()

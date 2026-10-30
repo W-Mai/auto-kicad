@@ -180,6 +180,7 @@ pub trait DiscoveryService: Send + Sync {
         &self,
         _endpoint: &str,
         _source: &LiveBoardObservation,
+        _source_uuid: &str,
     ) -> Result<(Vec<String>, RevisionDigest), String> {
         Err("complete footprint and copper evidence is unavailable".into())
     }
@@ -286,6 +287,7 @@ impl DiscoveryService for IpcDiscoveryService {
         &self,
         endpoint: &str,
         source: &LiveBoardObservation,
+        source_uuid: &str,
     ) -> Result<(Vec<String>, RevisionDigest), String> {
         let config =
             ClientConfig::new(endpoint, "auto-kicad-move-check").map_err(|e| e.to_string())?;
@@ -299,6 +301,11 @@ impl DiscoveryService for IpcDiscoveryService {
         if client.instance_token() != Some(&source.instance_token) {
             return Err("editor identity changed during copper observation".into());
         }
+        kicad_adapter::live_geometry::require_supported_footprint_transform(
+            &mut client,
+            &source.board_filename,
+            source_uuid,
+        )?;
         let templates = client
             .capture_footprint_instance_templates(&source.board_filename)
             .map_err(|e| e.to_string())?;
@@ -4740,16 +4747,17 @@ impl Server {
             if !affected.is_empty() {
                 return Ok(self.envelope_sync(arguments.request_id, None, json!({"reason": "connected_copper_requires_separate_edit", "target": placement_id, "affected_ids": affected})));
             }
-            let (zones, native_evidence) = match self
-                .discovery
-                .footprint_move_evidence(&arguments.endpoint, &observation)
-            {
+            let (zones, native_evidence) = match self.discovery.footprint_move_evidence(
+                &arguments.endpoint,
+                &observation,
+                source_uuid.as_str(),
+            ) {
                 Ok(zones) => zones,
                 Err(e) => {
                     return Ok(self.envelope_sync(
                         arguments.request_id,
                         None,
-                        json!({"reason": "unsupported_copper_interaction", "detail": e}),
+                        json!({"reason": "footprint_transform_unavailable", "detail": e}),
                     ));
                 }
             };
