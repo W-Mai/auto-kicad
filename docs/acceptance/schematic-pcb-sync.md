@@ -49,6 +49,8 @@ Commit with `kicad_commit_change` using that preview's `approval_hash` and `vali
 
 Complete native source/candidate/saved-board evidence binds all retained objects, UUIDs, source resources, physical copper partitions, effective netclasses and raw DRC diagnostic multisets. Full native re-observation of the actual published PCB must match the approved candidate. Manual geometry, dimensions, field placement, unknown protected data and copper geometry remain unchanged. Native dimension-owned text shares its owner's UUID only under the qualified typed ownership rule; ordinary global UUID collisions reject.
 
+[Connected same-geometry replacement](schematic-connected-replacement.md) passes actual public source assignment, PCB publication, killed-writer native recovery and a subsequent replacement commit. Complete child-identity mapping preserves full DRC meaning while retaining the exact declared raw diagnostic changes.
+
 Existing zero-pin components retain [verified complete empty pin authority](schematic-empty-components.md) for observation and conservative metadata/relink of existing footprints. Zero-pin additions, replacements and footprint reassignment retain separate refusal gates.
 
 ## Copper and scope

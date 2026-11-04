@@ -1,0 +1,17 @@
+# Connected footprint replacement
+
+Closed schematic-to-PCB synchronization replaces an explicitly selected footprint with the complete assigned source-library definition. The existing footprint UUID, placement and side remain fixed. Complete pad correspondence and unchanged connected contact geometry are mandatory; attached copper retains its UUIDs, geometry and net assignments. Native publication and guarded recovery verify the actual saved board.
+
+KiCad 10.0.7 can move an inherited pad's unchanged scalar `net` field during `SaveBoard`. Template comparison hashes that sole net separately, retaining its presence and complete tokens. Every other pad field, unknown token and nested point order remains protected. The ordinary native-board digest is unchanged. A net-value change still requires explicit source, difference and physical-partition authority.
+
+Actual production MCP acceptance replaces a connected R0603 with a project-library alias having the same physical definition. Reverse replacement uses the official library while retaining the now-unused alias files. Source assignment is a separate approved public schematic commit. PCB publication changes only the board; source, project settings, rules, libraries and configuration remain unchanged during synchronization.
+
+Independent review verifies the complete retained geometry/style/value of the selected footprint and its 14-object identity mapping. Complete unselected PCB root nodes remain byte-exact and ordered. Complete raw DRC reports retain unknown fields, numeric tokens and diagnostic multiplicity. Raw identity changes produce 6 introduced and 7 resolved records: 6 diagnostics retain the same complete content under the bijective child UUID mapping, and 1 source-assignment mismatch resolves. No zero-violation claim is made.
+
+The interruption profile kills the actual stdio writer after candidate publication. Fresh-process checks reject pending writes, later user bytes, stale-session approval and incorrect approval. Approved native recovery restores the exact original PCB bytes, pad identities, connectivity and full DRC baseline. A separately planned and reviewed connected replacement commits after recovery. The generic actual stdio and Codex app-server MCP regressions also pass on the exact runtime.
+
+The retained evidence includes an initial reviewer timeout, an ENOSPC transcript failure before PCB approval and a subsequent native-worker plan failure while disk space was low. Continuations verify committed source receipts, exact unchanged or recovered PCB bytes and durable states before proceeding. These failed attempts are retained separately from passing results. Interrupted private snapshots receive explicit owner cleanup; automatic abnormal-exit cleanup remains unqualified.
+
+Full quality passes 593 tests with 17 environment tests ignored; actual KiCad/MCP gates are recorded separately. The sole Cargo target is removed. Historical evidence uses transparent filesystem compression with readable byte hashes and paths preserved. No GUI was launched. [Machine-readable receipts](schematic-connected-replacement.json) bind the exact runtime, native results and remaining scope.
+
+This qualification covers connected same-geometry replacement. Other template/geometry families, explicit class/project/custom-rule transitions, affected zones/generated copper, composed bounds, GUI lifecycle and the complete real-project profiles retain separate qualification gates.

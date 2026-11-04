@@ -1,0 +1,301 @@
+{
+  "scope": "Connected same-geometry source-assigned footprint replacement and guarded PCB-only recovery",
+  "tested_version": "10.0.7",
+  "server_sha256": "1a3e08ae3878fef4532d20f98dc62f299df4002586f15a13ddacd94e4d4e4dc2",
+  "profiles": [
+    {
+      "profile": "connected-public-replacement",
+      "receipt": "m5-sync-public-replacement-1793801659418922000/replacement-replay-1793805606034181000/result.json",
+      "receipt_sha256": "5dbd84e60a516359afcc8216b916e30cef300a62eac67cdaf737ad30e6c05d64",
+      "result": {
+        "passed": true,
+        "actual_public_connected_replacement": true,
+        "source_assignment_resumed_from": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-public-replacement-1793801659418922000",
+        "root_uuid_retained": true,
+        "connected_copper_and_unselected_objects_preserved": true,
+        "pad_mapping": {
+          "0f42da3a-2263-4ac6-b0bd-9267e8c93e89": "fdf725d2-8011-8223-9e72-dee2f1e10650",
+          "59c03193-1169-48a0-bfb7-03b7e6b26cc7": "f23dd035-27b2-8deb-ae98-0cb2f3282798"
+        },
+        "reviewed_full_drc": {
+          "introduced": [
+            {
+              "diagnostic_json": "{\"description\":\"Silkscreen clearance\",\"items\":[{\"description\":\"Segment of R1 on F.Silkscreen\",\"pos\":{\"x\":29.762742,\"y\":25.5225},\"uuid\":\"ca89fd76-31a6-80ce-884d-8b21f78efcf9\"}],\"severity\":\"warning\",\"type\":\"silk_overlap\"}",
+              "section": "violations"
+            },
+            {
+              "diagnostic_json": "{\"description\":\"Silkscreen clearance\",\"items\":[{\"description\":\"Segment of R1 on F.Silkscreen\",\"pos\":{\"x\":29.762742,\"y\":25.5225},\"uuid\":\"ca89fd76-31a6-80ce-884d-8b21f78efcf9\"}],\"severity\":\"warning\",\"type\":\"silk_overlap\"}",
+              "section": "violations"
+            },
+            {
+              "diagnostic_json": "{\"description\":\"Silkscreen clipped by solder mask\",\"items\":[{\"description\":\"Pad 1 [unconnected-(R1-~-Pad1)] of R1 on F.Cu\",\"pos\":{\"x\":29.175,\"y\":25.0},\"uuid\":\"fdf725d2-8011-8223-9e72-dee2f1e10650\"}],\"severity\":\"warning\",\"type\":\"silk_over_copper\"}",
+              "section": "violations"
+            },
+            {
+              "diagnostic_json": "{\"description\":\"Silkscreen clipped by solder mask\",\"items\":[{\"description\":\"Pad 1 [unconnected-(R1-~-Pad1)] of R1 on F.Cu\",\"pos\":{\"x\":29.175,\"y\":25.0},\"uuid\":\"fdf725d2-8011-8223-9e72-dee2f1e10650\"}],\"severity\":\"warning\",\"type\":\"silk_over_copper\"}",
+              "section": "violations"
+            },
+            {
+              "diagnostic_json": "{\"description\":\"Silkscreen clipped by solder mask\",\"items\":[{\"description\":\"Pad 2 [Net-(R1-~-Pad2)] of R1 on F.Cu\",\"pos\":{\"x\":30.825,\"y\":25.0},\"uuid\":\"f23dd035-27b2-8deb-ae98-0cb2f3282798\"}],\"severity\":\"warning\",\"type\":\"silk_over_copper\"}",
+              "section": "violations"
+            },
+            {
+              "diagnostic_json": "{\"description\":\"Silkscreen clipped by solder mask\",\"items\":[{\"description\":\"Pad 2 [Net-(R1-~-Pad2)] of R1 on F.Cu\",\"pos\":{\"x\":30.825,\"y\":25.0},\"uuid\":\"f23dd035-27b2-8deb-ae98-0cb2f3282798\"}],\"severity\":\"warning\",\"type\":\"silk_over_copper\"}",
+              "section": "violations"
+            }
+          ],
+          "resolved": [
+            {
+              "diagnostic_json": "{\"description\":\"Resistor_SMD:R_0603_1608Metric doesn't match footprint given by symbol (SyncReplacement:R0603_compatible)\",\"items\":[{\"description\":\"Footprint R1\",\"pos\":{\"x\":30.0,\"y\":25.0},\"uuid\":\"0d08f5a5-de58-40cc-a692-8151c5103a35\"}],\"severity\":\"warning\",\"type\":\"footprint_symbol_mismatch\"}",
+              "section": "schematic_parity"
+            },
+            {
+              "diagnostic_json": "{\"description\":\"Silkscreen clearance\",\"items\":[{\"description\":\"Segment of R1 on F.Silkscreen\",\"pos\":{\"x\":29.762742,\"y\":25.5225},\"uuid\":\"32da10e0-9255-4172-b1ff-2327fe783a7f\"}],\"severity\":\"warning\",\"type\":\"silk_overlap\"}",
+              "section": "violations"
+            },
+            {
+              "diagnostic_json": "{\"description\":\"Silkscreen clearance\",\"items\":[{\"description\":\"Segment of R1 on F.Silkscreen\",\"pos\":{\"x\":29.762742,\"y\":25.5225},\"uuid\":\"32da10e0-9255-4172-b1ff-2327fe783a7f\"}],\"severity\":\"warning\",\"type\":\"silk_overlap\"}",
+              "section": "violations"
+            },
+            {
+              "diagnostic_json": "{\"description\":\"Silkscreen clipped by solder mask\",\"items\":[{\"description\":\"Pad 1 [unconnected-(R1-~-Pad1)] of R1 on F.Cu\",\"pos\":{\"x\":29.175,\"y\":25.0},\"uuid\":\"0f42da3a-2263-4ac6-b0bd-9267e8c93e89\"}],\"severity\":\"warning\",\"type\":\"silk_over_copper\"}",
+              "section": "violations"
+            },
+            {
+              "diagnostic_json": "{\"description\":\"Silkscreen clipped by solder mask\",\"items\":[{\"description\":\"Pad 1 [unconnected-(R1-~-Pad1)] of R1 on F.Cu\",\"pos\":{\"x\":29.175,\"y\":25.0},\"uuid\":\"0f42da3a-2263-4ac6-b0bd-9267e8c93e89\"}],\"severity\":\"warning\",\"type\":\"silk_over_copper\"}",
+              "section": "violations"
+            },
+            {
+              "diagnostic_json": "{\"description\":\"Silkscreen clipped by solder mask\",\"items\":[{\"description\":\"Pad 2 [Net-(R1-~-Pad2)] of R1 on F.Cu\",\"pos\":{\"x\":30.825,\"y\":25.0},\"uuid\":\"59c03193-1169-48a0-bfb7-03b7e6b26cc7\"}],\"severity\":\"warning\",\"type\":\"silk_over_copper\"}",
+              "section": "violations"
+            },
+            {
+              "diagnostic_json": "{\"description\":\"Silkscreen clipped by solder mask\",\"items\":[{\"description\":\"Pad 2 [Net-(R1-~-Pad2)] of R1 on F.Cu\",\"pos\":{\"x\":30.825,\"y\":25.0},\"uuid\":\"59c03193-1169-48a0-bfb7-03b7e6b26cc7\"}],\"severity\":\"warning\",\"type\":\"silk_over_copper\"}",
+              "section": "violations"
+            }
+          ]
+        },
+        "server_sha256": "1a3e08ae3878fef4532d20f98dc62f299df4002586f15a13ddacd94e4d4e4dc2",
+        "product_complete": false
+      }
+    },
+    {
+      "profile": "connected-replacement-kill-recovery-commit",
+      "receipt": "m5-sync-public-replacement-recovery-1793806776577384000/result.json",
+      "receipt_sha256": "5304e64204582f5cfa3b95ae4c09d92f9126c70b41ddce025f9f244e81b32964",
+      "result": {
+        "passed": true,
+        "connected_replacement": true,
+        "actual_killed_writer": true,
+        "later_user_bytes_preserved": true,
+        "restart_approval_required": true,
+        "actual_native_restoration": true,
+        "exact_original_board_and_objects_restored": true,
+        "subsequent_connected_replacement_committed": true,
+        "project_alias_unused_after_candidate": true,
+        "complete_identity_mapped_drc_preserved": true,
+        "retained_initial_enospc_and_subsequent_worker_failures": true,
+        "continued_from_exact_verified_recovered_board": true,
+        "gui_launched": false,
+        "product_complete": false,
+        "server_sha256": "1a3e08ae3878fef4532d20f98dc62f299df4002586f15a13ddacd94e4d4e4dc2"
+      }
+    },
+    {
+      "profile": "replacement-independent-seal",
+      "receipt": "m5-sync-public-replacement-recovery-1793806776577384000/sealed.json",
+      "receipt_sha256": "f823219a081ae935c11ec430119e61a25651dd00879fe489c60b7f333ff52755",
+      "result": {
+        "passed": true,
+        "server_sha256": "1a3e08ae3878fef4532d20f98dc62f299df4002586f15a13ddacd94e4d4e4dc2",
+        "full_root_comparisons": 3,
+        "exact_ordered_unselected_roots": [
+          15,
+          15,
+          15
+        ],
+        "complete_identity_mapping_items": 14,
+        "rehashed_artifact_references": 13,
+        "executions": [
+          {
+            "attempt_id": "000000000000000000001793807900383038000-90847-0",
+            "state": "committed"
+          },
+          {
+            "attempt_id": "000000000000000000001793807312112703000-87830-0",
+            "state": "restored"
+          }
+        ],
+        "recoveries": [
+          {
+            "recovery_id": "recovery-000000000000000000001793807369647575000-88614-0",
+            "state": "awaiting_approval"
+          },
+          {
+            "recovery_id": "recovery-000000000000000000001793807384515248000-88689-0",
+            "state": "restored"
+          }
+        ],
+        "retained_stale_recovery_unapproved": true,
+        "private_runtime_files_absent": true,
+        "retained_enospc_failure": true,
+        "product_complete": false
+      }
+    },
+    {
+      "profile": "generic-stdio-interruption",
+      "receipt": "m5-sync-public-interruption-1793806415684698000/qualification.json",
+      "receipt_sha256": "ccfcc961aae3caa4266ae2eeac0bfae45fc45203fabad44022b2763a08010192",
+      "result": {
+        "profile": "interruption",
+        "exit_code": 0,
+        "elapsed_seconds": 255.5284598339931,
+        "binary_sha256": "1a3e08ae3878fef4532d20f98dc62f299df4002586f15a13ddacd94e4d4e4dc2",
+        "product_complete": false,
+        "evidence": {
+          "passed": true,
+          "production_stdio": true,
+          "server_sha256": "1a3e08ae3878fef4532d20f98dc62f299df4002586f15a13ddacd94e4d4e4dc2",
+          "cases": [
+            {
+              "name": "actual-killed-stdio-recovery",
+              "later_user_bytes_preserved": true,
+              "fresh_restart_approval_required": true,
+              "actual_native_restoration": true
+            },
+            {
+              "name": "connected-sync",
+              "native_publication_committed": true
+            }
+          ],
+          "actual_stdio_writer_killed": true,
+          "private_snapshots_removed": true,
+          "configuration_unchanged": true,
+          "gui_launched": false,
+          "product_complete": false
+        }
+      }
+    },
+    {
+      "profile": "actual-codex-mcp",
+      "receipt": "m5-sync-public-codex-1793807857870984000/qualification.json",
+      "receipt_sha256": "fc950204fb0c84d31c9cb683ec4488663f704f402a9e116624869918a6487b91",
+      "result": {
+        "profile": "codex",
+        "exit_code": 0,
+        "elapsed_seconds": 276.29523587500444,
+        "binary_sha256": "1a3e08ae3878fef4532d20f98dc62f299df4002586f15a13ddacd94e4d4e4dc2",
+        "product_complete": false,
+        "evidence": {
+          "passed": true,
+          "production_stdio": true,
+          "server_sha256": "1a3e08ae3878fef4532d20f98dc62f299df4002586f15a13ddacd94e4d4e4dc2",
+          "cases": [
+            {
+              "name": "source-drift",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-public-codex-1793807857870984000/project/sync.kicad_sch",
+              "rejected_before_write": true
+            },
+            {
+              "name": "source-drift",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-public-codex-1793807857870984000/project/sync.kicad_pcb",
+              "rejected_before_write": true
+            },
+            {
+              "name": "source-drift",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-public-codex-1793807857870984000/project/sync.kicad_pro",
+              "rejected_before_write": true
+            },
+            {
+              "name": "source-drift",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-public-codex-1793807857870984000/config/10.0/kicad_common.json",
+              "rejected_before_write": true
+            },
+            {
+              "name": "restart-approval",
+              "rejected_before_write": true
+            },
+            {
+              "name": "connected-sync",
+              "native_publication_committed": true
+            },
+            {
+              "name": "unchanged",
+              "mutation_approval_refused": true
+            }
+          ],
+          "actual_stdio_writer_killed": false,
+          "private_snapshots_removed": true,
+          "configuration_unchanged": true,
+          "gui_launched": false,
+          "product_complete": false
+        }
+      }
+    }
+  ],
+  "quality": {
+    "exit_code": 0,
+    "aborted_for_disk": false,
+    "elapsed_seconds": 83.85627254200517,
+    "tests": [
+      593,
+      0,
+      17
+    ],
+    "observed_minimum_free_bytes": 2804334592,
+    "allocated_build_bytes_removed": 1210785792,
+    "unique_file_bytes_removed": 1201885606,
+    "target_absent": true,
+    "free_after_cleanup": 5031669760
+  },
+  "template_net_projection": {
+    "sole_scalar_net_order_independent": true,
+    "net_presence_and_full_tokens_protected": true,
+    "other_pad_fields_and_nested_points_ordered": true,
+    "general_native_digest_unchanged": true
+  },
+  "raw_drc": {
+    "introduced": 6,
+    "resolved": 7,
+    "diagnostic_identity_replacements": 6,
+    "source_assignment_mismatch_resolved": 1,
+    "complete_report_equal_after_bijective_uuid_mapping_except_resolved_assignment": true
+  },
+  "retained_failures": [
+    "Initial evidence reviewer assumed an in-memory native-saved digest had a retained file; no PCB commit occurred",
+    "Initial recovery driver could not serialize its plan transcript after ENOSPC; exact committed source and unchanged PCB were verified before continuation",
+    "Subsequent plan native worker failed while free disk was low; native restoration had passed and exact recovered bytes were verified before continuation"
+  ],
+  "unqualified": [
+    "Other replacement geometry/template families",
+    "Explicit class/project/custom-rule transitions",
+    "Affected zones/generated copper",
+    "Composed bounds",
+    "GUI lifecycle",
+    "Three complete real-project final profiles"
+  ],
+  "general_synchronization_complete": false,
+  "product_complete": false,
+  "installed_runtime_fresh_codex_discovery": {
+    "passed": true,
+    "before_sha256": "0260964b121d0e7e0195be4f0675906e363b5d0a369b019e42f3bb58d4b45191",
+    "installed_sha256": "1a3e08ae3878fef4532d20f98dc62f299df4002586f15a13ddacd94e4d4e4dc2",
+    "tools": 13,
+    "synchronization_schemas_discovered": true,
+    "fresh_codex_connection": true,
+    "complete_install_upgrade_rollback_qualification_claimed": false,
+    "product_complete": false
+  },
+  "resource_cleanup": {
+    "sole_build_target_removed": true,
+    "pinned_runtime_cleanup": {
+      "run": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-mcp-quality-1793806084620538000",
+      "allocated_bytes_removed": 82182144,
+      "runtime_absent": true
+    },
+    "installed_runtime_retained": true,
+    "transparent_compression_files": 84,
+    "compressed_allocated_bytes_reclaimed": 446828544
+  },
+  "qualified_source_sha256": "ca4634128ca4135a37ddf0b970d5fdd5f6dc01e336e197a7f07d967aeefca520"
+}

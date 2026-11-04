@@ -705,7 +705,33 @@ impl SavedSynchronizationBoard {
                             hash.update(record);
                         }
                     } else {
+                        let canonical_pad_net = canonical_footprint && name == "pad";
+                        if canonical_pad_net {
+                            let nets = children
+                                .iter()
+                                .filter_map(|(_, child)| {
+                                    matches!(child, Node::List { .. })
+                                        .then(|| tag(child).is_ok_and(|tag| tag == "net"))
+                                        .filter(|is_net| *is_net)
+                                        .map(|_| *child)
+                                })
+                                .collect::<Vec<_>>();
+                            if nets.len() > 1 {
+                                return Err("duplicate protected template pad net".into());
+                            }
+                            hash.update([3, u8::from(!nets.is_empty())]);
+                            if let Some(net) = nets.first() {
+                                scalar(net)?;
+                                feed(hash, text, net, owner, allowed, canonical_footprint)?;
+                            }
+                        }
                         for (index, child) in children {
+                            if canonical_pad_net
+                                && matches!(child, Node::List { .. })
+                                && tag(child)? == "net"
+                            {
+                                continue;
+                            }
                             if property_allowed && index == 2 {
                                 hash.update([2]);
                             } else {
@@ -1601,6 +1627,53 @@ mod tests {
                 (pad "1" smd rect (uuid "22222222-2222-4222-8222-222222222222")
                     (at 0 0) (net "GND"))))"#
         )
+    }
+
+    #[test]
+    fn template_pad_net_slot_is_independent_of_exact_ordered_physical_fields() {
+        let pad = "22222222-2222-4222-8222-222222222222";
+        let raw = fixture().replace(
+            "(at 0 0)",
+            "(at 0 0) (future_meta 7) (future_geometry (pts (xy 0 0) (xy 2 0) (xy 1 2)))",
+        );
+        let relocated = raw
+            .replace("(net \"GND\")", "")
+            .replace("(pad \"1\" smd rect", "(pad \"1\" smd rect (net \"GND\")");
+        let before = SavedSynchronizationBoard::parse(&raw).unwrap();
+        let after = SavedSynchronizationBoard::parse(&relocated).unwrap();
+        assert_eq!(
+            before.protected_template_digest(&[]).unwrap(),
+            after.protected_template_digest(&[]).unwrap()
+        );
+        assert_ne!(
+            before.protected_native_digest(&[]).unwrap(),
+            after.protected_native_digest(&[]).unwrap()
+        );
+        for corrupt in [
+            relocated.replace("GND", "OTHER"),
+            relocated.replace("(at 0 0)", "(at 0.000001 0)"),
+            relocated.replace("future_meta 7", "future_meta 8"),
+            relocated.replace("(xy 2 0) (xy 1 2)", "(xy 1 2) (xy 2 0)"),
+            relocated.replace(pad, "33333333-3333-4333-8333-333333333333"),
+            relocated.replace("(net \"GND\")", ""),
+        ] {
+            let corrupt = SavedSynchronizationBoard::parse(&corrupt).unwrap();
+            assert_ne!(
+                before.protected_template_digest(&[]).unwrap(),
+                corrupt.protected_template_digest(&[]).unwrap()
+            );
+        }
+        let renamed = SavedSynchronizationBoard::parse(&relocated.replace("GND", "OTHER")).unwrap();
+        let approved = vec![SynchronizationDifference {
+            uuid: pad.into(),
+            field: "net".into(),
+            before: Some("GND".into()),
+            after: Some("OTHER".into()),
+        }];
+        assert_eq!(
+            before.protected_template_digest(&approved).unwrap(),
+            renamed.protected_template_digest(&approved).unwrap()
+        );
     }
 
     #[test]
