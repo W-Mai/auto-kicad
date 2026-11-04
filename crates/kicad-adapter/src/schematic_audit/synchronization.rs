@@ -232,6 +232,27 @@ impl<'a> SourceIndex<'a> {
                 .or_default()
                 .push(pin);
         }
+        for component in audit.identities().components() {
+            let mut units = component
+                .units
+                .iter()
+                .map(SourceUnitKey::from)
+                .collect::<Vec<_>>();
+            units.sort();
+            let expected = audit
+                .pins()
+                .component_pin_numbers(&units)
+                .ok_or("missing complete source component pin universe")?;
+            let observed = pins.entry(Arc::<[SourceUnitKey]>::from(units)).or_default();
+            if observed
+                .iter()
+                .map(|pin| pin.key.number.clone())
+                .collect::<BTreeSet<_>>()
+                != *expected
+            {
+                return Err("logical pin records differ from complete component universe".into());
+            }
+        }
         let mut raw = BTreeMap::new();
         let mut fields = BTreeMap::new();
         for file in &audit.inner.parsed.files {
@@ -337,9 +358,6 @@ fn source_component(
             }
         }
     }
-    if pins.is_empty() {
-        return Err("synchronization component has no complete observed pins".into());
-    }
     let units = native
         .units
         .as_ref()
@@ -352,6 +370,11 @@ fn source_component(
         .collect::<Vec<_>>();
     if units.is_empty() {
         return Err("empty native component unit metadata".into());
+    }
+    if pins.is_empty() && units.iter().any(|unit| !unit.pins.is_empty()) {
+        return Err(
+            "empty active pin universe requires complete zero-pin native unit metadata".into(),
+        );
     }
     let mut shared = None;
     let mut common_fields = None::<BTreeMap<String, String>>;

@@ -1,0 +1,377 @@
+{
+  "scope": "Verified empty logical-pin universes and conservative existing zero-pin metadata",
+  "tested_versions": [
+    "10.0.7"
+  ],
+  "server_sha256": "0260964b121d0e7e0195be4f0675906e363b5d0a369b019e42f3bb58d4b45191",
+  "profiles": [
+    {
+      "profile": "real-pic-observation",
+      "receipt": "m5-sync-real-families-1793792441415457000/pic_programmer/empty-source-observation-1793793314381194000/result.json",
+      "receipt_sha256": "a24481743878e020517ad542924de449d3c08d41da6dfb367f0bb90a30d2aac9",
+      "result": {
+        "passed": true,
+        "native_version": "10.0.7",
+        "components": 63,
+        "complete_zero_pin_components": [
+          "P101",
+          "P102",
+          "P103",
+          "P104",
+          "P105",
+          "P106"
+        ],
+        "copper": 376,
+        "has_zones": true,
+        "server_sha256": "0260964b121d0e7e0195be4f0675906e363b5d0a369b019e42f3bb58d4b45191",
+        "project_configuration_unchanged": true,
+        "actual_public_observation": true,
+        "pcb_publication": false,
+        "gui_launched": false,
+        "product_complete": false
+      }
+    },
+    {
+      "profile": "zero-pin-public-control",
+      "receipt": "m5-sync-zero-pin-mcp-1793793825265212000/result.json",
+      "receipt_sha256": "6e66f48aa3f10c9c5a6192a00e398070f3db55d23a229785790ced9781006909",
+      "result": {
+        "passed": true,
+        "server_sha256": "0260964b121d0e7e0195be4f0675906e363b5d0a369b019e42f3bb58d4b45191",
+        "actual_stdio": true,
+        "zero_pin_relink_native_publication": true,
+        "zero_pin_source_value_publication": true,
+        "zero_pin_add_and_replace_rejected": true,
+        "unnumbered_pad_records_unchanged": true,
+        "unrelated_objects_unchanged": true,
+        "native_prepared_synthetic_control": true,
+        "real_project_gate_claimed": false,
+        "gui_launched": false,
+        "product_complete": false
+      }
+    },
+    {
+      "profile": "zero-pin-source-to-board-value",
+      "receipt": "m5-sync-zero-pin-mcp-1793793825265212000/metadata-update-1793794248589222000/result.json",
+      "receipt_sha256": "4f306803cce7a6e0494a86e54eed196def3249cadae0c8781b8c3fe7e29e305f",
+      "result": {
+        "passed": true,
+        "exact_single_value_difference": true,
+        "zero_pin_source_and_board_value_match": true,
+        "unnumbered_pad_and_all_other_records_preserved": true,
+        "actual_public_native_commit": true,
+        "server_sha256": "0260964b121d0e7e0195be4f0675906e363b5d0a369b019e42f3bb58d4b45191",
+        "real_project_gate_claimed": false,
+        "product_complete": false
+      }
+    },
+    {
+      "profile": "reproducible-driver",
+      "receipt": "m5-sync-zero-pin-tracked-driver/result.json",
+      "receipt_sha256": "5b357fbf2444dfd4998866842a0fa48c2607f57fca812948d9942c034b8f0646",
+      "result": {
+        "passed": true,
+        "server_sha256": "0260964b121d0e7e0195be4f0675906e363b5d0a369b019e42f3bb58d4b45191",
+        "actual_stdio": true,
+        "zero_pin_relink_native_publication": true,
+        "zero_pin_source_value_publication": true,
+        "zero_pin_source_and_board_value_match": true,
+        "zero_pin_add_and_replace_rejected": true,
+        "unnumbered_pad_records_unchanged": true,
+        "unrelated_objects_unchanged": true,
+        "native_prepared_synthetic_control": true,
+        "real_project_gate_claimed": false,
+        "gui_launched": false,
+        "product_complete": false
+      }
+    },
+    {
+      "profile": "electrical-stdio-kill-recovery",
+      "receipt": "m5-sync-public-interruption-1793793360299274000/qualification.json",
+      "receipt_sha256": "ca6d5019cc629c68bc9e2f7c08e07380027aac69227815351cf448c36e1631bb",
+      "result": {
+        "profile": "interruption",
+        "exit_code": 0,
+        "elapsed_seconds": 256.6246002910193,
+        "binary_sha256": "0260964b121d0e7e0195be4f0675906e363b5d0a369b019e42f3bb58d4b45191",
+        "product_complete": false,
+        "evidence": {
+          "passed": true,
+          "production_stdio": true,
+          "server_sha256": "0260964b121d0e7e0195be4f0675906e363b5d0a369b019e42f3bb58d4b45191",
+          "cases": [
+            {
+              "name": "actual-killed-stdio-recovery",
+              "later_user_bytes_preserved": true,
+              "fresh_restart_approval_required": true,
+              "actual_native_restoration": true
+            },
+            {
+              "name": "connected-sync",
+              "native_publication_committed": true
+            }
+          ],
+          "actual_stdio_writer_killed": true,
+          "private_snapshots_removed": true,
+          "configuration_unchanged": true,
+          "gui_launched": false,
+          "product_complete": false
+        }
+      }
+    },
+    {
+      "profile": "electrical-codex-client",
+      "receipt": "m5-sync-public-codex-1793793904846359000/qualification.json",
+      "receipt_sha256": "9e1622d3797d65ef47e2cdc6abb604a0ab9f03ee077c194acf396ff2b65a9cde",
+      "result": {
+        "profile": "codex",
+        "exit_code": 0,
+        "elapsed_seconds": 300.6212367909902,
+        "binary_sha256": "0260964b121d0e7e0195be4f0675906e363b5d0a369b019e42f3bb58d4b45191",
+        "product_complete": false,
+        "evidence": {
+          "passed": true,
+          "production_stdio": true,
+          "server_sha256": "0260964b121d0e7e0195be4f0675906e363b5d0a369b019e42f3bb58d4b45191",
+          "cases": [
+            {
+              "name": "source-drift",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-public-codex-1793793904846359000/project/sync.kicad_sch",
+              "rejected_before_write": true
+            },
+            {
+              "name": "source-drift",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-public-codex-1793793904846359000/project/sync.kicad_pcb",
+              "rejected_before_write": true
+            },
+            {
+              "name": "source-drift",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-public-codex-1793793904846359000/project/sync.kicad_pro",
+              "rejected_before_write": true
+            },
+            {
+              "name": "source-drift",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-public-codex-1793793904846359000/config/10.0/kicad_common.json",
+              "rejected_before_write": true
+            },
+            {
+              "name": "restart-approval",
+              "rejected_before_write": true
+            },
+            {
+              "name": "connected-sync",
+              "native_publication_committed": true
+            },
+            {
+              "name": "unchanged",
+              "mutation_approval_refused": true
+            }
+          ],
+          "actual_stdio_writer_killed": false,
+          "private_snapshots_removed": true,
+          "configuration_unchanged": true,
+          "gui_launched": false,
+          "product_complete": false
+        }
+      }
+    }
+  ],
+  "independent_zero_pin_source_seal": {
+    "passed": true,
+    "exact_combined_metadata_differences": 5,
+    "zero_pin_unit_metadata_retained": true,
+    "all_four_footprints_and_complete_geometry_tokens_preserved": true,
+    "unnumbered_pad_geometry_preserved": true,
+    "all_unselected_root_source_bytes_and_order_preserved": true,
+    "records": [
+      {
+        "domain": "pcb_sync",
+        "state": "committed"
+      },
+      {
+        "domain": "schematic",
+        "state": "committed"
+      },
+      {
+        "domain": "pcb_sync",
+        "state": "committed"
+      }
+    ],
+    "rehashed_artifacts": 14,
+    "real_project_gate_claimed": false,
+    "product_complete": false
+  },
+  "architecture_contracts": [
+    "complete nonempty component numbers",
+    "verified empty component numbers",
+    "absent and partial groups have no authority",
+    "contradictory native unit metadata rejects"
+  ],
+  "related_ecc83_real_family": {
+    "result": {
+      "passed": true,
+      "transport": "stdio",
+      "project": "ecc83",
+      "server_sha256": "702bad009999d0c062ea724c50d5ee45ad9aac95ca9bc0430d73927b1bed8da7",
+      "source_changed_components": [
+        "U1"
+      ],
+      "physical_source_units_changed": 3,
+      "all_complete_aliases_preserved": true,
+      "explicit_source_library_assignments": [
+        {
+          "reference": "R4",
+          "before": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal",
+          "after": "Footprints:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal",
+          "aliases": [
+            "/28f865a0-4433-4a53-bbd7-b62f276848e4/00000000-0000-0000-0000-00004549f3a2"
+          ]
+        },
+        {
+          "reference": "R2",
+          "before": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal",
+          "after": "Footprints:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal",
+          "aliases": [
+            "/28f865a0-4433-4a53-bbd7-b62f276848e4/00000000-0000-0000-0000-00004549f39d"
+          ]
+        },
+        {
+          "reference": "C1",
+          "before": "Capacitor_THT:CP_Radial_D10.0mm_P5.00mm",
+          "after": "Footprints:CP_Radial_D10.0mm_P5.00mm",
+          "aliases": [
+            "/28f865a0-4433-4a53-bbd7-b62f276848e4/00000000-0000-0000-0000-00004549f4be"
+          ]
+        },
+        {
+          "reference": "R3",
+          "before": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal",
+          "after": "Footprints:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal",
+          "aliases": [
+            "/28f865a0-4433-4a53-bbd7-b62f276848e4/00000000-0000-0000-0000-00004549f3ad"
+          ]
+        },
+        {
+          "reference": "R1",
+          "before": "Resistor_THT:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal",
+          "after": "Footprints:R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal",
+          "aliases": [
+            "/28f865a0-4433-4a53-bbd7-b62f276848e4/00000000-0000-0000-0000-00004549f38a"
+          ]
+        },
+        {
+          "reference": "C2",
+          "before": "Capacitor_THT:C_Disc_D4.7mm_W2.5mm_P5.00mm",
+          "after": "Footprints:C_Disc_D4.7mm_W2.5mm_P5.00mm",
+          "aliases": [
+            "/28f865a0-4433-4a53-bbd7-b62f276848e4/00000000-0000-0000-0000-00004549f3be"
+          ]
+        }
+      ],
+      "resumed_source_value_receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-real-families-1793790814802580000/ecc83/actual-stdio-1793791438625814000",
+      "explicit_relinked_footprints": 15,
+      "unchanged_copper_objects": 59,
+      "source_configuration_preserved": true,
+      "full_drc_introduced": [],
+      "actual_source_native_verified": true,
+      "existing_zones_retained": true,
+      "affected_zone_sync_claimed": false,
+      "gui_launched": false,
+      "product_complete": false
+    },
+    "independent_source_seal": {
+      "passed": true,
+      "all_unselected_root_nodes_byte_exact_and_ordered": true,
+      "all_15_footprints_retained": true,
+      "all_footprint_pad_geometry_and_unknown_tokens_exact": true,
+      "exact_approved_differences": 67,
+      "root_zone_nodes_unchanged": 1,
+      "rehashed_artifacts": 9,
+      "source_runtime_sha256": "702bad009999d0c062ea724c50d5ee45ad9aac95ca9bc0430d73927b1bed8da7",
+      "product_complete": false
+    },
+    "separate_runtime_sha256": "702bad009999d0c062ea724c50d5ee45ad9aac95ca9bc0430d73927b1bed8da7"
+  },
+  "related_rejected_real_families": [
+    {
+      "project": "multichannel_mixer",
+      "observed_source_units": 169,
+      "reused_child_instances": 4,
+      "footprints": 114,
+      "actual_codex_source_value_edit": true,
+      "source_components_changed": [
+        "IC2",
+        "IC3",
+        "IC4",
+        "IC5"
+      ],
+      "source_library_assignment_rejected": true,
+      "reason": "Extra numbered MP and SN/RN/TN pads are absent from logical source pin sets",
+      "pcb_unchanged": true,
+      "full_public_sync_qualified": false
+    },
+    {
+      "project": "pic_programmer",
+      "full_observation_qualified": true,
+      "full_public_sync_qualified": false,
+      "reason": "D-sub footprint also has numbered SH pads absent from the source connector"
+    },
+    {
+      "project": "complex_hierarchy",
+      "native_preparation_qualified": false,
+      "bounded_save_passes": 3,
+      "reason": "Generated teardrop root blocks reorder; complete nodes match but exact final serialization does not stabilize",
+      "original_and_owned_project_boards_unchanged": true,
+      "additional_retries": 0
+    }
+  ],
+  "constraints": [
+    "Existing zero-pin targets require empty native unit pin lists and no numbered board pads",
+    "Unnumbered pads and complete physical/native definitions remain protected",
+    "Zero-pin creation, replacement and footprint assignment remain unsupported",
+    "Unmapped numbered mechanical, shield and switch pads remain conflicts",
+    "General class/project/affected-zone/generated/GUI/bounds and final project gates remain open"
+  ],
+  "retained_fixture_preparation_failure": "Initial native control attempted to assign read-only m_Uuid; the corrected helper uses SetUuid and the original failed log is retained",
+  "general_synchronization_complete": false,
+  "product_complete": false,
+  "quality": {
+    "exit_code": 0,
+    "aborted_for_disk": false,
+    "elapsed_seconds": 80.21133429199108,
+    "tests": [
+      592,
+      0,
+      17
+    ],
+    "observed_minimum_free_bytes": 5363810304,
+    "allocated_build_bytes_removed": 1210724352,
+    "unique_file_bytes_removed": 1201826622,
+    "target_absent": true,
+    "free_after_cleanup": 6250004480
+  },
+  "installed_runtime_fresh_codex_discovery": {
+    "passed": true,
+    "installed_sha256": "0260964b121d0e7e0195be4f0675906e363b5d0a369b019e42f3bb58d4b45191",
+    "tools": 13,
+    "synchronization_schemas_discovered": true
+  },
+  "resource_cleanup": {
+    "runtimes": [
+      {
+        "runtime": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-mcp-quality-1793793138619678000/acceptance-runtime",
+        "allocated_bytes_removed": 82173952,
+        "absent": true
+      },
+      {
+        "runtime": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-mcp-quality-1793795213948323000/acceptance-runtime",
+        "allocated_bytes_removed": 82173952,
+        "absent": true
+      }
+    ],
+    "allocated_bytes_removed": 164347904,
+    "targets_absent": true,
+    "installed_runtime_retained": true,
+    "installed_discovery_receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-empty-installed-1793795411818963000/result.json"
+  }
+}

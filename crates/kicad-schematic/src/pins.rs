@@ -78,6 +78,7 @@ pub struct UnexportedPin {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SchematicPinIndex {
+    component_pins: BTreeMap<Arc<[SourceUnitKey]>, BTreeSet<String>>,
     pins: Vec<LogicalPin>,
     unexported: Vec<UnexportedPin>,
 }
@@ -412,6 +413,11 @@ fn occurrence(unit: &SymbolUnitIdentity, pin: &SourcePin) -> PinOccurrence {
 }
 
 impl SchematicPinIndex {
+    /// Complete active pin numbers for an exact exported component, including a verified empty set.
+    pub fn component_pin_numbers(&self, units: &[SourceUnitKey]) -> Option<&BTreeSet<String>> {
+        self.component_pins.get(units)
+    }
+
     pub fn pins(&self) -> &[LogicalPin] {
         &self.pins
     }
@@ -468,6 +474,7 @@ impl SchematicPinIndex {
             }
         }
         let mut pins = Vec::new();
+        let mut component_pins = BTreeMap::new();
         let mut expanded_count = 0_usize;
         let mut exported_units = BTreeSet::new();
         for component in identities.components() {
@@ -504,6 +511,12 @@ impl SchematicPinIndex {
                         .or_default()
                         .push((unit, pin));
                 }
+            }
+            if component_pins
+                .insert(unit_keys.clone(), active.keys().cloned().collect())
+                .is_some()
+            {
+                return Err("duplicate complete component pin universe".into());
             }
             for (number, occurrences) in active {
                 let (net, node) = nodes
@@ -563,7 +576,11 @@ impl SchematicPinIndex {
             }
         }
         pins.sort_by(|a, b| a.key.cmp(&b.key));
-        Ok(Self { pins, unexported })
+        Ok(Self {
+            component_pins,
+            pins,
+            unexported,
+        })
     }
 }
 
@@ -629,10 +646,67 @@ mod tests {
     }
 
     #[test]
+    fn complete_empty_component_is_distinct_from_absent_pin_authority() {
+        let root = "11111111-1111-4111-8111-111111111111";
+        let symbol = "22222222-2222-4222-8222-222222222222";
+        let bytes = format!(
+            r#"(kicad_sch (version 20260306) (generator eeschema) (uuid "{root}")
+            (lib_symbols (symbol "Test:Hole" (symbol "Hole_0_1")))
+            (symbol (uuid "{symbol}") (lib_id "Test:Hole") (unit 1) (at 10 10 0)
+                (property "Reference" "H1") (property "Value" "Hole")
+                (instances (project "pins" (path "/{root}" (reference "H1") (unit 1))))))"#
+        )
+        .into_bytes();
+        let parsed = parse_schematic("pins.kicad_sch", &bytes).unwrap();
+        let project = ParsedSchematicProject {
+            root_relative_path: "pins.kicad_sch".into(),
+            revision: SchematicArtifactRevision::new(
+                vec![parsed.artifact.clone()],
+                "10.0.7",
+                1,
+                false,
+            )
+            .unwrap(),
+            files: vec![parsed],
+            editor_lock_present: false,
+        };
+        let xml = format!(
+            r#"<export version="E"><design><sheet number="1" name="/" tstamps="/"/></design>
+            <components><comp ref="H1"><value>Hole</value><libsource lib="Test" part="Hole"/>
+            <sheetpath names="/" tstamps="/"/><tstamps>{symbol}</tstamps>
+            <units><unit name="A"><pins/></unit></units></comp></components><nets/></export>"#
+        );
+        let native = parse_netlist_xml(xml.as_bytes(), NetlistLimits::default()).unwrap();
+        let index = resolve(&project, &native, &bytes).unwrap();
+        let key = SourceUnitKey {
+            file: "pins.kicad_sch".into(),
+            sheet_path: format!("/{root}"),
+            symbol_uuid: symbol.into(),
+        };
+        assert_eq!(
+            index.component_pin_numbers(std::slice::from_ref(&key)),
+            Some(&BTreeSet::new())
+        );
+        assert!(index.component_pin_numbers(&[]).is_none());
+        assert!(index.pins().is_empty() && index.unexported().is_empty());
+        let mut contradictory = native;
+        contradictory.components[0].units.as_mut().unwrap()[0]
+            .pins
+            .push("1".into());
+        assert!(resolve(&project, &contradictory, &bytes).is_err());
+    }
+
+    #[test]
     fn active_units_share_common_pins_and_preserve_reference_independent_membership() {
         let (project, netlist, bytes) = fixture("U1");
         let index = resolve(&project, &netlist, &bytes).unwrap();
         assert_eq!(index.pins().len(), 3);
+        let keys = &index.pins()[0].key.component_units;
+        assert_eq!(
+            index.component_pin_numbers(keys).unwrap(),
+            &BTreeSet::from(["1".into(), "2".into(), "7".into()])
+        );
+        assert!(index.component_pin_numbers(&keys[..1]).is_none());
         assert_eq!(
             index
                 .pins()

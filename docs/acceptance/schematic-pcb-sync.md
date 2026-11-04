@@ -49,6 +49,8 @@ Commit with `kicad_commit_change` using that preview's `approval_hash` and `vali
 
 Complete native source/candidate/saved-board evidence binds all retained objects, UUIDs, source resources, physical copper partitions, effective netclasses and raw DRC diagnostic multisets. Full native re-observation of the actual published PCB must match the approved candidate. Manual geometry, dimensions, field placement, unknown protected data and copper geometry remain unchanged. Native dimension-owned text shares its owner's UUID only under the qualified typed ownership rule; ordinary global UUID collisions reject.
 
+Existing zero-pin components retain [verified complete empty pin authority](schematic-empty-components.md) for observation and conservative metadata/relink of existing footprints. Zero-pin additions, replacements and footprint reassignment retain separate refusal gates.
+
 ## Copper and scope
 
 Changing a connected pad's net requires explicit net assignments for every affected observed copper object. `copper_nets` contains `{uuid,net}` entries. Track, arc, via and supported root copper graphics participate in complete physical partitions; a partition requiring incompatible source nets rejects. Unknown returned endpoints cannot be skipped. Supported root copper graphics are `gr_line`, `gr_arc`, `gr_circle`, `gr_rect` and `gr_poly` on canonical copper layers. Their geometry/layers remain protected; nested or other forms without matching source/native evidence reject.
