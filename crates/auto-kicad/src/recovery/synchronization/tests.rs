@@ -60,6 +60,7 @@ fn native_synchronization_publication_and_restart_recovery() {
             .observe_board(&project.join("sync.kicad_pcb"))
             .unwrap();
         let intent = SynchronizationIntent {
+            project_netclasses: vec![],
             schema_version: 1,
             actions: source
                 .components()

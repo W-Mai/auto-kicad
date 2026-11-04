@@ -6,7 +6,18 @@ use kicad_checks::{
     connectivity::{ClosedConnectivityEvidence, check_saved_connectivity},
 };
 use std::time::Duration;
+mod project_preview;
 mod publication;
+pub use project_preview::{
+    MatchedSynchronizationProjectBoardPreview, MatchedSynchronizationProjectPreview,
+    NetclassRecordChange, PreparedSynchronizationProjectBoardPublication,
+    PreparedSynchronizationProjectPublication, ProjectNetclassDelta, SourceNetclass,
+    SynchronizationIntentPreview, SynchronizationProjectBoardExpectation,
+    SynchronizationProjectBoardPreview, SynchronizationProjectExpectation,
+    SynchronizationProjectPreview, SynchronizationProjectRecoveryBaseline,
+    SynchronizationProjectWrite, VerifiedSynchronizationProjectBoardPublication,
+    VerifiedSynchronizationProjectPublication, VerifiedSynchronizationProjectRecovery,
+};
 pub use publication::{
     MatchedSynchronizationPreview, PreparedSynchronizationPublication, SynchronizationExpectation,
     SynchronizationRecoveryBaseline, VerifiedSynchronizationPublication,
@@ -29,6 +40,7 @@ pub struct SynchronizationBoardObservation {
 }
 
 pub struct SynchronizationBoardPreview {
+    project_transition_pending: bool,
     observation: Arc<SynchronizationBoardObservation>,
     candidate: SynchronizationCandidate,
     native: native::NativeBoardProjection,
@@ -179,6 +191,49 @@ impl SynchronizationSource {
     }
 }
 impl SynchronizationBoardObservation {
+    /// Bound raw selectors retain legacy/empty assignments and exact observed pattern indices.
+    pub fn project_netclass_selections(
+        &self,
+    ) -> Result<super::project::ProjectNetclassSelections, String> {
+        self.verify()?;
+        let observed = super::project::inspect_project_netclass_selections(
+            self.project
+                .bytes
+                .as_deref()
+                .ok_or("missing captured project settings")?,
+        )?;
+        self.verify()?;
+        Ok(observed)
+    }
+
+    /// Observe complete configured and effective classes with exact native project readback.
+    /// This remains closed-input observation and grants no project write approval.
+    pub fn observe_project_netclasses(
+        &self,
+    ) -> Result<project::native::ProjectNetclassSnapshot, String> {
+        self.verify()?;
+        let projected = native::capture_project(
+            &self.source.audit,
+            self.path.file_name().ok_or("missing board basename")?,
+            &self.bytes,
+            self.project
+                .bytes
+                .as_deref()
+                .ok_or("missing project bytes")?,
+        )?;
+        if projected.report != self.native.report {
+            return Err(
+                "project-class observation differs from complete original native board".into(),
+            );
+        }
+        projected.verify(&self.source.audit)?;
+        let classes = projected
+            .project_classes
+            .ok_or("missing complete project class inventory")?;
+        self.verify()?;
+        Ok(classes)
+    }
+
     pub fn digest(&self) -> &str {
         &self.digest
     }
@@ -371,17 +426,24 @@ impl SynchronizationBoardObservation {
         self: &Arc<Self>,
         intent: &SynchronizationIntent,
     ) -> Result<Arc<SynchronizationBoardPreview>, String> {
+        self.preview_candidate(intent, false, false)
+    }
+    fn preview_candidate(
+        self: &Arc<Self>,
+        intent: &SynchronizationIntent,
+        project_transition_pending: bool,
+        allow_empty: bool,
+    ) -> Result<Arc<SynchronizationBoardPreview>, String> {
         self.verify()?;
-        if intent.schema_version != 1
-            || intent.actions.len() > 128
-            || intent.copper_nets.len() > 4096
-        {
-            return Err("invalid synchronization version or action bound".into());
-        }
+        intent.validate_board(allow_empty)?;
         let (templates, compiled_intent) = self.prepare_templates(intent)?;
         let candidate = if templates.is_empty() {
-            self.source
-                .compile_board(&self.board, intent, &self.connectivity)?
+            self.source.compile_board_for_preview(
+                &self.board,
+                intent,
+                &self.connectivity,
+                allow_empty,
+            )?
         } else {
             let augmented = self.board.with_templates(&templates)?;
             let temporary = tempfile::Builder::new()
@@ -405,7 +467,12 @@ impl SynchronizationBoardObservation {
             )
             .map_err(|e| format!("template candidate connectivity: {e:?}"))?;
             self.source
-                .compile_board(&augmented, &compiled_intent, &connectivity)?
+                .compile_board_for_preview(
+                    &augmented,
+                    &compiled_intent,
+                    &connectivity,
+                    allow_empty,
+                )?
                 .bind_templates(&self.board, intent, &templates)?
         };
         let owner = tempfile::Builder::new()
@@ -440,12 +507,14 @@ impl SynchronizationBoardObservation {
             std::str::from_utf8(candidate.bytes()).map_err(|e| e.to_string())?,
         )?;
         raw.verify_native_units(&native.board)?;
-        native::verify_retained_netclasses(&self.native.report, &native.report)?;
-        native::verify_replacement_netclasses(
-            &self.native.report,
-            &native.report,
-            candidate.replacement_pads(),
-        )?;
+        if !project_transition_pending {
+            native::verify_retained_netclasses(&self.native.report, &native.report)?;
+            native::verify_replacement_netclasses(
+                &self.native.report,
+                &native.report,
+                candidate.replacement_pads(),
+            )?;
+        }
         for template in &templates {
             template
                 .verify_composed(&raw, candidate.differences())
@@ -494,12 +563,17 @@ impl SynchronizationBoardObservation {
             .compare_complete(&drc.report)
             .map_err(|e| e.to_string())?;
         self.verify()?;
-        let evidence = serde_json::json!({"schema_version":1,"observation_digest":self.digest,"source_digest":self.source.digest(),"candidate_digest":candidate.digest(),
+        let mut evidence = serde_json::json!({"schema_version":1,"observation_digest":self.digest,"source_digest":self.source.digest(),"candidate_digest":candidate.digest(),
             "before_board_sha256":self.board.digest(),"candidate_board_sha256":hash(candidate.bytes()),"project":self.project,"rules":self.rules,
             "has_changes":candidate.has_changes(),"differences":candidate.differences(),"templates":candidate.template_evidence(),"native_before":self.native.report,"native_after":native.report,
             "drc_before":self.drc.evidence,"drc_after":drc.evidence,"drc_delta":drc_delta,"connectivity_before":self.connectivity,"connectivity_after":connectivity,"native_after_digest":native.digest,"publication_authorized":false});
+        if project_transition_pending {
+            evidence["project_class_authority"] =
+                serde_json::json!("pending_composed_project_validation");
+        }
         let digest = hash(&serde_json::to_vec(&evidence).map_err(|e| e.to_string())?);
         let preview = Arc::new(SynchronizationBoardPreview {
+            project_transition_pending,
             observation: self.clone(),
             candidate,
             native,
@@ -602,6 +676,34 @@ impl SynchronizationBoardPreview {
         self.drc.verify(&self.observation.source.audit)?;
         for template in &self.templates {
             template.verify(&self.observation.source)?;
+        }
+        if native::bounded_read(&self.candidate_path, 128 * 1024 * 1024)? != self.candidate.bytes()
+        {
+            return Err("private synchronization candidate changed".into());
+        }
+        self.connectivity
+            .verify_saved_inputs(
+                &self.candidate_path,
+                &DrcPolicy {
+                    allowed_root: self._owner.path().into(),
+                    timeout: Duration::from_secs(60),
+                },
+            )
+            .map_err(|e| format!("{e:?}"))?;
+        Ok(())
+    }
+    fn verify_private_prefix(
+        &self,
+        prefix: &crate::schematic_audit::source_transition::VerifiedInputPrefix<'_>,
+    ) -> Result<(), String> {
+        let audit = &self.observation.source.audit;
+        audit.verify_publication_prefix(prefix)?;
+        require_closed(&self.observation.path)?;
+        verify_input(&self.observation.rules)?;
+        self.native.verify_execution(audit)?;
+        self.drc.verify_prefix(audit, prefix)?;
+        for template in &self.templates {
+            template.verify_prefix(&self.observation.source, prefix)?;
         }
         if native::bounded_read(&self.candidate_path, 128 * 1024 * 1024)? != self.candidate.bytes()
         {

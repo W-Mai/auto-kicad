@@ -78,6 +78,7 @@ fn main() -> Result<()> {
     let original = fs::read(&board)?;
     let observation = source.observe_board(&board)?;
     let mut intent = SynchronizationIntent {
+        project_netclasses: vec![],
         schema_version: 1,
         actions: source
             .components()

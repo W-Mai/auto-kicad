@@ -7,11 +7,20 @@ pub mod board;
 mod drc;
 mod native;
 mod observation;
+pub mod project;
 mod templates;
 pub use observation::{
-    MatchedSynchronizationPreview, PreparedSynchronizationPublication,
+    MatchedSynchronizationPreview, MatchedSynchronizationProjectBoardPreview,
+    MatchedSynchronizationProjectPreview, NetclassRecordChange,
+    PreparedSynchronizationProjectBoardPublication, PreparedSynchronizationProjectPublication,
+    PreparedSynchronizationPublication, ProjectNetclassDelta, SourceNetclass,
     SynchronizationBoardObservation, SynchronizationBoardPreview, SynchronizationExpectation,
-    SynchronizationRecoveryBaseline, VerifiedSynchronizationPublication,
+    SynchronizationIntentPreview, SynchronizationProjectBoardExpectation,
+    SynchronizationProjectBoardPreview, SynchronizationProjectExpectation,
+    SynchronizationProjectPreview, SynchronizationProjectRecoveryBaseline,
+    SynchronizationProjectWrite, SynchronizationRecoveryBaseline,
+    VerifiedSynchronizationProjectBoardPublication, VerifiedSynchronizationProjectPublication,
+    VerifiedSynchronizationProjectRecovery, VerifiedSynchronizationPublication,
     VerifiedSynchronizationRestoration,
 };
 

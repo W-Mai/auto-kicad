@@ -100,6 +100,30 @@ impl SavedFootprintTemplate {
     }
     pub fn verify(&self, source: &SynchronizationSource) -> Result<(), String> {
         source.verify()?;
+        self.verify_private(source)?;
+        self.worker.verify(
+            &source.audit,
+            self.runner
+                .execution_context()
+                .ok_or("missing template execution context")?,
+        )
+    }
+    pub(super) fn verify_prefix(
+        &self,
+        source: &SynchronizationSource,
+        prefix: &crate::schematic_audit::source_transition::VerifiedInputPrefix<'_>,
+    ) -> Result<(), String> {
+        source.audit.verify_publication_prefix(prefix)?;
+        self.verify_private(source)?;
+        self.worker.verify_prefix(
+            &source.audit,
+            self.runner
+                .execution_context()
+                .ok_or("missing template execution context")?,
+            prefix,
+        )
+    }
+    fn verify_private(&self, source: &SynchronizationSource) -> Result<(), String> {
         self.original.verify()?;
         self.private.verify()?;
         if tree_names(self.owner.path())? != self.tree
@@ -113,12 +137,7 @@ impl SavedFootprintTemplate {
         {
             return Err("synchronization template source/configuration/namespace changed".into());
         }
-        self.worker.verify(
-            &source.audit,
-            self.runner
-                .execution_context()
-                .ok_or("missing template execution context")?,
-        )
+        Ok(())
     }
 }
 

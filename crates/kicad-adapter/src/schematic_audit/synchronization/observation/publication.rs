@@ -27,7 +27,7 @@ pub struct VerifiedSynchronizationPublication {
     evidence: Value,
 }
 
-fn canonical_differences(
+pub(super) fn canonical_differences(
     rows: &[board::SynchronizationDifference],
 ) -> Result<Vec<board::SynchronizationDifference>, String> {
     if rows.len() > 100_000 {
@@ -69,6 +69,9 @@ impl SynchronizationBoardPreview {
         self: &Arc<Self>,
         mut expectation: SynchronizationExpectation,
     ) -> Result<MatchedSynchronizationPreview, String> {
+        if self.project_transition_pending {
+            return Err("composed project candidate cannot use legacy board-only approval".into());
+        }
         expectation.differences = canonical_differences(&expectation.differences)?;
         if expectation.differences != canonical_differences(self.candidate.differences())? {
             return Err("synchronization_diff_expectation_mismatch".into());

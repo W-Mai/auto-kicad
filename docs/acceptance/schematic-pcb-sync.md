@@ -1,6 +1,6 @@
 # Closed schematic-to-PCB synchronization
 
-The existing MCP tools synchronize a saved schematic hierarchy to its same-basename saved PCB. KiCad10.0.7 validates private candidates and the actual published board. Close the target schematic and PCB editors before observation, planning, publication and recovery. Publication writes only the PCB; schematic authoring is a separate approved operation. Project settings, rules, libraries and configuration remain unchanged.
+The existing MCP tools synchronize a saved schematic hierarchy to its same-basename saved PCB. KiCad10.0.7 validates private candidates and the actual published board. Close the target schematic and PCB editors before observation, planning, publication and recovery. Publication writes the PCB and explicitly selected project netclass settings as needed; schematic authoring is a separate approved operation. Rules, libraries, source schematics, configuration and unselected project tokens remain unchanged. Project-only publication preserves PCB bytes and modification time.
 
 ## Observe and select changes
 
@@ -57,11 +57,37 @@ Existing zero-pin components retain [verified complete empty pin authority](sche
 
 Changing a connected pad's net requires explicit net assignments for every affected observed copper object. `copper_nets` contains `{uuid,net}` entries. Track, arc, via and supported root copper graphics participate in complete physical partitions; a partition requiring incompatible source nets rejects. Unknown returned endpoints cannot be skipped. Supported root copper graphics are `gr_line`, `gr_arc`, `gr_circle`, `gr_rect` and `gr_poly` on canonical copper layers. Their geometry/layers remain protected; nested or other forms without matching source/native evidence reject.
 
-This workflow preserves project settings and effective rules. Explicit class/project/custom-rule changes, affected zones/generated copper, zero-pin additions and unqualified source/template families are outside this accepted workflow. The composed connectivity reader limits inputs to32MiB and4096 endpoints; larger parser limits do not grant a larger supported workflow. Synchronization messages are bounded to4MiB, plans to128 actions and4096 explicit copper assignments. Sessions retain at most4 observations and4 live plans for900seconds, with32 terminal summaries. Release retained resources through `kicad_inspect_project.schematic_pcb_sync` using `kind: "release"`, `observation_ids` and `plan_ids`; `kind: "history"` returns bounded session history.
+Requests without project actions preserve project settings and effective rules. Typed project netclass transitions require their separate complete expectations below. Other project fields, custom-rule interactions, affected zones/generated copper, zero-pin additions and unqualified source/template families remain unsupported. Any actual project netclass change rejects when a zone or custom-rule file is present; a byte-identical project no-op retains the ordinary PCB workflow and its existing checks. The composed connectivity reader limits inputs to32MiB and4096 endpoints; larger parser limits do not grant a larger supported workflow. Synchronization messages are bounded to4MiB, plans to128 actions and4096 explicit copper assignments. Sessions retain at most4 observations and4 live plans for900seconds, with32 terminal summaries. Release retained resources through `kicad_inspect_project.schematic_pcb_sync` using `kind: "release"`, `observation_ids` and `plan_ids`; `kind: "history"` returns bounded session history.
+
+## Typed project netclass changes
+
+Set `schematic_pcb_sync.project_netclasses: true` on the observation request to inspect complete configured and effective native classes. The response also contains `selections`: a project digest, actual `net_settings_version`, named assignments with their raw JSON tokens, and ordered patterns with observed indices and exact raw tokens. Legacy scalar and empty assignments are preserved. Observation grants no write authority, accepts no caller scope sets and returns no complete project file.
+
+Add `intent.project_netclasses` to the existing synchronization plan. Empty or omitted project actions retain the existing intent serialization and PCB-only behavior. Supported settings use `net_settings.meta.version: 5`; legacy project formats require an explicit native save on an owned copy before editing. The server does not migrate the source project automatically.
+
+| Action | Selected fields |
+| --- | --- |
+| `assign` | Observed `net`, complete `classes` list |
+| `remove_assignment` | Existing observed `net` |
+| `add_pattern` | Observed insertion `position`, `class`, `pattern` |
+| `update_pattern` | Observed `index`, selected `class` and/or `pattern` |
+| `remove_pattern` | Observed `index` |
+| `define` | `name`, optional `priority`, selected `dimensions` |
+| `remove_class` | Existing unreferenced `name` |
+
+Each dimension edit is `{field, change:{kind:"set", nm:INTEGER}}` or `{field, change:{kind:"inherit"}}`. Fields are `clearance`, `track_width`, `via_diameter`, `via_drill`, `microvia_diameter`, `microvia_drill`, `diff_pair_width`, `diff_pair_gap` and `diff_pair_via_gap`. Values use integer nanometres within 0–2,000,000,000. New definitions require an explicit nonnegative priority; `Default` retains its native priority and cannot be removed. Complete configured/effective class records bind definition state, values, parents, priorities, membership and tuning profile.
+
+Assignments combine with native pattern behavior. An empty assignment or removal can fall through to a matching pattern; it does not disable that pattern. Select pattern changes explicitly and review the complete effective result. Original exported class constituents remain protected references, so removing a matching pattern may require a separate approved edit before class removal. Duplicate edits, foreign nets, missing definitions, invalid indices and arbitrary JSON fields reject. Unknown unselected tokens, including large numeric tokens, remain exact.
+
+For a project-only change, `actions: []` and `copper_nets: []` are permitted with selected project actions. Complete existing source linkage, explicit orphan/exclusion disposition, metadata, pin/pad/net parity and physical preservation checks still run. No implicit `keep` action is synthesized. A verified project no-op produces no project write; if the PCB is also unchanged, it produces no approval or execution journal.
+
+A project-changing plan reports `publication_kind: "project_and_optional_board"`, `project_differences` and `netclass_delta` in addition to the PCB differences and DRC delta. Preview requires `schematic_pcb_sync: {differences, project_differences, netclasses, drc}`. `netclasses` is the complete planned `netclass_delta`, including `source_nets`, `configured` and `effective`; `drc` contains complete `introduced` and `resolved` records. A PCB-only expectation cannot approve a project-changing plan. A requested project no-op uses `publication_kind: "board_only"` and the existing PCB expectation.
 
 ## Durable publication and recovery
 
 PCB-only executions use domain `pcb_sync`, execution schema4 and `.auto-kicad-sync-pending`. The initial durable record binds exact backups, candidate, expected differences/DRC, native baseline and absent-before sibling staging path. The OS project writer lock and pending record prevent conflicting writes. An interrupted or ambiguous write remains uncertain and blocks ordinary writers.
+
+Project transitions use execution schema5 and recovery schema6, retaining PCB-only execution4/recovery5 encoding. Publish project settings before PCB bytes; omit the PCB write when its bytes are unchanged. Each destination has an exact candidate and owned staging prefix; fsync and source revalidation precede replacement. Restore in reverse order and reproduce the complete original native source, classes, PCB, connectivity and DRC before clearing the marker. Per-file atomic replacement does not provide filesystem-wide two-file atomicity.
 
 Use `kicad_plan_recovery` with `project_dir`, `attempt_id` and `action: "restore_backups"`, then the existing recovery preview/commit tools with fresh approval. Recovery reconstructs source authority through the current server policy and validates retained evidence; it never accepts arbitrary resource roots from the journal. Later user bytes, altered candidates/configuration and arbitrary staging content reject restoration. Only an exact approved candidate prefix in a known absent-before staging file can be removed. Exact original bytes, complete fresh native serialization/connectivity/DRC and terminal journal records are required before the marker clears. Recovery does not run automatically.
 

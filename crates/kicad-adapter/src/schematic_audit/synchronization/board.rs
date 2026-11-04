@@ -851,6 +851,25 @@ pub struct SynchronizationIntent {
     pub actions: Vec<SynchronizationAction>,
     #[serde(default)]
     pub copper_nets: Vec<SynchronizationCopperNet>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub project_netclasses: Vec<super::project::ProjectNetclassChange>,
+}
+impl SynchronizationIntent {
+    pub(super) fn validate_board(&self, allow_empty: bool) -> Result<(), String> {
+        if !self.project_netclasses.is_empty() {
+            return Err(
+                "project netclass actions require a composed synchronization preview".into(),
+            );
+        }
+        if self.schema_version != 1
+            || self.actions.len() > 128
+            || self.copper_nets.len() > 4096
+            || (!allow_empty && self.actions.is_empty() && self.copper_nets.is_empty())
+        {
+            return Err("invalid synchronization version or action bound".into());
+        }
+        Ok(())
+    }
 }
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1140,14 +1159,18 @@ impl SynchronizationSource {
         intent: &SynchronizationIntent,
         connectivity: &ClosedConnectivityEvidence,
     ) -> Result<SynchronizationCandidate, String> {
+        self.compile_board_for_preview(board, intent, connectivity, false)
+    }
+
+    pub(super) fn compile_board_for_preview(
+        &self,
+        board: &SavedSynchronizationBoard,
+        intent: &SynchronizationIntent,
+        connectivity: &ClosedConnectivityEvidence,
+        allow_empty: bool,
+    ) -> Result<SynchronizationCandidate, String> {
         self.verify()?;
-        if intent.schema_version != 1
-            || intent.actions.len() + intent.copper_nets.len() == 0
-            || intent.actions.len() > 128
-            || intent.copper_nets.len() > 4096
-        {
-            return Err("invalid synchronization version or action bound".into());
-        }
+        intent.validate_board(allow_empty)?;
         if connectivity.board_sha256() != board.digest() {
             return Err("physical connectivity belongs to different saved board bytes".into());
         }
@@ -1889,5 +1912,37 @@ mod tests {
             patches.finish().is_err(),
             "one source span cannot receive conflicting writes"
         );
+    }
+}
+
+#[cfg(test)]
+mod intent_contracts {
+    use super::*;
+    #[test]
+    fn legacy_intent_bytes_and_composed_project_boundary_are_preserved() {
+        let raw = r#"{"schema_version":1,"actions":[],"copper_nets":[]}"#;
+        let mut intent: SynchronizationIntent = serde_json::from_str(raw).unwrap();
+        assert_eq!(serde_json::to_string(&intent).unwrap(), raw);
+        assert!(intent.project_netclasses.is_empty());
+        assert!(intent.validate_board(false).is_err());
+        assert!(intent.validate_board(true).is_ok());
+        intent
+            .project_netclasses
+            .push(super::super::project::ProjectNetclassChange::Define {
+                name: "Unused".into(),
+                priority: Some(5),
+                dimensions: vec![],
+            });
+        assert!(intent.validate_board(false).is_err());
+        assert!(intent.validate_board(true).is_err());
+        assert!(
+            serde_json::to_value(&intent)
+                .unwrap()
+                .get("project_netclasses")
+                .is_some()
+        );
+        let invalid = serde_json::json!({"schema_version":1,"actions":[],"copper_nets":[],
+            "project_netclasses":[{"kind":"assign","net":"N","classes":["Power"],"allowed_nets":["N"]}]});
+        assert!(serde_json::from_value::<SynchronizationIntent>(invalid).is_err());
     }
 }

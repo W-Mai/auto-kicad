@@ -1,10 +1,10 @@
 {
-  "scope": "Closed saved-document PCB-only synchronization, complete expectations and guarded native recovery",
+  "scope": "Closed saved-document PCB synchronization with typed project netclass transitions",
   "tested_versions": [
     "10.0.7"
   ],
   "board_format": "20260206",
-  "server_sha256": "702bad009999d0c062ea724c50d5ee45ad9aac95ca9bc0430d73927b1bed8da7",
+  "server_sha256": "e30281315ae0a787c3e3923a6569062459878bf051438159aaf20d45996f267c",
   "source_formats_exercised": [
     "20250114",
     "20260306"
@@ -177,25 +177,57 @@
   "quality": {
     "exit_code": 0,
     "aborted_for_disk": false,
-    "elapsed_seconds": 90.27559337500134,
-    "tests": [
-      591,
-      0,
-      17
+    "elapsed_seconds": 128.86088445800124,
+    "source_unchanged": true,
+    "completed_commands": [
+      [
+        "python3",
+        "/Users/w-mai/Projects/auto-kicad/scripts/check-capability-matrix.py"
+      ],
+      [
+        "cargo",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      [
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      [
+        "cargo",
+        "test",
+        "--workspace",
+        "--",
+        "--test-threads=1"
+      ]
     ],
-    "observed_minimum_free_bytes": 5212864512,
-    "allocated_build_bytes_removed": 1209507840,
-    "unique_file_bytes_removed": 1200598877,
+    "tests": [
+      613,
+      0,
+      18
+    ],
+    "minimum_free_bytes": 364486656,
+    "allocated_build_bytes_removed": 1360674816,
     "target_absent": true,
-    "free_after_cleanup": 6455709696
+    "public_project_publication_complete": false,
+    "product_complete": false
   },
   "preservation": {
     "complete_native_serialization": true,
     "complete_drc_diagnostic_multisets": true,
     "complete_physical_partitions": true,
-    "source_project_rules_libraries_configuration_unchanged_during_sync": true,
     "real_copper_objects": 166,
-    "real_original_footprint_ids_preserved": true
+    "real_original_footprint_ids_preserved": true,
+    "source_rules_libraries_configuration_unchanged_during_sync": true,
+    "project_changes_only_exact_typed_selections": true,
+    "project_only_pcb_bytes_and_mtime_unchanged": true
   },
   "bounds": {
     "messages_bytes": 4194304,
@@ -206,7 +238,11 @@
     "observations": 4,
     "live_plans": 4,
     "ttl_seconds": 900,
-    "terminal_summaries": 32
+    "terminal_summaries": 32,
+    "project_actions": 128,
+    "configured_classes": 512,
+    "assignments": 4096,
+    "patterns": 4096
   },
   "real_addition": {
     "component": "TP1",
@@ -231,8 +267,8 @@
     "Real lifecycle driver used incorrect ObjectKind casing after successful source creation; continuation verifies exact committed source hash and unchanged PCB"
   ],
   "unqualified": [
-    "Explicit project settings/netclass/custom-rule transitions",
-    "Affected zones and generated copper",
+    "Project fields outside typed net_settings and direct source class declarations",
+    "Custom-rule interactions and affected zones/generated copper",
     "Zero-pin additions and remaining source/template families",
     "Larger composed bounds",
     "Complete GUI load/save lifecycle",
@@ -242,15 +278,567 @@
   "general_synchronization_complete": false,
   "product_complete": false,
   "installed_runtime_fresh_codex_discovery": {
+    "receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-project-installed-codex-1793835320967868000/result.json",
+    "receipt_sha256": "7d25421b80639c65037ed88f9be6518ad4133f80145548530c5a2c052486c07e",
     "passed": true,
-    "installed_sha256": "702bad009999d0c062ea724c50d5ee45ad9aac95ca9bc0430d73927b1bed8da7",
+    "actual_global_codex_registration": true,
+    "command_override_used": false,
+    "actual_installed_capabilities_call": true,
+    "installed_sha256": "e30281315ae0a787c3e3923a6569062459878bf051438159aaf20d45996f267c",
     "tools": 13,
-    "synchronization_schemas_discovered": true
+    "project_intent_and_complete_expectation_discovered": true,
+    "owned_children_terminal": true,
+    "owned_node_cache_bytes_removed": 0,
+    "private_roots_empty": true,
+    "gui_launched": false,
+    "product_complete": false
   },
   "final_resource_cleanup": {
-    "allocated_bytes_removed": 82059264,
-    "runtime_absent": true,
+    "build_targets_absent": true,
+    "temporary_runtimes_absent": true,
+    "previous_install_backup_bytes_removed": 39415808,
+    "allocated_build_bytes_removed": 5692039168,
     "installed_runtime_retained": true,
-    "build_targets_absent": true
+    "all_acceptance_handles_terminal": true,
+    "gui_launched": false,
+    "abrupt_server_cleanup_qualified": false
+  },
+  "project_netclass_workflow": {
+    "bounded_project_workflow_passed": true,
+    "binary_sha256": "e30281315ae0a787c3e3923a6569062459878bf051438159aaf20d45996f267c",
+    "source_manifest": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-project-mcp-runtime-1793834707942642000/source-sha256.json",
+    "quality": {
+      "exit_code": 0,
+      "aborted_for_disk": false,
+      "elapsed_seconds": 128.86088445800124,
+      "source_unchanged": true,
+      "completed_commands": [
+        [
+          "python3",
+          "/Users/w-mai/Projects/auto-kicad/scripts/check-capability-matrix.py"
+        ],
+        [
+          "cargo",
+          "fmt",
+          "--all",
+          "--",
+          "--check"
+        ],
+        [
+          "cargo",
+          "clippy",
+          "--workspace",
+          "--all-targets",
+          "--",
+          "-D",
+          "warnings"
+        ],
+        [
+          "cargo",
+          "test",
+          "--workspace",
+          "--",
+          "--test-threads=1"
+        ]
+      ],
+      "tests": [
+        613,
+        0,
+        18
+      ],
+      "minimum_free_bytes": 364486656,
+      "allocated_build_bytes_removed": 1360674816,
+      "target_absent": true,
+      "public_project_publication_complete": false,
+      "product_complete": false
+    },
+    "quality_receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-project-workspace-quality-1793834803669789000/result.json",
+    "quality_receipt_sha256": "b61deee2148754aefc227b382bde92926452929945a6d924837337eea3897a63",
+    "profiles": [
+      {
+        "profile": "public-action-families",
+        "receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-project-public-families-1793833963301032000/result.json",
+        "receipt_sha256": "ed6eb6f73d041d7407042c55322165d42f3a81fae4108f52738f76b0a42d80f5",
+        "binary_sha256": "556c01bb833d7530aee31fb10e38b09201be7366bad83ed40cb5814e94c6ecbe",
+        "result": {
+          "passed": true,
+          "binary_sha256": "556c01bb833d7530aee31fb10e38b09201be7366bad83ed40cb5814e94c6ecbe",
+          "production_stdio": true,
+          "all_typed_project_action_families": true,
+          "operations": [
+            {
+              "label": "define-set-and-pattern-add",
+              "actions": [
+                {
+                  "kind": "define",
+                  "name": "PublicLifecycle",
+                  "priority": 3,
+                  "dimensions": [
+                    {
+                      "field": "track_width",
+                      "change": {
+                        "kind": "set",
+                        "nm": 700001
+                      }
+                    }
+                  ]
+                },
+                {
+                  "kind": "add_pattern",
+                  "position": 1,
+                  "class": "Power",
+                  "pattern": "Net-(R1-~-Pad2)"
+                }
+              ],
+              "artifact_references_rehashed": 6,
+              "passed": true
+            },
+            {
+              "label": "inherit-priority-and-pattern-update",
+              "actions": [
+                {
+                  "kind": "define",
+                  "name": "PublicLifecycle",
+                  "priority": 4,
+                  "dimensions": [
+                    {
+                      "field": "track_width",
+                      "change": {
+                        "kind": "inherit"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "kind": "update_pattern",
+                  "index": 1,
+                  "class": "PublicLifecycle",
+                  "pattern": "__UNMATCHED_LIFECYCLE__*"
+                }
+              ],
+              "artifact_references_rehashed": 6,
+              "passed": true
+            },
+            {
+              "label": "empty-assignment-pattern-fallthrough",
+              "actions": [
+                {
+                  "kind": "update_pattern",
+                  "index": 1,
+                  "class": "Power",
+                  "pattern": "Net-(R1-~-Pad2)"
+                },
+                {
+                  "kind": "assign",
+                  "net": "Net-(R1-~-Pad2)",
+                  "classes": []
+                }
+              ],
+              "artifact_references_rehashed": 6,
+              "passed": true
+            },
+            {
+              "label": "remove-assignment-pattern-fallthrough",
+              "actions": [
+                {
+                  "kind": "remove_assignment",
+                  "net": "Net-(R1-~-Pad2)"
+                },
+                {
+                  "kind": "define",
+                  "name": "PublicLifecycle",
+                  "priority": null,
+                  "dimensions": [
+                    {
+                      "field": "track_width",
+                      "change": {
+                        "kind": "set",
+                        "nm": 700002
+                      }
+                    }
+                  ]
+                }
+              ],
+              "artifact_references_rehashed": 6,
+              "passed": true
+            },
+            {
+              "label": "assign-pattern-remove-and-class-remove",
+              "actions": [
+                {
+                  "kind": "assign",
+                  "net": "Net-(R1-~-Pad2)",
+                  "classes": [
+                    "Power"
+                  ]
+                },
+                {
+                  "kind": "remove_pattern",
+                  "index": 1
+                },
+                {
+                  "kind": "remove_class",
+                  "name": "PublicLifecycle"
+                }
+              ],
+              "artifact_references_rehashed": 6,
+              "passed": true
+            }
+          ],
+          "readonly_legacy_empty_and_exact_pattern_tokens": true,
+          "unselected_raw_tokens_preserved": true,
+          "complete_native_and_connectivity_preserved": true,
+          "pcb_bytes_and_mtime_preserved": true,
+          "private_roots_empty": true,
+          "gui_launched": false,
+          "full_project_workflow_accepted": false,
+          "product_complete": false
+        }
+      },
+      {
+        "profile": "public-connected-replacement",
+        "receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-project-public-native-1793834535351322000/result.json",
+        "receipt_sha256": "589ebe75767a45a55a00b6a4de6907eb7ac6dc75743060ab2d61c9f25ac2cd98",
+        "binary_sha256": "556c01bb833d7530aee31fb10e38b09201be7366bad83ed40cb5814e94c6ecbe",
+        "result": {
+          "passed": true,
+          "profiles": [
+            {
+              "profile": "replacement",
+              "passed": true,
+              "production_stdio": true,
+              "actual_codex_client": false,
+              "controls": [
+                "complete-expectation-required",
+                "ordinary-board-expectation-refused",
+                "duplicate-project-selection-refused",
+                "wrong-approval-and-evidence-refused",
+                "commit-replay-refused",
+                "project-no-op-without-physical-actions-refuses-approval"
+              ],
+              "write_count": 2,
+              "artifact_references_rehashed": 9,
+              "pcb_changed": true,
+              "pcb_mtime_preserved": false,
+              "configuration_unchanged": true,
+              "elapsed_seconds": 143.16475324999192,
+              "actual_public_project_recovery_or_codex_complete": false,
+              "product_complete": false,
+              "private_roots_empty": true,
+              "gui_launched": false
+            }
+          ],
+          "binary_sha256": "556c01bb833d7530aee31fb10e38b09201be7366bad83ed40cb5814e94c6ecbe",
+          "full_project_workflow_accepted": false,
+          "product_complete": false
+        }
+      },
+      {
+        "profile": "public-one-and-two-file-killed-writer-recovery",
+        "receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-project-public-recovery-1793833965234359000/result.json",
+        "receipt_sha256": "54fbf0ef32eec612719f83c4f8cea610fd2de0dece60e033bf1890e4ae6932b3",
+        "binary_sha256": "556c01bb833d7530aee31fb10e38b09201be7366bad83ed40cb5814e94c6ecbe",
+        "result": {
+          "passed": true,
+          "profiles": [
+            {
+              "profile": "project-only",
+              "passed": true,
+              "actual_production_stdio_writer_killed": true,
+              "interrupted_pid": 6289,
+              "publication_file_count": 1,
+              "project_and_pcb_later_bytes_preserved": true,
+              "restarted_plan_and_recovery_approvals_rejected": true,
+              "complete_actual_native_restoration": true,
+              "subsequent_public_commit": true,
+              "source_and_configuration_preserved": true,
+              "elapsed_seconds": 356.18644033401506,
+              "actual_codex_project_client_complete": false,
+              "product_complete": false,
+              "private_roots_empty": true,
+              "gui_launched": false
+            },
+            {
+              "profile": "routed",
+              "passed": true,
+              "actual_production_stdio_writer_killed": true,
+              "interrupted_pid": 7836,
+              "publication_file_count": 2,
+              "project_and_pcb_later_bytes_preserved": true,
+              "restarted_plan_and_recovery_approvals_rejected": true,
+              "complete_actual_native_restoration": true,
+              "subsequent_public_commit": true,
+              "source_and_configuration_preserved": true,
+              "elapsed_seconds": 442.837452458014,
+              "actual_codex_project_client_complete": false,
+              "product_complete": false,
+              "private_roots_empty": true,
+              "gui_launched": false
+            }
+          ],
+          "binary_sha256": "556c01bb833d7530aee31fb10e38b09201be7366bad83ed40cb5814e94c6ecbe",
+          "full_project_workflow_accepted": false,
+          "product_complete": false
+        }
+      },
+      {
+        "profile": "codex-one-and-two-file-publication",
+        "receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-project-public-codex-1793834141002211000/result.json",
+        "receipt_sha256": "e98e057eb6765f7abbf2e7794999487432d608363a6f9675c4262542b0e3b775",
+        "binary_sha256": "556c01bb833d7530aee31fb10e38b09201be7366bad83ed40cb5814e94c6ecbe",
+        "result": {
+          "passed": true,
+          "profiles": [
+            {
+              "profile": "project-only",
+              "passed": true,
+              "production_stdio": true,
+              "actual_codex_client": true,
+              "controls": [
+                "foreign-net-and-default-removal-refused",
+                "complete-expectation-required",
+                "ordinary-board-expectation-refused",
+                "duplicate-project-selection-refused",
+                "wrong-approval-and-evidence-refused",
+                "commit-replay-refused",
+                "project-no-op-without-physical-actions-refuses-approval"
+              ],
+              "write_count": 1,
+              "artifact_references_rehashed": 7,
+              "pcb_changed": false,
+              "pcb_mtime_preserved": true,
+              "configuration_unchanged": true,
+              "elapsed_seconds": 173.73298016597982,
+              "actual_public_project_recovery_or_codex_complete": false,
+              "product_complete": false,
+              "private_roots_empty": true,
+              "gui_launched": false
+            },
+            {
+              "profile": "routed",
+              "passed": true,
+              "production_stdio": true,
+              "actual_codex_client": true,
+              "controls": [
+                "complete-expectation-required",
+                "ordinary-board-expectation-refused",
+                "duplicate-project-selection-refused",
+                "wrong-approval-and-evidence-refused",
+                "commit-replay-refused",
+                "project-no-op-without-physical-actions-refuses-approval"
+              ],
+              "write_count": 2,
+              "artifact_references_rehashed": 9,
+              "pcb_changed": true,
+              "pcb_mtime_preserved": false,
+              "configuration_unchanged": true,
+              "elapsed_seconds": 203.27797604197985,
+              "actual_public_project_recovery_or_codex_complete": false,
+              "product_complete": false,
+              "private_roots_empty": true,
+              "gui_launched": false
+            }
+          ],
+          "binary_sha256": "556c01bb833d7530aee31fb10e38b09201be7366bad83ed40cb5814e94c6ecbe",
+          "full_project_workflow_accepted": false,
+          "product_complete": false
+        }
+      },
+      {
+        "profile": "final-codex-two-file-publication",
+        "receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-project-public-codex-1793834792492312000/result.json",
+        "receipt_sha256": "0ce18aeba522b097273372afa59524048b54454f3dbc014c55944808a9233b4b",
+        "binary_sha256": "e30281315ae0a787c3e3923a6569062459878bf051438159aaf20d45996f267c",
+        "result": {
+          "passed": true,
+          "profiles": [
+            {
+              "profile": "routed",
+              "passed": true,
+              "production_stdio": true,
+              "actual_codex_client": true,
+              "controls": [
+                "complete-expectation-required",
+                "ordinary-board-expectation-refused",
+                "duplicate-project-selection-refused",
+                "wrong-approval-and-evidence-refused",
+                "commit-replay-refused",
+                "project-no-op-without-physical-actions-refuses-approval"
+              ],
+              "write_count": 2,
+              "artifact_references_rehashed": 9,
+              "pcb_changed": true,
+              "pcb_mtime_preserved": false,
+              "configuration_unchanged": true,
+              "elapsed_seconds": 169.02027429101872,
+              "actual_public_project_recovery_or_codex_complete": false,
+              "product_complete": false,
+              "private_roots_empty": true,
+              "gui_launched": false
+            }
+          ],
+          "binary_sha256": "e30281315ae0a787c3e3923a6569062459878bf051438159aaf20d45996f267c",
+          "full_project_workflow_accepted": false,
+          "product_complete": false
+        }
+      },
+      {
+        "profile": "final-protected-input-drift",
+        "receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-project-public-drift-1793834792850958000/result.json",
+        "receipt_sha256": "3ca0ee4ec422fc6edbecb0105d569bb886c5d862e510d752f24947a3558580a8",
+        "binary_sha256": "e30281315ae0a787c3e3923a6569062459878bf051438159aaf20d45996f267c",
+        "result": {
+          "passed": true,
+          "binary_sha256": "e30281315ae0a787c3e3923a6569062459878bf051438159aaf20d45996f267c",
+          "actual_production_stdio": true,
+          "capability_metadata_verified": true,
+          "cases": [
+            {
+              "input": "project",
+              "rejected_before_journal": true,
+              "later_bytes_preserved": true,
+              "restored_old_approval_still_rejected": true
+            },
+            {
+              "input": "source",
+              "rejected_before_journal": true,
+              "later_bytes_preserved": true,
+              "restored_old_approval_still_rejected": true
+            },
+            {
+              "input": "board",
+              "rejected_before_journal": true,
+              "later_bytes_preserved": true,
+              "restored_old_approval_still_rejected": true
+            },
+            {
+              "input": "config",
+              "rejected_before_journal": true,
+              "later_bytes_preserved": true,
+              "restored_old_approval_still_rejected": true
+            }
+          ],
+          "private_roots_empty": true,
+          "gui_launched": false,
+          "product_complete": false
+        }
+      },
+      {
+        "profile": "final-zone-custom-rule-scope-and-no-op",
+        "receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-project-scope-guards-1793834829970910000/result.json",
+        "receipt_sha256": "9d11adc762f84a027426f9fc63cece88c29ded1143eab4b8bbe6bff668ff7a1d",
+        "binary_sha256": "e30281315ae0a787c3e3923a6569062459878bf051438159aaf20d45996f267c",
+        "result": {
+          "passed": true,
+          "binary_sha256": "e30281315ae0a787c3e3923a6569062459878bf051438159aaf20d45996f267c",
+          "profiles": [
+            {
+              "profile": "zoned",
+              "passed": true,
+              "actual_native_observation": true,
+              "project_change_rejected_before_publication": true,
+              "verified_project_no_op_unchanged": true,
+              "source_and_config_unchanged": true,
+              "private_roots_empty": true,
+              "gui_launched": false
+            },
+            {
+              "profile": "custom-rules",
+              "passed": true,
+              "actual_native_observation": true,
+              "project_change_rejected_before_publication": true,
+              "verified_project_no_op_unchanged": true,
+              "source_and_config_unchanged": true,
+              "private_roots_empty": true,
+              "gui_launched": false
+            }
+          ],
+          "product_complete": false
+        }
+      },
+      {
+        "profile": "legacy-execution4-recovery5-public-regression",
+        "receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-public-interruption-1793834358310761000/qualification.json",
+        "receipt_sha256": "65abaf65bcfc4b76b5e5deb8df957124b29b3d34c9c0d289b90d25b451872b80",
+        "binary_sha256": "556c01bb833d7530aee31fb10e38b09201be7366bad83ed40cb5814e94c6ecbe",
+        "result": {
+          "profile": "interruption",
+          "exit_code": 0,
+          "elapsed_seconds": 147.90595445799408,
+          "binary_sha256": "556c01bb833d7530aee31fb10e38b09201be7366bad83ed40cb5814e94c6ecbe",
+          "product_complete": false,
+          "evidence": {
+            "passed": true,
+            "production_stdio": true,
+            "server_sha256": "556c01bb833d7530aee31fb10e38b09201be7366bad83ed40cb5814e94c6ecbe",
+            "cases": [
+              {
+                "name": "actual-killed-stdio-recovery",
+                "later_user_bytes_preserved": true,
+                "fresh_restart_approval_required": true,
+                "actual_native_restoration": true
+              },
+              {
+                "name": "connected-sync",
+                "native_publication_committed": true
+              }
+            ],
+            "actual_stdio_writer_killed": true,
+            "private_snapshots_removed": true,
+            "configuration_unchanged": true,
+            "gui_launched": false,
+            "product_complete": false
+          }
+        }
+      },
+      {
+        "profile": "real-antenna-project-preferences",
+        "receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-project-real-nfc-1793834092993970000/actual-project-netclass-1793834273613155000/result.json",
+        "receipt_sha256": "dafcab6e1a088fdfdc4432a1d58621adbe5212ae1859257628d5c33af033b9a1",
+        "binary_sha256": "556c01bb833d7530aee31fb10e38b09201be7366bad83ed40cb5814e94c6ecbe",
+        "result": {
+          "passed": true,
+          "binary_sha256": "556c01bb833d7530aee31fb10e38b09201be7366bad83ed40cb5814e94c6ecbe",
+          "real_project": "RoyalBlue54L NFC antenna",
+          "actual_production_stdio": true,
+          "actual_net": "/ANT",
+          "track_width_preference_before_nm": 200000,
+          "track_width_preference_after_nm": 250000,
+          "retained_footprints": 2,
+          "retained_pads": 2,
+          "retained_copper": 166,
+          "pcb_bytes_and_mtime_preserved": true,
+          "complete_native_connectivity_and_drc_verified": true,
+          "all_unselected_source_resource_and_configuration_files_preserved": true,
+          "artifact_references_rehashed": 6,
+          "gui_launched": false,
+          "complete_distinct_real_project_final_gate": false,
+          "product_complete": false,
+          "private_roots_empty": true
+        }
+      }
+    ],
+    "durable_records_rechecked": 22,
+    "durable_artifacts_rehashed": 117,
+    "artifact_manifest": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/project-public-workflow-seal-1793835095922715000-artifacts.json",
+    "artifact_manifest_sha256": "c9d214f156d4567e5ef7a33a20f89e258c03d59421a0599910298e6d26d093ad",
+    "final_conservative_guard": {
+      "changed_source": "crates/kicad-adapter/src/schematic_audit/synchronization/observation/project_preview.rs",
+      "only_adds_zone_or_custom_rule_refusal": true,
+      "all_other_runtime_sources_identical": true,
+      "unguarded_function_sha256": "7f346e1966f109fdf5b5e966b6bcae71f1dcf5f9985156c4218dc2026622ffd2",
+      "guard_sha256": "09d540e9eb32c7be3990b689b14f36060a786c3d43192a0b299607665b5f1dea"
+    },
+    "prior_backend_journal_seal": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/project-journal-seal-1793830732972837000.json",
+    "prior_backend_journal_seal_sha256": "3284e6c0c94a46aff58bb57ce2efc8905f513d38e1d45aa88813c44ffc64090c",
+    "prior_backend_complete_scenarios": 23,
+    "prior_backend_actual_sigkill_scenarios": 21,
+    "prior_backend_artifacts_previously_rehashed": 1234,
+    "legacy_worker_unchanged": true,
+    "gui_launched": false,
+    "all_build_targets_absent": true,
+    "complete_m5b": false,
+    "three_distinct_real_project_final_gate": false,
+    "product_complete": false
   }
 }

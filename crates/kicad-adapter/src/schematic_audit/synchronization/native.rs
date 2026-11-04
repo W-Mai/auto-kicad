@@ -1,6 +1,8 @@
 //! Bounded isolated native readback of exact synchronization board bytes.
 use super::*;
+mod project_rules;
 use board::SavedSynchronizationBoard;
+pub(super) use project_rules::verify_project_endpoint_netclasses;
 use serde::Deserialize;
 #[cfg(unix)]
 use std::os::unix::{fs::OpenOptionsExt, process::CommandExt};
@@ -13,6 +15,11 @@ use std::{
 pub(super) const PYTHON: &str =
     "/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3.9";
 pub(super) const WORKER: &str = include_str!("../../../helpers/synchronization_board.py");
+pub(super) const PROJECT_WORKER: &str = concat!(
+    include_str!("../../../helpers/synchronization_board.py"),
+    "\n",
+    include_str!("../../../helpers/synchronization_project.py")
+);
 const MAX_INPUT: u64 = 128 * 1024 * 1024;
 const MAX_REPORT: u64 = 64 * 1024 * 1024;
 
@@ -106,12 +113,23 @@ pub(super) struct NativeReport {
     pub copper: Vec<NativeCopper>,
 }
 pub(super) struct NativeBoardProjection {
+    pub project_classes: Option<project::native::ProjectNetclassSnapshot>,
     pub board: SavedSynchronizationBoard,
     pub report: NativeReport,
     pub digest: String,
     worker: NativeWorkerReceipt,
 }
 impl NativeBoardProjection {
+    /// Recheck only fixed executable/environment authority after separately verified source transitions.
+    pub(super) fn verify_execution(&self, audit: &SchematicAudit) -> Result<(), String> {
+        self.worker.verify_execution(
+            audit
+                .inner
+                .runner
+                .execution_context()
+                .ok_or("missing native process context")?,
+        )
+    }
     pub fn verify(&self, audit: &SchematicAudit) -> Result<(), String> {
         self.worker.verify(
             audit,
@@ -137,6 +155,18 @@ impl NativeWorkerReceipt {
         context: &NativeExecutionContext,
     ) -> Result<(), String> {
         audit.verify()?;
+        self.verify_execution(context)
+    }
+    pub(super) fn verify_prefix(
+        &self,
+        audit: &SchematicAudit,
+        context: &NativeExecutionContext,
+        prefix: &crate::schematic_audit::source_transition::VerifiedInputPrefix<'_>,
+    ) -> Result<(), String> {
+        audit.verify_publication_prefix(prefix)?;
+        self.verify_execution(context)
+    }
+    fn verify_execution(&self, context: &NativeExecutionContext) -> Result<(), String> {
         context.verify().map_err(|e| e.to_string())?;
         if context.digest() != self.execution {
             return Err("native worker execution context changed".into());
@@ -294,6 +324,25 @@ pub(super) fn capture(
     bytes: &[u8],
     project: &[u8],
 ) -> Result<NativeBoardProjection, String> {
+    capture_with_worker(audit, filename, bytes, project, false)
+}
+
+pub(super) fn capture_project(
+    audit: &SchematicAudit,
+    filename: &std::ffi::OsStr,
+    bytes: &[u8],
+    project: &[u8],
+) -> Result<NativeBoardProjection, String> {
+    capture_with_worker(audit, filename, bytes, project, true)
+}
+
+fn capture_with_worker(
+    audit: &SchematicAudit,
+    filename: &std::ffi::OsStr,
+    bytes: &[u8],
+    project: &[u8],
+    project_classes: bool,
+) -> Result<NativeBoardProjection, String> {
     audit.verify()?;
     if bytes.is_empty()
         || bytes.len() as u64 > MAX_INPUT
@@ -323,8 +372,17 @@ pub(super) fn capture(
     let output = root.join(".native-result.kicad_pcb");
     write_new(&input, bytes)?;
     write_new(&pro, project)?;
-    let (report_bytes, worker) =
-        run_fixed_worker(audit, context, &root, WORKER, &[&input, &output])?;
+    let (report_bytes, worker) = run_fixed_worker(
+        audit,
+        context,
+        &root,
+        if project_classes {
+            PROJECT_WORKER
+        } else {
+            WORKER
+        },
+        &[&input, &output],
+    )?;
     let report: NativeReport = serde_json::from_slice(&report_bytes).map_err(|e| e.to_string())?;
     let saved = bounded_read(&output, MAX_INPUT)?;
     if report.native_version != "10.0.7"
@@ -343,11 +401,27 @@ pub(super) fn capture(
         SavedSynchronizationBoard::parse(std::str::from_utf8(bytes).map_err(|e| e.to_string())?)?;
     validate_native(&original, &report)?;
     original.verify_native_units(&board)?;
+    let project_classes = if project_classes {
+        let bytes = bounded_read(&root.join(".project-netclasses.json"), MAX_REPORT)?;
+        kicad_checks::validate_json_structure(&bytes).map_err(|e| e.to_string())?;
+        let observed: project::native::ProjectNetclassSnapshot =
+            serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        observed.validate(
+            &report.board_sha256,
+            project,
+            &serde_json::to_value(&report.netclasses).map_err(|e| e.to_string())?,
+        )?;
+        Some(observed)
+    } else {
+        None
+    };
+    let mut evidence = serde_json::json!({"report":report,"worker":worker});
+    if let Some(observed) = &project_classes {
+        evidence["project_classes"] = serde_json::to_value(observed).map_err(|e| e.to_string())?;
+    }
     let result = NativeBoardProjection {
-        digest: hash(
-            &serde_json::to_vec(&serde_json::json!({"report":report,"worker":worker}))
-                .map_err(|e| e.to_string())?,
-        ),
+        project_classes,
+        digest: hash(&serde_json::to_vec(&evidence).map_err(|e| e.to_string())?),
         board,
         report,
         worker,

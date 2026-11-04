@@ -28,6 +28,18 @@ impl SynchronizationDrcCapture {
     pub fn verify(&self, audit: &SchematicAudit) -> Result<(), String> {
         audit.verify()?;
         self.source.verify()?;
+        self.verify_private(audit)
+    }
+    pub(super) fn verify_prefix(
+        &self,
+        audit: &SchematicAudit,
+        prefix: &crate::schematic_audit::source_transition::VerifiedInputPrefix<'_>,
+    ) -> Result<(), String> {
+        audit.verify_publication_prefix(prefix)?;
+        prefix.verify_inputs(&[&self.source])?;
+        self.verify_private(audit)
+    }
+    fn verify_private(&self, audit: &SchematicAudit) -> Result<(), String> {
         self.private.verify()?;
         if tree_names(&self.project_root)? != self.project_tree
             || tree_names(&self.resources)? != self.resource_tree
@@ -103,12 +115,7 @@ pub(super) fn capture(
             &configuration.join(path.file_name().ok_or("missing configuration basename")?),
         )?;
     }
-    let original_project_root = audit
-        .inner
-        .policy
-        .schematic
-        .parent()
-        .ok_or("missing original schematic parent")?;
+    let original_project_root = &audit.inner.resource_root;
     let schematic = project_root.join(&audit.inner.parsed.root_relative_path);
     for file in &audit.inner.parsed.files {
         let original = audit

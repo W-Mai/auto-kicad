@@ -1,6 +1,7 @@
 //! Private native schematic observations with bound source and library inputs.
 mod assignment;
 mod preview;
+mod source_transition;
 pub mod synchronization;
 use crate::library_catalog::{
     FootprintCatalog, LibraryCatalogPolicy, SchematicFootprintContext,
@@ -392,6 +393,7 @@ struct SchematicAuditState {
     private_config_names: Vec<PathBuf>,
     initialized_local_preferences: Option<PathBuf>,
     policy: SchematicAuditPolicy,
+    resource_root: PathBuf,
     symbols: SymbolCatalog,
     symbol_context: SymbolLibraryContext,
     footprints: FootprintCatalog,
@@ -507,6 +509,13 @@ impl SchematicAudit {
     }
 
     fn verify_context(&self) -> Result<(), String> {
+        if canonical_dir(&self.inner.resource_root)? != self.inner.resource_root
+            || !std::iter::once(&self.inner.policy.project)
+                .chain(self.inner.policy.extra_roots.iter())
+                .any(|root| self.inner.resource_root.starts_with(root))
+        {
+            return Err("native resource anchor escaped server policy".into());
+        }
         self.inner.private_inputs.verify()?;
         self.inner.symbols.verify(&self.inner.symbol_context)?;
         if self
@@ -989,6 +998,7 @@ impl SchematicAudit {
                 private_config_names,
                 initialized_local_preferences,
                 policy: policy.clone(),
+                resource_root: source_root.to_path_buf(),
                 symbols,
                 symbol_context: sym_context,
                 footprints,

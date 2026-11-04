@@ -2492,8 +2492,7 @@ fn approval_hash(plan_hash: &str, evidence_hash: &str) -> String {
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PreviewChangeRequest {
-    pub schematic_pcb_sync:
-        Option<kicad_adapter::schematic_audit::synchronization::SynchronizationExpectation>,
+    pub schematic_pcb_sync: Option<schematic_sync::Expectation>,
     pub plan_id: String,
     pub plan_hash: String,
     pub request_id: Option<String>,
@@ -3766,7 +3765,10 @@ impl Server {
                     "available":self.execution_store.is_some() && self.library_settings.as_ref().as_ref().is_ok_and(|s|s.schematic_available()),
                     "requires_complete_difference_and_drc_expectation":true,"requires_durable_state":true,
                     "maximum_observations":4,"maximum_live_plans":4,"session_ttl_seconds":900,
-                    "publication_files":["kicad_pcb"],"project_settings_changes":false}
+                    "publication_files":["kicad_pro","kicad_pcb"],"project_settings_changes":true,
+                    "project_settings_scope":"typed_net_settings","project_only_preserves_pcb_bytes":true,
+                    "requires_complete_project_and_netclass_expectation":true,
+                    "project_netclass_actions":["assign","remove_assignment","add_pattern","update_pattern","remove_pattern","define","remove_class"]}
             }),
             diagnostics: Vec::new(),
             next_actions: Vec::new(),

@@ -21,6 +21,14 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
+mod preview;
+pub use preview::Expectation;
+use preview::{Matched, Preview};
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 const LIVE_LIMIT: usize = 4;
 const TERMINAL_LIMIT: usize = 32;
 const TTL: Duration = Duration::from_secs(900);
@@ -32,6 +40,8 @@ pub enum Inspection {
     Observe {
         project_root: String,
         root_schematic: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        project_netclasses: bool,
     },
     Release {
         #[serde(default)]
@@ -58,9 +68,9 @@ struct Observation {
     created: Instant,
 }
 enum Phase {
-    Planned(Arc<SynchronizationBoardPreview>),
+    Planned(Preview),
     Awaiting {
-        matched: MatchedSynchronizationPreview,
+        matched: Box<Matched>,
         approval: String,
         validation: String,
     },
@@ -156,7 +166,8 @@ impl Registry {
             Inspection::Observe {
                 project_root,
                 root_schematic,
-            } => self.observe(settings, &project_root, &root_schematic),
+                project_netclasses,
+            } => self.observe(settings, &project_root, &root_schematic, project_netclasses),
             Inspection::Release {
                 observation_ids,
                 plan_ids,
@@ -169,6 +180,7 @@ impl Registry {
         settings: &library_settings::SharedLibrarySettings,
         project: &str,
         schematic: &str,
+        project_netclasses: bool,
     ) -> Result<Value, String> {
         let root = fs::canonicalize(project).map_err(|e| e.to_string())?;
         let source = fs::canonicalize(schematic).map_err(|e| e.to_string())?;
@@ -199,10 +211,15 @@ impl Registry {
             let synchronization = audit.synchronization_source()?;
             let observed = synchronization.observe_board(&source.with_extension("kicad_pcb"))?;
             let id = self.id("observation");
-            let data = json!({"schema_version":1,"observation":"closed_schematic_pcb_sync","observation_id":id,
+            let mut data = json!({"schema_version":1,"observation":"closed_schematic_pcb_sync","observation_id":id,
                 "revision":observed.digest(),"project_root":root,"root_schematic":source,"board":observed.path(),
                 "components":synchronization.components(),"ineligible_units":synchronization.ineligible_units(),
                 "footprints":observed.board().footprints(),"copper":observed.board().routes().iter().map(|(uuid,(net,locked))|json!({"uuid":uuid,"net":net,"locked":locked})).collect::<Vec<_>>(),"has_zones":observed.board().has_zones(),"source_context":audit.evidence()?,"expires_in_seconds":TTL.as_secs()});
+            if project_netclasses {
+                let classes = observed.observe_project_netclasses()?;
+                data["project_netclasses"] = json!({"digest":classes.digest()?,"project_sha256":classes.project_sha256(),
+                    "board_sha256":classes.board_sha256(),"configured":classes.configured(),"effective":classes.effective(),"selections":observed.project_netclass_selections()?});
+            }
             bounded(&data)?;
             observed.verify()?;
             Ok((
@@ -273,7 +290,8 @@ impl Registry {
             || request_id.trim().is_empty()
             || source_run.len() > 4096
             || request_id.len() > 4096
-            || request.intent.actions.is_empty()
+            || (request.intent.actions.is_empty() && request.intent.project_netclasses.is_empty())
+            || request.intent.project_netclasses.len() > 128
             || request.intent.actions.len() > 128
             || request.intent.copper_nets.len() > 4096
         {
@@ -301,7 +319,7 @@ impl Registry {
                 .check_project_ready(&observation.project)
                 .map_err(|e| e.to_string())?;
             observation.observed.verify()?;
-            let preview = observation.observed.preview(&request.intent)?;
+            let preview = Preview::from(observation.observed.preview_intent(&request.intent)?);
             let id = self.id("plan");
             let intent = serde_json::to_string(&request.intent).map_err(|e| e.to_string())?;
             let hash = digest_text(&[
@@ -314,10 +332,22 @@ impl Registry {
                 &intent,
                 preview.digest(),
             ]);
-            let has_changes = preview.candidate().has_changes();
-            let data = json!({"schema_version":1,"operation_identity":"schematic-pcb-sync-v1","plan_id":id,"plan_hash":hash,
-                "state":if has_changes{"planned"}else{"unchanged"},"has_changes":has_changes,"differences":preview.candidate().differences(),
-                "drc_delta":preview.drc_delta(),"native_preview":preview.evidence(),"expires_in_seconds":TTL.as_secs()});
+            let has_changes = preview.has_changes();
+            let mut data = json!({"schema_version":1,"operation_identity":"schematic-pcb-sync-v1","plan_id":id,"plan_hash":hash,
+                "state":if has_changes{"planned"}else{"unchanged"},"has_changes":has_changes,"differences":preview.differences(),
+                "drc_delta":preview.drc(),"native_preview":preview.evidence(),"expires_in_seconds":TTL.as_secs()});
+            if !request.intent.project_netclasses.is_empty() {
+                if let Some(project) = preview.project_data() {
+                    data["publication_kind"] = json!("project_and_optional_board");
+                    for (key, value) in
+                        project.as_object().ok_or("invalid project planning data")?
+                    {
+                        data[key] = value.clone();
+                    }
+                } else {
+                    data["publication_kind"] = json!("board_only");
+                }
+            }
             bounded(&data)?;
             let phase = if has_changes {
                 Phase::Planned(preview)
@@ -356,12 +386,7 @@ impl Registry {
         }
         Ok(plan)
     }
-    pub fn preview(
-        &self,
-        id: &str,
-        hash: &str,
-        expectation: SynchronizationExpectation,
-    ) -> Result<Value, String> {
+    pub fn preview(&self, id: &str, hash: &str, expectation: Expectation) -> Result<Value, String> {
         bounded(&expectation)?;
         let plan = self.get(id, hash)?;
         let preview = {
@@ -371,7 +396,7 @@ impl Registry {
             }
             match std::mem::replace(&mut *phase, Phase::Busy) {
                 Phase::Planned(p) => p,
-                Phase::Awaiting { matched, .. } => matched.preview().clone(),
+                Phase::Awaiting { matched, .. } => matched.preview(),
                 _ => unreachable!(),
             }
         };
@@ -409,7 +434,7 @@ impl Registry {
             return Err(e);
         }
         *plan.phase.lock().expect("sync phase") = Phase::Awaiting {
-            matched,
+            matched: Box::new(matched),
             approval,
             validation,
         };
@@ -449,7 +474,7 @@ impl Registry {
                 attempt_id: None,
                 reason: e.to_string(),
             })
-            .and_then(|writer| writer.publish_matched_synchronization(hash, approval, matched));
+            .and_then(|writer| (*matched).publish(&writer, hash, approval));
         let data = match result {
             Ok(receipt) => {
                 json!({"schema_version":1,"plan_id":id,"state":"committed","receipt":receipt})

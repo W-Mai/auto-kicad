@@ -90,13 +90,72 @@ impl SchematicAudit {
         )?;
         additional.verify()?;
         let before_connectivity = self.observe_pin_connectivity()?;
+        let observed = self.observe_candidate_files(candidate.files())?;
+        if observed.inner.parsed != *candidate.parsed() {
+            return Err("native candidate source differs from compiled hierarchy".into());
+        }
+        children::verify_candidate_pages(&candidate, &observed)?;
+        additional.capture_resources(self, &observed, &observed.inner.policy.project)?;
+        let after_connectivity = observed.observe_pin_connectivity()?;
+        let erc_delta = self
+            .inner
+            .erc
+            .compare(&observed.inner.erc)
+            .map_err(|error| error.to_string())?;
+        self.verify()?;
+        observed.verify()?;
+        verify_edit_sources(self, edits)?;
+        let evidence = serde_json::json!({
+            "schema_version": 1,
+            "source_revision": self.inner.revision,
+            "source_artifacts": candidate.source_revision(),
+            "candidate_artifacts": candidate.parsed().revision,
+            "created_files": candidate.created_files(),
+            "additional_source_context": additional.evidence(),
+            "sheets_before": self.sheet_inventory()?,
+            "sheets_after": observed.sheet_inventory()?,
+            "operation_digest": hash(format!("{:?}", candidate.changes()).as_bytes()),
+            "source_context": self.evidence()?,
+            "candidate_context": observed.evidence()?,
+            "native_before": format!("{:?}", self.inner.netlist),
+            "native_after": format!("{:?}", observed.inner.netlist),
+            "erc_before": self.inner.erc,
+            "erc_after": observed.inner.erc,
+            "erc_delta": erc_delta,
+            "connectivity_before": connectivity_json(before_connectivity.connectivity()),
+            "connectivity_after": connectivity_json(after_connectivity.connectivity()),
+            "publication_authorized": false,
+        });
+        let digest = hash(&serde_json::to_vec(&evidence).map_err(|error| error.to_string())?);
+        Ok(Arc::new(SchematicEditPreview {
+            source: self.clone(),
+            additional,
+            observed,
+            candidate,
+            before_connectivity,
+            after_connectivity,
+            erc_delta,
+            evidence,
+            digest,
+            state: AtomicU8::new(READY),
+        }))
+    }
+}
+
+impl SchematicAudit {
+    /// Observe exact caller-internal candidates in an isolated source tree. No write authority.
+    pub(super) fn observe_candidate_files(
+        &self,
+        candidates: &BTreeMap<String, Vec<u8>>,
+    ) -> Result<SchematicAudit, String> {
+        self.verify()?;
         let snapshot = tempfile::Builder::new()
             .prefix("auto-kicad-schematic-preview-")
             .tempdir()
             .map_err(|error| error.to_string())?;
         let root = fs::canonicalize(snapshot.path()).map_err(|error| error.to_string())?;
         let project = root.join("project");
-        for (relative, bytes) in candidate.files() {
+        for (relative, bytes) in candidates {
             write_new(&project.join(relative), bytes)?;
         }
         // Copy protected resources separately from the exact schematic candidates.
@@ -108,7 +167,7 @@ impl SchematicAudit {
             {
                 if relative
                     .to_str()
-                    .is_some_and(|name| candidate.files().contains_key(name))
+                    .is_some_and(|name| candidates.contains_key(name))
                 {
                     continue;
                 }
@@ -155,57 +214,13 @@ impl SchematicAudit {
             &extra_roots,
         )?;
         let mut observed = SchematicAudit::prepare(&policy)?;
-        Arc::get_mut(&mut observed.inner)
-            .ok_or("candidate audit unexpectedly shared during initialization")?
-            ._source_owner = Some(Arc::new(snapshot));
-        if observed.inner.parsed != *candidate.parsed() {
-            return Err("native candidate source differs from compiled hierarchy".into());
-        }
-        children::verify_candidate_pages(&candidate, &observed)?;
-        additional.capture_resources(self, &observed, &project)?;
-        let after_connectivity = observed.observe_pin_connectivity()?;
-        let erc_delta = self
-            .inner
-            .erc
-            .compare(&observed.inner.erc)
-            .map_err(|error| error.to_string())?;
+        let state = Arc::get_mut(&mut observed.inner)
+            .ok_or("candidate audit unexpectedly shared during initialization")?;
+        state.resource_root = self.inner.resource_root.clone();
+        state._source_owner = Some(Arc::new(snapshot));
         self.verify()?;
         observed.verify()?;
-        verify_edit_sources(self, edits)?;
-        let evidence = serde_json::json!({
-            "schema_version": 1,
-            "source_revision": self.inner.revision,
-            "source_artifacts": candidate.source_revision(),
-            "candidate_artifacts": candidate.parsed().revision,
-            "created_files": candidate.created_files(),
-            "additional_source_context": additional.evidence(),
-            "sheets_before": self.sheet_inventory()?,
-            "sheets_after": observed.sheet_inventory()?,
-            "operation_digest": hash(format!("{:?}", candidate.changes()).as_bytes()),
-            "source_context": self.evidence()?,
-            "candidate_context": observed.evidence()?,
-            "native_before": format!("{:?}", self.inner.netlist),
-            "native_after": format!("{:?}", observed.inner.netlist),
-            "erc_before": self.inner.erc,
-            "erc_after": observed.inner.erc,
-            "erc_delta": erc_delta,
-            "connectivity_before": connectivity_json(before_connectivity.connectivity()),
-            "connectivity_after": connectivity_json(after_connectivity.connectivity()),
-            "publication_authorized": false,
-        });
-        let digest = hash(&serde_json::to_vec(&evidence).map_err(|error| error.to_string())?);
-        Ok(Arc::new(SchematicEditPreview {
-            source: self.clone(),
-            additional,
-            observed,
-            candidate,
-            before_connectivity,
-            after_connectivity,
-            erc_delta,
-            evidence,
-            digest,
-            state: AtomicU8::new(READY),
-        }))
+        Ok(observed)
     }
 }
 
@@ -344,7 +359,7 @@ fn pin_json(pin: &ConnectivityPin) -> Value {
     }
 }
 
-fn connectivity_json(connectivity: &PinConnectivity) -> Value {
+pub(super) fn connectivity_json(connectivity: &PinConnectivity) -> Value {
     serde_json::json!({
         "nets": connectivity.nets().iter().map(|net| serde_json::json!({
             "name": net.name, "class": net.class, "pins": net.pins.iter().map(pin_json).collect::<Vec<_>>(),

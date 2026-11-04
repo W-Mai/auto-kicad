@@ -10,14 +10,19 @@ mod file_publication;
 mod native_publication;
 mod publication;
 mod synchronization;
+mod synchronization_project;
 pub use synchronization::{
     NativeSynchronizationPublication, SynchronizationPublicationFailure,
     SynchronizationPublicationIntent,
+};
+pub use synchronization_project::{
+    NativeSynchronizationProjectPublication, SynchronizationProjectPublicationIntent,
 };
 
 enum ExecutionStart<'a, 'b> {
     Legacy(&'a [PathBuf]),
     Synchronization(&'a mut synchronization::Start<'b>),
+    SynchronizationProject(&'a mut synchronization_project::Start<'b>),
 }
 pub use native_publication::{NativeSchematicPublication, SchematicPublicationFailure};
 pub use publication::{
@@ -133,6 +138,8 @@ pub struct ExecutionRecord {
     pub publication: Option<SchematicPublicationIntent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sync_publication: Option<SynchronizationPublicationIntent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_project_publication: Option<SynchronizationProjectPublicationIntent>,
 }
 
 /// Exact observed existence of a source path; absence never uses an empty hash sentinel.
@@ -284,12 +291,17 @@ fn confined_existence_with_limit(
 
 fn valid_execution_schema(record: &ExecutionRecord) -> bool {
     if record.domain == synchronization::DOMAIN {
-        return record.schema_version == 4
-            && record.created_sources.is_empty()
+        return record.created_sources.is_empty()
             && record.publication.is_none()
-            && record.sync_publication.is_some();
+            && ((record.schema_version == 4
+                && record.sync_publication.is_some()
+                && record.sync_project_publication.is_none())
+                || (record.schema_version == 5
+                    && record.sync_publication.is_none()
+                    && record.sync_project_publication.is_some()));
     }
     record.sync_publication.is_none()
+        && record.sync_project_publication.is_none()
         && ((record.schema_version == 1
             && record.created_sources.is_empty()
             && record.publication.is_none())
@@ -576,7 +588,7 @@ impl ProjectWriter {
         }
         let created_paths = match &start {
             ExecutionStart::Legacy(paths) => *paths,
-            ExecutionStart::Synchronization(_) => &[],
+            ExecutionStart::Synchronization(_) | ExecutionStart::SynchronizationProject(_) => &[],
         };
         let created_sources = created_paths
             .iter()
@@ -598,7 +610,7 @@ impl ProjectWriter {
             .to_string_lossy()
             .into_owned();
         let sync_publication = match &start {
-            ExecutionStart::Legacy(_) => None,
+            ExecutionStart::Legacy(_) | ExecutionStart::SynchronizationProject(_) => None,
             ExecutionStart::Synchronization(sync) => Some(synchronization::make_intent(
                 &self.project,
                 &directory,
@@ -606,8 +618,16 @@ impl ProjectWriter {
                 sync,
             )?),
         };
+        let sync_project_publication = match &start {
+            ExecutionStart::SynchronizationProject(sync) => Some(
+                synchronization_project::make_intent(&self.project, &directory, &attempt_id, sync)?,
+            ),
+            _ => None,
+        };
         let record = ExecutionRecord {
-            schema_version: if sync_publication.is_some() {
+            schema_version: if sync_project_publication.is_some() {
+                5
+            } else if sync_publication.is_some() {
                 4
             } else if created_sources.is_empty() {
                 1
@@ -631,8 +651,10 @@ impl ProjectWriter {
             created_sources,
             publication: None,
             sync_publication,
+            sync_project_publication,
         };
         synchronization::validate_intent(&self.project, &record)?;
+        synchronization_project::validate_intent(&self.project, &record)?;
         let path = directory.join("record.json");
         let bytes = serde_json::to_vec(&record)?;
         if bytes.len() as u64 > MAX_RECORD_BYTES {
@@ -641,8 +663,10 @@ impl ProjectWriter {
         write_new(&path, &bytes)?;
         sync_directory(&directory)?;
         sync_directory(&self.records)?;
-        if let ExecutionStart::Synchronization(sync) = &mut start {
-            (sync.checkpoint)("intent")?;
+        match &mut start {
+            ExecutionStart::Synchronization(sync) => (sync.checkpoint)("intent")?,
+            ExecutionStart::SynchronizationProject(sync) => (sync.checkpoint)("intent")?,
+            _ => {}
         }
         let marker = if domain == synchronization::DOMAIN {
             Some(synchronization::PENDING)
@@ -665,8 +689,10 @@ impl ProjectWriter {
             write_new(&self.project.join(marker), &serde_json::to_vec(&pending)?)?;
             sync_directory(&self.project)?;
         }
-        if let ExecutionStart::Synchronization(sync) = &mut start {
-            (sync.checkpoint)("pending")?;
+        match &mut start {
+            ExecutionStart::Synchronization(sync) => (sync.checkpoint)("pending")?,
+            ExecutionStart::SynchronizationProject(sync) => (sync.checkpoint)("pending")?,
+            _ => {}
         }
         Ok(ExecutionAttempt { path, record })
     }
@@ -710,6 +736,14 @@ fn valid_id(id: &str) -> bool {
 }
 
 fn sync_intent_digest(record: &ExecutionRecord) -> io::Result<Option<String>> {
+    if let Some(intent) = &record.sync_project_publication {
+        if record.sync_publication.is_some() {
+            return Err(invalid("overlapping synchronization intents"));
+        }
+        return Ok(Some(
+            crate::digest_bytes(&serde_json::to_vec(intent)?).to_string(),
+        ));
+    }
     record
         .sync_publication
         .as_ref()
@@ -721,7 +755,14 @@ fn check_sync_dependencies(
     record: &ExecutionRecord,
     policy: Option<&kicad_adapter::schematic_audit::SchematicAuditPolicy>,
 ) -> io::Result<()> {
-    if record.domain == synchronization::DOMAIN {
+    if record.sync_project_publication.is_some() {
+        synchronization_project::check_dependencies(
+            record,
+            policy.ok_or_else(|| {
+                invalid("project synchronization recovery requires current server policy")
+            })?,
+        )?;
+    } else if record.domain == synchronization::DOMAIN {
         synchronization::baseline(record)?
             .verify_dependencies(policy.ok_or_else(|| {
                 invalid("synchronization recovery requires current server policy")
@@ -739,7 +780,9 @@ fn recovery_staging(
     project: &Path,
     record: &ExecutionRecord,
 ) -> io::Result<Vec<CreatedSchematicRecovery>> {
-    if record.domain == synchronization::DOMAIN {
+    if record.sync_project_publication.is_some() {
+        synchronization_project::recovery_staging(project, record)
+    } else if record.domain == synchronization::DOMAIN {
         synchronization::recovery_staging(project, record)
     } else {
         publication::recovery_staging(project, record)
@@ -827,6 +870,16 @@ impl ExecutionStore {
         {
             return Err(invalid("execution record identity mismatch"));
         }
+        if record.sync_project_publication.is_some() {
+            let directory = self.records_dir(project).join(id);
+            if record.backups.iter().enumerate().any(|(index, backup)| {
+                backup.saved != directory.join(format!("source-{index}.backup"))
+            }) {
+                return Err(invalid(
+                    "project synchronization backup escaped execution namespace",
+                ));
+            }
+        }
         Ok(record)
     }
 
@@ -837,6 +890,7 @@ impl ExecutionStore {
     ) -> io::Result<Vec<RecoveryFile>> {
         publication::validate_intent(project, record)?;
         synchronization::validate_intent(project, record)?;
+        synchronization_project::validate_intent(project, record)?;
         let record_path = self
             .records_dir(project)
             .join(&record.attempt_id)
@@ -873,9 +927,14 @@ impl ExecutionStore {
         }
         let backup_root = self.records_dir(project).join(&record.attempt_id);
         let mut paths = std::collections::BTreeSet::new();
-        record
-            .backups
-            .iter()
+        // Restore project transitions in reverse publication order: PCB, then project.
+        let backups = if record.sync_project_publication.is_some() {
+            record.backups.iter().rev().collect::<Vec<_>>()
+        } else {
+            record.backups.iter().collect::<Vec<_>>()
+        };
+        backups
+            .into_iter()
             .map(|backup| {
                 let extension = backup
                     .original
@@ -885,7 +944,10 @@ impl ExecutionStore {
                 let supported = match record.domain.as_str() {
                     "pcb" => matches!(extension, "kicad_pcb" | "kicad_pro" | "kicad_dru"),
                     "schematic" => extension == "kicad_sch",
-                    synchronization::DOMAIN => extension == "kicad_pcb",
+                    synchronization::DOMAIN => {
+                        extension == "kicad_pcb"
+                            || record.sync_project_publication.is_some() && extension == "kicad_pro"
+                    }
                     _ => false,
                 };
                 if !supported
@@ -922,6 +984,15 @@ impl ExecutionStore {
                 )
                 .or_else(|| {
                     synchronization::intended_state(
+                        record,
+                        &backup.original,
+                        &SourceExistence::Present {
+                            sha256: crate::digest_bytes(&current),
+                        },
+                    )
+                })
+                .or_else(|| {
+                    synchronization_project::intended_state(
                         record,
                         &backup.original,
                         &SourceExistence::Present {
@@ -998,11 +1069,17 @@ impl ExecutionStore {
         let path = self.recovery_dir(project).join(id).join("record.json");
         let record: RecoveryRecord =
             serde_json::from_slice(&read_bounded(&path, MAX_RECORD_BYTES)?)?;
-        if !(record.schema_version == 5
+        if !(record.schema_version == 6
             && record.domain == synchronization::DOMAIN
             && record.created_sources.is_empty()
-            && record.staging_files.len() == 1
+            && (1..=2).contains(&record.staging_files.len())
+            && record.files.len() == record.staging_files.len()
             && record.sync_intent_sha256.is_some()
+            || record.schema_version == 5
+                && record.domain == synchronization::DOMAIN
+                && record.created_sources.is_empty()
+                && record.staging_files.len() == 1
+                && record.sync_intent_sha256.is_some()
             || record.sync_intent_sha256.is_none()
                 && (record.schema_version == 2
                     && record.created_sources.is_empty()
@@ -1097,7 +1174,9 @@ impl ExecutionStore {
         let directory = root.join(&id);
         fs::create_dir(&directory)?;
         let mut record = RecoveryRecord {
-            schema_version: if execution.domain == synchronization::DOMAIN {
+            schema_version: if execution.sync_project_publication.is_some() {
+                6
+            } else if execution.domain == synchronization::DOMAIN {
                 5
             } else if !staging_files.is_empty() {
                 4
@@ -1300,6 +1379,11 @@ impl ExecutionStore {
         let result = (|| {
             for (index, file) in attempt.record.files.iter().enumerate() {
                 require_closed_project(&writer.project)?;
+                let execution =
+                    self.execution_record(&writer.project, &attempt.record.attempt_id)?;
+                if execution.sync_project_publication.is_some() {
+                    check_sync_dependencies(&execution, policy)?;
+                }
                 let bytes = read_bounded(&file.backup, MAX_FILE_BYTES)?;
                 if crate::digest_bytes(&bytes).to_string() != file.backup_sha256 {
                     return Err(invalid("backup changed during recovery"));
@@ -1309,6 +1393,9 @@ impl ExecutionStore {
                     .with_file_name(format!(".{recovery_id}-{index}.auto-kicad-recovery.tmp"));
                 write_new(&temporary, &bytes)?;
                 let result = (|| {
+                    if execution.sync_project_publication.is_some() {
+                        check_sync_dependencies(&execution, policy)?;
+                    }
                     let current = read_bounded(&file.original, MAX_FILE_BYTES)?;
                     if crate::digest_bytes(&current).to_string() != file.current_sha256 {
                         return Err(invalid("source changed during recovery"));
@@ -1323,6 +1410,9 @@ impl ExecutionStore {
                 let _ = fs::remove_file(&temporary);
                 result?;
                 checkpoint(index)?;
+                if execution.sync_project_publication.is_some() {
+                    check_sync_dependencies(&execution, policy)?;
+                }
             }
             for (index, source) in attempt.record.created_sources.iter().enumerate() {
                 require_closed_project(&writer.project)?;
@@ -1390,11 +1480,12 @@ impl ExecutionStore {
             let native_proof = if attempt.record.domain == synchronization::DOMAIN {
                 let execution =
                     self.execution_record(&writer.project, &attempt.record.attempt_id)?;
-                let proof = synchronization::baseline(&execution)?
-                    .verify_restored(policy.ok_or_else(|| {
+                let proof = synchronization_project::verify_restored(
+                    &execution,
+                    policy.ok_or_else(|| {
                         invalid("synchronization recovery requires current server policy")
-                    })?)
-                    .map_err(io::Error::other)?;
+                    })?,
+                )?;
                 let evidence = serde_json::json!({"kind":"restored","actual_native_baseline_verified":true,"native_verification_digest":proof.digest(),"native_evidence":proof.evidence()});
                 let directory = attempt.path.parent().expect("recovery directory");
                 write_new(
@@ -1487,7 +1578,7 @@ impl ExecutionStore {
                 }
                 let mut record: RecoveryRecord =
                     serde_json::from_slice(&read_bounded(&path, MAX_RECORD_BYTES)?)?;
-                if record.project_dir != project || !matches!(record.schema_version, 1..=5) {
+                if record.project_dir != project || !matches!(record.schema_version, 1..=6) {
                     return Err(invalid("invalid recovery history record"));
                 }
                 if record.state == "in_flight" {

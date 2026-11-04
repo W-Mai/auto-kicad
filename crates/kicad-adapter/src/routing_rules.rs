@@ -212,7 +212,7 @@ fn validate_json(raw: &RawValue, depth: usize, nodes: &mut usize) -> Result<(), 
     Ok(())
 }
 
-fn mm_to_nm(raw: &RawValue) -> Result<i64, String> {
+pub(crate) fn mm_to_nm(raw: &RawValue) -> Result<i64, String> {
     let number = raw.get();
     if number.len() > 128 || !number.as_bytes().first().is_some_and(u8::is_ascii_digit) {
         return Err("constraint must be a bounded nonnegative JSON number".into());

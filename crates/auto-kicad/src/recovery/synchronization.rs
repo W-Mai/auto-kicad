@@ -11,9 +11,9 @@ pub(super) const PENDING: &str = ".auto-kicad-sync-pending";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SynchronizationArtifact {
-    path: PathBuf,
-    sha256: kicad_model::RevisionDigest,
-    bytes: u64,
+    pub(super) path: PathBuf,
+    pub(super) sha256: kicad_model::RevisionDigest,
+    pub(super) bytes: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -60,7 +60,11 @@ impl std::fmt::Display for SynchronizationPublicationFailure {
 }
 impl std::error::Error for SynchronizationPublicationFailure {}
 
-fn artifact(directory: &Path, name: &str, bytes: &[u8]) -> io::Result<SynchronizationArtifact> {
+pub(super) fn artifact(
+    directory: &Path,
+    name: &str,
+    bytes: &[u8],
+) -> io::Result<SynchronizationArtifact> {
     let path = directory.join(name);
     write_new(&path, bytes)?;
     Ok(SynchronizationArtifact {
@@ -70,7 +74,7 @@ fn artifact(directory: &Path, name: &str, bytes: &[u8]) -> io::Result<Synchroniz
     })
 }
 
-fn read_artifact(
+pub(super) fn read_artifact(
     directory: &Path,
     artifact: &SynchronizationArtifact,
     name: &str,
@@ -441,9 +445,11 @@ impl ExecutionStore {
         if record.domain != DOMAIN {
             return Ok(None);
         }
-        Ok(Some(
-            baseline(&record)?.board_path().with_extension("kicad_sch"),
-        ))
+        Ok(Some(if record.sync_project_publication.is_some() {
+            synchronization_project::schematic(&record)?
+        } else {
+            baseline(&record)?.board_path().with_extension("kicad_sch")
+        }))
     }
     pub(crate) fn synchronization_schematic_for_recovery(
         &self,
