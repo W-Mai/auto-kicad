@@ -1,7 +1,7 @@
 //! Decode quoted atoms with KiCad lexer rules while retaining exact source spans.
 use kiutils_sexpr::{Atom, CstDocument, Node, ParseError};
 
-pub(crate) fn parse_one(text: &str) -> Result<CstDocument, ParseError> {
+pub fn parse_one(text: &str) -> Result<CstDocument, ParseError> {
     let mut document = kiutils_sexpr::parse_one(text)?;
     let mut pending = document.nodes.iter_mut().collect::<Vec<_>>();
     while let Some(node) = pending.pop() {

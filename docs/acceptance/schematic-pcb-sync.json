@@ -1,0 +1,256 @@
+{
+  "scope": "Closed saved-document PCB-only synchronization, complete expectations and guarded native recovery",
+  "tested_versions": [
+    "10.0.7"
+  ],
+  "board_format": "20260206",
+  "server_sha256": "702bad009999d0c062ea724c50d5ee45ad9aac95ca9bc0430d73927b1bed8da7",
+  "source_formats_exercised": [
+    "20250114",
+    "20260306"
+  ],
+  "profiles": [
+    {
+      "profile": "stdio-interruption",
+      "passed": true,
+      "receipt": "m5-sync-public-interruption-1793788099912213000/qualification.json",
+      "receipt_sha256": "66147dfe3b3110621bcd7547e5508ec4bb66e19a03a42ffa1e48d514934d3715",
+      "result": {
+        "profile": "interruption",
+        "exit_code": 0,
+        "elapsed_seconds": 287.8079282500257,
+        "binary_sha256": "702bad009999d0c062ea724c50d5ee45ad9aac95ca9bc0430d73927b1bed8da7",
+        "product_complete": false,
+        "evidence": {
+          "passed": true,
+          "production_stdio": true,
+          "server_sha256": "702bad009999d0c062ea724c50d5ee45ad9aac95ca9bc0430d73927b1bed8da7",
+          "cases": [
+            {
+              "name": "actual-killed-stdio-recovery",
+              "later_user_bytes_preserved": true,
+              "fresh_restart_approval_required": true,
+              "actual_native_restoration": true
+            },
+            {
+              "name": "connected-sync",
+              "native_publication_committed": true
+            }
+          ],
+          "actual_stdio_writer_killed": true,
+          "private_snapshots_removed": true,
+          "configuration_unchanged": true,
+          "gui_launched": false,
+          "product_complete": false
+        }
+      }
+    },
+    {
+      "profile": "codex-app-server-mcp",
+      "passed": true,
+      "receipt": "m5-sync-public-codex-1793788410048404000/qualification.json",
+      "receipt_sha256": "22f846cf98654096f0a8a0f69803d10dd6c93c75eee1d43452e354735a44d372",
+      "result": {
+        "profile": "codex",
+        "exit_code": 0,
+        "elapsed_seconds": 300.6139601249888,
+        "binary_sha256": "702bad009999d0c062ea724c50d5ee45ad9aac95ca9bc0430d73927b1bed8da7",
+        "product_complete": false,
+        "evidence": {
+          "passed": true,
+          "production_stdio": true,
+          "server_sha256": "702bad009999d0c062ea724c50d5ee45ad9aac95ca9bc0430d73927b1bed8da7",
+          "cases": [
+            {
+              "name": "source-drift",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-public-codex-1793788410048404000/project/sync.kicad_sch",
+              "rejected_before_write": true
+            },
+            {
+              "name": "source-drift",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-public-codex-1793788410048404000/project/sync.kicad_pcb",
+              "rejected_before_write": true
+            },
+            {
+              "name": "source-drift",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-public-codex-1793788410048404000/project/sync.kicad_pro",
+              "rejected_before_write": true
+            },
+            {
+              "name": "source-drift",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-public-codex-1793788410048404000/config/10.0/kicad_common.json",
+              "rejected_before_write": true
+            },
+            {
+              "name": "restart-approval",
+              "rejected_before_write": true
+            },
+            {
+              "name": "connected-sync",
+              "native_publication_committed": true
+            },
+            {
+              "name": "unchanged",
+              "mutation_approval_refused": true
+            }
+          ],
+          "actual_stdio_writer_killed": false,
+          "private_snapshots_removed": true,
+          "configuration_unchanged": true,
+          "gui_launched": false,
+          "product_complete": false
+        }
+      }
+    },
+    {
+      "profile": "real-source-metadata-and-pcb-relink",
+      "passed": true,
+      "receipt": "m5-sync-real-nfc-1793784815624352000/actual-edit-1793788059273686000/result.json",
+      "receipt_sha256": "49e8ef7632352ef813a1ee2b198bd3dfab8861551a73ad5d865db481ab443872",
+      "result": {
+        "passed": true,
+        "real_project": "RoyalBlue54L NFC antenna",
+        "actual_source_reference_value_commit": true,
+        "actual_explicit_pcb_relink": true,
+        "manual_copper_records_unchanged": 166,
+        "unselected_logo_record_unchanged": true,
+        "source_blank_project_label_preserved": true,
+        "configuration_unchanged": true,
+        "board_footprint_ids_preserved": true,
+        "remaining_real_add_remove_recovery_gate": true,
+        "gui_launched": false,
+        "product_complete": false
+      }
+    },
+    {
+      "profile": "real-electrical-add-remove-killed-writer-recovery",
+      "passed": true,
+      "receipt": "m5-sync-real-nfc-1793784815624352000/electrical-lifecycle-1793788912954580000/result.json",
+      "result": {
+        "passed": true,
+        "binary_sha256": "702bad009999d0c062ea724c50d5ee45ad9aac95ca9bc0430d73927b1bed8da7",
+        "stages": [
+          {
+            "stage": "create-antenna-probe",
+            "committed": true,
+            "resumed_receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-real-nfc-1793784815624352000/electrical-lifecycle-1793788582504905000"
+          },
+          {
+            "stage": "assign-antenna-probe-footprint",
+            "committed": true
+          },
+          {
+            "stage": "add-electrical-antenna-probe",
+            "committed": true
+          },
+          {
+            "stage": "remove-source-antenna-probe",
+            "committed": true
+          },
+          {
+            "stage": "remove-disconnected-antenna-probe",
+            "committed": true
+          },
+          {
+            "stage": "update-antenna-connector-value",
+            "committed": true
+          },
+          {
+            "stage": "real-killed-writer-native-recovery",
+            "passed": true
+          },
+          {
+            "stage": "metadata-sync-after-native-recovery",
+            "committed": true
+          }
+        ],
+        "real_project": "RoyalBlue54L NFC antenna",
+        "unchanged_copper_records": 166,
+        "original_footprint_ids_preserved": true,
+        "configuration_unchanged": true,
+        "gui_launched": false,
+        "product_complete": false
+      },
+      "independent_source_node_and_journal_seal_sha256": "bdba1946cf15165ed381d1e625337b5b1a4a2588ab3cd7754187267944fc6914"
+    }
+  ],
+  "quality": {
+    "exit_code": 0,
+    "aborted_for_disk": false,
+    "elapsed_seconds": 90.27559337500134,
+    "tests": [
+      591,
+      0,
+      17
+    ],
+    "observed_minimum_free_bytes": 5212864512,
+    "allocated_build_bytes_removed": 1209507840,
+    "unique_file_bytes_removed": 1200598877,
+    "target_absent": true,
+    "free_after_cleanup": 6455709696
+  },
+  "preservation": {
+    "complete_native_serialization": true,
+    "complete_drc_diagnostic_multisets": true,
+    "complete_physical_partitions": true,
+    "source_project_rules_libraries_configuration_unchanged_during_sync": true,
+    "real_copper_objects": 166,
+    "real_original_footprint_ids_preserved": true
+  },
+  "bounds": {
+    "messages_bytes": 4194304,
+    "connectivity_input_bytes": 33554432,
+    "connectivity_endpoints": 4096,
+    "actions": 128,
+    "explicit_copper_assignments": 4096,
+    "observations": 4,
+    "live_plans": 4,
+    "ttl_seconds": 900,
+    "terminal_summaries": 32
+  },
+  "real_addition": {
+    "component": "TP1",
+    "symbol": "Connector:TestPoint",
+    "footprint": "TestPoint:TestPoint_Pad_D1.0mm",
+    "net": "/ANT",
+    "position_nm": [
+      151450000,
+      113100000
+    ],
+    "explicitly_expected_unconnected_items": 1,
+    "autorouting_claimed": false
+  },
+  "legacy_board_preparation": {
+    "explicit_native_save_on_owned_copy": true,
+    "input_format": "20241229",
+    "output_format": "20260206",
+    "legacy_sync_support_claimed": false
+  },
+  "retained_failed_attempts": [
+    "Initial older driver redundantly declared already-updated copper nets",
+    "Real lifecycle driver used incorrect ObjectKind casing after successful source creation; continuation verifies exact committed source hash and unchanged PCB"
+  ],
+  "unqualified": [
+    "Explicit project settings/netclass/custom-rule transitions",
+    "Affected zones and generated copper",
+    "Zero-pin additions and remaining source/template families",
+    "Larger composed bounds",
+    "Complete GUI load/save lifecycle",
+    "Three distinct real-project final profiles",
+    "Automatic cleanup after abrupt client termination"
+  ],
+  "general_synchronization_complete": false,
+  "product_complete": false,
+  "installed_runtime_fresh_codex_discovery": {
+    "passed": true,
+    "installed_sha256": "702bad009999d0c062ea724c50d5ee45ad9aac95ca9bc0430d73927b1bed8da7",
+    "tools": 13,
+    "synchronization_schemas_discovered": true
+  },
+  "final_resource_cleanup": {
+    "allocated_bytes_removed": 82059264,
+    "runtime_absent": true,
+    "installed_runtime_retained": true,
+    "build_targets_absent": true
+  }
+}

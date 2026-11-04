@@ -115,31 +115,7 @@ impl<'de> Deserialize<'de> for RawMap {
     }
 }
 
-fn project_with_root(project: &[u8], root: &str) -> Result<Vec<u8>, String> {
-    let RawMap(mut top) = serde_json::from_slice(project).map_err(|e| e.to_string())?;
-    let mut vars = match top.remove("text_variables") {
-        Some(raw) => {
-            serde_json::from_str::<RawMap>(raw.get())
-                .map_err(|e| e.to_string())?
-                .0
-        }
-        None => BTreeMap::new(),
-    };
-    for value in vars.values() {
-        serde_json::from_str::<String>(value.get()).map_err(|e| e.to_string())?;
-    }
-    vars.insert(
-        "KIPRJMOD".into(),
-        RawValue::from_string(serde_json::to_string(root).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?,
-    );
-    top.insert(
-        "text_variables".into(),
-        RawValue::from_string(serde_json::to_string(&vars).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?,
-    );
-    serde_json::to_vec(&top).map_err(|e| e.to_string())
-}
+use kicad_adapter::native_project::project_with_root;
 
 fn environment() -> Result<String, String> {
     let values = std::env::vars_os()

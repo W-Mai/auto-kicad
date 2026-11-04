@@ -12,6 +12,7 @@ mod library_settings;
 pub mod recovery;
 pub mod routing_rules;
 pub mod schematic_authoring;
+pub mod schematic_sync;
 
 use kicad_adapter::{
     BoardGraphicsCommitOutcome, BoardGraphicsExecutor, DiscoveryInput, DisposablePcbLifecycle,
@@ -1887,8 +1888,11 @@ fn observe_documents<T: kicad_ipc::KiCadTransport>(
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PlanBoardGraphicsRequest {
+    pub schematic_pcb_sync: Option<schematic_sync::Request>,
     pub geometry: Option<kicad_model::geometry::GeometryRequest>,
+    #[serde(default)]
     pub endpoint: String,
     pub source_run_id: String,
     pub segments: Option<Value>,
@@ -2486,13 +2490,17 @@ fn approval_hash(plan_hash: &str, evidence_hash: &str) -> String {
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PreviewChangeRequest {
+    pub schematic_pcb_sync:
+        Option<kicad_adapter::schematic_audit::synchronization::SynchronizationExpectation>,
     pub plan_id: String,
     pub plan_hash: String,
     pub request_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct CommitChangeRequest {
     pub plan_id: String,
     pub plan_hash: String,
@@ -3270,6 +3278,7 @@ struct StoredDrcBaseline {
 #[derive(Clone)]
 pub struct Server {
     general_schematic: Arc<schematic_authoring::Registry>,
+    schematic_sync: Arc<schematic_sync::Registry>,
     library_settings: library_settings::SharedLibrarySettings,
     execution_store: Option<Arc<recovery::ExecutionStore>>,
     sessions: Arc<Mutex<BTreeMap<String, StoredChangeSession>>>,
@@ -3313,10 +3322,13 @@ pub struct SchematicAuditRequest {
 }
 
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct InspectProjectRequest {
+    pub schematic_pcb_sync: Option<schematic_sync::Inspection>,
     /// Include complete bounded native zone and board-level outline summaries.
     pub geometry: Option<bool>,
     pub routing_rules: Option<routing_rules::RoutingRulesRequest>,
+    #[serde(default)]
     pub endpoint: String,
     pub footprint_source: Option<FootprintSourceRequest>,
     pub project_dir: Option<String>,
@@ -3587,6 +3599,7 @@ impl Server {
         Self {
             library_settings,
             general_schematic: Arc::new(schematic_authoring::Registry::default()),
+            schematic_sync: Arc::new(schematic_sync::Registry::default()),
             execution_store: None,
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             schematic_sessions: Arc::new(Mutex::new(BTreeMap::new())),
@@ -3748,7 +3761,12 @@ impl Server {
                     "status": capability.status
                 })).collect::<Vec<_>>(),
                 "capability_matrix": self.capability_matrix(),
-                "advertised_tools": advertised_tools
+                "advertised_tools": advertised_tools,
+                "schematic_pcb_sync": {"backend":"closed_saved_documents","native_version":"10.0.7",
+                    "available":self.execution_store.is_some() && self.library_settings.as_ref().as_ref().is_ok_and(|s|s.schematic_available()),
+                    "requires_complete_difference_and_drc_expectation":true,"requires_durable_state":true,
+                    "maximum_observations":4,"maximum_live_plans":4,"session_ttl_seconds":900,
+                    "publication_files":["kicad_pcb"],"project_settings_changes":false}
             }),
             diagnostics: Vec::new(),
             next_actions: Vec::new(),
@@ -4049,6 +4067,25 @@ impl Server {
             .request_id
             .unwrap_or_else(|| "req_inspect_project".to_owned());
         let project_dir = arguments.project_dir.as_deref().map(std::path::Path::new);
+        if let Some(sync) = arguments.schematic_pcb_sync {
+            if !arguments.endpoint.is_empty()
+                || arguments.geometry.is_some()
+                || arguments.routing_rules.is_some()
+                || arguments.footprint_source.is_some()
+                || arguments.project_dir.is_some()
+            {
+                return Ok(self.rejected(
+                    request_id,
+                    "schematic_pcb_sync inspection requires its own closed-document request",
+                ));
+            }
+            let registry = self.schematic_sync.clone();
+            let settings = self.library_settings.clone();
+            let result = tokio::task::spawn_blocking(move || registry.inspect(&settings, sync))
+                .await
+                .unwrap_or_else(|e| Err(format!("synchronization inspection worker failed: {e}")));
+            return self.general_schematic_response(request_id, result);
+        }
         if let Some(query) = &arguments.routing_rules {
             routing_rules::validate_selection(&query.net_ids)
                 .map_err(|reason| ErrorData::invalid_params(reason, None))?;
@@ -4232,10 +4269,34 @@ impl Server {
         let Some(store) = &self.execution_store else {
             return Ok(self.rejected(request_id, "recovery_unavailable"));
         };
-        let record = match store.plan_recovery(
-            std::path::Path::new(&arguments.project_dir),
+        let project = std::path::Path::new(&arguments.project_dir);
+        let policy = match schematic_sync::recovery_policy(
+            &self.library_settings,
+            store,
+            project,
             &arguments.attempt_id,
+            true,
         ) {
+            Ok(policy) => policy,
+            Err(e) => return Ok(self.rejected(request_id, &e)),
+        };
+        let result = if let Some(policy) = policy {
+            let store = store.clone();
+            let attempt = arguments.attempt_id.clone();
+            tokio::task::spawn_blocking(move || {
+                store.plan_synchronization_recovery(&policy, &attempt)
+            })
+            .await
+            .map_err(|e| {
+                ErrorData::internal_error(
+                    format!("synchronization recovery planning worker failed: {e}"),
+                    None,
+                )
+            })?
+        } else {
+            store.plan_recovery(project, &arguments.attempt_id)
+        };
+        let record = match result {
             Ok(record) => record,
             Err(error) => return Ok(self.rejected(request_id, &error.to_string())),
         };
@@ -4274,11 +4335,39 @@ impl Server {
         let Some(store) = &self.execution_store else {
             return Ok(self.rejected(request_id, "recovery_unavailable"));
         };
-        let approval_hash = match store.preview_recovery(
-            std::path::Path::new(&arguments.project_dir),
+        let project = std::path::Path::new(&arguments.project_dir);
+        let policy = match schematic_sync::recovery_policy(
+            &self.library_settings,
+            store,
+            project,
             &arguments.recovery_id,
-            &arguments.recovery_plan_hash,
+            false,
         ) {
+            Ok(policy) => policy,
+            Err(e) => return Ok(self.rejected(request_id, &e)),
+        };
+        let result = if let Some(policy) = policy {
+            let store = store.clone();
+            let id = arguments.recovery_id.clone();
+            let hash = arguments.recovery_plan_hash.clone();
+            tokio::task::spawn_blocking(move || {
+                store.preview_synchronization_recovery(&policy, &id, &hash)
+            })
+            .await
+            .map_err(|e| {
+                ErrorData::internal_error(
+                    format!("synchronization recovery preview worker failed: {e}"),
+                    None,
+                )
+            })?
+        } else {
+            store.preview_recovery(
+                project,
+                &arguments.recovery_id,
+                &arguments.recovery_plan_hash,
+            )
+        };
+        let approval_hash = match result {
             Ok(hash) => hash,
             Err(error) => return Ok(self.rejected(request_id, &error.to_string())),
         };
@@ -4309,12 +4398,42 @@ impl Server {
             return Ok(self.rejected(request_id, "recovery_unavailable"));
         };
         let project = std::path::Path::new(&arguments.project_dir);
-        let result = store.commit_recovery(
+        let policy = match schematic_sync::recovery_policy(
+            &self.library_settings,
+            store,
             project,
             &arguments.recovery_id,
-            &arguments.recovery_plan_hash,
-            &arguments.approval_hash,
-        );
+            false,
+        ) {
+            Ok(policy) => policy,
+            Err(e) => {
+                return Ok(self.envelope_sync(
+                    request_id,
+                    None,
+                    json!({
+                        "recovery_id":arguments.recovery_id,"state":"rejected",
+                        "outcome":{"kind":"rejected","reason":e}
+                    }),
+                ));
+            }
+        };
+        let result = if let Some(policy) = policy {
+            let store = store.clone();
+            let id = arguments.recovery_id.clone();
+            let hash = arguments.recovery_plan_hash.clone();
+            let approval = arguments.approval_hash.clone();
+            match tokio::task::spawn_blocking(move||store.commit_synchronization_recovery(&policy,&id,&hash,&approval)).await {
+                Ok(result)=>result,
+                Err(e)=>return Ok(self.envelope_sync(request_id,None,json!({"recovery_id":arguments.recovery_id,"state":"unknown","outcome":{"kind":"unknown","reason":format!("synchronization recovery worker failed: {e}")}}))),
+            }
+        } else {
+            store.commit_recovery(
+                project,
+                &arguments.recovery_id,
+                &arguments.recovery_plan_hash,
+                &arguments.approval_hash,
+            )
+        };
         match result {
             Ok(record) => self.envelope(
                 request_id,
@@ -4348,6 +4467,44 @@ impl Server {
         &self,
         Parameters(arguments): Parameters<PlanBoardGraphicsRequest>,
     ) -> Result<CallToolResponse, ErrorData> {
+        if let Some(sync) = arguments.schematic_pcb_sync {
+            if !arguments.endpoint.is_empty()
+                || arguments.geometry.is_some()
+                || arguments.delete_items.is_some()
+                || arguments.flip_footprint.is_some()
+                || arguments.edit_existing.is_some()
+                || arguments.move_footprint.is_some()
+                || arguments.assembly.is_some()
+                || arguments.footprint.is_some()
+                || arguments.batch.is_some()
+                || arguments.segments.is_some()
+                || arguments.outline.is_some()
+                || arguments.track.is_some()
+                || arguments.via.is_some()
+                || arguments.route.is_some()
+            {
+                return Ok(self.rejected(
+                    arguments.request_id,
+                    "schematic_pcb_sync requires its own closed-document plan",
+                ));
+            }
+            let Some(store) = self.execution_store.clone() else {
+                return Ok(self.rejected(
+                    arguments.request_id,
+                    "durable state is required for synchronization",
+                ));
+            };
+            let registry = self.schematic_sync.clone();
+            let run = arguments.source_run_id;
+            let id = arguments.request_id.clone();
+            let result =
+                tokio::task::spawn_blocking(move || registry.plan(&store, &run, &id, sync))
+                    .await
+                    .unwrap_or_else(|e| {
+                        Err(format!("synchronization planning worker failed: {e}"))
+                    });
+            return self.general_schematic_response(arguments.request_id, result);
+        }
         if arguments.endpoint.is_empty() {
             return Ok(self.rejected(arguments.request_id, "identity_is_required"));
         }
@@ -4955,6 +5112,32 @@ impl Server {
         &self,
         Parameters(arguments): Parameters<PreviewChangeRequest>,
     ) -> Result<CallToolResponse, ErrorData> {
+        if schematic_sync::is_plan(&arguments.plan_id) {
+            let id = arguments
+                .request_id
+                .unwrap_or_else(|| "req_preview_sync".into());
+            let Some(expected) = arguments.schematic_pcb_sync else {
+                return Ok(self.rejected(
+                    id,
+                    "synchronization preview requires the complete difference and DRC expectation",
+                ));
+            };
+            let registry = self.schematic_sync.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                registry.preview(&arguments.plan_id, &arguments.plan_hash, expected)
+            })
+            .await
+            .unwrap_or_else(|e| Err(format!("synchronization preview worker failed: {e}")));
+            return self.general_schematic_response(id, result);
+        }
+        if arguments.schematic_pcb_sync.is_some() {
+            return Ok(self.rejected(
+                arguments
+                    .request_id
+                    .unwrap_or_else(|| "req_preview_change".into()),
+                "synchronization expectation requires a synchronization plan",
+            ));
+        }
         let mut stored = self
             .sessions
             .lock()
@@ -5139,6 +5322,27 @@ impl Server {
         &self,
         Parameters(arguments): Parameters<CommitChangeRequest>,
     ) -> Result<CallToolResponse, ErrorData> {
+        if schematic_sync::is_plan(&arguments.plan_id) {
+            let id = arguments
+                .request_id
+                .unwrap_or_else(|| "req_commit_sync".into());
+            let Some(store) = self.execution_store.clone() else {
+                return Ok(self.rejected(id, "durable state is required for synchronization"));
+            };
+            let registry = self.schematic_sync.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                registry.commit(
+                    &store,
+                    &arguments.plan_id,
+                    &arguments.plan_hash,
+                    &arguments.approval_hash,
+                    &arguments.validation_evidence_hash,
+                )
+            })
+            .await
+            .unwrap_or_else(|e|Ok(json!({"state":"unknown","reason":format!("synchronization commit worker failed: {e}")})));
+            return self.general_schematic_response(id, result);
+        }
         let mut stored = self
             .sessions
             .lock()
@@ -8049,6 +8253,7 @@ mod tests {
 
     fn plan_request(_snapshot: ProjectSnapshot, request_id: &str) -> PlanBoardGraphicsRequest {
         PlanBoardGraphicsRequest {
+            schematic_pcb_sync: None,
             geometry: None,
             route: None,
             endpoint: "ipc:///tmp/kicad/api.sock".into(),
@@ -9022,6 +9227,7 @@ mod tests {
             .clone();
         let preview = server
             .kicad_preview_change(Parameters(PreviewChangeRequest {
+                schematic_pcb_sync: None,
                 plan_id: plan_id.clone(),
                 plan_hash,
                 request_id: Some("req_preview_call".into()),
@@ -9080,6 +9286,7 @@ mod tests {
 
         let preview = server
             .kicad_preview_change(Parameters(PreviewChangeRequest {
+                schematic_pcb_sync: None,
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
                 request_id: Some("req_missing_shadow_preview".into()),
@@ -9171,6 +9378,7 @@ mod tests {
         assert!(early.is_err());
         let preview = server
             .kicad_preview_change(Parameters(PreviewChangeRequest {
+                schematic_pcb_sync: None,
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
                 request_id: Some("req_preview".into()),
@@ -9281,6 +9489,7 @@ mod tests {
         };
         let preview = server
             .kicad_preview_change(Parameters(PreviewChangeRequest {
+                schematic_pcb_sync: None,
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
                 request_id: Some(format!("{request_id}:preview")),
@@ -9555,6 +9764,7 @@ mod tests {
         let plan_hash = result["data"]["plan_hash"].as_str().unwrap().to_owned();
         let preview = server
             .kicad_preview_change(Parameters(PreviewChangeRequest {
+                schematic_pcb_sync: None,
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
                 request_id: Some("req_outcome_preview".into()),
@@ -9801,6 +10011,7 @@ mod tests {
             let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
             let preview = server
                 .kicad_preview_change(Parameters(PreviewChangeRequest {
+                    schematic_pcb_sync: None,
                     plan_id: plan_id.clone(),
                     plan_hash: plan_hash.clone(),
                     request_id: Some("req_shadow_rejected_preview".into()),
@@ -9893,6 +10104,7 @@ mod tests {
         let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
         let preview = server
             .kicad_preview_change(Parameters(PreviewChangeRequest {
+                schematic_pcb_sync: None,
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
                 request_id: Some("req_shadow_committed_preview".into()),

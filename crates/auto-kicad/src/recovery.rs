@@ -6,8 +6,19 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+mod file_publication;
 mod native_publication;
 mod publication;
+mod synchronization;
+pub use synchronization::{
+    NativeSynchronizationPublication, SynchronizationPublicationFailure,
+    SynchronizationPublicationIntent,
+};
+
+enum ExecutionStart<'a, 'b> {
+    Legacy(&'a [PathBuf]),
+    Synchronization(&'a mut synchronization::Start<'b>),
+}
 pub use native_publication::{NativeSchematicPublication, SchematicPublicationFailure};
 pub use publication::{
     SchematicPublication, SchematicPublicationFile, SchematicPublicationIntent, SchematicWrite,
@@ -88,6 +99,8 @@ fn clear_execution_pending(
 ) -> io::Result<()> {
     if domain == "schematic" {
         clear_pending_marker(project, SCHEMATIC_PENDING, record_path, attempt_id)
+    } else if domain == synchronization::DOMAIN {
+        clear_pending_marker(project, synchronization::PENDING, record_path, attempt_id)
     } else {
         clear_pending_geometry(project, record_path, attempt_id)
     }
@@ -118,6 +131,8 @@ pub struct ExecutionRecord {
     pub created_sources: Vec<CreatedSchematicSource>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publication: Option<SchematicPublicationIntent>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_publication: Option<SynchronizationPublicationIntent>,
 }
 
 /// Exact observed existence of a source path; absence never uses an empty hash sentinel.
@@ -180,6 +195,8 @@ pub struct RecoveryRecord {
     pub created_sources: Vec<CreatedSchematicRecovery>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub staging_files: Vec<CreatedSchematicRecovery>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sync_intent_sha256: Option<String>,
     pub outcome: Option<Value>,
 }
 
@@ -237,6 +254,17 @@ fn schematic_existence(project: &Path, path: &Path) -> io::Result<SourceExistenc
 }
 
 fn confined_existence(project: &Path, path: &Path) -> io::Result<SourceExistence> {
+    confined_existence_with_limit(project, path, 32 * 1024 * 1024)
+}
+
+fn confined_existence_with_limit(
+    project: &Path,
+    path: &Path,
+    limit: u64,
+) -> io::Result<SourceExistence> {
+    if limit == 0 || limit > MAX_FILE_BYTES {
+        return Err(invalid("invalid publication file byte limit"));
+    }
     let parent = path
         .parent()
         .ok_or_else(|| invalid("schematic source has no parent"))?;
@@ -249,22 +277,42 @@ fn confined_existence(project: &Path, path: &Path) -> io::Result<SourceExistence
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(SourceExistence::Absent),
         Err(error) => Err(error),
         Ok(_) => Ok(SourceExistence::Present {
-            sha256: crate::digest_bytes(&read_bounded(path, 32 * 1024 * 1024)?),
+            sha256: crate::digest_bytes(&read_bounded(path, limit)?),
         }),
     }
 }
 
 fn valid_execution_schema(record: &ExecutionRecord) -> bool {
-    (record.schema_version == 1
-        && record.created_sources.is_empty()
-        && record.publication.is_none())
-        || (record.schema_version == 2
-            && record.domain == "schematic"
-            && !record.created_sources.is_empty()
+    if record.domain == synchronization::DOMAIN {
+        return record.schema_version == 4
+            && record.created_sources.is_empty()
+            && record.publication.is_none()
+            && record.sync_publication.is_some();
+    }
+    record.sync_publication.is_none()
+        && ((record.schema_version == 1
+            && record.created_sources.is_empty()
             && record.publication.is_none())
-        || (record.schema_version == 3
-            && record.domain == "schematic"
-            && record.publication.is_some())
+            || (record.schema_version == 2
+                && record.domain == "schematic"
+                && !record.created_sources.is_empty()
+                && record.publication.is_none())
+            || (record.schema_version == 3
+                && record.domain == "schematic"
+                && record.publication.is_some()))
+}
+
+fn journal_temporary(path: &Path, synchronization: bool) -> PathBuf {
+    if synchronization {
+        static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+        path.with_extension(format!(
+            "sync-{}-{}.pending",
+            std::process::id(),
+            SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ))
+    } else {
+        path.with_extension("pending")
+    }
 }
 
 fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -292,7 +340,9 @@ fn sync_directory(path: &Path) -> io::Result<()> {
 
 impl ExecutionStore {
     pub fn check_project_ready(&self, project: &Path) -> io::Result<()> {
-        require_project_ready(&fs::canonicalize(project)?)
+        let project = fs::canonicalize(project)?;
+        require_project_ready(&project)?;
+        synchronization::require_no_interrupted(&self.records_dir(&project), &project)
     }
     pub fn open(root: &Path) -> io::Result<Self> {
         let existed = root.exists();
@@ -406,7 +456,8 @@ fn read_records(root: &Path, project: &Path, limit: usize) -> io::Result<Vec<Exe
 impl ProjectWriter {
     /// Ordinary writers reject pending recovery before source preflight; recovery uses its own checks.
     pub fn ensure_ready(&self) -> io::Result<()> {
-        require_project_ready(&self.project)
+        require_project_ready(&self.project)?;
+        synchronization::require_no_interrupted(&self.records, &self.project)
     }
 
     pub fn begin(
@@ -417,7 +468,19 @@ impl ProjectWriter {
         evidence: Value,
         sources: &[PathBuf],
     ) -> io::Result<ExecutionAttempt> {
-        self.begin_internal(domain, plan_hash, approval_hash, evidence, sources, &[])
+        if domain == synchronization::DOMAIN {
+            return Err(invalid(
+                "synchronization requires sealed native publication",
+            ));
+        }
+        self.begin_internal(
+            domain,
+            plan_hash,
+            approval_hash,
+            evidence,
+            sources,
+            ExecutionStart::Legacy(&[]),
+        )
     }
 
     /// Record existing backups and proven-absent schematic paths before any publication.
@@ -463,7 +526,7 @@ impl ProjectWriter {
             approval_hash,
             evidence,
             sources,
-            created_sources,
+            ExecutionStart::Legacy(created_sources),
         )
     }
 
@@ -474,7 +537,7 @@ impl ProjectWriter {
         approval_hash: &str,
         evidence: Value,
         sources: &[PathBuf],
-        created_paths: &[PathBuf],
+        mut start: ExecutionStart<'_, '_>,
     ) -> io::Result<ExecutionAttempt> {
         self.ensure_ready()?;
         if read_records(&self.records, &self.project, usize::MAX)?
@@ -511,6 +574,10 @@ impl ProjectWriter {
                 sha256: crate::digest_bytes(&bytes).to_string(),
             });
         }
+        let created_paths = match &start {
+            ExecutionStart::Legacy(paths) => *paths,
+            ExecutionStart::Synchronization(_) => &[],
+        };
         let created_sources = created_paths
             .iter()
             .map(|path| {
@@ -525,8 +592,28 @@ impl ProjectWriter {
                 })
             })
             .collect::<io::Result<Vec<_>>>()?;
+        let attempt_id = directory
+            .file_name()
+            .expect("execution directory name")
+            .to_string_lossy()
+            .into_owned();
+        let sync_publication = match &start {
+            ExecutionStart::Legacy(_) => None,
+            ExecutionStart::Synchronization(sync) => Some(synchronization::make_intent(
+                &self.project,
+                &directory,
+                &attempt_id,
+                sync,
+            )?),
+        };
         let record = ExecutionRecord {
-            schema_version: if created_sources.is_empty() { 1 } else { 2 },
+            schema_version: if sync_publication.is_some() {
+                4
+            } else if created_sources.is_empty() {
+                1
+            } else {
+                2
+            },
             attempt_id: directory
                 .file_name()
                 .expect("execution directory has a name")
@@ -543,7 +630,9 @@ impl ProjectWriter {
             post_attempt: None,
             created_sources,
             publication: None,
+            sync_publication,
         };
+        synchronization::validate_intent(&self.project, &record)?;
         let path = directory.join("record.json");
         let bytes = serde_json::to_vec(&record)?;
         if bytes.len() as u64 > MAX_RECORD_BYTES {
@@ -552,7 +641,12 @@ impl ProjectWriter {
         write_new(&path, &bytes)?;
         sync_directory(&directory)?;
         sync_directory(&self.records)?;
-        let marker = if domain == "schematic" {
+        if let ExecutionStart::Synchronization(sync) = &mut start {
+            (sync.checkpoint)("intent")?;
+        }
+        let marker = if domain == synchronization::DOMAIN {
+            Some(synchronization::PENDING)
+        } else if domain == "schematic" {
             Some(SCHEMATIC_PENDING)
         } else if record
             .evidence
@@ -571,12 +665,17 @@ impl ProjectWriter {
             write_new(&self.project.join(marker), &serde_json::to_vec(&pending)?)?;
             sync_directory(&self.project)?;
         }
+        if let ExecutionStart::Synchronization(sync) = &mut start {
+            (sync.checkpoint)("pending")?;
+        }
         Ok(ExecutionAttempt { path, record })
     }
 }
 
 fn require_project_ready(project: &Path) -> io::Result<()> {
-    if pending_geometry(project)?.is_some() || pending_marker(project, SCHEMATIC_PENDING)?.is_some()
+    if pending_geometry(project)?.is_some()
+        || pending_marker(project, SCHEMATIC_PENDING)?.is_some()
+        || pending_marker(project, synchronization::PENDING)?.is_some()
     {
         return Err(invalid(
             "execution outcome requires guarded recovery before further project writes",
@@ -610,6 +709,55 @@ fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 120 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
 }
 
+fn sync_intent_digest(record: &ExecutionRecord) -> io::Result<Option<String>> {
+    record
+        .sync_publication
+        .as_ref()
+        .map(|intent| Ok(crate::digest_bytes(&serde_json::to_vec(intent)?).to_string()))
+        .transpose()
+}
+
+fn check_sync_dependencies(
+    record: &ExecutionRecord,
+    policy: Option<&kicad_adapter::schematic_audit::SchematicAuditPolicy>,
+) -> io::Result<()> {
+    if record.domain == synchronization::DOMAIN {
+        synchronization::baseline(record)?
+            .verify_dependencies(policy.ok_or_else(|| {
+                invalid("synchronization recovery requires current server policy")
+            })?)
+            .map_err(io::Error::other)?;
+    } else if policy.is_some() {
+        return Err(invalid(
+            "synchronization recovery cannot accept another domain",
+        ));
+    }
+    Ok(())
+}
+
+fn recovery_staging(
+    project: &Path,
+    record: &ExecutionRecord,
+) -> io::Result<Vec<CreatedSchematicRecovery>> {
+    if record.domain == synchronization::DOMAIN {
+        synchronization::recovery_staging(project, record)
+    } else {
+        publication::recovery_staging(project, record)
+    }
+}
+
+fn recovery_stage_existence(
+    project: &Path,
+    path: &Path,
+    domain: &str,
+) -> io::Result<SourceExistence> {
+    if domain == synchronization::DOMAIN {
+        confined_existence_with_limit(project, path, MAX_FILE_BYTES)
+    } else {
+        confined_existence(project, path)
+    }
+}
+
 fn recovery_hash(record: &RecoveryRecord) -> io::Result<String> {
     let mut fields = serde_json::json!({
         "schema_version": record.schema_version, "recovery_id": record.recovery_id,
@@ -621,6 +769,9 @@ fn recovery_hash(record: &RecoveryRecord) -> io::Result<String> {
     }
     if !record.staging_files.is_empty() {
         fields["staging_files"] = serde_json::to_value(&record.staging_files)?;
+    }
+    if let Some(digest) = &record.sync_intent_sha256 {
+        fields["sync_intent_sha256"] = serde_json::json!(digest);
     }
     Ok(crate::digest_bytes(&serde_json::to_vec(&fields)?).to_string())
 }
@@ -685,18 +836,30 @@ impl ExecutionStore {
         record: &ExecutionRecord,
     ) -> io::Result<Vec<RecoveryFile>> {
         publication::validate_intent(project, record)?;
+        synchronization::validate_intent(project, record)?;
         let record_path = self
             .records_dir(project)
             .join(&record.attempt_id)
             .join("record.json");
-        let pending = if record.domain == "schematic" {
+        let pending = if record.domain == synchronization::DOMAIN {
+            matching_pending_marker(
+                project,
+                synchronization::PENDING,
+                &record_path,
+                &record.attempt_id,
+            )?
+        } else if record.domain == "schematic" {
             matching_pending_marker(project, SCHEMATIC_PENDING, &record_path, &record.attempt_id)?
         } else {
             matching_pending_geometry(project, &record_path, &record.attempt_id)?
         };
         if !(matches!(record.state.as_str(), "unknown" | "in_flight")
-            || pending && matches!(record.state.as_str(), "committed" | "rejected"))
-            || !matches!(record.domain.as_str(), "pcb" | "schematic")
+            || pending && matches!(record.state.as_str(), "committed" | "rejected")
+            || pending && record.domain == synchronization::DOMAIN && record.state == "restored")
+            || !matches!(
+                record.domain.as_str(),
+                "pcb" | "schematic" | synchronization::DOMAIN
+            )
             || (record.backups.is_empty() && record.created_sources.is_empty())
         {
             return Err(invalid("execution attempt is not recoverable"));
@@ -722,6 +885,7 @@ impl ExecutionStore {
                 let supported = match record.domain.as_str() {
                     "pcb" => matches!(extension, "kicad_pcb" | "kicad_pro" | "kicad_dru"),
                     "schematic" => extension == "kicad_sch",
+                    synchronization::DOMAIN => extension == "kicad_pcb",
                     _ => false,
                 };
                 if !supported
@@ -756,6 +920,15 @@ impl ExecutionStore {
                         sha256: current_digest,
                     },
                 )
+                .or_else(|| {
+                    synchronization::intended_state(
+                        record,
+                        &backup.original,
+                        &SourceExistence::Present {
+                            sha256: crate::digest_bytes(&current),
+                        },
+                    )
+                })
                 .unwrap_or(&current_hash == expected);
                 if !allowed {
                     return Err(invalid(
@@ -825,16 +998,22 @@ impl ExecutionStore {
         let path = self.recovery_dir(project).join(id).join("record.json");
         let record: RecoveryRecord =
             serde_json::from_slice(&read_bounded(&path, MAX_RECORD_BYTES)?)?;
-        if !(record.schema_version == 2
+        if !(record.schema_version == 5
+            && record.domain == synchronization::DOMAIN
             && record.created_sources.is_empty()
-            && record.staging_files.is_empty()
-            || record.schema_version == 3
-                && record.domain == "schematic"
-                && !record.created_sources.is_empty()
-                && record.staging_files.is_empty()
-            || record.schema_version == 4
-                && record.domain == "schematic"
-                && !record.staging_files.is_empty())
+            && record.staging_files.len() == 1
+            && record.sync_intent_sha256.is_some()
+            || record.sync_intent_sha256.is_none()
+                && (record.schema_version == 2
+                    && record.created_sources.is_empty()
+                    && record.staging_files.is_empty()
+                    || record.schema_version == 3
+                        && record.domain == "schematic"
+                        && !record.created_sources.is_empty()
+                        && record.staging_files.is_empty()
+                    || record.schema_version == 4
+                        && record.domain == "schematic"
+                        && !record.staging_files.is_empty()))
             || record.project_dir != project
             || record.recovery_id != id
             || record.action != "restore_backups"
@@ -861,7 +1040,10 @@ impl ExecutionStore {
         if bytes.len() as u64 > MAX_RECORD_BYTES {
             return Err(invalid("recovery record exceeds size limit"));
         }
-        let temporary = attempt.path.with_extension("pending");
+        let temporary = journal_temporary(
+            &attempt.path,
+            attempt.record.domain == synchronization::DOMAIN,
+        );
         write_new(&temporary, &bytes)?;
         let result = fs::rename(&temporary, &attempt.path)
             .and_then(|()| sync_directory(attempt.path.parent().expect("record parent")));
@@ -872,13 +1054,31 @@ impl ExecutionStore {
     }
 
     pub fn plan_recovery(&self, project: &Path, attempt_id: &str) -> io::Result<RecoveryRecord> {
+        self.plan_recovery_with_policy(project, attempt_id, None)
+    }
+
+    pub fn plan_synchronization_recovery(
+        &self,
+        policy: &kicad_adapter::schematic_audit::SchematicAuditPolicy,
+        attempt_id: &str,
+    ) -> io::Result<RecoveryRecord> {
+        self.plan_recovery_with_policy(policy.project_dir(), attempt_id, Some(policy))
+    }
+
+    fn plan_recovery_with_policy(
+        &self,
+        project: &Path,
+        attempt_id: &str,
+        policy: Option<&kicad_adapter::schematic_audit::SchematicAuditPolicy>,
+    ) -> io::Result<RecoveryRecord> {
         let writer = self.acquire(project)?;
         let project = &writer.project;
         require_closed_project(project)?;
         let execution = self.execution_record(project, attempt_id)?;
+        check_sync_dependencies(&execution, policy)?;
         let files = self.recovery_files(project, &execution)?;
         let created_sources = self.recovery_created_sources(project, &execution)?;
-        let staging_files = publication::recovery_staging(project, &execution)?;
+        let staging_files = recovery_staging(project, &execution)?;
         static SEQUENCE: AtomicU64 = AtomicU64::new(0);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -897,7 +1097,9 @@ impl ExecutionStore {
         let directory = root.join(&id);
         fs::create_dir(&directory)?;
         let mut record = RecoveryRecord {
-            schema_version: if !staging_files.is_empty() {
+            schema_version: if execution.domain == synchronization::DOMAIN {
+                5
+            } else if !staging_files.is_empty() {
                 4
             } else if created_sources.is_empty() {
                 2
@@ -905,9 +1107,9 @@ impl ExecutionStore {
                 3
             },
             recovery_id: id.clone(),
-            attempt_id: execution.attempt_id,
+            attempt_id: execution.attempt_id.clone(),
             project_dir: project.clone(),
-            domain: execution.domain,
+            domain: execution.domain.clone(),
             action: "restore_backups".into(),
             plan_hash: String::new(),
             approval_hash: None,
@@ -915,6 +1117,7 @@ impl ExecutionStore {
             files,
             created_sources,
             staging_files,
+            sync_intent_sha256: sync_intent_digest(&execution)?,
             outcome: None,
         };
         record.plan_hash = recovery_hash(&record)?;
@@ -933,12 +1136,20 @@ impl ExecutionStore {
         Ok(attempt.record)
     }
 
-    fn check_recovery_files(&self, record: &RecoveryRecord) -> io::Result<()> {
+    fn check_recovery_files(
+        &self,
+        record: &RecoveryRecord,
+        policy: Option<&kicad_adapter::schematic_audit::SchematicAuditPolicy>,
+    ) -> io::Result<()> {
         require_closed_project(&record.project_dir)?;
         let execution = self.execution_record(&record.project_dir, &record.attempt_id)?;
+        check_sync_dependencies(&execution, policy)?;
+        if sync_intent_digest(&execution)? != record.sync_intent_sha256 {
+            return Err(invalid("synchronization recovery intent changed"));
+        }
         let current = self.recovery_files(&record.project_dir, &execution)?;
         let created = self.recovery_created_sources(&record.project_dir, &execution)?;
-        let staging = publication::recovery_staging(&record.project_dir, &execution)?;
+        let staging = recovery_staging(&record.project_dir, &execution)?;
         if serde_json::to_value(current)? != serde_json::to_value(&record.files)?
             || created != record.created_sources
             || staging != record.staging_files
@@ -967,12 +1178,36 @@ impl ExecutionStore {
         recovery_id: &str,
         plan_hash: &str,
     ) -> io::Result<String> {
+        self.preview_recovery_with_policy(project, recovery_id, plan_hash, None)
+    }
+
+    pub fn preview_synchronization_recovery(
+        &self,
+        policy: &kicad_adapter::schematic_audit::SchematicAuditPolicy,
+        recovery_id: &str,
+        plan_hash: &str,
+    ) -> io::Result<String> {
+        self.preview_recovery_with_policy(
+            policy.project_dir(),
+            recovery_id,
+            plan_hash,
+            Some(policy),
+        )
+    }
+
+    fn preview_recovery_with_policy(
+        &self,
+        project: &Path,
+        recovery_id: &str,
+        plan_hash: &str,
+        policy: Option<&kicad_adapter::schematic_audit::SchematicAuditPolicy>,
+    ) -> io::Result<String> {
         let writer = self.acquire(project)?;
         let mut attempt = self.read_recovery(&writer.project, recovery_id)?;
         if attempt.record.plan_hash != plan_hash || attempt.record.state != "prepared" {
             return Err(invalid("recovery plan is stale or already used"));
         }
-        if let Err(error) = self.check_recovery_files(&attempt.record) {
+        if let Err(error) = self.check_recovery_files(&attempt.record, policy) {
             self.invalidate(&mut attempt, &error);
             return Err(error);
         }
@@ -1001,6 +1236,42 @@ impl ExecutionStore {
         recovery_id: &str,
         plan_hash: &str,
         approval_hash: &str,
+        checkpoint: impl FnMut(usize) -> io::Result<()>,
+    ) -> Result<RecoveryRecord, RecoveryFailure> {
+        self.commit_recovery_with_policy(
+            project,
+            recovery_id,
+            plan_hash,
+            approval_hash,
+            None,
+            checkpoint,
+        )
+    }
+
+    pub fn commit_synchronization_recovery(
+        &self,
+        policy: &kicad_adapter::schematic_audit::SchematicAuditPolicy,
+        recovery_id: &str,
+        plan_hash: &str,
+        approval_hash: &str,
+    ) -> Result<RecoveryRecord, RecoveryFailure> {
+        self.commit_recovery_with_policy(
+            policy.project_dir(),
+            recovery_id,
+            plan_hash,
+            approval_hash,
+            Some(policy),
+            |_| Ok(()),
+        )
+    }
+
+    fn commit_recovery_with_policy(
+        &self,
+        project: &Path,
+        recovery_id: &str,
+        plan_hash: &str,
+        approval_hash: &str,
+        policy: Option<&kicad_adapter::schematic_audit::SchematicAuditPolicy>,
         mut checkpoint: impl FnMut(usize) -> io::Result<()>,
     ) -> Result<RecoveryRecord, RecoveryFailure> {
         let writer = self.acquire(project)?;
@@ -1015,7 +1286,7 @@ impl ExecutionStore {
         {
             return Err(invalid("recovery approval mismatch or state is not ready").into());
         }
-        if let Err(error) = self.check_recovery_files(&attempt.record) {
+        if let Err(error) = self.check_recovery_files(&attempt.record, policy) {
             self.invalidate(&mut attempt, &error);
             return Err(error.into());
         }
@@ -1071,7 +1342,12 @@ impl ExecutionStore {
             }
             for (index, stage) in attempt.record.staging_files.iter().enumerate() {
                 require_closed_project(&writer.project)?;
-                if confined_existence(&writer.project, &stage.original)? != stage.current {
+                if recovery_stage_existence(
+                    &writer.project,
+                    &stage.original,
+                    &attempt.record.domain,
+                )? != stage.current
+                {
                     return Err(invalid("publication staging changed during recovery"));
                 }
                 if matches!(stage.current, SourceExistence::Present { .. }) {
@@ -1102,19 +1378,64 @@ impl ExecutionStore {
                 }
             }
             for stage in &attempt.record.staging_files {
-                if confined_existence(&writer.project, &stage.original)? != SourceExistence::Absent
+                if recovery_stage_existence(
+                    &writer.project,
+                    &stage.original,
+                    &attempt.record.domain,
+                )? != SourceExistence::Absent
                 {
                     return Err(invalid("publication staging was not removed"));
                 }
             }
+            let native_proof = if attempt.record.domain == synchronization::DOMAIN {
+                let execution =
+                    self.execution_record(&writer.project, &attempt.record.attempt_id)?;
+                let proof = synchronization::baseline(&execution)?
+                    .verify_restored(policy.ok_or_else(|| {
+                        invalid("synchronization recovery requires current server policy")
+                    })?)
+                    .map_err(io::Error::other)?;
+                let evidence = serde_json::json!({"kind":"restored","actual_native_baseline_verified":true,"native_verification_digest":proof.digest(),"native_evidence":proof.evidence()});
+                let directory = attempt.path.parent().expect("recovery directory");
+                write_new(
+                    &directory.join("native-restoration.json"),
+                    &serde_json::to_vec(&evidence)?,
+                )?;
+                sync_directory(directory)?;
+                Some(proof)
+            } else {
+                None
+            };
+            let native_restoration=native_proof.as_ref().map(|proof|serde_json::json!({"kind":"restored","actual_native_baseline_verified":true,"native_verification_digest":proof.digest()}));
             checkpoint(usize::MAX)?;
+            if let Some(proof) = &native_proof {
+                proof.verify().map_err(io::Error::other)?;
+            }
             attempt.record.state = "restored".into();
-            attempt.record.outcome = Some(serde_json::json!({"kind": "restored"}));
+            attempt.record.outcome = Some(
+                native_restoration
+                    .clone()
+                    .unwrap_or_else(|| serde_json::json!({"kind": "restored"})),
+            );
             Self::persist_recovery(&attempt)?;
             let record_path = self
                 .records_dir(&writer.project)
                 .join(&attempt.record.attempt_id)
                 .join("record.json");
+            if let Some(evidence) = native_restoration {
+                let mut execution =
+                    self.execution_record(&writer.project, &attempt.record.attempt_id)?;
+                execution.state = "restored".into();
+                execution.outcome = Some(evidence);
+                ExecutionAttempt {
+                    path: record_path.clone(),
+                    record: execution,
+                }
+                .persist()?;
+            }
+            if let Some(proof) = &native_proof {
+                proof.verify().map_err(io::Error::other)?;
+            }
             clear_execution_pending(
                 &writer.project,
                 &record_path,
@@ -1166,7 +1487,7 @@ impl ExecutionStore {
                 }
                 let mut record: RecoveryRecord =
                     serde_json::from_slice(&read_bounded(&path, MAX_RECORD_BYTES)?)?;
-                if record.project_dir != project || !matches!(record.schema_version, 1..=4) {
+                if record.project_dir != project || !matches!(record.schema_version, 1..=5) {
                     return Err(invalid("invalid recovery history record"));
                 }
                 if record.state == "in_flight" {
@@ -1195,7 +1516,25 @@ impl ExecutionAttempt {
         &self.record.attempt_id
     }
 
-    pub fn finish(mut self, state: &str, outcome: Value) -> io::Result<()> {
+    pub fn finish(self, state: &str, outcome: Value) -> io::Result<()> {
+        if self.record.domain == synchronization::DOMAIN && state != "unknown" {
+            return Err(invalid(
+                "synchronization completion requires a sealed native proof",
+            ));
+        }
+        self.finish_internal(state, outcome)
+    }
+
+    fn finish_internal(self, state: &str, outcome: Value) -> io::Result<()> {
+        self.finish_checkpoint(state, outcome, || Ok(()))
+    }
+
+    fn finish_checkpoint(
+        mut self,
+        state: &str,
+        outcome: Value,
+        mut checkpoint: impl FnMut() -> io::Result<()>,
+    ) -> io::Result<()> {
         // Missing final evidence requires unchanged bytes unless durable publication intent binds exact candidate states.
         self.record.post_attempt = Some(
             self.record
@@ -1225,10 +1564,12 @@ impl ExecutionAttempt {
         if bytes.len() as u64 > MAX_RECORD_BYTES {
             return Err(invalid("recovery outcome exceeds size limit"));
         }
-        let temporary = self.path.with_extension("pending");
+        let temporary =
+            journal_temporary(&self.path, self.record.domain == synchronization::DOMAIN);
         write_new(&temporary, &bytes)?;
         fs::rename(&temporary, &self.path)?;
         sync_directory(self.path.parent().expect("record has parent"))?;
+        checkpoint()?;
         if matches!(state, "committed" | "rejected") {
             clear_execution_pending(
                 &self.record.project_dir,

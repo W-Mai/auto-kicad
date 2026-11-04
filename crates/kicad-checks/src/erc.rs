@@ -202,42 +202,7 @@ fn validate(tree: &Node) -> Result<ErcSummary, ErcError> {
     Ok(summary)
 }
 
-// Emit exact numeric tokens directly; converting through serde_json::Value would round them.
-fn node_json(node: &Node) -> String {
-    fn append(node: &Node, out: &mut String) {
-        match node {
-            Node::Scalar(value) => out.push_str(value),
-            Node::String(value) => {
-                out.push_str(&serde_json::to_string(value).expect("strings serialize"))
-            }
-            Node::Array(values) => {
-                out.push('[');
-                for (i, value) in values.iter().enumerate() {
-                    if i > 0 {
-                        out.push(',');
-                    }
-                    append(value, out);
-                }
-                out.push(']');
-            }
-            Node::Object(values) => {
-                out.push('{');
-                for (i, (key, value)) in values.iter().enumerate() {
-                    if i > 0 {
-                        out.push(',');
-                    }
-                    out.push_str(&serde_json::to_string(key).expect("keys serialize"));
-                    out.push(':');
-                    append(value, out);
-                }
-                out.push('}');
-            }
-        }
-    }
-    let mut out = String::new();
-    append(node, &mut out);
-    out
-}
+use crate::exact_json::node_json;
 
 struct Parts {
     metadata: Node,

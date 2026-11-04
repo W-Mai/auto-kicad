@@ -56,6 +56,19 @@ pub enum IdentityError {
 fn invalid(message: &'static str) -> IdentityError {
     IdentityError::Invalid(message)
 }
+/// Native identity is the complete expanded path; labels never authorize a duplicate row.
+pub(crate) fn unique_instance_annotation<T>(
+    mut rows: impl Iterator<Item = T>,
+) -> Result<T, IdentityError> {
+    let row = rows
+        .next()
+        .ok_or(invalid("missing or duplicate source instance annotation"))?;
+    if rows.next().is_some() {
+        return Err(invalid("missing or duplicate source instance annotation"));
+    }
+    Ok(row)
+}
+
 pub(crate) fn uuid(value: &str) -> bool {
     value.len() == 36
         && value.bytes().enumerate().all(|(i, c)| {
@@ -229,10 +242,6 @@ impl SchematicIdentityIndex {
         let root = files
             .get(project.root_relative_path.as_str())
             .ok_or(invalid("missing root"))?;
-        let project_name = Path::new(&project.root_relative_path)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or(invalid("invalid project name"))?;
         let expanded = sheets
             .iter()
             .map(|sheet| sheet.path.clone())
@@ -257,17 +266,12 @@ impl SchematicIdentityIndex {
                 if units.len() >= MAX_UNITS {
                     return Err(invalid("expanded unit bound"));
                 }
-                let matching = symbol
-                    .instance_paths
-                    .iter()
-                    .filter(|i| {
-                        i.project == project_name && i.path.trim_end_matches('/') == sheet.path
-                    })
-                    .collect::<Vec<_>>();
-                if matching.len() != 1 {
-                    return Err(invalid("missing or duplicate source instance annotation"));
-                }
-                let instance = matching[0];
+                let instance = unique_instance_annotation(
+                    symbol
+                        .instance_paths
+                        .iter()
+                        .filter(|row| row.path.trim_end_matches('/') == sheet.path),
+                )?;
                 let reference = instance
                     .reference
                     .as_ref()
@@ -438,6 +442,36 @@ mod tests {
                 nets: vec![],
             },
         )
+    }
+
+    #[test]
+    fn unique_full_path_authority_is_independent_of_project_labels() {
+        let (_directory, project, native) = fixture();
+        let expected = SchematicIdentityIndex::resolve(&project, &native).unwrap();
+        for label in ["", "renamed-project"] {
+            let mut changed = project.clone();
+            for file in &mut changed.files {
+                for symbol in &mut file.symbols {
+                    for row in &mut symbol.instance_paths {
+                        row.project = label.into();
+                    }
+                }
+            }
+            assert_eq!(
+                SchematicIdentityIndex::resolve(&changed, &native).unwrap(),
+                expected
+            );
+            let symbol = changed
+                .files
+                .iter_mut()
+                .flat_map(|f| &mut f.symbols)
+                .next()
+                .unwrap();
+            let mut duplicate = symbol.instance_paths[0].clone();
+            duplicate.project = "other".into();
+            symbol.instance_paths.push(duplicate);
+            assert!(SchematicIdentityIndex::resolve(&changed, &native).is_err());
+        }
     }
 
     #[test]

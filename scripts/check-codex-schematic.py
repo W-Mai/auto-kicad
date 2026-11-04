@@ -8,6 +8,7 @@ from codex_rpc import CodexRpc
 
 drivers = {
     'general': 'check-schematic-general.py',
+    'synchronization': 'check-schematic-pcb-sync.py',
     'component': 'check-schematic-component-edits.py',
     'multiunit': 'check-schematic-multiunit.py',
     'inheritance': 'check-schematic-inheritance.py',

@@ -8,14 +8,7 @@ pub struct SchematicPublicationIntent {
     pub files: Vec<SchematicPublicationFile>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct SchematicPublicationFile {
-    pub original: PathBuf,
-    pub before: SourceExistence,
-    pub candidate_sha256: kicad_model::RevisionDigest,
-    pub staging: PathBuf,
-}
+pub use super::file_publication::PublicationFile as SchematicPublicationFile;
 
 /// Captured before-state and exact candidate bytes supplied by a validated orchestration layer.
 pub struct SchematicWrite {
@@ -115,8 +108,7 @@ impl ProjectWriter {
                 return Err(invalid("source changed before candidate staging"));
             }
             let file = &attempt.record.publication.as_ref().expect("intent").files[index];
-            write_new(&file.staging, &write.bytes)?;
-            sync_directory(file.staging.parent().expect("staging parent"))?;
+            file_publication::stage(&self.project, file, &write.bytes, 32 * 1024 * 1024)?;
             checkpoint(index)?;
         }
         let publication = SchematicPublication {
@@ -193,18 +185,12 @@ impl SchematicPublication<'_> {
             return Ok(false);
         }
         let file = &self.files()[index];
-        match file.before {
-            SourceExistence::Present { .. } => fs::rename(&file.staging, &file.original)?,
-            SourceExistence::Absent => {
-                // Exclusive creation: a destination collision cannot overwrite an external file.
-                fs::hard_link(&file.staging, &file.original)?;
-                checkpoint("linked")?;
-                fs::remove_file(&file.staging)?;
-            }
-        }
-        checkpoint("published")?;
-        sync_directory(file.original.parent().expect("source parent"))?;
-        checkpoint("synchronized")?;
+        file_publication::publish(
+            &self.writer.project,
+            file,
+            32 * 1024 * 1024,
+            &mut checkpoint,
+        )?;
         self.check_progress(index + 1)?;
         self.next = Some(index + 1);
         Ok(true)
@@ -309,12 +295,13 @@ impl SchematicPublication<'_> {
 }
 
 impl ExecutionAttempt {
-    fn persist(&self) -> io::Result<()> {
+    pub(super) fn persist(&self) -> io::Result<()> {
         let bytes = serde_json::to_vec(&self.record)?;
         if bytes.len() as u64 > MAX_RECORD_BYTES {
             return Err(invalid("publication intent exceeds size limit"));
         }
-        let temporary = self.path.with_extension("pending");
+        let temporary =
+            journal_temporary(&self.path, self.record.domain == synchronization::DOMAIN);
         write_new(&temporary, &bytes)?;
         let result = fs::rename(&temporary, &self.path)
             .and_then(|()| sync_directory(self.path.parent().expect("record parent")));

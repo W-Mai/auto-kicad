@@ -12,7 +12,7 @@ use kiutils_sexpr::{Atom, Node, Span};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
 
-mod cst;
+pub mod cst;
 pub mod editing;
 mod execution;
 pub use execution::NativeExecutionContext;

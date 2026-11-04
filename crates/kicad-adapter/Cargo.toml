@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+schemars = "1"
 protobuf = "3"
 kicad-checks = { path = "../kicad-checks" }
 kicad-engine = { path = "../kicad-engine" }

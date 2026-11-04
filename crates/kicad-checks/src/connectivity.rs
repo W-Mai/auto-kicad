@@ -32,6 +32,8 @@ pub enum ConnectivityKind {
     Arc,
     #[serde(rename = "PCB_VIA")]
     ThroughVia,
+    #[serde(rename = "PCB_SHAPE")]
+    CopperGraphic,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

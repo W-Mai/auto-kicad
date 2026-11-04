@@ -1,6 +1,7 @@
 //! Private native schematic observations with bound source and library inputs.
 mod assignment;
 mod preview;
+pub mod synchronization;
 use crate::library_catalog::{
     FootprintCatalog, LibraryCatalogPolicy, SchematicFootprintContext,
     symbols::{SymbolCatalog, SymbolLibraryContext},
@@ -53,6 +54,9 @@ pub struct SchematicAuditPolicy {
     extra_roots: Vec<PathBuf>,
 }
 impl SchematicAuditPolicy {
+    pub fn project_dir(&self) -> &Path {
+        &self.project
+    }
     pub fn new(
         project: &Path,
         schematic: &Path,

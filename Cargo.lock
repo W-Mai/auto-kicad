@@ -435,6 +435,7 @@ dependencies = [
  "libc",
  "nng",
  "protobuf",
+ "schemars",
  "serde",
  "serde_json",
  "sha2",
@@ -447,6 +448,7 @@ version = "0.1.0"
 dependencies = [
  "hex",
  "libc",
+ "schemars",
  "serde",
  "serde_json",
  "sha2",

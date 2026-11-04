@@ -260,7 +260,7 @@ impl NetlistRunner {
         project_root: &Path,
         root_schematic: &Path,
     ) -> Result<(), NetlistRunnerError> {
-        self.run_erc_capture(project_root, root_schematic, false)
+        self.run_check_capture(project_root, root_schematic, NativeCheck::ErcErrors)
             .map(|_| ())
     }
 
@@ -270,7 +270,7 @@ impl NetlistRunner {
         project_root: &Path,
         root_schematic: &Path,
     ) -> Result<kicad_checks::erc::CompleteErcReport, NetlistRunnerError> {
-        let raw = self.run_erc_capture(project_root, root_schematic, true)?;
+        let raw = self.run_check_capture(project_root, root_schematic, NativeCheck::ErcComplete)?;
         let report = kicad_checks::erc::CompleteErcReport::parse(&raw)?;
         if report.summary().kicad_version != "10.0.7"
             || Some(report.summary().source.as_str())
@@ -283,24 +283,43 @@ impl NetlistRunner {
         Ok(report)
     }
 
-    fn run_erc_capture(
+    /// Run all PCB checks, including schematic parity, through the frozen native context.
+    /// The caller must capture the complete project, source hierarchy and library resources.
+    pub fn run_complete_pcb_drc(
+        &self,
+        project_root: &Path,
+        board: &Path,
+    ) -> Result<kicad_checks::CompleteDrcReport, NetlistRunnerError> {
+        let raw = self.run_check_capture(project_root, board, NativeCheck::PcbComplete)?;
+        let report = kicad_checks::CompleteDrcReport::parse(&raw)?;
+        report.require_complete_capture(
+            "10.0.7",
+            board.file_name().and_then(|s| s.to_str()).unwrap_or(""),
+        )?;
+        Ok(report)
+    }
+
+    fn run_check_capture(
         &self,
         project_root: &Path,
         root_schematic: &Path,
-        complete: bool,
+        kind: NativeCheck,
     ) -> Result<String, NetlistRunnerError> {
         if !cfg!(unix) {
             return Err(NetlistRunnerError::UnsupportedPlatform);
         }
         let root = canonical_directory(project_root)?;
-        let schematic = canonical_schematic(&root, root_schematic)?;
+        let schematic = match kind {
+            NativeCheck::PcbComplete => canonical_board(&root, root_schematic)?,
+            _ => canonical_schematic(&root, root_schematic)?,
+        };
         self.verify_context()?;
         let executable = canonical_executable(&self.executable)?;
         let output_dir = Builder::new()
-            .prefix(".auto-kicad-erc-")
+            .prefix(".auto-kicad-check-")
             .tempdir_in(&root)
             .map_err(|error| NetlistRunnerError::TemporaryOutput(error.to_string()))?;
-        let report_path = output_dir.path().join("erc.rpt");
+        let report_path = output_dir.path().join("report.rpt");
         let stderr_path = output_dir.path().join("stderr.log");
         let stderr = File::create(&stderr_path)
             .map_err(|error| NetlistRunnerError::TemporaryOutput(error.to_string()))?;
@@ -309,11 +328,16 @@ impl NetlistRunner {
         if let Some(context) = &self.context {
             context.apply(&mut command, &root);
         }
-        command
-            .arg("sch")
-            .arg("erc")
-            .arg("--format")
-            .arg(if complete { "json" } else { "report" });
+        let complete = !matches!(kind, NativeCheck::ErcErrors);
+        match kind {
+            NativeCheck::PcbComplete => {
+                command.args(["pcb", "drc", "--schematic-parity", "--all-track-errors"]);
+            }
+            _ => {
+                command.args(["sch", "erc"]);
+            }
+        }
+        command.args(["--format", if complete { "json" } else { "report" }]);
         if complete {
             command.args(["--severity-all", "--units", "mm"]);
         } else {
@@ -356,6 +380,13 @@ impl NetlistRunner {
     }
 }
 
+#[derive(Clone, Copy)]
+enum NativeCheck {
+    ErcErrors,
+    ErcComplete,
+    PcbComplete,
+}
+
 #[derive(Debug, Error)]
 pub enum NetlistRunnerError {
     #[error("native execution context: {0}")]
@@ -366,6 +397,8 @@ pub enum NetlistRunnerError {
     InvalidProjectRoot,
     #[error("root schematic must be a canonical .kicad_sch file inside the project root")]
     InvalidSchematic,
+    #[error("PCB must be a canonical .kicad_pcb file inside the project root")]
+    InvalidBoard,
     #[error("KiCad CLI executable was not found at a verified system path")]
     ExecutableNotFound,
     #[error("KiCad CLI executable must be a canonical regular file")]
@@ -394,6 +427,8 @@ pub enum NetlistRunnerError {
     Parse(#[from] NetlistParseError),
     #[error(transparent)]
     ErcParse(#[from] kicad_checks::erc::ErcError),
+    #[error(transparent)]
+    DrcParse(#[from] kicad_checks::ParseError),
 }
 
 #[derive(Debug, Error, Eq, PartialEq)]
@@ -581,6 +616,19 @@ fn canonical_schematic(root: &Path, path: &Path) -> Result<PathBuf, NetlistRunne
         || canonical.extension().and_then(|value| value.to_str()) != Some("kicad_sch")
     {
         return Err(NetlistRunnerError::InvalidSchematic);
+    }
+    Ok(canonical)
+}
+
+fn canonical_board(root: &Path, path: &Path) -> Result<PathBuf, NetlistRunnerError> {
+    let canonical = fs::canonicalize(path).map_err(|_| NetlistRunnerError::InvalidBoard)?;
+    let metadata = fs::metadata(&canonical).map_err(|_| NetlistRunnerError::InvalidBoard)?;
+    if canonical != path
+        || !canonical.starts_with(root)
+        || !metadata.is_file()
+        || canonical.extension().and_then(|s| s.to_str()) != Some("kicad_pcb")
+    {
+        return Err(NetlistRunnerError::InvalidBoard);
     }
     Ok(canonical)
 }
@@ -1271,6 +1319,58 @@ mod tests {
             );
             assert_eq!(argv[9], schematic.to_str().unwrap());
             assert!(!Path::new(argv[8]).exists());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn complete_pcb_drc_uses_the_same_bounded_frozen_capture_contract() {
+        let valid = r#"{"$schema":"https://schemas.kicad.org/drc.v1.json","coordinate_units":"mm","date":"today","source":"root.kicad_pcb","kicad_version":"10.0.7","included_severities":["error","warning","exclusion"],"ignored_checks":[],"violations":[],"unconnected_items":[],"schematic_parity":[]}"#;
+        for (report, accepted) in [
+            (valid.to_owned(), true),
+            (valid.replace("10.0.7", "11.0.0"), false),
+            (valid.replace("root.kicad_pcb", "other.kicad_pcb"), false),
+            (valid.replace("\"exclusion\"", "\"error\""), false),
+        ] {
+            let script = format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > ARGS_FILE\nwhile [ \"$1\" != '-o' ]; do shift; done\nshift\nprintf '%s' '{report}' > \"$1\"\n"
+            );
+            let (_cli, executable, args, _) = fake_cli(&script);
+            let (_project, schematic) = project();
+            let root = schematic.parent().unwrap();
+            let board = schematic.with_extension("kicad_pcb");
+            fs::write(&board, "(kicad_pcb)").unwrap();
+            let config = root.join("config");
+            fs::create_dir(&config).unwrap();
+            let runner = NetlistRunner::new(executable)
+                .freeze_context(Some(&config))
+                .unwrap();
+            assert_eq!(runner.run_complete_pcb_drc(root, &board).is_ok(), accepted);
+            let argv = fs::read_to_string(&args).unwrap();
+            let argv = argv.lines().collect::<Vec<_>>();
+            assert_eq!(
+                &argv[..10],
+                &[
+                    "pcb",
+                    "drc",
+                    "--schematic-parity",
+                    "--all-track-errors",
+                    "--format",
+                    "json",
+                    "--severity-all",
+                    "--units",
+                    "mm",
+                    "-o"
+                ]
+            );
+            assert_eq!(argv[11], board.to_str().unwrap());
+            assert!(!Path::new(argv[10]).exists());
+            fs::remove_file(&args).unwrap();
+            assert!(matches!(
+                runner.run_complete_pcb_drc(root, &schematic),
+                Err(NetlistRunnerError::InvalidBoard)
+            ));
+            assert!(!args.exists());
         }
     }
 

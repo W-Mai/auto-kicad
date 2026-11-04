@@ -1,7 +1,9 @@
 mod complete_drc;
 pub mod erc;
 mod exact_json;
-pub use complete_drc::CompleteDrcReport;
+pub use complete_drc::{
+    CompleteDrcDelta, CompleteDrcDiagnostic, CompleteDrcExpectation, CompleteDrcReport,
+};
 
 /// Reject duplicate keys and excessive nesting without converting numeric tokens.
 pub fn validate_json_structure(bytes: &[u8]) -> Result<(), ParseError> {

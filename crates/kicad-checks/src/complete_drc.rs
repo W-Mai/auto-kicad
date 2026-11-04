@@ -1,6 +1,8 @@
 mod connectivity;
+mod delta;
 use crate::exact_json::{Node, json_error, object, serialize_raw};
 use crate::{DrcReport, ParseError, RawViolation, normalize_violation};
+pub use delta::{CompleteDrcDelta, CompleteDrcDiagnostic, CompleteDrcExpectation};
 use serde::Serialize;
 use serde_json::value::RawValue;
 use std::collections::{BTreeMap, BTreeSet};

@@ -63,7 +63,7 @@ class CodexRpc:
             removed = []
             if self.temporary:
                 for path in self.temporary.iterdir():
-                    if path.name.startswith(('auto-kicad-schematic-', '.tmp')):
+                    if path.name.startswith(('auto-kicad-schematic-', 'auto-kicad-sync-', '.tmp')):
                         assert path.is_dir() and not path.is_symlink()
                         removed.append(path.name)
                         shutil.rmtree(path)

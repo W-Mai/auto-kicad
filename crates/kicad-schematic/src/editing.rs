@@ -812,7 +812,7 @@ fn edit_existing(
     action: &EditAction,
     patches: &mut Patches<'_>,
     format: &str,
-    annotation_scope: Option<(&str, &[String])>,
+    annotation_scope: Option<&[String]>,
 ) -> Result<(String, ObjectKind), String> {
     let (id, kind) = match action {
         EditAction::SetSheetPage { .. }
@@ -867,32 +867,26 @@ fn edit_existing(
             if property.len() != 1 {
                 return Err("symbol must have one Reference property".into());
             }
-            let (project_name, observed_paths) =
+            let observed_paths =
                 annotation_scope.ok_or("reference edit requires observed annotation scope")?;
             let instances = one(items, "instances")?;
-            let project_nodes = values(instances)?
-                .iter()
-                .filter_map(list_items)
-                .filter(|v| {
-                    list_tag(v) == Some("project") && atom_text(v.get(1)) == Some(project_name)
-                })
-                .collect::<Vec<_>>();
-            if project_nodes.len() != 1 {
-                return Err("symbol must have one current instances project".into());
+            let mut saved_paths = Vec::new();
+            for project in children(values(instances)?, "project") {
+                for path in children(values(project)?, "path") {
+                    saved_paths.push(values(path)?);
+                }
             }
-            let paths = project_nodes[0]
-                .iter()
-                .skip(2)
-                .filter_map(list_items)
-                .filter(|v| {
-                    list_tag(v) == Some("path")
-                        && atom_text(v.get(1)).is_some_and(|path| {
-                            observed_paths
-                                .iter()
-                                .any(|observed| observed == path.trim_end_matches('/'))
-                        })
-                })
-                .collect::<Vec<_>>();
+            let mut paths = Vec::new();
+            for observed in observed_paths {
+                let path = crate::identities::unique_instance_annotation(
+                    saved_paths.iter().copied().filter(|path| {
+                        atom_text(path.get(1))
+                            .is_some_and(|id| id.trim_end_matches('/') == observed)
+                    }),
+                )
+                .map_err(|e| e.to_string())?;
+                paths.push(path);
+            }
             if paths.is_empty() {
                 return Err("symbol has no instance paths".into());
             }
@@ -1560,13 +1554,7 @@ pub fn compile_edits_with_children(
                     &edit.action,
                     &mut patches,
                     &file.format_version,
-                    Some((
-                        Path::new(&project.root_relative_path)
-                            .file_stem()
-                            .and_then(|name| name.to_str())
-                            .ok_or("invalid project basename")?,
-                        &instances,
-                    )),
+                    Some(&instances),
                 )?,
             };
             changes.push(ObjectChange {
@@ -2313,6 +2301,42 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn component_reference_edits_preserve_standalone_and_renamed_project_labels() {
+        let (project, native, bytes, ids) = component_fixture();
+        for label in ["", "renamed-project"] {
+            let text = String::from_utf8(bytes.clone())
+                .unwrap()
+                .replace("(project \"test\"", &format!("(project {}", quote(label)));
+            let bytes = text.into_bytes();
+            let project = reparsed(&project, &bytes);
+            let edits = ids
+                .iter()
+                .map(|id| {
+                    edit(EditAction::SetReference {
+                        uuid: id.clone(),
+                        reference: "U20".into(),
+                        instance_path: None,
+                    })
+                })
+                .collect::<Vec<_>>();
+            let candidate = compile(&project, &native, &bytes, &edits).unwrap();
+            assert_preserved(&bytes, &candidate);
+            for symbol in &candidate.parsed().files[0].symbols {
+                assert!(symbol.instance_paths.iter().all(|row| row.project == label));
+                if ids.contains(&symbol.source_uuid) {
+                    assert_eq!(symbol.reference, "U20");
+                    assert!(
+                        symbol
+                            .instance_paths
+                            .iter()
+                            .all(|row| row.reference.as_deref() == Some("U20"))
+                    );
+                }
+            }
+        }
     }
 
     #[test]

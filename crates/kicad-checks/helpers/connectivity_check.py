@@ -49,7 +49,9 @@ def main():
         uuid = identifier(item)
         require(uuid not in native, "duplicate native endpoint")
         kind = item.GetClass()
-        require(kind in ['PAD', 'PCB_TRACK', 'PCB_ARC', 'PCB_VIA'], "unsupported endpoint kind")
+        require(kind in ['PAD', 'PCB_TRACK', 'PCB_ARC', 'PCB_VIA', 'PCB_SHAPE'], "unsupported endpoint kind")
+        if kind == 'PCB_SHAPE':
+            require(item.IsOnCopperLayer(), "non-copper graphic endpoint")
         if kind == 'PCB_VIA':
             require(item.GetViaType() == pcbnew.VIATYPE_THROUGH, "unsupported via type")
         position = item.GetPosition()
@@ -61,9 +63,15 @@ def main():
 
     for item in board.GetTracks():
         add(item)
+    for drawing in board.GetDrawings():
+        if drawing.GetClass() == 'PCB_SHAPE' and drawing.IsOnCopperLayer():
+            add(drawing)
     for footprint in board.GetFootprints():
         for pad in footprint.Pads():
             add(pad)
+        for drawing in footprint.GraphicalItems():
+            if drawing.GetClass() == 'PCB_SHAPE' and drawing.IsOnCopperLayer():
+                add(drawing)
     membership = {}
     for uuid, item in native.items():
         members = {uuid}
@@ -74,7 +82,7 @@ def main():
             if member.GetClass() == 'ZONE':
                 continue
             member_id = identifier(member)
-            require(member_id in native, "native component has an unobserved endpoint")
+            require(member_id in native, "native component has an unobserved endpoint: " + member.GetClass() + ":" + member_id)
             require(records[member_id]['net'] == records[uuid]['net'], "native component crosses nets")
             members.add(member_id)
         membership[uuid] = tuple(sorted(members))
