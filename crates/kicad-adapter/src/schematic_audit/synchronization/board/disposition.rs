@@ -32,7 +32,8 @@ pub(super) fn require_explicit(
             .filter(|action| match action {
                 SynchronizationAction::Keep { footprint_uuid }
                 | SynchronizationAction::Detach { footprint_uuid }
-                | SynchronizationAction::Remove { footprint_uuid } => {
+                | SynchronizationAction::Remove { footprint_uuid }
+                | SynchronizationAction::RemoveManual { footprint_uuid } => {
                     footprint_uuid == &footprint.uuid
                 }
                 _ => false,

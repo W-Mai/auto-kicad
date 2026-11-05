@@ -42,6 +42,8 @@ pub enum Inspection {
         root_schematic: String,
         #[serde(default, skip_serializing_if = "is_false")]
         project_netclasses: bool,
+        #[serde(default, skip_serializing_if = "is_false")]
+        regions: bool,
     },
     Release {
         #[serde(default)]
@@ -167,7 +169,14 @@ impl Registry {
                 project_root,
                 root_schematic,
                 project_netclasses,
-            } => self.observe(settings, &project_root, &root_schematic, project_netclasses),
+                regions,
+            } => self.observe(
+                settings,
+                &project_root,
+                &root_schematic,
+                project_netclasses,
+                regions,
+            ),
             Inspection::Release {
                 observation_ids,
                 plan_ids,
@@ -181,6 +190,7 @@ impl Registry {
         project: &str,
         schematic: &str,
         project_netclasses: bool,
+        regions: bool,
     ) -> Result<Value, String> {
         let root = fs::canonicalize(project).map_err(|e| e.to_string())?;
         let source = fs::canonicalize(schematic).map_err(|e| e.to_string())?;
@@ -209,12 +219,20 @@ impl Registry {
                 .schematic_policy(&root, &source)?;
             let audit = SchematicAudit::prepare(&policy)?;
             let synchronization = audit.synchronization_source()?;
-            let observed = synchronization.observe_board(&source.with_extension("kicad_pcb"))?;
+            let observed = if regions {
+                synchronization.observe_region_board(&source.with_extension("kicad_pcb"))?
+            } else {
+                synchronization.observe_board(&source.with_extension("kicad_pcb"))?
+            };
             let id = self.id("observation");
             let mut data = json!({"schema_version":1,"observation":"closed_schematic_pcb_sync","observation_id":id,
                 "revision":observed.digest(),"project_root":root,"root_schematic":source,"board":observed.path(),
                 "components":synchronization.components(),"ineligible_units":synchronization.ineligible_units(),
                 "footprints":observed.board().footprints(),"copper":observed.board().routes().iter().map(|(uuid,(net,locked))|json!({"uuid":uuid,"net":net,"locked":locked})).collect::<Vec<_>>(),"has_zones":observed.board().has_zones(),"source_context":audit.evidence()?,"expires_in_seconds":TTL.as_secs()});
+            if let Some(regions) = observed.region_evidence()? {
+                data["zones"] = json!(observed.board().zones()?);
+                data["region_ownership"] = regions;
+            }
             if project_netclasses {
                 let classes = observed.observe_project_netclasses()?;
                 data["project_netclasses"] = json!({"digest":classes.digest()?,"project_sha256":classes.project_sha256(),
@@ -294,6 +312,7 @@ impl Registry {
             || request.intent.project_netclasses.len() > 128
             || request.intent.actions.len() > 128
             || request.intent.copper_nets.len() > 4096
+            || request.intent.zone_nets.len() > 256
         {
             return Err("invalid synchronization schema, identity or action bound".into());
         }
@@ -336,6 +355,9 @@ impl Registry {
             let mut data = json!({"schema_version":1,"operation_identity":"schematic-pcb-sync-v1","plan_id":id,"plan_hash":hash,
                 "state":if has_changes{"planned"}else{"unchanged"},"has_changes":has_changes,"differences":preview.differences(),
                 "drc_delta":preview.drc(),"native_preview":preview.evidence(),"expires_in_seconds":TTL.as_secs()});
+            if let Some(regions) = preview.regions() {
+                data["regions"] = json!(regions);
+            }
             if !request.intent.project_netclasses.is_empty() {
                 if let Some(project) = preview.project_data() {
                     data["publication_kind"] = json!("project_and_optional_board");
@@ -563,7 +585,7 @@ mod tests {
         let actions = definitions["SynchronizationAction"]["oneOf"]
             .as_array()
             .unwrap();
-        assert_eq!(actions.len(), 7);
+        assert_eq!(actions.len(), 8);
         for action in actions {
             assert_eq!(action["additionalProperties"], false);
             assert!(action["properties"]["kind"]["const"].is_string());

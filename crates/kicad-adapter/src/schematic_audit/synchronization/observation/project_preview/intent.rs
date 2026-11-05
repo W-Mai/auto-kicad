@@ -22,10 +22,17 @@ impl SynchronizationBoardObservation {
         let mut board = intent.clone();
         board.project_netclasses.clear();
         board.validate_board(true)?;
-        let project = self.preview_project_netclasses(&intent.project_netclasses)?;
+        let project = self.preview_project_netclasses_profile(
+            &intent.project_netclasses,
+            self.regions.is_some(),
+        )?;
         if !project.candidate.has_changes() {
             // No project bytes are authorized. Keep the ordinary endpoint-class contract.
-            let preview = self.preview_candidate(&board, false, true)?;
+            let preview = if self.regions.is_some() {
+                self.preview_region_candidate(&board, false, true, None)?
+            } else {
+                self.preview_candidate(&board, false, true)?
+            };
             project.verify()?;
             return Ok(SynchronizationIntentPreview::Board(preview));
         }

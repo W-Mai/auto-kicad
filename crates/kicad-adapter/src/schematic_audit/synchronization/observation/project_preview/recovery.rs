@@ -83,6 +83,10 @@ fn source_projection(observation: &SynchronizationBoardObservation) -> Result<Va
 }
 
 impl SynchronizationProjectRecoveryBaseline {
+    pub fn has_regions(&self) -> bool {
+        self.original.has_regions()
+    }
+
     pub(super) fn capture(
         preview: &SynchronizationProjectPreview,
         candidate_board: &[u8],
@@ -277,9 +281,8 @@ impl SynchronizationProjectRecoveryBaseline {
             .policy
             .project
             .join(relative(self.board_path())?);
-        let original = original_audit
-            .synchronization_source()?
-            .observe_board(&board)?;
+        let source = original_audit.synchronization_source()?;
+        let original = self.original.observe_recovery_source(&source, &board)?;
         let classes = self.match_original(&original, original_project, candidate_project)?;
         self.proof(current, selected, original, classes, prefix, false)
     }
@@ -299,9 +302,10 @@ impl SynchronizationProjectRecoveryBaseline {
             candidate_project,
             0,
         )?;
-        let original = current
-            .synchronization_source()?
-            .observe_board(self.board_path())?;
+        let source = current.synchronization_source()?;
+        let original = self
+            .original
+            .observe_recovery_source(&source, self.board_path())?;
         let classes = self.match_original(&original, original_project, candidate_project)?;
         self.proof(current, selected, original, classes, 0, true)
     }

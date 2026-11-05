@@ -1,5 +1,9 @@
 //! Complete live board text and independently observed zone locks.
 mod filled_copper;
+mod refill_candidate;
+pub use refill_candidate::{
+    ClosedRefillCandidate, ClosedRefillDelta, ClosedRegionCopper, ClosedRegionCopperChange,
+};
 mod geometry_identity;
 mod saved_binding;
 mod teardrops;
@@ -13,7 +17,8 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 pub use teardrops::{
-    GeneratedDrcSnapshot, GeneratedZoneCorrespondence, TeardropIdentity, TeardropTextPartition,
+    ClosedGeneratedDrcSnapshot, GeneratedDrcSnapshot, GeneratedZoneCorrespondence,
+    TeardropIdentity, TeardropTextPartition,
 };
 
 const MAX_DEPTH: usize = 64;

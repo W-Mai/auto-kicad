@@ -1,6 +1,7 @@
 //! Exact saved-board candidates; models and candidates carry no publication approval.
 use super::*;
 mod disposition;
+mod regions;
 pub(super) mod replacement;
 use kicad_checks::connectivity::{ClosedConnectivityEvidence, ConnectivityKind};
 use kiutils_sexpr::{Atom, CstDocument, Node, Span};
@@ -232,6 +233,16 @@ pub struct SynchronizationFootprint {
     pub pads: Vec<SynchronizationPad>,
 }
 
+/// Exact authored zone identity and net ownership; generated regions have separate native authority.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct SynchronizationZone {
+    pub uuid: String,
+    pub net: String,
+    pub locked: bool,
+    pub rule_area: bool,
+    pub layers: Vec<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct SavedSynchronizationBoard {
     cst: CstDocument,
@@ -239,6 +250,7 @@ pub struct SavedSynchronizationBoard {
     routes: BTreeMap<String, (String, bool)>,
     digest: String,
     has_zones: bool,
+    zones: Result<BTreeMap<String, SynchronizationZone>, String>,
     net_names: BTreeSet<String>,
     identities: BTreeSet<String>,
     external_references: BTreeMap<String, BTreeSet<Option<String>>>,
@@ -380,6 +392,49 @@ impl SavedSynchronizationBoard {
                 .map(|(name, _)| name.clone())
                 .filter(|name| !name.is_empty()),
         );
+        // Legacy observations retain unknown zone grammar; explicit region authority requires this index.
+        let authored_zones = (|| -> Result<BTreeMap<String, SynchronizationZone>, String> {
+            let mut authored_zones = BTreeMap::new();
+            for zone in &zones {
+                let generated = optional(zone, "attr")?
+                    .map(|attr| optional(attr, "teardrop"))
+                    .transpose()?
+                    .flatten()
+                    .is_some();
+                if !generated {
+                    let id = identity(zone)?;
+                    let layers = match (optional(zone, "layer")?, optional(zone, "layers")?) {
+                        (Some(layer), None) => vec![scalar(layer)?.to_owned()],
+                        (None, Some(layers)) => items(layers)?[1..]
+                            .iter()
+                            .map(|item| atom(item).map(str::to_owned))
+                            .collect::<Result<Vec<_>, _>>()?,
+                        _ => {
+                            return Err(
+                                "authored zone requires one explicit layer selection".into()
+                            );
+                        }
+                    };
+                    let mut sorted = layers.clone();
+                    sorted.sort();
+                    sorted.dedup();
+                    if layers.is_empty() || layers.len() > 32 || sorted.len() != layers.len() {
+                        return Err("authored zone layer selection exceeds bounds".into());
+                    }
+                    let observed = SynchronizationZone {
+                        uuid: id.clone(),
+                        net: net(zone, &nets)?,
+                        locked: locked(zone)?,
+                        rule_area: optional(zone, "keepout")?.is_some(),
+                        layers: sorted,
+                    };
+                    if authored_zones.insert(id, observed).is_some() || authored_zones.len() > 256 {
+                        return Err("duplicate or excessive authored zone".into());
+                    }
+                }
+            }
+            Ok(authored_zones)
+        })();
         for zone in zones {
             let name = net(zone, &nets)?;
             if !name.is_empty() {
@@ -393,6 +448,7 @@ impl SavedSynchronizationBoard {
             routes,
             digest: hash(text.as_bytes()),
             has_zones,
+            zones: authored_zones,
             net_names,
             identities: reserved,
             external_references,
@@ -488,6 +544,10 @@ impl SavedSynchronizationBoard {
     pub fn routes(&self) -> &BTreeMap<String, (String, bool)> {
         &self.routes
     }
+    pub fn zones(&self) -> Result<&BTreeMap<String, SynchronizationZone>, String> {
+        self.zones.as_ref().map_err(Clone::clone)
+    }
+
     pub fn has_zones(&self) -> bool {
         self.has_zones
     }
@@ -649,6 +709,7 @@ impl SavedSynchronizationBoard {
                         "gr_poly",
                     ]
                     .contains(&name)
+                        || (name == "zone" && optional(node, "uuid")?.is_some())
                     {
                         Some(scalar(required(node, "uuid")?)?)
                     } else {
@@ -834,6 +895,9 @@ pub enum SynchronizationAction {
     Remove {
         footprint_uuid: String,
     },
+    RemoveManual {
+        footprint_uuid: String,
+    },
     Detach {
         footprint_uuid: String,
     },
@@ -853,6 +917,8 @@ pub struct SynchronizationIntent {
     pub copper_nets: Vec<SynchronizationCopperNet>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub project_netclasses: Vec<super::project::ProjectNetclassChange>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub zone_nets: Vec<SynchronizationCopperNet>,
 }
 impl SynchronizationIntent {
     pub(super) fn validate_board(&self, allow_empty: bool) -> Result<(), String> {
@@ -864,7 +930,11 @@ impl SynchronizationIntent {
         if self.schema_version != 1
             || self.actions.len() > 128
             || self.copper_nets.len() > 4096
-            || (!allow_empty && self.actions.is_empty() && self.copper_nets.is_empty())
+            || self.zone_nets.len() > 256
+            || (!allow_empty
+                && self.actions.is_empty()
+                && self.copper_nets.is_empty()
+                && self.zone_nets.is_empty())
         {
             return Err("invalid synchronization version or action bound".into());
         }
@@ -889,8 +959,26 @@ pub struct SynchronizationCandidate {
     added_pads: BTreeSet<String>,
     replacement_pads: BTreeMap<String, String>,
     template_evidence: Vec<Value>,
+    region_delta: Option<crate::live_geometry::ClosedRefillDelta>,
 }
 impl SynchronizationCandidate {
+    pub fn region_delta(&self) -> Option<&crate::live_geometry::ClosedRefillDelta> {
+        self.region_delta.as_ref()
+    }
+    pub(super) fn with_refill(
+        mut self,
+        refill: &crate::live_geometry::ClosedRefillCandidate,
+    ) -> Result<Self, String> {
+        if refill.evidence()["input_sha256"].as_str() != Some(hash(&self.bytes).as_str()) {
+            return Err("refill content belongs to another source candidate".into());
+        }
+        let previous = self.digest.clone();
+        self.bytes = refill.text().as_bytes().to_vec();
+        self.region_delta = Some(refill.delta().clone());
+        self.digest=hash(&serde_json::to_vec(&serde_json::json!({"candidate_before_refill":previous,
+            "candidate_sha256":hash(&self.bytes),"refill_content":refill.digest(),"regions":self.region_delta})).map_err(|e|e.to_string())?);
+        Ok(self)
+    }
     pub(super) fn added_pads(&self) -> &BTreeSet<String> {
         &self.added_pads
     }
@@ -1169,6 +1257,33 @@ impl SynchronizationSource {
         connectivity: &ClosedConnectivityEvidence,
         allow_empty: bool,
     ) -> Result<SynchronizationCandidate, String> {
+        self.compile_board_profile(board, intent, connectivity, allow_empty, None)
+    }
+
+    pub(super) fn compile_board_for_regions(
+        &self,
+        board: &SavedSynchronizationBoard,
+        intent: &SynchronizationIntent,
+        connectivity: &ClosedConnectivityEvidence,
+        allow_empty: bool,
+        regions: &native::NativeRegionOwnership,
+    ) -> Result<SynchronizationCandidate, String> {
+        regions.verify(&self.audit)?;
+        regions.require_input(board, connectivity)?;
+        self.compile_board_profile(board, intent, connectivity, allow_empty, Some(regions))
+    }
+
+    fn compile_board_profile(
+        &self,
+        board: &SavedSynchronizationBoard,
+        intent: &SynchronizationIntent,
+        connectivity: &ClosedConnectivityEvidence,
+        allow_empty: bool,
+        regions: Option<&native::NativeRegionOwnership>,
+    ) -> Result<SynchronizationCandidate, String> {
+        if regions.is_none() && !intent.zone_nets.is_empty() {
+            return Err("zone net selections require the complete region workflow".into());
+        }
         self.verify()?;
         intent.validate_board(allow_empty)?;
         if connectivity.board_sha256() != board.digest() {
@@ -1373,7 +1488,7 @@ impl SynchronizationSource {
                                     pad.uuid
                                 ));
                             }
-                            if board.has_zones {
+                            if board.has_zones && regions.is_none() {
                                 return Err(
                                     "affected zoned board requires complete refill qualification"
                                         .into(),
@@ -1391,6 +1506,7 @@ impl SynchronizationSource {
                     owners.insert(id, c.id.as_str());
                 }
                 SynchronizationAction::Remove { footprint_uuid }
+                | SynchronizationAction::RemoveManual { footprint_uuid }
                 | SynchronizationAction::Detach { footprint_uuid } => {
                     let fp = board
                         .footprints
@@ -1406,8 +1522,13 @@ impl SynchronizationSource {
                         patches.set(board.node(&fp.uuid)?, &fp.uuid, "path", "")?;
                         continue;
                     }
-                    if fp.board_only
-                        || board.has_zones
+                    let manual = matches!(action, SynchronizationAction::RemoveManual { .. });
+                    if manual != fp.board_only {
+                        return Err(
+                            "manual_removal_policy_must_match_observed_board_only_flag".into()
+                        );
+                    }
+                    if (board.has_zones && regions.is_none())
                         || board.has_external_references(&fp.uuid)?
                     {
                         return Err("board-only, zoned or grouped footprint removal requires separate qualification".into());
@@ -1455,13 +1576,28 @@ impl SynchronizationSource {
             {
                 return Err("repeated, locked, redundant or foreign copper net change".into());
             }
-            if board.has_zones {
+            if board.has_zones && regions.is_none() {
                 return Err(
                     "zoned copper net changes require complete refill qualification".into(),
                 );
             }
             patches.set(board.node(&change.uuid)?, &change.uuid, "net", &change.net)?;
             expected_nets.insert(change.uuid.clone(), change.net.clone());
+        }
+        if let Some(regions) = regions {
+            let names = desired_names
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect::<BTreeSet<_>>();
+            regions.validate_net_changes(
+                &intent.zone_nets,
+                &expected_nets,
+                &BTreeMap::new(),
+                &names,
+            )?;
+            for change in &intent.zone_nets {
+                patches.set(board.node(&change.uuid)?, &change.uuid, "net", &change.net)?;
+            }
         }
         for group in connectivity.components() {
             let desired = group
@@ -1610,6 +1746,7 @@ impl SynchronizationSource {
             added_pads: BTreeSet::new(),
             replacement_pads: BTreeMap::new(),
             template_evidence: Vec::new(),
+            region_delta: None,
             bytes,
             differences,
             digest,

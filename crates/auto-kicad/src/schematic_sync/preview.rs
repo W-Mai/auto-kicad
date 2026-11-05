@@ -50,6 +50,12 @@ impl Preview {
             Self::Project(p) => p.evidence(),
         }
     }
+    pub(super) fn regions(&self) -> Option<&kicad_adapter::live_geometry::ClosedRefillDelta> {
+        match self {
+            Self::Board(p) => p.candidate().region_delta(),
+            Self::Project(p) => p.board_candidate().region_delta(),
+        }
+    }
     pub(super) fn differences(&self) -> &[SynchronizationDifference] {
         match self {
             Self::Board(p) => p.candidate().differences(),

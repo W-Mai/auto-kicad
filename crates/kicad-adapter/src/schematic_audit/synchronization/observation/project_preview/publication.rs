@@ -74,6 +74,12 @@ impl MatchedSynchronizationProjectPreview {
     }
     pub fn prepare_publication(self) -> Result<PreparedSynchronizationProjectPublication, String> {
         self.preview.verify()?;
+        if self.preview.region_profile || self.preview.observation.regions.is_some() {
+            return Err(
+                "project region transitions require the complete PCB/refill publication workflow"
+                    .into(),
+            );
+        }
         if !self.preview.candidate.has_changes() {
             return Err("synchronization_has_no_changes".into());
         }
@@ -316,9 +322,26 @@ pub(super) fn observe_published_candidate(
                 .into(),
         );
     }
-    let actual = source.observe_board(board_path)?;
-    if actual.native.report != observed.native.report
-        || actual.native.board.text() != observed.native.board.text()
+    let actual = if observed.regions.is_some() {
+        source.observe_region_board(board_path)?
+    } else {
+        source.observe_board(board_path)?
+    };
+    if match (&observed.regions, &actual.regions) {
+        (Some(before), Some(after)) => !before.same_native(after),
+        (None, None) => false,
+        _ => true,
+    } {
+        return Err(
+            "published project native region ownership differs from the matched candidate".into(),
+        );
+    }
+    if !actual
+        .native
+        .same_report(&observed.native, observed.regions.is_some())?
+        || !actual
+            .native
+            .same_saved_content(&observed.native, observed.regions.is_some())?
         || actual.connectivity != observed.connectivity
         || actual.observe_project_netclasses()? != *classes
     {

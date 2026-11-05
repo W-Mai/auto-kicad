@@ -1,9 +1,11 @@
 //! PCB-only synchronization journal. Optional project transitions require separate qualification.
+mod regions;
 use super::*;
 use file_publication::PublicationFile;
 use kicad_adapter::schematic_audit::synchronization::{
     MatchedSynchronizationPreview, SynchronizationRecoveryBaseline,
 };
+pub(super) use regions::{archive_region_preview, region_payload_bytes, validate_region_preview};
 
 pub(super) const DOMAIN: &str = "pcb_sync";
 pub(super) const PENDING: &str = ".auto-kicad-sync-pending";
@@ -33,6 +35,7 @@ pub(super) struct Start<'a> {
     candidate: &'a [u8],
     baseline: Vec<u8>,
     preview: Vec<u8>,
+    native_regions: Vec<(&'static str, &'a [u8])>,
     expectation: Vec<u8>,
     matched_digest: &'a str,
     pub(super) checkpoint: &'a mut dyn FnMut(&str) -> io::Result<()>,
@@ -97,6 +100,7 @@ pub(super) fn make_intent(
     attempt: &str,
     start: &Start<'_>,
 ) -> io::Result<SynchronizationPublicationIntent> {
+    let region_bytes = region_payload_bytes(&start.native_regions)?;
     if start.board.extension().and_then(|s| s.to_str()) != Some("kicad_pcb")
         || start.candidate.is_empty()
         || start.candidate.len() as u64 > MAX_FILE_BYTES
@@ -107,6 +111,7 @@ pub(super) fn make_intent(
             + start.baseline.len()
             + start.preview.len()
             + start.expectation.len()
+            + region_bytes
             > 256 * 1024 * 1024
         || !matches!(start.before, SourceExistence::Present { .. })
         || confined_existence_with_limit(project, start.board, MAX_FILE_BYTES)? != start.before
@@ -138,7 +143,16 @@ pub(super) fn make_intent(
         file,
         candidate: artifact(directory, "candidate.kicad_pcb", start.candidate)?,
         baseline: artifact(directory, "baseline.json", &start.baseline)?,
-        preview: artifact(directory, "preview.json", &start.preview)?,
+        preview: artifact(
+            directory,
+            "preview.json",
+            &archive_region_preview(
+                directory,
+                &start.preview,
+                &start.native_regions,
+                &crate::digest_bytes(start.candidate),
+            )?,
+        )?,
         expectation: artifact(directory, "expectation.json", &start.expectation)?,
         matched_digest: start.matched_digest.into(),
     };
@@ -193,6 +207,12 @@ pub(super) fn validate_intent(project: &Path, record: &ExecutionRecord) -> io::R
         &intent.baseline,
         "baseline.json",
     )?)?;
+    validate_region_preview(
+        directory,
+        &read_artifact(directory, &intent.preview, "preview.json")?,
+        baseline.has_regions(),
+        &intent.candidate.sha256,
+    )?;
     if baseline.project_dir() != project
         || baseline.board_path() != file.original
         || baseline.board_sha256() != sha256.as_str()
@@ -318,6 +338,7 @@ impl ProjectWriter {
                 candidate: check.candidate_bytes(),
                 baseline: baseline_bytes,
                 preview: serde_json::to_vec(check.preview_evidence())?,
+                native_regions: check.native_region_artifacts().map_err(io::Error::other)?,
                 expectation: serde_json::to_vec(check.expectation())?,
                 matched_digest: check.matched_digest(),
                 checkpoint: &mut checkpoint,

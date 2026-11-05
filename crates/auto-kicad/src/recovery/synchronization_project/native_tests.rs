@@ -48,6 +48,7 @@ fn native_project_publication_and_restart_recovery() {
         let project_only = control["project_only"] == true;
         let mut intent = SynchronizationIntent {
             project_netclasses: vec![],
+            zone_nets: Vec::new(),
             schema_version: 1,
             actions: source
                 .components()
@@ -138,6 +139,7 @@ fn native_project_publication_and_restart_recovery() {
             .preview_board_and_project(&intent, &actions)
             .unwrap();
         let expected = SynchronizationProjectBoardExpectation {
+            regions: None,
             erc: None,
             differences: preview.board_candidate().differences().to_vec(),
             project_differences: preview.project_candidate().differences().to_vec(),

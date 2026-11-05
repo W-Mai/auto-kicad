@@ -1,3 +1,5 @@
+mod refill;
+pub use refill::NativeRefillCapture;
 mod artifact_export;
 pub use artifact_export::NativeArtifactRecipe;
 use std::fs::{self, File};
@@ -312,7 +314,9 @@ impl NetlistRunner {
         }
         let root = canonical_directory(project_root)?;
         let schematic = match kind {
-            NativeCheck::PcbComplete => canonical_board(&root, root_schematic)?,
+            NativeCheck::PcbComplete | NativeCheck::PcbRefill => {
+                canonical_board(&root, root_schematic)?
+            }
             _ => canonical_schematic(&root, root_schematic)?,
         };
         self.verify_context()?;
@@ -334,6 +338,28 @@ impl NetlistRunner {
         match kind {
             NativeCheck::PcbComplete => {
                 command.args(["pcb", "drc", "--schematic-parity", "--all-track-errors"]);
+            }
+            NativeCheck::PcbRefill => {
+                command.args([
+                    "pcb",
+                    "drc",
+                    "--refill-zones",
+                    "--save-board",
+                    "--all-track-errors",
+                ]);
+                #[cfg(unix)]
+                unsafe {
+                    command.pre_exec(|| {
+                        let limit = libc::rlimit {
+                            rlim_cur: 32 * 1024 * 1024,
+                            rlim_max: 32 * 1024 * 1024,
+                        };
+                        if libc::setrlimit(libc::RLIMIT_FSIZE, &limit) != 0 {
+                            return Err(io::Error::last_os_error());
+                        }
+                        Ok(())
+                    });
+                }
             }
             _ => {
                 command.args(["sch", "erc"]);
@@ -387,6 +413,7 @@ enum NativeCheck {
     ErcErrors,
     ErcComplete,
     PcbComplete,
+    PcbRefill,
 }
 
 #[derive(Debug, Error)]

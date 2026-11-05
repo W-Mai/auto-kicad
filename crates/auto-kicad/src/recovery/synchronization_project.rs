@@ -8,7 +8,10 @@ use kicad_adapter::schematic_audit::{
         VerifiedSynchronizationProjectRecovery, VerifiedSynchronizationRestoration,
     },
 };
-use synchronization::{DOMAIN, PENDING, SynchronizationArtifact, artifact, read_artifact};
+use synchronization::{
+    DOMAIN, PENDING, SynchronizationArtifact, archive_region_preview, artifact, read_artifact,
+    region_payload_bytes, validate_region_preview,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -32,6 +35,7 @@ pub(super) struct Start<'a> {
     original_board: &'a [u8],
     baseline: Vec<u8>,
     preview: Vec<u8>,
+    native_regions: Vec<(&'static str, &'a [u8])>,
     expectation: Vec<u8>,
     matched_digest: &'a str,
     pub(super) checkpoint: &'a mut dyn FnMut(&str) -> io::Result<()>,
@@ -87,7 +91,8 @@ pub(super) fn make_intent(
     let mut total = start.original_board.len()
         + start.baseline.len()
         + start.preview.len()
-        + start.expectation.len();
+        + start.expectation.len()
+        + region_payload_bytes(&start.native_regions)?;
     let mut files = Vec::new();
     let mut candidates = Vec::new();
     for (index, source) in start.files.iter().enumerate() {
@@ -136,7 +141,23 @@ pub(super) fn make_intent(
         candidates,
         original_board: artifact(directory, "original.kicad_pcb", start.original_board)?,
         baseline: artifact(directory, "project-baseline.json", &start.baseline)?,
-        preview: artifact(directory, "project-preview.json", &start.preview)?,
+        preview: artifact(
+            directory,
+            "project-preview.json",
+            &archive_region_preview(
+                directory,
+                &start.preview,
+                &start.native_regions,
+                &crate::digest_bytes(
+                    start
+                        .files
+                        .last()
+                        .filter(|_| start.files.len() == 2)
+                        .map(|file| file.candidate)
+                        .unwrap_or(start.original_board),
+                ),
+            )?,
+        )?,
         expectation: artifact(directory, "project-expectation.json", &start.expectation)?,
         matched_digest: start.matched_digest.into(),
     };
@@ -227,6 +248,16 @@ pub(super) fn validate_intent(project: &Path, record: &ExecutionRecord) -> io::R
         &intent.baseline,
         "project-baseline.json",
     )?)?;
+    validate_region_preview(
+        directory,
+        &read_artifact(directory, &intent.preview, "project-preview.json")?,
+        baseline.has_regions(),
+        if intent.files.len() == 2 {
+            &intent.files[1].candidate_sha256
+        } else {
+            &intent.original_board.sha256
+        },
+    )?;
     let evidence = serde_json::to_value(&baseline)?;
     if baseline.project_dir() != project
         || baseline.project_path() != intent.files[0].original
@@ -469,6 +500,7 @@ impl ProjectWriter {
                 original_board: &original_board,
                 baseline,
                 preview: serde_json::to_vec(check.preview_evidence())?,
+                native_regions: check.native_region_artifacts().map_err(io::Error::other)?,
                 expectation: serde_json::to_vec(check.expectation())?,
                 matched_digest: check.matched_digest(),
                 checkpoint: &mut checkpoint,

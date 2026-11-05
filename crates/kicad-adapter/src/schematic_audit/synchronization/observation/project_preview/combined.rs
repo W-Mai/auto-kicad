@@ -35,7 +35,7 @@ impl SynchronizationBoardObservation {
         let mut board = intent.clone();
         board.project_netclasses.clear();
         board.validate_board(true)?;
-        let project = self.preview_project_netclasses(actions)?;
+        let project = self.preview_project_netclasses_profile(actions, self.regions.is_some())?;
         self.compose_project(&board, project)
     }
 
@@ -54,7 +54,11 @@ impl SynchronizationBoardObservation {
             );
         }
         // This core candidate cannot match the legacy board-only publication expectation.
-        let board = self.preview_candidate(intent, true, true)?;
+        let board = if project.region_profile {
+            self.preview_region_candidate(intent, true, true, Some(project.candidate.bytes()))?
+        } else {
+            self.preview_candidate(intent, true, true)?
+        };
         let audit = &self.source.audit;
         let relative = |path: &Path| -> Result<String, String> {
             path.strip_prefix(&audit.inner.policy.project)
@@ -76,7 +80,11 @@ impl SynchronizationBoardObservation {
             return Err("composed candidate changes the matched project source classes".into());
         }
         let path = observed.inner.policy.project.join(relative(&self.path)?);
-        let observed = source.observe_board(&path)?;
+        let observed = if project.region_profile {
+            source.observe_region_board(&path)?
+        } else {
+            source.observe_board(&path)?
+        };
         let classes = observed.observe_project_netclasses()?;
         let source_class_requirements = native::verify_source_netclasses(
             &observed.source,
@@ -84,7 +92,9 @@ impl SynchronizationBoardObservation {
             &observed.native.report,
         )?;
         if classes.configured() != project.after.configured()
-            || board.native.board.text() != observed.native.board.text()
+            || !board
+                .native
+                .same_saved_content(&observed.native, project.region_profile)?
             || board.connectivity.endpoints() != observed.connectivity.endpoints()
             || board.connectivity.components() != observed.connectivity.components()
             || observed.bytes.as_ref() != board.candidate.bytes()
@@ -102,13 +112,23 @@ impl SynchronizationBoardObservation {
                 .ok_or("missing original project settings")?,
             project.candidate.bytes(),
         )?;
-        native::verify_project_endpoint_netclasses(
-            &self.native.report,
-            &board.native.report,
-            &observed.native.report,
-            board.candidate.replacement_pads(),
-            &assignments,
-        )?;
+        if project.region_profile {
+            native::verify_region_project_endpoint_netclasses(
+                &self.native.report,
+                &board.native,
+                &observed.native,
+                board.candidate.replacement_pads(),
+                &assignments,
+            )?;
+        } else {
+            native::verify_project_endpoint_netclasses(
+                &self.native.report,
+                &board.native.report,
+                &observed.native.report,
+                board.candidate.replacement_pads(),
+                &assignments,
+            )?;
+        }
         let mut delta = ProjectNetclassDelta::between(&project.before, &classes);
         delta.source_nets = project.delta.source_nets.clone();
         let drc_delta = self
@@ -119,7 +139,7 @@ impl SynchronizationBoardObservation {
         project.verify()?;
         board.verify()?;
         observed.verify()?;
-        let evidence = serde_json::json!({
+        let mut evidence = serde_json::json!({
             "schema_version": 1, "observation_digest": self.digest,
             "project_preview_digest": project.digest, "board_candidate_digest": board.candidate.digest(),
             "board_differences": board.candidate.differences(), "project_differences": project.candidate.differences(),
@@ -136,6 +156,12 @@ impl SynchronizationBoardObservation {
             "connectivity_before": self.connectivity, "connectivity_after": observed.connectivity,
             "publication_authorized": false,
         });
+        if let Some(frame) = &board.region_refill {
+            evidence["region_refill"] = frame.evidence().clone();
+        }
+        if let Some(regions) = &observed.regions {
+            evidence["region_after"] = regions.evidence()?;
+        }
         let digest = hash(&serde_json::to_vec(&evidence).map_err(|e| e.to_string())?);
         let preview = Arc::new(SynchronizationProjectBoardPreview {
             project,

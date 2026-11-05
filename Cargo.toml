@@ -11,3 +11,10 @@ members = [
     "crates/runtime",
 ]
 resolver = "3"
+
+# Keep native executable verification fast in development and acceptance builds.
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.test.package.sha2]
+opt-level = 3

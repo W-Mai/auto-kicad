@@ -7,6 +7,8 @@ pub use recovery::{SynchronizationRecoveryBaseline, VerifiedSynchronizationResto
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SynchronizationExpectation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regions: Option<crate::live_geometry::ClosedRefillDelta>,
     pub differences: Vec<board::SynchronizationDifference>,
     pub drc: kicad_checks::CompleteDrcExpectation,
 }
@@ -73,6 +75,9 @@ impl SynchronizationBoardPreview {
             return Err("composed project candidate cannot use legacy board-only approval".into());
         }
         expectation.differences = canonical_differences(&expectation.differences)?;
+        if expectation.regions.as_ref() != self.candidate.region_delta() {
+            return Err("synchronization_region_expectation_mismatch".into());
+        }
         if expectation.differences != canonical_differences(self.candidate.differences())? {
             return Err("synchronization_diff_expectation_mismatch".into());
         }
@@ -112,6 +117,13 @@ impl MatchedSynchronizationPreview {
 }
 
 impl PreparedSynchronizationPublication {
+    pub fn native_region_artifacts(&self) -> Result<Vec<(&'static str, &[u8])>, String> {
+        match self.matched.preview.region_refill.as_ref() {
+            Some(frame) => frame.native_artifacts(),
+            None => Ok(Vec::new()),
+        }
+    }
+
     pub fn project_dir(&self) -> &Path {
         &self
             .matched
@@ -156,11 +168,22 @@ impl PreparedSynchronizationPublication {
                 "actual synchronization PCB differs from the exact approved candidate".into(),
             );
         }
-        let actual = preview
-            .observation
-            .source
-            .observe_board(self.board_path())?;
-        if actual.native.report != preview.native.report
+        let source = &preview.observation.source;
+        let actual = if preview.region_after.is_some() {
+            source.observe_region_board(self.board_path())?
+        } else {
+            source.observe_board(self.board_path())?
+        };
+        if match (&preview.region_after, &actual.regions) {
+            (Some(before), Some(after)) => !before.same_native(after),
+            (None, None) => false,
+            _ => true,
+        } {
+            return Err("published native region ownership differs from approved preview".into());
+        }
+        if !actual
+            .native
+            .same_report(&preview.native, preview.observation.regions.is_some())?
             || actual.connectivity != preview.connectivity
         {
             return Err("actual synchronization native board/serialization/connectivity differs from the matched preview".into());

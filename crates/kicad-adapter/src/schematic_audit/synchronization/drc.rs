@@ -97,7 +97,55 @@ pub(super) fn capture(
     project: &InputFile,
     rules: &InputFile,
 ) -> Result<SynchronizationDrcCapture, String> {
+    capture_profile(audit, filename, board, project, rules, None)
+}
+
+pub(super) fn capture_for_regions(
+    audit: &SchematicAudit,
+    filename: &std::ffi::OsStr,
+    board: &SavedSynchronizationBoard,
+    project: &InputFile,
+    rules: &InputFile,
+    native: &native::NativeBoardProjection,
+) -> Result<SynchronizationDrcCapture, String> {
+    native.verify(audit)?;
+    if native.report.board_sha256 != board.digest()
+        || Some(&native.report.project_sha256) != project.digest.as_ref()
+    {
+        return Err(
+            "generated DRC native readback belongs to different board/project inputs".into(),
+        );
+    }
+    capture_profile(audit, filename, board, project, rules, Some(native))
+}
+
+fn capture_profile(
+    audit: &SchematicAudit,
+    filename: &std::ffi::OsStr,
+    board: &SavedSynchronizationBoard,
+    project: &InputFile,
+    rules: &InputFile,
+    native: Option<&native::NativeBoardProjection>,
+) -> Result<SynchronizationDrcCapture, String> {
     audit.verify()?;
+    let generated = if let Some(native) = native {
+        let partition = crate::live_geometry::TeardropTextPartition::parse(board.text())?;
+        if partition.generated_count() > 0 {
+            if rules.bytes.is_some() {
+                return Err("generated custom-rule DRC requires independently qualified identity-invariant evaluation".into());
+            }
+            Some(
+                crate::live_geometry::ClosedGeneratedDrcSnapshot::bind_native_readback(
+                    board.text(),
+                    native.board.text(),
+                )?,
+            )
+        } else {
+            None
+        }
+    } else {
+        None
+    };
     let owner = runtime::owned_temp::Builder::new()
         .prefix("auto-kicad-sync-drc-")
         .tempdir()
@@ -143,7 +191,14 @@ pub(super) fn capture(
     if pcb.with_extension("kicad_sch") != schematic {
         return Err("synchronization DRC requires paired schematic and PCB basenames".into());
     }
-    write_new(&pcb, board.text().as_bytes())?;
+    write_new(
+        &pcb,
+        generated
+            .as_ref()
+            .map(|snapshot| snapshot.text())
+            .unwrap_or(board.text())
+            .as_bytes(),
+    )?;
     let original_pro = project
         .bytes
         .as_deref()
@@ -268,10 +323,14 @@ pub(super) fn capture(
     connectivity
         .verify_saved_inputs(&pcb, &policy)
         .map_err(|e| format!("DRC connectivity input drift: {e:?}"))?;
-    let evidence = serde_json::json!({"schema_version":1,"board_sha256":board.digest(),"project_source_sha256":hash(original_pro),"project_snapshot_sha256":hash(&compiled_pro),"rules":rules,
+    let mut evidence = serde_json::json!({"schema_version":1,"board_sha256":board.digest(),"project_source_sha256":hash(original_pro),"project_snapshot_sha256":hash(&compiled_pro),"rules":rules,
         "source_inputs":source,"private_inputs":private,"footprints":footprint_context,"unqualified_board_footprints":board.footprints().values().filter(|fp| !fp.library.contains(':')).map(|fp| &fp.uuid).collect::<Vec<_>>(),
         "execution":runner.execution_context().ok_or("missing DRC execution context")?.digest(),"complete_report":report,"connectivity":connectivity,
         "flags":["--schematic-parity","--all-track-errors","--severity-all","--units=mm"],"repeated_native_equal":true});
+    if let Some(generated) = &generated {
+        evidence["closed_generated_drc"] =
+            serde_json::to_value(generated).map_err(|e| e.to_string())?;
+    }
     let capture = SynchronizationDrcCapture {
         report,
         evidence,

@@ -8,6 +8,7 @@ use kicad_checks::{
 use std::time::Duration;
 mod project_preview;
 mod publication;
+mod refill;
 pub use project_preview::{
     MatchedSynchronizationProjectBoardPreview, MatchedSynchronizationProjectPreview,
     NetclassRecordChange, PreparedSynchronizationProjectBoardPublication,
@@ -32,6 +33,7 @@ pub struct SynchronizationBoardObservation {
     rules: InputFile,
     board: SavedSynchronizationBoard,
     native: native::NativeBoardProjection,
+    regions: Option<native::NativeRegionOwnership>,
     drc: drc::SynchronizationDrcCapture,
     connectivity: ClosedConnectivityEvidence,
     _owner: runtime::owned_temp::TempDir,
@@ -41,6 +43,8 @@ pub struct SynchronizationBoardObservation {
 
 pub struct SynchronizationBoardPreview {
     project_transition_pending: bool,
+    region_refill: Option<refill::SynchronizationRegionRefill>,
+    region_after: Option<native::NativeRegionOwnership>,
     observation: Arc<SynchronizationBoardObservation>,
     candidate: SynchronizationCandidate,
     native: native::NativeBoardProjection,
@@ -115,6 +119,20 @@ impl SynchronizationSource {
         &self,
         path: &Path,
     ) -> Result<Arc<SynchronizationBoardObservation>, String> {
+        self.observe_board_profile(path, false)
+    }
+    /// Capture complete authored/generated region ownership for the explicit region workflow.
+    pub fn observe_region_board(
+        &self,
+        path: &Path,
+    ) -> Result<Arc<SynchronizationBoardObservation>, String> {
+        self.observe_board_profile(path, true)
+    }
+    fn observe_board_profile(
+        &self,
+        path: &Path,
+        region_profile: bool,
+    ) -> Result<Arc<SynchronizationBoardObservation>, String> {
         self.verify()?;
         let canonical = fs::canonicalize(path).map_err(|e| e.to_string())?;
         if canonical != path
@@ -170,8 +188,28 @@ impl SynchronizationSource {
             project.bytes.as_deref().ok_or("missing project bytes")?,
         )?;
         board.verify_native_units(&native.board)?;
-        let drc = drc::capture(&self.audit, filename, &board, &project, &rules)?;
-        let digest=hash(&serde_json::to_vec(&serde_json::json!({"source":self.digest,"board":board.digest(),"project":project,"rules":rules,"native":native.digest,"connectivity":connectivity,"drc":drc.evidence})).map_err(|e|e.to_string())?);
+        let drc = if region_profile {
+            drc::capture_for_regions(&self.audit, filename, &board, &project, &rules, &native)?
+        } else {
+            drc::capture(&self.audit, filename, &board, &project, &rules)?
+        };
+        let regions = if region_profile {
+            Some(native::capture_regions(
+                &self.audit,
+                filename,
+                &board,
+                &project,
+                &rules,
+                &connectivity,
+            )?)
+        } else {
+            None
+        };
+        let mut captured = serde_json::json!({"source":self.digest,"board":board.digest(),"project":project,"rules":rules,"native":native.digest,"connectivity":connectivity,"drc":drc.evidence});
+        if let Some(regions) = &regions {
+            captured["regions"] = regions.evidence()?;
+        }
+        let digest = hash(&serde_json::to_vec(&captured).map_err(|e| e.to_string())?);
         let observed = Arc::new(SynchronizationBoardObservation {
             source: self.clone(),
             path: path.into(),
@@ -180,6 +218,7 @@ impl SynchronizationSource {
             rules,
             board,
             native,
+            regions,
             drc,
             connectivity,
             _owner: owner,
@@ -221,7 +260,7 @@ impl SynchronizationBoardObservation {
                 .as_deref()
                 .ok_or("missing project bytes")?,
         )?;
-        if projected.report != self.native.report {
+        if !projected.same_report(&self.native, self.regions.is_some())? {
             return Err(
                 "project-class observation differs from complete original native board".into(),
             );
@@ -246,6 +285,12 @@ impl SynchronizationBoardObservation {
     pub fn path(&self) -> &Path {
         &self.path
     }
+    pub fn region_evidence(&self) -> Result<Option<Value>, String> {
+        self.regions
+            .as_ref()
+            .map(|regions| regions.evidence())
+            .transpose()
+    }
     pub fn verify(&self) -> Result<(), String> {
         if !self.valid.load(Ordering::Acquire) {
             return Err("synchronization observation was invalidated".into());
@@ -262,6 +307,9 @@ impl SynchronizationBoardObservation {
             verify_input(&self.project)?;
             verify_input(&self.rules)?;
             self.native.verify(&self.source.audit)?;
+            if let Some(regions) = &self.regions {
+                regions.verify(&self.source.audit)?;
+            }
             self.drc.verify(&self.source.audit)?;
             Ok(())
         })();
@@ -280,6 +328,23 @@ impl SynchronizationBoardObservation {
         ),
         String,
     > {
+        self.prepare_templates_profile(intent, None)
+    }
+    fn prepare_templates_profile(
+        &self,
+        intent: &SynchronizationIntent,
+        regions: Option<&native::NativeRegionOwnership>,
+    ) -> Result<
+        (
+            Vec<templates::SavedFootprintTemplate>,
+            SynchronizationIntent,
+        ),
+        String,
+    > {
+        if let Some(regions) = regions {
+            regions.verify(&self.source.audit)?;
+            regions.require_board(&self.board)?;
+        }
         use board::SynchronizationAction;
         let mut result = Vec::new();
         let mut compiled = intent.clone();
@@ -390,7 +455,7 @@ impl SynchronizationBoardObservation {
             let mut template =
                 templates::capture(&self.source, component, &placement, &seed, &root_id)?;
             if replacement.is_some() {
-                let connected = self
+                let mut connected: BTreeSet<String> = self
                     .connectivity
                     .components()
                     .iter()
@@ -398,12 +463,23 @@ impl SynchronizationBoardObservation {
                     .flatten()
                     .cloned()
                     .collect();
-                self.board.inherit_replacement(
-                    &mut template,
-                    &connected,
-                    &seed,
-                    &self.native.board,
-                )?;
+                if let Some(regions) = regions {
+                    connected.extend(regions.contacted_endpoints());
+                    self.board.inherit_region_replacement(
+                        &mut template,
+                        &connected,
+                        &seed,
+                        &self.native.board,
+                        regions,
+                    )?;
+                } else {
+                    self.board.inherit_replacement(
+                        &mut template,
+                        &connected,
+                        &seed,
+                        &self.native.board,
+                    )?;
+                }
             }
             bytes = bytes
                 .checked_add(template.footprint.len() as u64)
@@ -426,7 +502,11 @@ impl SynchronizationBoardObservation {
         self: &Arc<Self>,
         intent: &SynchronizationIntent,
     ) -> Result<Arc<SynchronizationBoardPreview>, String> {
-        self.preview_candidate(intent, false, false)
+        if self.regions.is_some() {
+            self.preview_region_candidate(intent, false, false, None)
+        } else {
+            self.preview_candidate(intent, false, false)
+        }
     }
     fn preview_candidate(
         self: &Arc<Self>,
@@ -434,16 +514,64 @@ impl SynchronizationBoardObservation {
         project_transition_pending: bool,
         allow_empty: bool,
     ) -> Result<Arc<SynchronizationBoardPreview>, String> {
+        self.preview_candidate_profile(intent, project_transition_pending, allow_empty, false, None)
+    }
+    fn preview_region_candidate(
+        self: &Arc<Self>,
+        intent: &SynchronizationIntent,
+        project_transition_pending: bool,
+        allow_empty: bool,
+        final_project: Option<&[u8]>,
+    ) -> Result<Arc<SynchronizationBoardPreview>, String> {
+        self.preview_candidate_profile(
+            intent,
+            project_transition_pending,
+            allow_empty,
+            true,
+            final_project,
+        )
+    }
+    fn preview_candidate_profile(
+        self: &Arc<Self>,
+        intent: &SynchronizationIntent,
+        project_transition_pending: bool,
+        allow_empty: bool,
+        region_profile: bool,
+        final_project: Option<&[u8]>,
+    ) -> Result<Arc<SynchronizationBoardPreview>, String> {
         self.verify()?;
         intent.validate_board(allow_empty)?;
-        let (templates, compiled_intent) = self.prepare_templates(intent)?;
-        let candidate = if templates.is_empty() {
-            self.source.compile_board_for_preview(
-                &self.board,
-                intent,
-                &self.connectivity,
-                allow_empty,
-            )?
+        let regions = if region_profile {
+            Some(
+                self.regions
+                    .as_ref()
+                    .ok_or("region preview lacks original native ownership")?,
+            )
+        } else {
+            None
+        };
+        let (templates, compiled_intent) = if region_profile {
+            self.prepare_templates_profile(intent, regions)?
+        } else {
+            self.prepare_templates(intent)?
+        };
+        let mut candidate = if templates.is_empty() {
+            if let Some(regions) = regions {
+                self.source.compile_board_for_regions(
+                    &self.board,
+                    intent,
+                    &self.connectivity,
+                    allow_empty,
+                    regions,
+                )?
+            } else {
+                self.source.compile_board_for_preview(
+                    &self.board,
+                    intent,
+                    &self.connectivity,
+                    allow_empty,
+                )?
+            }
         } else {
             let augmented = self.board.with_templates(&templates)?;
             let temporary = runtime::owned_temp::Builder::new()
@@ -466,15 +594,89 @@ impl SynchronizationBoardObservation {
                 },
             )
             .map_err(|e| format!("template candidate connectivity: {e:?}"))?;
-            self.source
-                .compile_board_for_preview(
+            let compiled = if region_profile {
+                let owned_regions = native::capture_regions(
+                    &self.source.audit,
+                    self.path.file_name().ok_or("missing board basename")?,
+                    &augmented,
+                    &self.project,
+                    &self.rules,
+                    &connectivity,
+                )?;
+                self.source.compile_board_for_regions(
+                    &augmented,
+                    &compiled_intent,
+                    &connectivity,
+                    allow_empty,
+                    &owned_regions,
+                )?
+            } else {
+                self.source.compile_board_for_preview(
                     &augmented,
                     &compiled_intent,
                     &connectivity,
                     allow_empty,
                 )?
-                .bind_templates(&self.board, intent, &templates)?
+            };
+            compiled.bind_templates(&self.board, intent, &templates)?
         };
+        if region_profile
+            && self.rules.bytes.is_some()
+            && (candidate.has_changes() || final_project.is_some())
+        {
+            return Err(
+                "region changes with custom rules require separately qualified rule authority"
+                    .into(),
+            );
+        }
+        let region_refill =
+            if region_profile && (candidate.has_changes() || final_project.is_some()) {
+                let compiled = SavedSynchronizationBoard::parse(
+                    std::str::from_utf8(candidate.bytes()).map_err(|e| e.to_string())?,
+                )?;
+                let endpoints = compiled
+                    .footprints()
+                    .values()
+                    .flat_map(|fp| {
+                        fp.pads
+                            .iter()
+                            .map(|pad| (pad.uuid.clone(), pad.net.clone()))
+                    })
+                    .chain(
+                        compiled
+                            .routes()
+                            .iter()
+                            .map(|(id, (net, _))| (id.clone(), net.clone())),
+                    )
+                    .collect();
+                let nets = self
+                    .source
+                    .components()
+                    .iter()
+                    .flat_map(|component| component.pins().values().map(|net| net.name.clone()))
+                    .collect();
+                regions
+                    .ok_or("missing native region ownership")?
+                    .validate_net_changes(
+                        &intent.zone_nets,
+                        &endpoints,
+                        candidate.replacement_pads(),
+                        &nets,
+                    )?;
+                let frame = refill::refill_candidate(
+                    &self.source.audit,
+                    self.path.file_name().ok_or("missing board basename")?,
+                    compiled.text(),
+                    final_project
+                        .or(self.project.bytes.as_deref())
+                        .ok_or("missing refill project settings")?,
+                    self.rules.bytes.as_deref(),
+                )?;
+                candidate = candidate.with_refill(frame.candidate())?;
+                Some(frame)
+            } else {
+                None
+            };
         let owner = runtime::owned_temp::Builder::new()
             .prefix("auto-kicad-sync-preview-")
             .tempdir()
@@ -535,14 +737,13 @@ impl SynchronizationBoardObservation {
                 .verify_native_composed(&native.board, candidate.differences())
                 .map_err(|e| format!("native replacement serialization: {e}"))?;
         }
-        if self
-            .native
-            .board
-            .protected_native_digest(candidate.differences())?
-            != native
-                .board
-                .protected_native_digest(candidate.differences())?
-        {
+        let protected = |board: &SavedSynchronizationBoard| match &region_refill {
+            Some(frame) => {
+                board.protected_refilled_native_digest(candidate.differences(), frame.candidate())
+            }
+            None => board.protected_native_digest(candidate.differences()),
+        };
+        if protected(&self.native.board)? != protected(&native.board)? {
             return Err("native synchronization changed unapproved board data".into());
         }
         if connectivity.endpoints().iter().any(|endpoint| {
@@ -562,13 +763,36 @@ impl SynchronizationBoardObservation {
             &connectivity,
             candidate.replacement_pads(),
         )?;
-        let drc = drc::capture(
-            &self.source.audit,
-            filename,
-            &raw,
-            &self.project,
-            &self.rules,
-        )?;
+        let drc = if region_profile {
+            drc::capture_for_regions(
+                &self.source.audit,
+                filename,
+                &raw,
+                &self.project,
+                &self.rules,
+                &native,
+            )?
+        } else {
+            drc::capture(
+                &self.source.audit,
+                filename,
+                &raw,
+                &self.project,
+                &self.rules,
+            )?
+        };
+        let region_after = if region_profile {
+            Some(native::capture_regions(
+                &self.source.audit,
+                filename,
+                &raw,
+                &self.project,
+                &self.rules,
+                &connectivity,
+            )?)
+        } else {
+            None
+        };
         let drc_delta = self
             .drc
             .report
@@ -579,6 +803,13 @@ impl SynchronizationBoardObservation {
             "before_board_sha256":self.board.digest(),"candidate_board_sha256":hash(candidate.bytes()),"project":self.project,"rules":self.rules,
             "has_changes":candidate.has_changes(),"differences":candidate.differences(),"source_netclass_requirements":source_class_requirements,"templates":candidate.template_evidence(),"native_before":self.native.report,"native_after":native.report,
             "drc_before":self.drc.evidence,"drc_after":drc.evidence,"drc_delta":drc_delta,"connectivity_before":self.connectivity,"connectivity_after":connectivity,"native_after_digest":native.digest,"publication_authorized":false});
+        if let Some(frame) = &region_refill {
+            evidence["region_refill"] = frame.evidence().clone();
+            evidence["region_candidate_artifact"] = serde_json::json!({"path":path,"sha256":hash(candidate.bytes()),"bytes":candidate.bytes().len()});
+        }
+        if let Some(regions) = &region_after {
+            evidence["region_after"] = regions.evidence()?;
+        }
         if project_transition_pending {
             evidence["project_class_authority"] =
                 serde_json::json!("pending_composed_project_validation");
@@ -586,6 +817,8 @@ impl SynchronizationBoardObservation {
         let digest = hash(&serde_json::to_vec(&evidence).map_err(|e| e.to_string())?);
         let preview = Arc::new(SynchronizationBoardPreview {
             project_transition_pending,
+            region_refill,
+            region_after,
             observation: self.clone(),
             candidate,
             native,
@@ -685,6 +918,12 @@ impl SynchronizationBoardPreview {
         verify_input(&self.observation.project)?;
         verify_input(&self.observation.rules)?;
         self.native.verify(&self.observation.source.audit)?;
+        if let Some(frame) = &self.region_refill {
+            frame.verify(&self.observation.source.audit)?;
+        }
+        if let Some(regions) = &self.region_after {
+            regions.verify(&self.observation.source.audit)?;
+        }
         self.drc.verify(&self.observation.source.audit)?;
         for template in &self.templates {
             template.verify(&self.observation.source)?;
@@ -713,6 +952,13 @@ impl SynchronizationBoardPreview {
         require_closed(&self.observation.path)?;
         verify_input(&self.observation.rules)?;
         self.native.verify_execution(audit)?;
+        if let Some(frame) = &self.region_refill {
+            frame.verify_prefix(audit, prefix)?;
+        }
+        // Region inputs are all private; only their original audit's mutable project needs prefix authority.
+        if let Some(regions) = &self.region_after {
+            regions.verify_prefix(audit, prefix)?;
+        }
         self.drc.verify_prefix(audit, prefix)?;
         for template in &self.templates {
             template.verify_prefix(&self.observation.source, prefix)?;

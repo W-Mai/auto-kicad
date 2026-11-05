@@ -2,7 +2,9 @@
 mod correspondence;
 use super::filled_copper::{FillNode, canonical, point};
 use super::*;
-pub use correspondence::{GeneratedDrcSnapshot, GeneratedZoneCorrespondence};
+pub use correspondence::{
+    ClosedGeneratedDrcSnapshot, GeneratedDrcSnapshot, GeneratedZoneCorrespondence,
+};
 use kicad_ipc::{base_types, board_types};
 use protobuf::{Enum, Message};
 use std::collections::BTreeSet;

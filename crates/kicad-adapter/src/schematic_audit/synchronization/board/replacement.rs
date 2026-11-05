@@ -194,12 +194,37 @@ impl SavedSynchronizationBoard {
         seed: &str,
         native_original: &SavedSynchronizationBoard,
     ) -> Result<(), String> {
+        self.inherit_replacement_profile(template, connected, seed, native_original, None)
+    }
+    pub(in crate::schematic_audit::synchronization) fn inherit_region_replacement(
+        &self,
+        template: &mut templates::SavedFootprintTemplate,
+        connected: &BTreeSet<String>,
+        seed: &str,
+        native_original: &SavedSynchronizationBoard,
+        regions: &native::NativeRegionOwnership,
+    ) -> Result<(), String> {
+        regions.require_board(self)?;
+        self.inherit_replacement_profile(template, connected, seed, native_original, Some(regions))
+    }
+    fn inherit_replacement_profile(
+        &self,
+        template: &mut templates::SavedFootprintTemplate,
+        connected: &BTreeSet<String>,
+        seed: &str,
+        native_original: &SavedSynchronizationBoard,
+        regions: Option<&native::NativeRegionOwnership>,
+    ) -> Result<(), String> {
         let id = &template.root_id;
         let fp = self
             .footprints
             .get(id)
             .ok_or("unknown replacement footprint")?;
-        if fp.locked || fp.board_only || self.has_zones || self.has_external_references(id)? {
+        if fp.locked
+            || fp.board_only
+            || (self.has_zones && regions.is_none())
+            || self.has_external_references(id)?
+        {
             return Err("locked, board-only, zoned or externally referenced replacement requires separate qualification".into());
         }
         let node = self.node(id)?;

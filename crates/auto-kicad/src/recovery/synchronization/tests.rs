@@ -61,6 +61,7 @@ fn native_synchronization_publication_and_restart_recovery() {
             .unwrap();
         let intent = SynchronizationIntent {
             project_netclasses: vec![],
+            zone_nets: Vec::new(),
             schema_version: 1,
             actions: source
                 .components()
@@ -79,6 +80,7 @@ fn native_synchronization_publication_and_restart_recovery() {
         };
         let preview = observed.preview(&intent).unwrap();
         let expectation = SynchronizationExpectation {
+            regions: None,
             differences: preview.candidate().differences().to_vec(),
             drc: kicad_checks::CompleteDrcExpectation {
                 introduced: preview.drc_delta().introduced.clone(),

@@ -9,6 +9,8 @@ use crate::schematic_audit::synchronization::project::ProjectNetclassDifference;
 #[derive(Clone, Debug, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct SynchronizationProjectBoardExpectation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub regions: Option<crate::live_geometry::ClosedRefillDelta>,
     pub differences: Vec<board::SynchronizationDifference>,
     pub project_differences: Vec<ProjectNetclassDifference>,
     pub netclasses: ProjectNetclassDelta,
@@ -49,6 +51,9 @@ impl SynchronizationProjectBoardPreview {
         mut expected: SynchronizationProjectBoardExpectation,
     ) -> Result<MatchedSynchronizationProjectBoardPreview, String> {
         self.verify()?;
+        if expected.regions.as_ref() != self.board.candidate.region_delta() {
+            return Err("combined_region_expectation_mismatch".into());
+        }
         expected.differences = canonical_differences(&expected.differences)?;
         expected.project_differences = super::super::publication::canonical_project_differences(
             &expected.project_differences,
@@ -130,6 +135,13 @@ impl MatchedSynchronizationProjectBoardPreview {
 }
 
 impl PreparedSynchronizationProjectBoardPublication {
+    pub fn native_region_artifacts(&self) -> Result<Vec<(&'static str, &[u8])>, String> {
+        match self.matched.preview.board.region_refill.as_ref() {
+            Some(frame) => frame.native_artifacts(),
+            None => Ok(Vec::new()),
+        }
+    }
+
     pub fn recovery_baseline(&self) -> Result<SynchronizationProjectRecoveryBaseline, String> {
         self.verify_before_write()?;
         SynchronizationProjectRecoveryBaseline::capture(

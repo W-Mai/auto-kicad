@@ -144,6 +144,33 @@ pub(in crate::schematic_audit::synchronization) fn verify_project_endpoint_netcl
     Ok(())
 }
 
+pub(in crate::schematic_audit::synchronization) fn verify_region_project_endpoint_netclasses(
+    original: &NativeReport,
+    without: &NativeBoardProjection,
+    after: &NativeBoardProjection,
+    replacement_pads: &BTreeMap<String, String>,
+    assignment_changes: &BTreeSet<String>,
+) -> Result<(), String> {
+    if without.report.board_sha256 != after.report.board_sha256
+        || !without.same_saved_content(after, true)?
+    {
+        return Err(
+            "region project authority requires complete identical candidate PCB content".into(),
+        );
+    }
+    // Normalize only the already-proven serialization correspondence for this comparison.
+    // Persisted observations and their exact raw native save hashes stay unchanged.
+    let mut compared = after.report.clone();
+    compared.native_saved_sha256 = without.report.native_saved_sha256.clone();
+    verify_project_endpoint_netclasses(
+        original,
+        &without.report,
+        &compared,
+        replacement_pads,
+        assignment_changes,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

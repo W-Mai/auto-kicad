@@ -79,6 +79,7 @@ fn main() -> Result<()> {
     let observation = source.observe_board(&board)?;
     let mut intent = SynchronizationIntent {
         project_netclasses: vec![],
+        zone_nets: Vec::new(),
         schema_version: 1,
         actions: source
             .components()
@@ -243,6 +244,7 @@ fn main() -> Result<()> {
     if args[1] == "publication-proof" {
         use kicad_adapter::schematic_audit::synchronization::SynchronizationExpectation;
         let complete = SynchronizationExpectation {
+            regions: None,
             differences: preview.candidate().differences().to_vec(),
             drc: expected.clone(),
         };

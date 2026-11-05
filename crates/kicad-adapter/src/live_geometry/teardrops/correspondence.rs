@@ -83,6 +83,88 @@ impl GeneratedDrcSnapshot {
         })
     }
 }
+/// Identity-only input for closed native DRC, bound to complete native saved content.
+/// Source/resource/native-receipt authority remains the caller's responsibility.
+#[derive(Clone, Debug, Serialize)]
+pub struct ClosedGeneratedDrcSnapshot {
+    input_sha256: String,
+    native_saved_sha256: String,
+    snapshot_sha256: String,
+    generated_content: BTreeMap<String, String>,
+    private_identities: BTreeMap<String, String>,
+    #[serde(skip)]
+    text: String,
+}
+impl ClosedGeneratedDrcSnapshot {
+    pub(crate) fn bind_native_readback(source: &str, native_saved: &str) -> Result<Self, String> {
+        let partition = TeardropTextPartition::parse(source)?;
+        let native = TeardropTextPartition::parse(native_saved)?;
+        let content = partition.generated_content()?;
+        if content.is_empty()
+            || content != native.generated_content()?
+            || super::super::refill_candidate::synchronization_definitions(partition.authored())?
+                != super::super::refill_candidate::synchronization_definitions(native.authored())?
+            || partition.authored().filled_copper()? != native.authored().filled_copper()?
+        {
+            return Err(
+                "closed generated DRC requires complete matching native saved content".into(),
+            );
+        }
+        let mut reserved = BTreeSet::new();
+        authored_ids(
+            partition
+                .source
+                .nodes
+                .first()
+                .ok_or("missing generated source root")?,
+            &mut reserved,
+        )?;
+        let mut identities = BTreeMap::new();
+        for key in content.keys() {
+            let mut chosen = None;
+            for salt in 0..8192 {
+                let digest = hash_bytes(
+                    format!("auto-kicad-closed-generated-drc-v1\0{key}\0{salt}").as_bytes(),
+                );
+                let id = format!(
+                    "{}-{}-4{}-a{}-{}",
+                    &digest[..8],
+                    &digest[8..12],
+                    &digest[13..16],
+                    &digest[17..20],
+                    &digest[20..32]
+                );
+                if reserved.insert(id.clone()) {
+                    chosen = Some(id);
+                    break;
+                }
+            }
+            identities.insert(
+                key.clone(),
+                chosen.ok_or("closed generated identity collision bound exceeded")?,
+            );
+        }
+        let text = compile_mapped(&partition, &identities)?;
+        Ok(Self {
+            input_sha256: hash_bytes(source.as_bytes()),
+            native_saved_sha256: hash_bytes(native_saved.as_bytes()),
+            snapshot_sha256: hash_bytes(text.as_bytes()),
+            generated_content: content,
+            private_identities: identities,
+            text,
+        })
+    }
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+    pub fn input_sha256(&self) -> &str {
+        &self.input_sha256
+    }
+    pub fn snapshot_sha256(&self) -> &str {
+        &self.snapshot_sha256
+    }
+}
+
 fn is_uuid(value: &str) -> bool {
     value.len() == 36
         && value.bytes().enumerate().all(|(i, c)| {
@@ -111,31 +193,43 @@ fn compile(
     partition: &TeardropTextPartition,
     identities: &[TeardropIdentity],
 ) -> Result<String, String> {
+    let identities = identities
+        .iter()
+        .map(|identity| {
+            (
+                identity.correspondence_key.clone(),
+                identity.native_uuid.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mapping = identities.iter().cloned().collect::<BTreeMap<_, _>>();
+    if mapping.len() != identities.len() {
+        return Err("duplicate generated native identity key".into());
+    }
+    compile_mapped(partition, &mapping)
+}
+
+fn compile_mapped(
+    partition: &TeardropTextPartition,
+    identities: &BTreeMap<String, String>,
+) -> Result<String, String> {
     let mut used = BTreeSet::new();
     authored_ids(
         partition.source.nodes.first().ok_or("missing board root")?,
         &mut used,
     )?;
-    let mut by_key = BTreeMap::new();
-    for identity in identities {
-        if !is_uuid(&identity.native_uuid)
-            || !used.insert(identity.native_uuid.clone())
-            || by_key
-                .insert(
-                    identity.correspondence_key.as_str(),
-                    identity.native_uuid.as_str(),
-                )
-                .is_some()
-        {
+    for id in identities.values() {
+        if !is_uuid(id) || !used.insert(id.clone()) {
             return Err(
-                "DRC generated identity is invalid, duplicated or collides with authored content"
+                "DRC generated identity is invalid, duplicate or collides with authored content"
                     .into(),
             );
         }
     }
-    if by_key.len() != partition.generated.len() {
+    if identities.len() != partition.generated.len() {
         return Err("DRC generated identity set differs".into());
     }
+    let by_key = identities;
     let mut insertions = Vec::new();
     for text in partition.generated.values() {
         let id = by_key
@@ -244,5 +338,23 @@ mod tests {
         let mut wrong = ids;
         wrong[0].correspondence_key.push('x');
         assert!(compile(&partition, &wrong).is_err());
+    }
+    #[test]
+    fn closed_generated_drc_requires_complete_native_content_and_stable_private_identity() {
+        let text = r#"(kicad_pcb (version 20260206) (future_board "untouched") (zone (layer F.Mask) (attr (teardrop (type padvia))) (polygon (pts (xy 0 0) (xy 1 0) (xy 0 1))) (future_zone 42)))"#;
+        let first = ClosedGeneratedDrcSnapshot::bind_native_readback(text, text).unwrap();
+        let second = ClosedGeneratedDrcSnapshot::bind_native_readback(text, text).unwrap();
+        assert_eq!(first.text(), second.text());
+        assert_eq!(first.private_identities.len(), 1);
+        let id = first.private_identities.values().next().unwrap();
+        assert!(is_uuid(id));
+        assert_eq!(first.text().replace(&format!(" (uuid \"{id}\")"), ""), text);
+        for changed in [
+            text.replace("untouched", "changed"),
+            text.replace("future_zone 42", "future_zone 43"),
+            text.replace("xy 1 0", "xy 2 0"),
+        ] {
+            assert!(ClosedGeneratedDrcSnapshot::bind_native_readback(text, &changed).is_err());
+        }
     }
 }

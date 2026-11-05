@@ -1,8 +1,13 @@
 //! Bounded isolated native readback of exact synchronization board bytes.
+mod regions;
+mod serialization;
 use super::*;
+pub(super) use regions::{NativeRegionOwnership, RegionRecoveryEvidence, capture_regions};
 mod project_rules;
 use board::SavedSynchronizationBoard;
-pub(super) use project_rules::verify_project_endpoint_netclasses;
+pub(super) use project_rules::{
+    verify_project_endpoint_netclasses, verify_region_project_endpoint_netclasses,
+};
 use serde::Deserialize;
 #[cfg(unix)]
 use std::os::unix::{fs::OpenOptionsExt, process::CommandExt};

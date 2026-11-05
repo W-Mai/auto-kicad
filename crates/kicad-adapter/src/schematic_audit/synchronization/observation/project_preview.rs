@@ -81,6 +81,7 @@ impl ProjectNetclassDelta {
 
 /// A read-only project candidate. Matching evidence cannot publish source files.
 pub struct SynchronizationProjectPreview {
+    region_profile: bool,
     observation: Arc<SynchronizationBoardObservation>,
     candidate: ProjectNetclassCandidate,
     actions: Vec<ProjectNetclassChange>,
@@ -102,6 +103,19 @@ impl SynchronizationBoardObservation {
         self: &Arc<Self>,
         actions: &[ProjectNetclassChange],
     ) -> Result<Arc<SynchronizationProjectPreview>, String> {
+        self.preview_project_netclasses_profile(actions, false)
+    }
+    fn preview_project_netclasses_profile(
+        self: &Arc<Self>,
+        actions: &[ProjectNetclassChange],
+        region_profile: bool,
+    ) -> Result<Arc<SynchronizationProjectPreview>, String> {
+        if region_profile {
+            self.regions
+                .as_ref()
+                .ok_or("project region transition requires complete ownership observation")?
+                .verify(&self.source.audit)?;
+        }
         self.verify()?;
         let before = self.observe_project_netclasses()?;
         let audit = &self.source.audit;
@@ -128,7 +142,7 @@ impl SynchronizationBoardObservation {
             &allowed_nets,
             &source_classes,
         )?;
-        if candidate.has_changes() && self.board.has_zones() {
+        if candidate.has_changes() && self.board.has_zones() && !region_profile {
             return Err(
                 "project netclass changes on zoned boards require complete refill qualification"
                     .into(),
@@ -165,14 +179,22 @@ impl SynchronizationBoardObservation {
             actions,
         )?;
         let board_path = observed.inner.policy.project.join(relative(&self.path)?);
-        let observed = source.observe_board(&board_path)?;
+        let observed = if region_profile {
+            source.observe_region_board(&board_path)?
+        } else {
+            source.observe_board(&board_path)?
+        };
         let after = observed.observe_project_netclasses()?;
         // Project rules cannot authorize any change to the board or its native serialization.
         if self.bytes != observed.bytes
-            || self.native.board.text() != observed.native.board.text()
+            || !self
+                .native
+                .same_saved_content(&observed.native, region_profile)?
             || self.native.report.native_version != observed.native.report.native_version
             || self.native.report.board_sha256 != observed.native.report.board_sha256
-            || self.native.report.native_saved_sha256 != observed.native.report.native_saved_sha256
+            || (!region_profile
+                && self.native.report.native_saved_sha256
+                    != observed.native.report.native_saved_sha256)
             || self.native.report.footprints != observed.native.report.footprints
             || self.native.report.pads != observed.native.report.pads
             || self.native.report.copper != observed.native.report.copper
@@ -224,6 +246,7 @@ impl SynchronizationBoardObservation {
         });
         let digest = hash(&serde_json::to_vec(&evidence).map_err(|e| e.to_string())?);
         let preview = Arc::new(SynchronizationProjectPreview {
+            region_profile,
             observation: self.clone(),
             candidate,
             actions: actions.to_vec(),

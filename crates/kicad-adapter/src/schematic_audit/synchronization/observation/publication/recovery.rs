@@ -16,6 +16,8 @@ pub struct SynchronizationRecoveryBaseline {
     native: native::NativeReport,
     connectivity: Value,
     drc_json: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    regions: Option<native::RegionRecoveryEvidence>,
 }
 
 fn digest_value(value: &impl Serialize) -> Result<String, String> {
@@ -91,7 +93,12 @@ impl SynchronizationBoardObservation {
         let ids = ids.into_iter().collect::<Vec<_>>();
         let dependencies = dependencies(&self.source.audit, &ids)?;
         let result = SynchronizationRecoveryBaseline {
-            schema_version: 1,
+            schema_version: if self.regions.is_some() { 2 } else { 1 },
+            regions: self
+                .regions
+                .as_ref()
+                .map(|regions| regions.recovery_evidence(&self.native))
+                .transpose()?,
             project: self.source.audit.inner.policy.project.clone(),
             board: self.path.clone(),
             board_sha256: hash(&self.bytes),
@@ -114,6 +121,10 @@ impl PreparedSynchronizationPublication {
 }
 
 impl SynchronizationRecoveryBaseline {
+    pub fn has_regions(&self) -> bool {
+        self.regions.is_some()
+    }
+
     pub fn project_dir(&self) -> &Path {
         &self.project
     }
@@ -130,13 +141,18 @@ impl SynchronizationRecoveryBaseline {
     }
 
     fn validate_policy(&self, policy: &SchematicAuditPolicy) -> Result<(), String> {
-        if self.schema_version != 1
-            || policy.project != self.project
+        if !matches!(
+            (self.schema_version, self.regions.is_some()),
+            (1, false) | (2, true)
+        ) || policy.project != self.project
             || policy.schematic.with_extension("kicad_pcb") != self.board
             || self.footprint_ids.len() > 8192
             || self.drc_json.len() > 32 * 1024 * 1024
         {
             return Err("synchronization recovery baseline/policy mismatch".into());
+        }
+        if let Some(regions) = &self.regions {
+            regions.validate()?;
         }
         Ok(())
     }
@@ -219,12 +235,26 @@ impl SynchronizationRecoveryBaseline {
         &self,
         actual: &SynchronizationBoardObservation,
     ) -> Result<(), String> {
+        let complete_generated_signature = match &self.regions {
+            Some(regions) => regions.saved_signature()?,
+            None => None,
+        };
         if hash(&actual.bytes) != self.board_sha256
-            || actual.native.report != self.native
+            || !actual
+                .native
+                .matches_original_report(&self.native, complete_generated_signature)?
             || serde_json::to_value(&actual.connectivity).map_err(|e| e.to_string())?
                 != self.connectivity
         {
             return Err("synchronization recovery native baseline mismatch".into());
+        }
+        if let Some(regions) = &self.regions {
+            regions.verify_observation(
+                actual
+                    .regions
+                    .as_ref()
+                    .ok_or("restoration lacks native region ownership")?,
+            )?;
         }
         let drc =
             kicad_checks::CompleteDrcReport::parse(&self.drc_json).map_err(|e| e.to_string())?;
@@ -233,6 +263,18 @@ impl SynchronizationRecoveryBaseline {
             .match_expectation(&kicad_checks::CompleteDrcExpectation::default())
             .map_err(|e| e.to_string())?;
         actual.verify()
+    }
+
+    pub(in crate::schematic_audit::synchronization) fn observe_recovery_source(
+        &self,
+        source: &SynchronizationSource,
+        path: &Path,
+    ) -> Result<Arc<SynchronizationBoardObservation>, String> {
+        if self.regions.is_some() {
+            source.observe_region_board(path)
+        } else {
+            source.observe_board(path)
+        }
     }
 
     /// Actual restored PCB must independently reproduce the original native baseline.
@@ -247,7 +289,7 @@ impl SynchronizationRecoveryBaseline {
             return Err("synchronization recovery did not restore original PCB bytes".into());
         }
         let source = audit.synchronization_source()?;
-        let actual = source.observe_board(&self.board)?;
+        let actual = self.observe_recovery_source(&source, &self.board)?;
         self.verify_original_observation(&actual)?;
         let evidence = serde_json::json!({"baseline_sha256":digest_value(self)?,"project":self.project,"board":self.board,
             "actual_native":actual.native.report,"actual_connectivity":actual.connectivity,

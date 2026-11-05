@@ -1,0 +1,206 @@
+{
+  "schema_version": 1,
+  "native_version": "10.0.7",
+  "backend": "closed_saved_documents",
+  "product_complete": false,
+  "profiles": [
+    {
+      "profile": "ordinary-regions",
+      "receipt": "m5-sync-regions-batch-1793865734237561000",
+      "result": {
+        "passed": true,
+        "cases": [
+          {
+            "name": "conflicting-zone-terminals",
+            "rejected": {
+              "reason": "zone_islands_have_conflicting_desired_nets: a0000000-0000-4000-8000-000000000001: 5574b95f-6a3d-4ded-a854-3264da506a36",
+              "state": "rejected"
+            }
+          },
+          {
+            "name": "two-island-plane-metadata",
+            "committed": true,
+            "exact_native_archive": true
+          },
+          {
+            "name": "zoned-project-and-refill",
+            "committed": true
+          }
+        ],
+        "binary_sha256": "e8525f85ee14d5f122aff7870aec9606faaf6eb13e6208b5f0b746a2fa82d5ad",
+        "private_roots_empty": true,
+        "product_complete": false
+      }
+    },
+    {
+      "profile": "ordinary-region-recovery",
+      "receipt": "m5-sync-region-public-recovery-1793866678356386000",
+      "result": {
+        "passed": true,
+        "profiles": [
+          {
+            "profile": "project-only",
+            "passed": true,
+            "actual_production_stdio_writer_killed": true,
+            "interrupted_pid": 63976,
+            "publication_file_count": 1,
+            "project_and_pcb_later_bytes_preserved": true,
+            "restarted_plan_and_recovery_approvals_rejected": true,
+            "complete_actual_native_restoration": true,
+            "subsequent_public_commit": true,
+            "source_and_configuration_preserved": true,
+            "elapsed_seconds": 473.4585298750317,
+            "actual_codex_project_client_complete": false,
+            "product_complete": false,
+            "private_roots_empty": true,
+            "gui_launched": false
+          }
+        ],
+        "binary_sha256": "173acfe29e54d4b14f81549bb8e137b55eb183c8660b1eeae94b81aa94935d59",
+        "full_project_workflow_accepted": false,
+        "product_complete": false
+      }
+    },
+    {
+      "profile": "generated-and-codex",
+      "receipt": "m5-sync-region-extended-1793867427168953000",
+      "result": {
+        "passed": true,
+        "cases": [
+          {
+            "profile": "generated-manual",
+            "passed": true,
+            "elapsed_seconds": 47.00879862502916,
+            "actual_codex": false,
+            "generated": true,
+            "binary_sha256": "c71ab885edb3b13cfad5d533047f751de31a2f233936cd8bf6155479b50868bf"
+          },
+          {
+            "profile": "rename-codex",
+            "passed": true,
+            "elapsed_seconds": 142.80337287503062,
+            "actual_codex": true,
+            "generated": false,
+            "binary_sha256": "c71ab885edb3b13cfad5d533047f751de31a2f233936cd8bf6155479b50868bf"
+          }
+        ],
+        "product_complete": false
+      }
+    },
+    {
+      "profile": "class-driven-fill",
+      "receipt": "m5-sync-region-class-fill-1793869106519809000",
+      "result": {
+        "passed": true,
+        "actual_class_driven_fill_change": true,
+        "changed_authored_regions": 1,
+        "ordered_two_file_commit": true,
+        "binary_sha256": "5aaaacd494e92de28eb93a587f5a4d1e19d0ce2fd42f239fb7cb41e1a03b2f36",
+        "product_complete": false
+      }
+    },
+    {
+      "profile": "generated-recovery",
+      "receipt": "m5-sync-region-public-recovery-1793868029956180000",
+      "result": {
+        "passed": true,
+        "generated_actual_killed_writer": true,
+        "complete_native_restoration": true,
+        "later_user_bytes_retained": true,
+        "fresh_restart_approval_required": true,
+        "subsequent_commit": true,
+        "resumed_after_harness_native_save_hash_assertion": true,
+        "initial_failure_retained": true,
+        "binary_sha256": "5aaaacd494e92de28eb93a587f5a4d1e19d0ce2fd42f239fb7cb41e1a03b2f36",
+        "private_roots_empty": true,
+        "product_complete": false
+      }
+    },
+    {
+      "profile": "real-nfc-region",
+      "receipt": "m5-sync-real-region-nfc-1793868043865909000",
+      "result": {
+        "passed": true,
+        "real_project": true,
+        "original_copper_count": 166,
+        "originals_unchanged": true,
+        "binary_sha256": "5aaaacd494e92de28eb93a587f5a4d1e19d0ce2fd42f239fb7cb41e1a03b2f36",
+        "product_complete": false
+      }
+    },
+    {
+      "profile": "source-template-add",
+      "receipt": "m5-sync-region-template-lifecycle-1793871916060373000",
+      "result": null
+    },
+    {
+      "profile": "source-template-replace-remove",
+      "receipt": "m5-sync-region-template-resume-1793872340955939000",
+      "result": {
+        "passed": true,
+        "steps": [
+          {
+            "kind": "replace",
+            "committed": true
+          },
+          {
+            "kind": "remove",
+            "committed": true
+          }
+        ],
+        "prior_add_evidence": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-region-template-lifecycle-1793871916060373000",
+        "every_original_board_root_preserved": true,
+        "binary_sha256": "88f7fb5191cd5acb3d3c6cac55a6b91e08bd6bf851ed396e5b7efbd993a00d11",
+        "product_complete": false
+      }
+    },
+    {
+      "profile": "connected-template",
+      "receipt": "m5-sync-region-connected-template-1793873578318654000",
+      "result": {
+        "passed": true,
+        "exact_connected_replacement": true,
+        "displaced_connected_contact_rejected": true,
+        "refusal": {
+          "reason": "replacement_connected_contact_requires_reroute: a90a7cd2-4c0a-8d9d-b979-db864da6bcbd",
+          "state": "rejected"
+        },
+        "original_copper_preserved": true,
+        "binary_sha256": "a7233eef8ae1a131848b02a1aa757c9bad0b24b0a14354e083379604bba952ff",
+        "product_complete": false
+      }
+    }
+  ],
+  "source_template_add": {
+    "committed_and_independently_verified": true,
+    "receipt": "m5-sync-region-template-lifecycle-1793871916060373000/transcript.json",
+    "full_original_driver_not_complete": true
+  },
+  "generated_recovery_harness": {
+    "initial_raw_native_save_hash_assertion_retained": true,
+    "resumed_without_repeating_recovery": true
+  },
+  "unsupported": [
+    "custom-rule region changes",
+    "unqualified source/template families",
+    "maximum-size cross-product qualification",
+    "GUI editing"
+  ],
+  "quality": {
+    "passed": 626,
+    "failed": 0,
+    "ignored": 18
+  },
+  "consolidated_seal": "m5-sync-region-module-seal-1793875337161200000/result.json",
+  "record_count": 19,
+  "immutable_artifacts_rehashed": 142,
+  "native_archives": 14,
+  "failed_harness_private_cleanup": {
+    "manual_identity_and_native_lease_verified": true,
+    "trees": 10,
+    "allocated_bytes_removed": 4182016,
+    "archive_sha256": "eea8eca4a4b251574e736e5add08ea4e040bd6d7165869d2d16d59a9fce991d1",
+    "automatic_cleanup_not_claimed": true,
+    "malformed_owner_metadata_origin_pending": true
+  }
+}
