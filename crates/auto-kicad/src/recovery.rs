@@ -1673,6 +1673,12 @@ impl ExecutionAttempt {
     }
 }
 
+impl ExecutionStore {
+    pub(crate) fn artifact_export_root(&self) -> PathBuf {
+        self.root.join("artifact-exports")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

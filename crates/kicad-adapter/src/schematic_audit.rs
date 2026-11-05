@@ -1,4 +1,5 @@
 //! Private native schematic observations with bound source and library inputs.
+pub mod artifact_export;
 mod assignment;
 mod preview;
 mod source_transition;
@@ -384,7 +385,7 @@ pub struct SchematicAudit {
 }
 
 struct SchematicAuditState {
-    owner: tempfile::TempDir,
+    owner: runtime::owned_temp::TempDir,
     source: Inputs,
     private_inputs: Inputs,
     source_config: PathBuf,
@@ -408,7 +409,7 @@ struct SchematicAuditState {
     pins: kicad_schematic::pins::SchematicPinIndex,
     revision: String,
     // Keep internally generated source trees until every audit owner is released.
-    _source_owner: Option<Arc<tempfile::TempDir>>,
+    _source_owner: Option<Arc<runtime::owned_temp::TempDir>>,
 }
 impl SchematicAudit {
     pub fn revision(&self) -> &str {
@@ -593,7 +594,7 @@ impl SchematicAudit {
                 evidence: serde_json::json!({"source_revision":self.inner.revision,"probe_count":0,"original_native_reused":true}),
             });
         }
-        let owner = tempfile::Builder::new()
+        let owner = runtime::owned_temp::Builder::new()
             .prefix("auto-kicad-pin-probe-")
             .tempdir()
             .map_err(|e| e.to_string())?;
@@ -720,7 +721,7 @@ impl SchematicAudit {
                 );
             }
         }
-        let owner = tempfile::Builder::new()
+        let owner = runtime::owned_temp::Builder::new()
             .prefix("auto-kicad-schematic-audit-")
             .tempdir()
             .map_err(|e| e.to_string())?;

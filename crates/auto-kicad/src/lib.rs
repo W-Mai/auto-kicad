@@ -1,3 +1,4 @@
+pub mod artifact_export;
 pub mod copper_route;
 pub use copper_route::BoardRouteRequest;
 mod existing_footprint;
@@ -1890,6 +1891,7 @@ fn observe_documents<T: kicad_ipc::KiCadTransport>(
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PlanBoardGraphicsRequest {
+    pub artifact_export: Option<artifact_export::Request>,
     pub schematic_pcb_sync: Option<schematic_sync::Request>,
     pub geometry: Option<kicad_model::geometry::GeometryRequest>,
     #[serde(default)]
@@ -2492,6 +2494,7 @@ fn approval_hash(plan_hash: &str, evidence_hash: &str) -> String {
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct PreviewChangeRequest {
+    pub artifact_export: Option<artifact_export::Expectation>,
     pub schematic_pcb_sync: Option<schematic_sync::Expectation>,
     pub plan_id: String,
     pub plan_hash: String,
@@ -3278,6 +3281,7 @@ struct StoredDrcBaseline {
 pub struct Server {
     general_schematic: Arc<schematic_authoring::Registry>,
     schematic_sync: Arc<schematic_sync::Registry>,
+    artifact_exports: Arc<artifact_export::Registry>,
     library_settings: library_settings::SharedLibrarySettings,
     execution_store: Option<Arc<recovery::ExecutionStore>>,
     sessions: Arc<Mutex<BTreeMap<String, StoredChangeSession>>>,
@@ -3323,6 +3327,7 @@ pub struct SchematicAuditRequest {
 #[derive(Clone, Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct InspectProjectRequest {
+    pub artifact_export: Option<artifact_export::Inspection>,
     pub schematic_pcb_sync: Option<schematic_sync::Inspection>,
     /// Include complete bounded native zone and board-level outline summaries.
     pub geometry: Option<bool>,
@@ -3599,6 +3604,7 @@ impl Server {
             library_settings,
             general_schematic: Arc::new(schematic_authoring::Registry::default()),
             schematic_sync: Arc::new(schematic_sync::Registry::default()),
+            artifact_exports: Arc::new(artifact_export::Registry::default()),
             execution_store: None,
             sessions: Arc::new(Mutex::new(BTreeMap::new())),
             schematic_sessions: Arc::new(Mutex::new(BTreeMap::new())),
@@ -3761,6 +3767,17 @@ impl Server {
                 })).collect::<Vec<_>>(),
                 "capability_matrix": self.capability_matrix(),
                 "advertised_tools": advertised_tools,
+                "native_temporary_cleanup": runtime::owned_temp::last_cleanup(),
+                "artifact_export": {"backend":"closed_saved_documents","native_version":"10.0.7",
+                    "available":self.execution_store.is_some() && self.library_settings.as_ref().as_ref().is_ok_and(|s|s.schematic_available()),
+                    "formats":["gerber","drill","bom","schematic_pdf"],"schema_version":1,
+                    "requires_complete_inventory_expectation":true,"requires_durable_state":true,
+                    "output_policy":"new_directory_only","publication":"exclusive_atomic_directory_rename",
+                    "source":"saved_documents","source_files_read_only":true,
+                    "recovery_actions":["finalize_export","retain_artifacts"],
+                    "maximum_observations":4,"maximum_live_plans":4,"session_ttl_seconds":900,
+                    "maximum_files":512,"maximum_file_bytes":67108864,"maximum_total_bytes":268435456,
+                    "maximum_pcb_input_bytes":33554432},
                 "schematic_pcb_sync": {"backend":"closed_saved_documents","native_version":"10.0.7",
                     "available":self.execution_store.is_some() && self.library_settings.as_ref().as_ref().is_ok_and(|s|s.schematic_available()),
                     "requires_complete_difference_and_drc_expectation":true,"requires_durable_state":true,
@@ -4069,6 +4086,29 @@ impl Server {
             .request_id
             .unwrap_or_else(|| "req_inspect_project".to_owned());
         let project_dir = arguments.project_dir.as_deref().map(std::path::Path::new);
+        if let Some(export) = arguments.artifact_export {
+            if !arguments.endpoint.is_empty()
+                || arguments.schematic_pcb_sync.is_some()
+                || arguments.geometry.is_some()
+                || arguments.routing_rules.is_some()
+                || arguments.footprint_source.is_some()
+                || arguments.project_dir.is_some()
+            {
+                return Ok(self.rejected(
+                    request_id,
+                    "artifact export inspection requires an exclusive saved-document request",
+                ));
+            }
+            let registry = self.artifact_exports.clone();
+            let settings = self.library_settings.clone();
+            let store = self.execution_store.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                registry.inspect(&settings, store.as_deref(), export)
+            })
+            .await
+            .unwrap_or_else(|error| Err(format!("artifact inspection failed: {error}")));
+            return self.general_schematic_response(request_id, result);
+        }
         if let Some(sync) = arguments.schematic_pcb_sync {
             if !arguments.endpoint.is_empty()
                 || arguments.geometry.is_some()
@@ -4265,6 +4305,23 @@ impl Server {
         let request_id = arguments
             .request_id
             .unwrap_or_else(|| "req_plan_recovery".into());
+        if artifact_export::is_attempt(&arguments.attempt_id) {
+            let Some(store) = self.execution_store.clone() else {
+                return Ok(self.rejected(request_id, "durable artifact recovery is unavailable"));
+            };
+            let registry = self.artifact_exports.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                registry.plan_recovery(
+                    &store,
+                    &arguments.project_dir,
+                    &arguments.attempt_id,
+                    &arguments.action,
+                )
+            })
+            .await
+            .unwrap_or_else(|error| Err(format!("artifact recovery failed: {error}")));
+            return self.general_schematic_response(request_id, result);
+        }
         if arguments.action != "restore_backups" {
             return Ok(self.rejected(request_id, "recovery_action_unsupported"));
         }
@@ -4334,6 +4391,23 @@ impl Server {
         let request_id = arguments
             .request_id
             .unwrap_or_else(|| "req_preview_recovery".into());
+        if artifact_export::is_recovery(&arguments.recovery_id) {
+            let Some(store) = self.execution_store.clone() else {
+                return Ok(self.rejected(request_id, "durable artifact recovery is unavailable"));
+            };
+            let registry = self.artifact_exports.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                let _store = store;
+                registry.preview_recovery(
+                    &arguments.project_dir,
+                    &arguments.recovery_id,
+                    &arguments.recovery_plan_hash,
+                )
+            })
+            .await
+            .unwrap_or_else(|error| Err(format!("artifact recovery failed: {error}")));
+            return self.general_schematic_response(request_id, result);
+        }
         let Some(store) = &self.execution_store else {
             return Ok(self.rejected(request_id, "recovery_unavailable"));
         };
@@ -4396,6 +4470,24 @@ impl Server {
         let request_id = arguments
             .request_id
             .unwrap_or_else(|| "req_commit_recovery".into());
+        if artifact_export::is_recovery(&arguments.recovery_id) {
+            let Some(store) = self.execution_store.clone() else {
+                return Ok(self.rejected(request_id, "durable artifact recovery is unavailable"));
+            };
+            let registry = self.artifact_exports.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                registry.commit_recovery(
+                    &store,
+                    &arguments.project_dir,
+                    &arguments.recovery_id,
+                    &arguments.recovery_plan_hash,
+                    &arguments.approval_hash,
+                )
+            })
+            .await
+            .unwrap_or_else(|error| Err(format!("artifact recovery failed: {error}")));
+            return self.general_schematic_response(request_id, result);
+        }
         let Some(store) = &self.execution_store else {
             return Ok(self.rejected(request_id, "recovery_unavailable"));
         };
@@ -4469,6 +4561,43 @@ impl Server {
         &self,
         Parameters(arguments): Parameters<PlanBoardGraphicsRequest>,
     ) -> Result<CallToolResponse, ErrorData> {
+        if let Some(export) = arguments.artifact_export {
+            if !arguments.endpoint.is_empty()
+                || arguments.schematic_pcb_sync.is_some()
+                || arguments.geometry.is_some()
+                || arguments.delete_items.is_some()
+                || arguments.flip_footprint.is_some()
+                || arguments.edit_existing.is_some()
+                || arguments.move_footprint.is_some()
+                || arguments.assembly.is_some()
+                || arguments.footprint.is_some()
+                || arguments.batch.is_some()
+                || arguments.segments.is_some()
+                || arguments.outline.is_some()
+                || arguments.track.is_some()
+                || arguments.via.is_some()
+                || arguments.route.is_some()
+            {
+                return Ok(self.rejected(
+                    arguments.request_id,
+                    "artifact export requires an exclusive saved-document plan",
+                ));
+            }
+            let Some(store) = self.execution_store.clone() else {
+                return Ok(self.rejected(
+                    arguments.request_id,
+                    "durable state is required for artifact exports",
+                ));
+            };
+            let registry = self.artifact_exports.clone();
+            let run = arguments.source_run_id;
+            let id = arguments.request_id.clone();
+            let result =
+                tokio::task::spawn_blocking(move || registry.plan(&store, &run, &id, export))
+                    .await
+                    .unwrap_or_else(|error| Err(format!("artifact planning failed: {error}")));
+            return self.general_schematic_response(arguments.request_id, result);
+        }
         if let Some(sync) = arguments.schematic_pcb_sync {
             if !arguments.endpoint.is_empty()
                 || arguments.geometry.is_some()
@@ -5114,6 +5243,38 @@ impl Server {
         &self,
         Parameters(arguments): Parameters<PreviewChangeRequest>,
     ) -> Result<CallToolResponse, ErrorData> {
+        if artifact_export::is_plan(&arguments.plan_id) {
+            let id = arguments
+                .request_id
+                .unwrap_or_else(|| "req_preview_export".into());
+            if arguments.schematic_pcb_sync.is_some() {
+                return Ok(self.rejected(
+                    id,
+                    "mixed export and synchronization expectations are not supported",
+                ));
+            }
+            let Some(expected) = arguments.artifact_export else {
+                return Ok(self.rejected(
+                    id,
+                    "export preview requires the complete artifact inventory",
+                ));
+            };
+            let registry = self.artifact_exports.clone();
+            let result = tokio::task::spawn_blocking(move || {
+                registry.preview(&arguments.plan_id, &arguments.plan_hash, expected)
+            })
+            .await
+            .unwrap_or_else(|error| Err(format!("artifact preview failed: {error}")));
+            return self.general_schematic_response(id, result);
+        }
+        if arguments.artifact_export.is_some() {
+            return Ok(self.rejected(
+                arguments
+                    .request_id
+                    .unwrap_or_else(|| "req_preview_change".into()),
+                "artifact expectation requires an artifact export plan",
+            ));
+        }
         if schematic_sync::is_plan(&arguments.plan_id) {
             let id = arguments
                 .request_id
@@ -5324,6 +5485,18 @@ impl Server {
         &self,
         Parameters(arguments): Parameters<CommitChangeRequest>,
     ) -> Result<CallToolResponse, ErrorData> {
+        if artifact_export::is_plan(&arguments.plan_id) {
+            let id = arguments
+                .request_id
+                .unwrap_or_else(|| "req_commit_export".into());
+            let Some(store) = self.execution_store.clone() else {
+                return Ok(self.rejected(id, "durable state is required for artifact exports"));
+            };
+            let registry = self.artifact_exports.clone();
+            let result=tokio::task::spawn_blocking(move||registry.commit(&store,&arguments.plan_id,&arguments.plan_hash,&arguments.approval_hash,&arguments.validation_evidence_hash)).await
+                .unwrap_or_else(|error|Ok(json!({"state":"unknown","reason":format!("artifact publication failed: {error}")})));
+            return self.general_schematic_response(id, result);
+        }
         if schematic_sync::is_plan(&arguments.plan_id) {
             let id = arguments
                 .request_id
@@ -8255,6 +8428,7 @@ mod tests {
 
     fn plan_request(_snapshot: ProjectSnapshot, request_id: &str) -> PlanBoardGraphicsRequest {
         PlanBoardGraphicsRequest {
+            artifact_export: None,
             schematic_pcb_sync: None,
             geometry: None,
             route: None,
@@ -9229,6 +9403,7 @@ mod tests {
             .clone();
         let preview = server
             .kicad_preview_change(Parameters(PreviewChangeRequest {
+                artifact_export: None,
                 schematic_pcb_sync: None,
                 plan_id: plan_id.clone(),
                 plan_hash,
@@ -9288,6 +9463,7 @@ mod tests {
 
         let preview = server
             .kicad_preview_change(Parameters(PreviewChangeRequest {
+                artifact_export: None,
                 schematic_pcb_sync: None,
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
@@ -9380,6 +9556,7 @@ mod tests {
         assert!(early.is_err());
         let preview = server
             .kicad_preview_change(Parameters(PreviewChangeRequest {
+                artifact_export: None,
                 schematic_pcb_sync: None,
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
@@ -9491,6 +9668,7 @@ mod tests {
         };
         let preview = server
             .kicad_preview_change(Parameters(PreviewChangeRequest {
+                artifact_export: None,
                 schematic_pcb_sync: None,
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
@@ -9766,6 +9944,7 @@ mod tests {
         let plan_hash = result["data"]["plan_hash"].as_str().unwrap().to_owned();
         let preview = server
             .kicad_preview_change(Parameters(PreviewChangeRequest {
+                artifact_export: None,
                 schematic_pcb_sync: None,
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),
@@ -10013,6 +10192,7 @@ mod tests {
             let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
             let preview = server
                 .kicad_preview_change(Parameters(PreviewChangeRequest {
+                    artifact_export: None,
                     schematic_pcb_sync: None,
                     plan_id: plan_id.clone(),
                     plan_hash: plan_hash.clone(),
@@ -10106,6 +10286,7 @@ mod tests {
         let plan_hash = planned["data"]["plan_hash"].as_str().unwrap().to_owned();
         let preview = server
             .kicad_preview_change(Parameters(PreviewChangeRequest {
+                artifact_export: None,
                 schematic_pcb_sync: None,
                 plan_id: plan_id.clone(),
                 plan_hash: plan_hash.clone(),

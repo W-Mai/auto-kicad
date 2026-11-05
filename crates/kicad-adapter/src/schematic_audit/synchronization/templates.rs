@@ -58,7 +58,7 @@ pub(super) struct SavedFootprintTemplate {
     tree: BTreeSet<PathBuf>,
     runner: NetlistRunner,
     worker: native::NativeWorkerReceipt,
-    owner: tempfile::TempDir,
+    owner: runtime::owned_temp::TempDir,
 }
 impl SavedFootprintTemplate {
     pub fn artifacts(&self) -> impl Iterator<Item = (&'static str, &[u8])> {
@@ -484,7 +484,7 @@ pub(super) fn capture(
     if resolved.source_size > 8 * 1024 * 1024 {
         return Err("source template exceeds 8 MiB bound".into());
     }
-    let owner = tempfile::Builder::new()
+    let owner = runtime::owned_temp::Builder::new()
         .prefix("auto-kicad-sync-template-")
         .tempdir()
         .map_err(|e| e.to_string())?;

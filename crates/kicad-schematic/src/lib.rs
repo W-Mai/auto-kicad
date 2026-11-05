@@ -24,8 +24,9 @@ pub mod pins;
 pub mod probes;
 
 pub use netlist::{
-    NetlistComponent, NetlistDocument, NetlistLimits, NetlistNet, NetlistNode, NetlistRun,
-    NetlistRunner, NetlistRunnerError, NetlistSheet, NetlistUnit, parse_netlist_xml,
+    NativeArtifactRecipe, NetlistComponent, NetlistDocument, NetlistLimits, NetlistNet,
+    NetlistNode, NetlistRun, NetlistRunner, NetlistRunnerError, NetlistSheet, NetlistUnit,
+    parse_netlist_xml,
 };
 pub use patch::{
     SchematicPatchOutcome, SchematicPatchRejection, SchematicPreviewReceipt,

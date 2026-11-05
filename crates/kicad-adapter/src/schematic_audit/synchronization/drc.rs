@@ -21,7 +21,7 @@ pub(super) struct SynchronizationDrcCapture {
     footprint_context: SchematicFootprintContext,
     footprint_ids: Vec<FootprintLibraryIdentifier>,
     runner: NetlistRunner,
-    _owner: tempfile::TempDir,
+    _owner: runtime::owned_temp::TempDir,
 }
 
 impl SynchronizationDrcCapture {
@@ -98,7 +98,7 @@ pub(super) fn capture(
     rules: &InputFile,
 ) -> Result<SynchronizationDrcCapture, String> {
     audit.verify()?;
-    let owner = tempfile::Builder::new()
+    let owner = runtime::owned_temp::Builder::new()
         .prefix("auto-kicad-sync-drc-")
         .tempdir()
         .map_err(|e| e.to_string())?;

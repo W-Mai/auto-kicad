@@ -150,7 +150,7 @@ impl SchematicAudit {
         candidates: &BTreeMap<String, Vec<u8>>,
     ) -> Result<SchematicAudit, String> {
         self.verify()?;
-        let snapshot = tempfile::Builder::new()
+        let snapshot = runtime::owned_temp::Builder::new()
             .prefix("auto-kicad-schematic-preview-")
             .tempdir()
             .map_err(|error| error.to_string())?;

@@ -277,6 +277,7 @@ pub(super) fn run_fixed_worker(
             Ok(())
         });
     }
+    runtime::owned_temp::inherit_leases(&mut command);
     let mut child = OwnedWorker(
         command
             .spawn()
@@ -362,7 +363,7 @@ fn capture_with_worker(
         .execution_context()
         .ok_or("missing native process context")?;
     context.verify().map_err(|e| e.to_string())?;
-    let owner = tempfile::Builder::new()
+    let owner = runtime::owned_temp::Builder::new()
         .prefix("auto-kicad-sync-native-")
         .tempdir()
         .map_err(|e| e.to_string())?;

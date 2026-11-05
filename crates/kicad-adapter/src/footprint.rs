@@ -1220,7 +1220,9 @@ fn run_fixed_python_helper(
         "source_size": request.resolved().provenance.source_size,
     });
     let deadline = std::time::Instant::now() + HELPER_TIMEOUT;
-    let mut child = Command::new(FIXED_PYTHON_PATH)
+    let mut command = Command::new(FIXED_PYTHON_PATH);
+    runtime::owned_temp::inherit_leases(&mut command);
+    let mut child = command
         .arg("-c")
         .arg(FIXED_HELPER_SOURCE)
         .arg("--fixed-footprint-placement-v2")

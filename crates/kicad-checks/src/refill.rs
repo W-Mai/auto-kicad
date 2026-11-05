@@ -105,7 +105,7 @@ fn run(
     } else {
         None
     };
-    let work = tempfile::Builder::new()
+    let work = runtime::owned_temp::Builder::new()
         .prefix(".auto-kicad-refill-")
         .tempdir_in(&policy.allowed_root)
         .map_err(invalid)?;
@@ -157,6 +157,7 @@ fn run(
             Ok(())
         });
     }
+    runtime::owned_temp::inherit_leases(&mut command);
     let mut child = command
         .spawn()
         .map_err(|e| CheckFailure::CommandUnavailable {

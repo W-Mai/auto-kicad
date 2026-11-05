@@ -34,7 +34,7 @@ pub struct SynchronizationBoardObservation {
     native: native::NativeBoardProjection,
     drc: drc::SynchronizationDrcCapture,
     connectivity: ClosedConnectivityEvidence,
-    _owner: tempfile::TempDir,
+    _owner: runtime::owned_temp::TempDir,
     valid: AtomicBool,
     digest: String,
 }
@@ -47,7 +47,7 @@ pub struct SynchronizationBoardPreview {
     drc: drc::SynchronizationDrcCapture,
     connectivity: ClosedConnectivityEvidence,
     candidate_path: PathBuf,
-    _owner: tempfile::TempDir,
+    _owner: runtime::owned_temp::TempDir,
     valid: AtomicBool,
     digest: String,
     evidence: Value,
@@ -150,7 +150,7 @@ impl SynchronizationSource {
         let board = SavedSynchronizationBoard::parse(
             std::str::from_utf8(&bytes).map_err(|e| e.to_string())?,
         )?;
-        let owner = tempfile::Builder::new()
+        let owner = runtime::owned_temp::Builder::new()
             .prefix("auto-kicad-sync-observation-")
             .tempdir()
             .map_err(|e| e.to_string())?;
@@ -446,7 +446,7 @@ impl SynchronizationBoardObservation {
             )?
         } else {
             let augmented = self.board.with_templates(&templates)?;
-            let temporary = tempfile::Builder::new()
+            let temporary = runtime::owned_temp::Builder::new()
                 .prefix("auto-kicad-sync-added-")
                 .tempdir()
                 .map_err(|e| e.to_string())?;
@@ -475,7 +475,7 @@ impl SynchronizationBoardObservation {
                 )?
                 .bind_templates(&self.board, intent, &templates)?
         };
-        let owner = tempfile::Builder::new()
+        let owner = runtime::owned_temp::Builder::new()
             .prefix("auto-kicad-sync-preview-")
             .tempdir()
             .map_err(|e| e.to_string())?;

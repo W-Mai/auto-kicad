@@ -106,6 +106,15 @@ fn binary_digest(path: &Path) -> Result<String, NetlistRunnerError> {
     Ok(hex::encode(hash.finalize()))
 }
 impl NativeExecutionContext {
+    /// Hash inherited process inputs without disclosing their values.
+    pub fn current_inherited_environment_digest() -> Result<String, NetlistRunnerError> {
+        Ok(Environment::capture()?.digest())
+    }
+
+    pub fn inherited_environment_digest(&self) -> String {
+        self.inherited.digest()
+    }
+
     pub(crate) fn capture(
         executable: &Path,
         configuration_home: Option<&Path>,
@@ -191,7 +200,9 @@ impl NativeExecutionContext {
         }
         Ok(())
     }
-    pub(crate) fn apply(&self, command: &mut Command, project_root: &Path) {
+    /// Apply the exact captured environment to a trusted native process command.
+    pub fn apply(&self, command: &mut Command, project_root: &Path) {
+        runtime::owned_temp::inherit_leases(command);
         command
             .env_clear()
             .envs(&self.effective.0)

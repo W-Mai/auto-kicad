@@ -17,6 +17,7 @@ pub mod connectivity;
 pub mod outline;
 pub mod refill;
 
+use runtime::owned_temp::Builder;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -28,7 +29,6 @@ use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::Duration;
-use tempfile::Builder;
 use wait_timeout::ChildExt;
 
 const MAX_DIAGNOSTIC_BYTES: usize = 64 * 1024;
@@ -264,6 +264,7 @@ fn run_pcb_drc_raw_with_options(
         });
     }
 
+    runtime::owned_temp::inherit_leases(&mut command);
     let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {

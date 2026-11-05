@@ -236,7 +236,7 @@ fn run(
     if board_bytes != supplied_bytes {
         return Err(invalid("board changed during confinement"));
     }
-    let work = tempfile::Builder::new()
+    let work = runtime::owned_temp::Builder::new()
         .prefix(".auto-kicad-connectivity-")
         .tempdir_in(&policy.allowed_root)
         .map_err(invalid)?;
@@ -275,6 +275,7 @@ fn run(
     if Instant::now() >= deadline {
         return Err(invalid("connectivity deadline expired before launch"));
     }
+    runtime::owned_temp::inherit_leases(&mut command);
     let mut child = command
         .spawn()
         .map_err(|error| CheckFailure::CommandUnavailable {

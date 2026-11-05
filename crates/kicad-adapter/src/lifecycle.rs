@@ -2,7 +2,7 @@ use std::fs::{self, File, OpenOptions, TryLockError};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use kicad_ipc::{ClientConfig, DocumentQuery, KiCadClient, NngTransport, OpenDocumentKind};
 
@@ -176,7 +176,9 @@ impl OwnedPcbnewLauncher {
             .ok_or(LifecycleError::InvalidSource)?
             .to_owned();
         let (_socket_namespace_guard, default_socket_existed) = Self::guard_api_socket_namespace()?;
-        let child = Command::new(executable)
+        let mut command = Command::new(executable);
+        runtime::owned_temp::inherit_leases(&mut command);
+        let child = command
             .arg(shadow.board_path())
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -470,6 +472,7 @@ pub trait DisposablePcbLifecycle {
 #[derive(Clone, Debug)]
 pub struct FilesystemDisposablePcbLifecycle {
     server_root: PathBuf,
+    shadow_owner: Option<std::sync::Arc<runtime::owned_temp::TempDir>>,
     shadow: Option<ShadowProject>,
     editor: Option<OwnedEditorIdentity>,
     closed: bool,
@@ -484,6 +487,7 @@ impl FilesystemDisposablePcbLifecycle {
             .map_err(|error| LifecycleError::ShadowCreation(error.to_string()))?;
         Ok(Self {
             server_root,
+            shadow_owner: None,
             shadow: None,
             editor: None,
             closed: false,
@@ -528,19 +532,14 @@ impl DisposablePcbLifecycle for FilesystemDisposablePcbLifecycle {
             .file_stem()
             .and_then(|x| x.to_str())
             .ok_or(LifecycleError::InvalidSource)?;
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|_| LifecycleError::InvalidSource)?
-            .as_nanos();
-        let root = self.server_root.join(format!(
-            "auto-kicad-shadow-{}-{}",
-            std::process::id(),
-            stamp
-        ));
-        if !root.starts_with(&self.server_root) {
-            return Err(LifecycleError::SourceOutsideServerRoot);
-        }
-        fs::create_dir(&root).map_err(|error| LifecycleError::ShadowCreation(error.to_string()))?;
+        let owner = std::sync::Arc::new(
+            runtime::owned_temp::Builder::new()
+                .prefix("auto-kicad-shadow-")
+                .tempdir_in(&self.server_root)
+                .map_err(|error| LifecycleError::ShadowCreation(error.to_string()))?,
+        );
+        let root = fs::canonicalize(owner.path())
+            .map_err(|error| LifecycleError::ShadowCreation(error.to_string()))?;
         let board_path = root.join(format!("{stem}.kicad_pcb"));
         let project_path = root.join(format!("{stem}.kicad_pro"));
         if let Err(error) = fs::copy(&source_board, &board_path)
@@ -561,6 +560,7 @@ impl DisposablePcbLifecycle for FilesystemDisposablePcbLifecycle {
             board_path,
             project_path,
         };
+        self.shadow_owner = Some(owner);
         self.shadow = Some(shadow.clone());
         self.closed = false;
         self.reopened = false;
@@ -640,8 +640,27 @@ impl DisposablePcbLifecycle for FilesystemDisposablePcbLifecycle {
             ));
         }
         let shadow = self.shadow.as_ref().ok_or(LifecycleError::NoShadow)?;
-        fs::remove_dir_all(&shadow.root)
+        if self.shadow_owner.is_none() || !shadow.root.starts_with(&self.server_root) {
+            return Err(LifecycleError::Cleanup(
+                "shadow ownership is unavailable".into(),
+            ));
+        }
+        if !shadow.root.is_dir() {
+            return Err(LifecycleError::Cleanup(
+                "owned shadow directory is missing".into(),
+            ));
+        }
+        let owner = self.shadow_owner.take().expect("shadow owner checked");
+        let owner = std::sync::Arc::try_unwrap(owner)
+            .map_err(|_| LifecycleError::Cleanup("shadow owner is still shared".into()))?;
+        owner
+            .close()
             .map_err(|error| LifecycleError::Cleanup(error.to_string()))?;
+        if shadow.root.exists() {
+            return Err(LifecycleError::Cleanup(
+                "native worker still holds shadow lease".into(),
+            ));
+        }
         self.shadow = None;
         self.editor = None;
         Ok(())

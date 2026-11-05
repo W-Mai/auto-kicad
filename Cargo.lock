@@ -435,6 +435,7 @@ dependencies = [
  "libc",
  "nng",
  "protobuf",
+ "runtime",
  "schemars",
  "serde",
  "serde_json",
@@ -448,6 +449,7 @@ version = "0.1.0"
 dependencies = [
  "hex",
  "libc",
+ "runtime",
  "schemars",
  "serde",
  "serde_json",
@@ -510,6 +512,7 @@ dependencies = [
  "kiutils_sexpr",
  "libc",
  "quick-xml",
+ "runtime",
  "sha2",
  "tempfile",
  "thiserror 2.0.20",
@@ -793,6 +796,12 @@ dependencies = [
 [[package]]
 name = "runtime"
 version = "0.1.0"
+dependencies = [
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "rustix"

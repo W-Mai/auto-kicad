@@ -314,12 +314,30 @@
       "id": "release.exports",
       "domain": "release",
       "mode": "write",
-      "status": "deferred",
-      "mcp_tools": [],
-      "constraints": [
-        "requires output collision policy and distribution decision"
+      "status": "verified",
+      "mcp_tools": [
+        "kicad_inspect_project",
+        "kicad_plan_change",
+        "kicad_preview_change",
+        "kicad_commit_change",
+        "kicad_plan_recovery",
+        "kicad_preview_recovery",
+        "kicad_commit_recovery"
       ],
-      "evidence": null
+      "constraints": [
+        "KiCad 10.0.7 saved-document exports; Gerber, Excellon drill, BOM and schematic PDF",
+        "Exact complete inventory approval and fresh source/resource/environment checks; no output overwrite",
+        "New confined directory only; exclusive atomic directory publication and guarded recovery",
+        "Local-only macOS arm64 delivery; no manufacturing-readiness certification"
+      ],
+      "evidence": {
+        "fixture": "Owned synchronized PCB/source pair and intact RoyalBlue54L-NFC-Antenna copy",
+        "tested_versions": [
+          "10.0.7"
+        ],
+        "command": "python3 scripts/check-artifact-exports.py --binary SERVER --project PROJECT --schematic ROOT_SCHEMATIC --config CONFIG_HOME --output NEW_OUTPUT",
+        "record": "docs/acceptance/local-delivery-and-exports.md"
+      }
     },
     {
       "id": "pcb.routing_rules.inspect",

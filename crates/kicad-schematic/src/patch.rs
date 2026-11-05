@@ -7,8 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use kicad_model::{RevisionDigest, SchematicArtifactFile};
 use kiutils_sexpr::Node;
+use runtime::owned_temp::Builder;
 use sha2::{Digest, Sha256};
-use tempfile::Builder;
 
 use crate::{NetlistDocument, NetlistRunner, parse_schematic};
 

@@ -1,3 +1,5 @@
+mod artifact_export;
+pub use artifact_export::NativeArtifactRecipe;
 use std::fs::{self, File};
 use std::io::{self, BufReader, Read};
 #[cfg(unix)]
@@ -8,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
-use tempfile::Builder;
+use runtime::owned_temp::Builder;
 use thiserror::Error;
 
 const DEFAULT_MAX_STDOUT_BYTES: u64 = 32 * 1024 * 1024;
