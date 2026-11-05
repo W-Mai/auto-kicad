@@ -338,6 +338,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('binary', nargs='?', type=Path)
     parser.add_argument('--replay-binary', type=Path)
+    parser.add_argument('--no-rollback', action='store_true', help='Retain only the active owned release after installation')
     parser.add_argument('--prefix', type=Path, default=Path.home() / '.local')
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--status', action='store_true')
@@ -346,6 +347,7 @@ def main():
     group.add_argument('--uninstall', action='store_true')
     args = parser.parse_args()
     action = args.status or args.verify or args.rollback or args.uninstall
+    if action and args.no_rollback: parser.error('--no-rollback requires an installation source')
     if action and (args.binary or args.replay_binary): parser.error('installation sources cannot be combined with a lifecycle action')
     if not action and args.binary is None: parser.error('an executable or lifecycle action is required')
     prefix = args.prefix.expanduser().resolve()
@@ -380,6 +382,7 @@ def main():
             identifier = stage_release(root,sources,info,dependency_inventory)
             for name in sources: owned_entry(prefix,root,name,True)
             result = dict(installed=True, **activate(root,state,identifier))
+            if args.no_rollback: result['previous'] = None
             result['pruned_releases'] = prune(root,result)
             # Keep activation metadata independent of transient presentation fields.
             clean_state = {key:result[key] for key in ['schema_version','active','previous','releases']}

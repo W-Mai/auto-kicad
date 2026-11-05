@@ -10,7 +10,7 @@ use std::os::unix::{
 use std::{
     ffi::{CString, OsStr, OsString},
     fs::{self, File, OpenOptions},
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, Read, Write},
     path::{Path, PathBuf},
     process::Command,
     sync::{Arc, Mutex, OnceLock, Weak},
@@ -18,6 +18,7 @@ use std::{
 };
 
 const ATTRIBUTE: &[u8] = b"user.auto-kicad.owner-v1\0";
+const RELEASE_ATTRIBUTE: &[u8] = b"user.auto-kicad.released-v1\0";
 const MAX_RECORDS: usize = 4096;
 static LEASES: OnceLock<Mutex<Vec<Weak<File>>>> = OnceLock::new();
 static LAST_CLEANUP: OnceLock<CleanupReport> = OnceLock::new();
@@ -71,15 +72,11 @@ impl TempDir {
         };
         // The OS lease, not a surviving Rust parent, determines whether a native worker still owns bytes.
         let _retained = inner.keep();
-        self.owner.released = true;
         if let Some(file) = &self.lease {
-            let bytes = serde_json::to_vec(&self.owner)
-                .map_err(|_| invalid("cannot update temporary release state"))?;
-            let mut writer = &**file;
-            writer.seek(SeekFrom::Start(0))?;
-            writer.write_all(&bytes)?;
-            writer.set_len(bytes.len() as u64)?;
-            writer.sync_all()?;
+            // The inherited open-file-description lease stays on this immutable record.
+            // A single xattr update cannot leave a partially rewritten JSON document.
+            set_attribute_token(file, RELEASE_ATTRIBUTE, &self.owner.token)?;
+            file.sync_all()?;
         }
         self.lease.take();
         match reclaim(&self.record, Some(&self.owner), true)? {
@@ -214,12 +211,12 @@ fn open_directory(path: &Path) -> io::Result<File> {
     Ok(file)
 }
 #[cfg(unix)]
-fn set_token(directory: &File, token: &str) -> io::Result<()> {
+fn set_attribute_token(directory: &File, attribute: &[u8], token: &str) -> io::Result<()> {
     #[cfg(target_os = "macos")]
     let status = unsafe {
         libc::fsetxattr(
             directory.as_raw_fd(),
-            ATTRIBUTE.as_ptr().cast(),
+            attribute.as_ptr().cast(),
             token.as_ptr().cast(),
             token.len(),
             0,
@@ -230,7 +227,7 @@ fn set_token(directory: &File, token: &str) -> io::Result<()> {
     let status = unsafe {
         libc::fsetxattr(
             directory.as_raw_fd(),
-            ATTRIBUTE.as_ptr().cast(),
+            attribute.as_ptr().cast(),
             token.as_ptr().cast(),
             token.len(),
             libc::XATTR_CREATE,
@@ -248,20 +245,20 @@ fn set_token(directory: &File, token: &str) -> io::Result<()> {
     Ok(())
 }
 #[cfg(not(unix))]
-fn set_token(_directory: &File, _token: &str) -> io::Result<()> {
+fn set_attribute_token(_directory: &File, _attribute: &[u8], _token: &str) -> io::Result<()> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
         "native temporary ownership unavailable",
     ))
 }
 #[cfg(unix)]
-fn token_matches(directory: &File, token: &str) -> io::Result<bool> {
+fn attribute_token_matches(directory: &File, attribute: &[u8], token: &str) -> io::Result<bool> {
     let mut bytes = [0u8; 64];
     #[cfg(target_os = "macos")]
     let size = unsafe {
         libc::fgetxattr(
             directory.as_raw_fd(),
-            ATTRIBUTE.as_ptr().cast(),
+            attribute.as_ptr().cast(),
             bytes.as_mut_ptr().cast(),
             bytes.len(),
             0,
@@ -272,7 +269,7 @@ fn token_matches(directory: &File, token: &str) -> io::Result<bool> {
     let size = unsafe {
         libc::fgetxattr(
             directory.as_raw_fd(),
-            ATTRIBUTE.as_ptr().cast(),
+            attribute.as_ptr().cast(),
             bytes.as_mut_ptr().cast(),
             bytes.len(),
         )
@@ -291,15 +288,40 @@ fn token_matches(directory: &File, token: &str) -> io::Result<bool> {
     }
 }
 #[cfg(not(unix))]
-fn token_matches(_directory: &File, _token: &str) -> io::Result<bool> {
+fn attribute_token_matches(_directory: &File, _attribute: &[u8], _token: &str) -> io::Result<bool> {
     Ok(false)
 }
-fn try_lease(file: &File) -> io::Result<bool> {
+fn set_token(directory: &File, token: &str) -> io::Result<()> {
+    set_attribute_token(directory, ATTRIBUTE, token)
+}
+fn token_matches(directory: &File, token: &str) -> io::Result<bool> {
+    attribute_token_matches(directory, ATTRIBUTE, token)
+}
+fn release_marker_matches(record: &File, token: &str) -> io::Result<bool> {
+    match attribute_token_matches(record, RELEASE_ATTRIBUTE, token) {
+        Ok(true) => Ok(true),
+        Ok(false) => Err(invalid("temporary release marker identity differs")),
+        #[cfg(target_os = "macos")]
+        Err(error) if error.raw_os_error() == Some(libc::ENOATTR) => Ok(false),
+        #[cfg(target_os = "linux")]
+        Err(error) if error.raw_os_error() == Some(libc::ENODATA) => Ok(false),
+        Err(error) => Err(error),
+    }
+}
+#[derive(Clone, Copy)]
+enum LeaseKind {
+    Holder,
+    Reclaim,
+}
+fn try_lease(file: &File, kind: LeaseKind) -> io::Result<bool> {
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
         // OFD locks remain attached to the inherited open file description after its creator dies.
         let mut lock: libc::flock = unsafe { std::mem::zeroed() };
-        lock.l_type = libc::F_WRLCK as _;
+        lock.l_type = match kind {
+            LeaseKind::Holder => libc::F_RDLCK,
+            LeaseKind::Reclaim => libc::F_WRLCK,
+        } as _;
         lock.l_whence = libc::SEEK_SET as _;
         #[cfg(target_os = "macos")]
         const SET_OFD_LOCK: libc::c_int = 90;
@@ -316,7 +338,7 @@ fn try_lease(file: &File) -> io::Result<bool> {
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
-        let _ = file;
+        let _ = (file, kind);
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
             "native OFD leases unavailable",
@@ -349,18 +371,30 @@ fn register(inner: tempfile::TempDir) -> io::Result<TempDir> {
             .as_nanos(),
     };
     let record = root.join(format!("{token}.json"));
-    let mut options = OpenOptions::new();
-    options.read(true).write(true).create_new(true);
-    #[cfg(unix)]
-    options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
-    let mut file = options.open(&record)?;
-    if !try_lease(&file)? {
+    // Publish only complete immutable records. Hold a shared lease throughout the
+    // transition from the unpublished writer to the read-only inherited descriptor.
+    let mut pending = tempfile::Builder::new()
+        .prefix(".owner-register-")
+        .tempfile_in(&root)?;
+    if !try_lease(pending.as_file(), LeaseKind::Holder)? {
         return Err(invalid("new ownership lease is already held"));
     }
     let encoded =
         serde_json::to_vec(&owner).map_err(|_| invalid("cannot encode temporary ownership"))?;
-    file.write_all(&encoded)?;
-    file.sync_all()?;
+    pending.write_all(&encoded)?;
+    pending.as_file().sync_all()?;
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NOFOLLOW);
+    let file = options.open(pending.path())?;
+    if !try_lease(&file, LeaseKind::Holder)? {
+        return Err(invalid("read-only temporary ownership lease unavailable"));
+    }
+    let published = pending
+        .persist_noclobber(&record)
+        .map_err(|error| error.error)?;
+    drop(published);
     File::open(&root)?.sync_all()?;
     let lease = Arc::new(file);
     LEASES
@@ -515,7 +549,7 @@ fn reclaim(record: &Path, expected: Option<&Owner>, own_drop: bool) -> io::Resul
     if !metadata.is_file() || metadata.len() > 8192 {
         return Err(invalid("invalid temporary owner record"));
     }
-    if !try_lease(&lease)? {
+    if !try_lease(&lease, LeaseKind::Reclaim)? {
         return Ok(Reclaimed::Leased);
     }
     let mut bytes = Vec::new();
@@ -535,7 +569,9 @@ fn reclaim(record: &Path, expected: Option<&Owner>, own_drop: bool) -> io::Resul
     {
         return Err(invalid("temporary ownership identity differs"));
     }
-    if !own_drop && !owner.released && owner_alive(owner.pid) {
+    let marker_released = release_marker_matches(&lease, &owner.token)?;
+    let released = owner.released || marker_released;
+    if !own_drop && !released && owner_alive(owner.pid) {
         return Ok(Reclaimed::OwnerAlive);
     }
     let quarantine = owner
@@ -611,18 +647,37 @@ mod tests {
             .unwrap();
         let path = owner.path().to_owned();
         let record = owner.record.clone();
+        let original_record = fs::read(&record).unwrap();
+        let lease = owner.lease.as_ref().unwrap();
+        assert_eq!(
+            unsafe { libc::fcntl(lease.as_raw_fd(), libc::F_GETFL) } & libc::O_ACCMODE,
+            libc::O_RDONLY
+        );
         fs::write(path.join("evidence"), b"native worker input").unwrap();
         let mut command = Command::new("/bin/sh");
-        command.args(["-c", "sleep 0.2"]);
+        command
+            .args(["-c", "read signal || :"])
+            .stdin(std::process::Stdio::piped());
         inherit_leases(&mut command);
         let mut worker = command.spawn().unwrap();
         drop(command);
         owner.close().unwrap();
+        assert_eq!(fs::read(&record).unwrap(), original_record);
+        assert!(
+            release_marker_matches(
+                &File::open(&record).unwrap(),
+                &serde_json::from_slice::<Owner>(&original_record)
+                    .unwrap()
+                    .token
+            )
+            .unwrap()
+        );
         assert!(path.join("evidence").is_file());
         assert!(matches!(
             reclaim(&record, None, false).unwrap(),
             Reclaimed::Leased
         ));
+        worker.stdin.take().unwrap().write_all(b"done\n").unwrap();
         assert!(worker.wait().unwrap().success());
         reclaim(&record, None, false).unwrap();
         assert!(!path.exists());
@@ -649,5 +704,59 @@ mod tests {
         reclaim(&record, None, false).unwrap();
         assert!(!path.exists());
         assert!(!record.exists());
+    }
+    #[test]
+    fn legacy_released_records_remain_reclaimable_without_a_new_marker() {
+        let mut owner = Builder::new()
+            .prefix("auto-kicad-legacy-owner-")
+            .tempdir()
+            .unwrap();
+        let path = owner.path().to_owned();
+        let record = owner.record.clone();
+        let _retained = owner.inner.take().unwrap().keep();
+        owner.owner.released = true;
+        let bytes = serde_json::to_vec(&owner.owner).unwrap();
+        fs::write(&record, &bytes).unwrap();
+        owner.lease.take();
+        assert!(matches!(
+            reclaim(&record, None, false).unwrap(),
+            Reclaimed::Removed
+        ));
+        assert!(!path.exists() && !record.exists());
+    }
+
+    #[test]
+    fn foreign_release_marker_never_grants_deletion_authority() {
+        let owner = Builder::new()
+            .prefix("auto-kicad-foreign-marker-")
+            .tempdir()
+            .unwrap();
+        let path = owner.path().to_owned();
+        let record = owner.record.clone();
+        let token = owner.owner.token.clone();
+        let bytes = fs::read(&record).unwrap();
+        fs::write(path.join("retained"), b"preserve").unwrap();
+        let file = File::open(&record).unwrap();
+        set_attribute_token(&file, RELEASE_ATTRIBUTE, &"0".repeat(64)).unwrap();
+        assert!(owner.close().is_err());
+        assert!(reclaim(&record, None, false).is_err());
+        assert_eq!(fs::read(&record).unwrap(), bytes);
+        assert_eq!(fs::read(path.join("retained")).unwrap(), b"preserve");
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            unsafe { libc::fremovexattr(file.as_raw_fd(), RELEASE_ATTRIBUTE.as_ptr().cast(), 0) },
+            0
+        );
+        #[cfg(target_os = "linux")]
+        assert_eq!(
+            unsafe { libc::fremovexattr(file.as_raw_fd(), RELEASE_ATTRIBUTE.as_ptr().cast()) },
+            0
+        );
+        set_attribute_token(&file, RELEASE_ATTRIBUTE, &token).unwrap();
+        assert!(matches!(
+            reclaim(&record, None, false).unwrap(),
+            Reclaimed::Removed
+        ));
+        assert!(!path.exists() && !record.exists());
     }
 }
