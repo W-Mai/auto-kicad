@@ -4,7 +4,7 @@
     "10.0.7"
   ],
   "board_format": "20260206",
-  "server_sha256": "2ac3480a8283b4aac8e4d56ce2b10123c9af679dcf7d3c5004a905264521d988",
+  "server_sha256": "91aed2cb41a45b8c7e5c280c3dc9978b6192fbbde4b240980ed973fce59600f0",
   "source_formats_exercised": [
     "20250114",
     "20260306"
@@ -177,7 +177,7 @@
   "quality": {
     "exit_code": 0,
     "aborted_for_disk": false,
-    "elapsed_seconds": 138.11335808294825,
+    "elapsed_seconds": 112.16429749998497,
     "source_unchanged": true,
     "completed_commands": [
       [
@@ -209,12 +209,12 @@
       ]
     ],
     "tests": [
-      615,
+      616,
       0,
       18
     ],
-    "minimum_free_bytes": 2210443264,
-    "allocated_build_bytes_removed": 1361932288,
+    "minimum_free_bytes": 11955376128,
+    "allocated_build_bytes_removed": 1365192704,
     "target_absent": true,
     "public_project_publication_complete": false,
     "product_complete": false
@@ -269,7 +269,7 @@
   "unqualified": [
     "Project fields outside typed net_settings, source declaration editing and unresolved dynamic class expressions",
     "Custom-rule interactions and affected zones/generated copper",
-    "Zero-pin additions and remaining source/template/policy families",
+    "Remaining source/template/policy families",
     "Larger composed bounds",
     "Complete GUI load/save lifecycle",
     "Three distinct real-project final profiles",
@@ -278,13 +278,13 @@
   "general_synchronization_complete": false,
   "product_complete": false,
   "installed_runtime_fresh_codex_discovery": {
-    "receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-source-installed-codex-1793844017718473000/result.json",
-    "receipt_sha256": "abfa0cfea9c176ad31c3140cdc0637ec5ec57b358ea4f522a8f256e82931badb",
+    "receipt": "m5-empty-lifecycle-installed-codex-1793849363212897000/result.json",
+    "receipt_sha256": "16980bbb7c70e67f9e18be18232d4ee7431bff0f4278caf4a16e677147c0ada8",
     "passed": true,
     "actual_global_codex_registration": true,
     "command_override_used": false,
     "actual_installed_capabilities_call": true,
-    "installed_sha256": "2ac3480a8283b4aac8e4d56ce2b10123c9af679dcf7d3c5004a905264521d988",
+    "installed_sha256": "91aed2cb41a45b8c7e5c280c3dc9978b6192fbbde4b240980ed973fce59600f0",
     "tools": 13,
     "project_intent_and_complete_expectation_discovered": true,
     "owned_children_terminal": true,
@@ -297,8 +297,8 @@
     "build_targets_absent": true,
     "temporary_runtimes_absent": true,
     "installed_runtime_retained": true,
-    "previous_install_backup_bytes_removed": 19767296,
-    "allocated_build_bytes_removed": 3706335232,
+    "previous_install_backup_bytes_removed": 19877888,
+    "allocated_build_bytes_removed": 3665440768,
     "all_acceptance_handles_terminal": true,
     "gui_launched": false,
     "abrupt_server_cleanup_qualified": false
@@ -1290,5 +1290,29 @@
     "complete_m5b": false,
     "three_distinct_real_project_final_gate": false,
     "product_complete": false
+  },
+  "pinless_lifecycle": {
+    "passed": true,
+    "server_sha256": "91aed2cb41a45b8c7e5c280c3dc9978b6192fbbde4b240980ed973fce59600f0",
+    "evidence": "schematic-empty-components.json",
+    "profiles": [
+      "front-complete",
+      "codex-back-oblique-complete",
+      "legacy-complete",
+      "no-pad-complete",
+      "retained-real-mounting-hole",
+      "actual-killed-add-recovery",
+      "actual-killed-replace-recovery",
+      "source-library-authority-and-pinful-regression",
+      "existing-relink-and-metadata"
+    ],
+    "complete_m5b": false,
+    "product_complete": false,
+    "workflow_seal": {
+      "receipt": "empty-lifecycle-workflow-seal-1793849314370605000.json",
+      "sha256": "13bbb3676bc624ffeee91f39886f4c3e907233388de80ad8222d34c9e868844c",
+      "durable_records_rechecked": 57,
+      "artifact_references_rehashed": 283
+    }
   }
 }

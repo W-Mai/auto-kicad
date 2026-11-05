@@ -264,8 +264,7 @@ pub(super) fn validate(
             return Err("footprint assignment evidence digest is invalid".into());
         }
         let pads = evidence.pad_numbers.iter().collect::<BTreeSet<_>>();
-        if pads.is_empty()
-            || pads.len() > 512
+        if pads.len() > 512
             || pads.len() != evidence.pad_numbers.len()
             || pads.iter().any(|pad| {
                 pad.is_empty()
@@ -276,7 +275,7 @@ pub(super) fn validate(
                         .any(|c| c.is_ascii_whitespace() || c.is_ascii_control())
             })
         {
-            return Err("footprint assignment pad evidence is empty, invalid or oversized".into());
+            return Err("footprint assignment pad evidence is invalid or oversized".into());
         }
         let mut expected = None;
         for &index in groups.indices(&edit.file, uuid)? {
@@ -290,10 +289,9 @@ pub(super) fn validate(
                         .cloned(),
                 );
             }
-            if pins.is_empty() || expected.as_ref().is_some_and(|first| first != &pins) {
+            if expected.as_ref().is_some_and(|first| first != &pins) {
                 return Err(
-                    "physical target instances have empty or differing component pin universes"
-                        .into(),
+                    "physical target instances have differing component pin universes".into(),
                 );
             }
             expected = Some(pins);

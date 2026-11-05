@@ -217,7 +217,10 @@ pub(super) fn selected_pins(
 ) -> Result<Vec<String>, String> {
     let mut pins = BTreeSet::new();
     let mut maximum = 1;
+    let mut selected_body = false;
+    let mut any_pin = false;
     for body in children(root, "symbol") {
+        any_pin |= children(values(body)?, "pin").next().is_some();
         let name = atom(values(body)?, 1)?;
         let mut parts = name.rsplitn(3, '_');
         let style = parts
@@ -237,6 +240,7 @@ pub(super) fn selected_pins(
         if slot != 0 && slot != unit || style != 0 && style != body_style.unwrap_or(1) {
             continue;
         }
+        selected_body = true;
         for pin in children(values(body)?, "pin") {
             let number = atom(values(one(values(pin)?, "number")?)?, 1)?.to_owned();
             if number.is_empty() || number.contains(['[', ']', '$']) || !pins.insert(number) {
@@ -244,7 +248,7 @@ pub(super) fn selected_pins(
             }
         }
     }
-    if unit == 0 || unit > maximum || pins.is_empty() {
+    if unit == 0 || unit > maximum || !selected_body || (pins.is_empty() && any_pin) {
         return Err("requested unit/body has no supported pin definition".into());
     }
     Ok(pins.into_iter().collect())
@@ -383,4 +387,30 @@ pub(super) fn insert_unit(
     let node = object(values(&parsed.nodes[0])?, symbol_uuid, ObjectKind::Symbol)?;
     let span = node_span(node);
     Ok(format!("\n{}\n", &rendered[span.start..span.end]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verified_empty_creation_requires_a_selected_body_and_a_wholly_pinless_definition() {
+        let empty = parse_one(
+            r#"(symbol "Mechanical" (symbol "Mechanical_0_1" (circle (center 0 0) (radius 1))))"#,
+        )
+        .unwrap();
+        let root = values(&empty.nodes[0]).unwrap();
+        assert_eq!(selected_pins(root, 1, None).unwrap(), Vec::<String>::new());
+        assert!(selected_pins(root, 0, None).is_err());
+        assert!(selected_pins(root, 2, None).is_err());
+        assert!(selected_pins(root, 1, Some(2)).is_err());
+        let missing = parse_one(r#"(symbol "Missing")"#).unwrap();
+        assert!(selected_pins(values(&missing.nodes[0]).unwrap(), 1, None).is_err());
+        let mixed = parse_one(r#"(symbol "Mixed" (symbol "Mixed_0_1" (circle (center 0 0) (radius 1))) (symbol "Mixed_1_2" (pin passive line (number "1"))))"#).unwrap();
+        assert!(selected_pins(values(&mixed.nodes[0]).unwrap(), 1, None).is_err());
+        assert_eq!(
+            selected_pins(values(&mixed.nodes[0]).unwrap(), 1, Some(2)).unwrap(),
+            vec!["1"]
+        );
+    }
 }

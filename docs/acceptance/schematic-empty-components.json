@@ -1,9 +1,9 @@
 {
-  "scope": "Verified empty logical-pin universes and conservative existing zero-pin metadata",
+  "scope": "Complete pinless symbol authoring and source-bound PCB lifecycle",
   "tested_versions": [
     "10.0.7"
   ],
-  "server_sha256": "0260964b121d0e7e0195be4f0675906e363b5d0a369b019e42f3bb58d4b45191",
+  "server_sha256": "91aed2cb41a45b8c7e5c280c3dc9978b6192fbbde4b240980ed973fce59600f0",
   "profiles": [
     {
       "profile": "real-pic-observation",
@@ -328,7 +328,7 @@
   "constraints": [
     "Existing zero-pin targets require empty native unit pin lists and no numbered board pads",
     "Unnumbered pads and complete physical/native definitions remain protected",
-    "Zero-pin creation, replacement and footprint assignment remain unsupported",
+    "Pinless creation requires a selected wholly pinless definition; assignment requires exact empty numbered-pad equality and replacement requires complete physical pad correspondence",
     "Unmapped numbered mechanical, shield and switch pads remain conflicts",
     "General class/project/affected-zone/generated/GUI/bounds and final project gates remain open"
   ],
@@ -338,23 +338,63 @@
   "quality": {
     "exit_code": 0,
     "aborted_for_disk": false,
-    "elapsed_seconds": 80.21133429199108,
-    "tests": [
-      592,
-      0,
-      17
+    "elapsed_seconds": 112.16429749998497,
+    "source_unchanged": true,
+    "completed_commands": [
+      [
+        "python3",
+        "/Users/w-mai/Projects/auto-kicad/scripts/check-capability-matrix.py"
+      ],
+      [
+        "cargo",
+        "fmt",
+        "--all",
+        "--",
+        "--check"
+      ],
+      [
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--",
+        "-D",
+        "warnings"
+      ],
+      [
+        "cargo",
+        "test",
+        "--workspace",
+        "--",
+        "--test-threads=1"
+      ]
     ],
-    "observed_minimum_free_bytes": 5363810304,
-    "allocated_build_bytes_removed": 1210724352,
-    "unique_file_bytes_removed": 1201826622,
+    "tests": [
+      616,
+      0,
+      18
+    ],
+    "minimum_free_bytes": 11955376128,
+    "allocated_build_bytes_removed": 1365192704,
     "target_absent": true,
-    "free_after_cleanup": 6250004480
+    "public_project_publication_complete": false,
+    "product_complete": false
   },
   "installed_runtime_fresh_codex_discovery": {
+    "receipt": "m5-empty-lifecycle-installed-codex-1793849363212897000/result.json",
+    "receipt_sha256": "16980bbb7c70e67f9e18be18232d4ee7431bff0f4278caf4a16e677147c0ada8",
     "passed": true,
-    "installed_sha256": "0260964b121d0e7e0195be4f0675906e363b5d0a369b019e42f3bb58d4b45191",
+    "actual_global_codex_registration": true,
+    "command_override_used": false,
+    "actual_installed_capabilities_call": true,
+    "installed_sha256": "91aed2cb41a45b8c7e5c280c3dc9978b6192fbbde4b240980ed973fce59600f0",
     "tools": 13,
-    "synchronization_schemas_discovered": true
+    "project_intent_and_complete_expectation_discovered": true,
+    "owned_children_terminal": true,
+    "owned_node_cache_bytes_removed": 0,
+    "private_roots_empty": true,
+    "gui_launched": false,
+    "product_complete": false
   },
   "resource_cleanup": {
     "runtimes": [
@@ -373,5 +413,473 @@
     "targets_absent": true,
     "installed_runtime_retained": true,
     "installed_discovery_receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-empty-installed-1793795411818963000/result.json"
+  },
+  "historical_server_sha256": "0260964b121d0e7e0195be4f0675906e363b5d0a369b019e42f3bb58d4b45191",
+  "historical_quality": {
+    "exit_code": 0,
+    "aborted_for_disk": false,
+    "elapsed_seconds": 80.21133429199108,
+    "tests": [
+      592,
+      0,
+      17
+    ],
+    "observed_minimum_free_bytes": 5363810304,
+    "allocated_build_bytes_removed": 1210724352,
+    "unique_file_bytes_removed": 1201826622,
+    "target_absent": true,
+    "free_after_cleanup": 6250004480
+  },
+  "pinless_lifecycle": {
+    "passed": true,
+    "server_sha256": "91aed2cb41a45b8c7e5c280c3dc9978b6192fbbde4b240980ed973fce59600f0",
+    "source_formats": [
+      "20250114",
+      "20260306"
+    ],
+    "profiles": [
+      {
+        "profile": "front-complete",
+        "receipt": "m5-empty-lifecycle-stdio-1793847208435147000/front/result.json",
+        "receipt_sha256": "c0239e29842d0c51ccc9b6b05c96128a23dc87ae2dae902c7ea56df139fa6b96",
+        "result": {
+          "passed": true,
+          "profile": "front",
+          "actual_complete_lifecycle": true,
+          "steps": [
+            {
+              "kind": "source-create_symbol",
+              "plan_hash": "sha256:e91a9eb09c426d025f73272b7f0e361c2fb0532b7f3079607714df36a3fb5c14",
+              "uuid": "467f8f45-ffe4-4aea-9626-b83da3e076f0"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:82a59a736e6d668eb028ebfbabac9bd1181db7043050730328f001dbccc4d37d",
+              "uuid": "467f8f45-ffe4-4aea-9626-b83da3e076f0"
+            },
+            {
+              "kind": "pcb-add",
+              "plan_hash": "sha256:b989fcb5185cdd02d2ce4ff778a1e54c0e22e3a1b2a6859d5b170db497d2de46",
+              "target_uuid": "bbbed846-6001-8c98-8869-87d29f356f63"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:5250772a23b0e7ba05064806ea26c1061a2e8965b5df2c9f4a8ef1b793d3fdd3",
+              "uuid": "467f8f45-ffe4-4aea-9626-b83da3e076f0"
+            },
+            {
+              "kind": "pcb-replace",
+              "plan_hash": "sha256:dc641a05c2cced632b7d238f8532141969600a68b89df77005d0d855427c3697",
+              "target_uuid": "bbbed846-6001-8c98-8869-87d29f356f63"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:5de64950a0e2a5cbc02a195e15af388e1bae2a1bb8c1b19bbbef1e99f10023a6",
+              "uuid": "467f8f45-ffe4-4aea-9626-b83da3e076f0"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:2e906c218e03b7ca58b16e7d8bd07ce22cf99f58bdc9d330a506ab33fa37346e",
+              "uuid": "467f8f45-ffe4-4aea-9626-b83da3e076f0"
+            },
+            {
+              "kind": "source-delete",
+              "plan_hash": "sha256:1ceb708d6527a3f0a059651ca8d4c995fea7da26c615d22d9e1340250b4db8fc",
+              "uuid": "467f8f45-ffe4-4aea-9626-b83da3e076f0"
+            },
+            {
+              "kind": "pcb-remove",
+              "plan_hash": "sha256:fbb5a14b78199b49b61481aa7299f8ce4aa761ead3f06c85458d269dd4ed5d84",
+              "target_uuid": "bbbed846-6001-8c98-8869-87d29f356f63"
+            }
+          ],
+          "journal_count": 9,
+          "artifact_references_rehashed": 48,
+          "postcondition_sealing_resumed_without_repeating_native_writes": true,
+          "initial_driver_artifact_reader_failed": true,
+          "complete_native_and_drc_postconditions_rechecked": true,
+          "original_pcb_roots_and_copper_preserved": true,
+          "private_roots_empty": true,
+          "gui_editor_launched": false,
+          "product_complete": false,
+          "binary_sha256": "91aed2cb41a45b8c7e5c280c3dc9978b6192fbbde4b240980ed973fce59600f0"
+        }
+      },
+      {
+        "profile": "codex-back-oblique-complete",
+        "receipt": "m5-empty-lifecycle-tracked-codex-back-fixed/result.json",
+        "receipt_sha256": "1ea00869329f50c67aa1abfef9779142c9bf11b6d3c44a34a421c9860ddbb636",
+        "result": {
+          "passed": true,
+          "profile": "back-oblique",
+          "actual_complete_lifecycle": true,
+          "steps": [
+            {
+              "kind": "source-create_symbol",
+              "plan_hash": "sha256:8b72b4cc2cc3a900449b12a5b03217bd92f76fac19eaf081a183756314f6101f",
+              "uuid": "467f8f45-ffe4-4aea-9626-b83da3e076f0"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:d341dac9c9c8da18c69204b28fe574f6c3867c121affd89d19bfb546ff5d2eb9",
+              "uuid": "467f8f45-ffe4-4aea-9626-b83da3e076f0"
+            },
+            {
+              "kind": "pcb-add",
+              "plan_hash": "sha256:d4eb20e8d1bba1c991325133ce59cfdb522d55db3af31ed3d215b3abb3049304",
+              "target_uuid": "9af91182-35d1-8632-88b9-4c972f151001"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:722033512343eb8e02a236a36990115af0ec708bdeaaf4566c08a7d4ae59b73a",
+              "uuid": "467f8f45-ffe4-4aea-9626-b83da3e076f0"
+            },
+            {
+              "kind": "pcb-replace",
+              "plan_hash": "sha256:b7304e049da1be136c733d13cbbc367781536cdf45979cfa17b5cbf2c0a1f299",
+              "target_uuid": "9af91182-35d1-8632-88b9-4c972f151001"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:13df66a6d3fb52f9414a26587f1472e1ae1d37d597abb27c9ac7a5cb715b4527",
+              "uuid": "467f8f45-ffe4-4aea-9626-b83da3e076f0"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:8e657a3603c9b9c08d3a1c3613078a526fbe2053faef9efd80fdff6ecad91742",
+              "uuid": "467f8f45-ffe4-4aea-9626-b83da3e076f0"
+            },
+            {
+              "kind": "source-delete",
+              "plan_hash": "sha256:5e79871c6eb07a9d5989bd0a3889792d0b96cd28e8f0d95a76d9d013077c7db7",
+              "uuid": "467f8f45-ffe4-4aea-9626-b83da3e076f0"
+            },
+            {
+              "kind": "pcb-remove",
+              "plan_hash": "sha256:a0741ff1030fb0091302d86fcfbfffddd826692d9cc223e848e3053a3baf0dec",
+              "target_uuid": "9af91182-35d1-8632-88b9-4c972f151001"
+            }
+          ],
+          "journal_count": 9,
+          "artifact_references_rehashed": 48,
+          "postcondition_sealing_resumed_without_repeating_native_writes": true,
+          "initial_driver_artifact_reader_failed": true,
+          "complete_native_and_drc_postconditions_rechecked": true,
+          "original_pcb_roots_and_copper_preserved": true,
+          "private_roots_empty": true,
+          "gui_editor_launched": false,
+          "product_complete": false,
+          "binary_sha256": "91aed2cb41a45b8c7e5c280c3dc9978b6192fbbde4b240980ed973fce59600f0"
+        }
+      },
+      {
+        "profile": "legacy-complete",
+        "receipt": "m5-empty-lifecycle-tracked-legacy-nfc/result.json",
+        "receipt_sha256": "b48a8082a20e898c388f23f0590359e0088fc94d01eb534232829f187c3c2143",
+        "result": {
+          "passed": true,
+          "profile": "legacy-front",
+          "binary_sha256": "91aed2cb41a45b8c7e5c280c3dc9978b6192fbbde4b240980ed973fce59600f0",
+          "actual_source_create_assign_and_native_pcb_add": true,
+          "pcb_replace": true,
+          "source_and_pcb_remove": true,
+          "retained_useful_real_addition": false,
+          "steps": [
+            {
+              "kind": "source-create_symbol",
+              "plan_hash": "sha256:c5bbf91de66b5e41e3af8a26780a15015e2c22460bfba12413225f4dcd1e90d8",
+              "uuid": "ba7295b7-5b95-4078-9455-ef6d4d6e79c0"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:dd76c8976cbb34ae4045f322b46b228a20dde00c7fa051910393cfe4822f3312",
+              "uuid": "ba7295b7-5b95-4078-9455-ef6d4d6e79c0"
+            },
+            {
+              "kind": "pcb-add",
+              "plan_hash": "sha256:ac881e91e45c9104f57775590e98275bbdf2da4d43d1f56cb050bf3dd2c8c795",
+              "target_uuid": "7344f991-d403-809e-b6ce-2886fcf19654"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:d38ad9f16356f3ac995d3aabb5d19b6ea5f9dd91e0268b5e0dfb2cfe301b33d9",
+              "uuid": "ba7295b7-5b95-4078-9455-ef6d4d6e79c0"
+            },
+            {
+              "kind": "pcb-replace",
+              "plan_hash": "sha256:e3d709176fb178ef52e2c27c3331e4248349dc0712de747ea83bf77e3a3f7498",
+              "target_uuid": "7344f991-d403-809e-b6ce-2886fcf19654"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:4af92dca38f9e107a70cec30d96c0782f800c17468ec35b7bd1aeb372193c6df",
+              "uuid": "ba7295b7-5b95-4078-9455-ef6d4d6e79c0"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:98e5a2a8b79c14c54d4c3d79985fd43e8fa1f17b77657989ab84a5b57913a2a2",
+              "uuid": "ba7295b7-5b95-4078-9455-ef6d4d6e79c0"
+            },
+            {
+              "kind": "source-delete",
+              "plan_hash": "sha256:0d56550a6e7c25cf5fce7f32c55d8786c8ec2acf59fe7629d51d39b1236ac66b",
+              "uuid": "ba7295b7-5b95-4078-9455-ef6d4d6e79c0"
+            },
+            {
+              "kind": "pcb-remove",
+              "plan_hash": "sha256:3c8860ee40f14fb569b777b80a8bc1c3cd88b95db9c1369a15adafc46fb69124",
+              "target_uuid": "7344f991-d403-809e-b6ce-2886fcf19654"
+            }
+          ],
+          "controls": [
+            "invalid-unit-0",
+            "invalid-unit-2",
+            "invalid-body_style-2",
+            "exact-empty-numbered-pad-bijection-and-source-identity",
+            "physical-pad-cardinality-refused"
+          ],
+          "original_pcb_roots_and_copper_preserved": true,
+          "independent_native_and_complete_drc": true,
+          "journal_count": 9,
+          "artifact_references_rehashed": 39,
+          "original_inputs_unchanged": true,
+          "real_final_gate_claimed": false,
+          "gui_editor_launched": false,
+          "product_complete": false,
+          "private_roots_empty": true
+        }
+      },
+      {
+        "profile": "no-pad-complete",
+        "receipt": "m5-empty-lifecycle-tracked-no-pad-native-bounds/result.json",
+        "receipt_sha256": "2e82f39120d9d63dcd2b517f41ebe057bf51050f01fc780730f42cd2af14149c",
+        "result": {
+          "passed": true,
+          "profile": "no-pad",
+          "binary_sha256": "91aed2cb41a45b8c7e5c280c3dc9978b6192fbbde4b240980ed973fce59600f0",
+          "actual_source_create_assign_and_native_pcb_add": true,
+          "pcb_replace": true,
+          "source_and_pcb_remove": true,
+          "retained_useful_real_addition": false,
+          "steps": [
+            {
+              "kind": "source-create_symbol",
+              "plan_hash": "sha256:f43db1ee6b6944aee2d4c07786a98ef760afa23891137f2bc7adec3869f88c46",
+              "uuid": "467f8f45-ffe4-4aea-9626-b83da3e076f0"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:bfec8f02bf1fb5a909bc41989aa44eb6e46b8cc41228c843e619d7f8424e2223",
+              "uuid": "467f8f45-ffe4-4aea-9626-b83da3e076f0"
+            },
+            {
+              "kind": "pcb-add",
+              "plan_hash": "sha256:6387a6158ca46b8fc4d4fb5ad38f9fc52dec18af6d2b6c7bc1c475b5ef388d2c",
+              "target_uuid": "bbacff88-8688-8a7c-bde9-7c8daa7b4498"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:9a824880bd0a645025608e699d4a1cfbcb002f438b4f2830219758abcf7b9af0",
+              "uuid": "467f8f45-ffe4-4aea-9626-b83da3e076f0"
+            },
+            {
+              "kind": "pcb-replace",
+              "plan_hash": "sha256:735c8c38ad88856a44e65c8f9acbc7bc0acd9efb1264ccaf88b71c449a75ccaa",
+              "target_uuid": "bbacff88-8688-8a7c-bde9-7c8daa7b4498"
+            },
+            {
+              "kind": "source-delete",
+              "plan_hash": "sha256:eb480767e2834262215c804e6d7609d3a7f5d7b073f51c80c0a22a1e968d6909",
+              "uuid": "467f8f45-ffe4-4aea-9626-b83da3e076f0"
+            },
+            {
+              "kind": "pcb-remove",
+              "plan_hash": "sha256:472e62c2fa95f14ba36bc65c57c9276047d47ee70ff928d5fdac054f9faa4d1d",
+              "target_uuid": "bbacff88-8688-8a7c-bde9-7c8daa7b4498"
+            }
+          ],
+          "controls": [
+            "invalid-unit-0",
+            "invalid-unit-2",
+            "invalid-body_style-2",
+            "exact-empty-numbered-pad-bijection-and-source-identity"
+          ],
+          "original_pcb_roots_and_copper_preserved": true,
+          "independent_native_and_complete_drc": true,
+          "journal_count": 7,
+          "artifact_references_rehashed": 31,
+          "original_inputs_unchanged": true,
+          "real_final_gate_claimed": false,
+          "gui_editor_launched": false,
+          "product_complete": false,
+          "private_roots_empty": true
+        }
+      },
+      {
+        "profile": "retained-real-mounting-hole",
+        "receipt": "m5-empty-lifecycle-tracked-real-nfc/result.json",
+        "receipt_sha256": "175b3e546b942e7363cbe99076f2a6f1deff56a9c2e9b1cdc5a2e82ee21d1007",
+        "result": {
+          "passed": true,
+          "profile": "real",
+          "actual_complete_lifecycle": true,
+          "steps": [
+            {
+              "kind": "source-create_symbol",
+              "plan_hash": "sha256:e97f26bb15e1460522d44990461877caa710c8fa1f8ba6e759ac33749b62aab0",
+              "uuid": "ba7295b7-5b95-4078-9455-ef6d4d6e79c0"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:7d2232ecd9201dcd985bc07225b82ab6422cdea3c20daafb87af2666e20a4518",
+              "uuid": "ba7295b7-5b95-4078-9455-ef6d4d6e79c0"
+            },
+            {
+              "kind": "pcb-add",
+              "plan_hash": "sha256:ef809b2092f08f6a3fc4cb47069da9e2a04863873946cefb16815c730911e026",
+              "target_uuid": "ea0d16fe-8826-83c0-a973-dffb7e63133f"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:7cb600d303364084b180d26ba146822122878eb91cb879c4a56618e13c6243be",
+              "uuid": "ba7295b7-5b95-4078-9455-ef6d4d6e79c0"
+            },
+            {
+              "kind": "pcb-replace",
+              "plan_hash": "sha256:0775dae3a88f395f61ebc48681d8b55ccd87eb8106651066ab8cefa6cc7606bc",
+              "target_uuid": "ea0d16fe-8826-83c0-a973-dffb7e63133f"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:3dc7d983ce8b8e221f79c25b0d8c1b73edc82d0704a12f2890fa8bc5c91742e0",
+              "uuid": "ba7295b7-5b95-4078-9455-ef6d4d6e79c0"
+            },
+            {
+              "kind": "source-assign_footprint",
+              "plan_hash": "sha256:753f3254e19df85b919d555311fbe477d44fe3ac7b32a6d151323ad57a627d90",
+              "uuid": "ba7295b7-5b95-4078-9455-ef6d4d6e79c0"
+            }
+          ],
+          "journal_count": 7,
+          "artifact_references_rehashed": 37,
+          "postcondition_sealing_resumed_without_repeating_native_writes": true,
+          "initial_driver_artifact_reader_failed": true,
+          "complete_native_and_drc_postconditions_rechecked": true,
+          "original_pcb_roots_and_copper_preserved": true,
+          "private_roots_empty": true,
+          "gui_editor_launched": false,
+          "product_complete": false,
+          "binary_sha256": "91aed2cb41a45b8c7e5c280c3dc9978b6192fbbde4b240980ed973fce59600f0"
+        }
+      },
+      {
+        "profile": "actual-killed-add-recovery",
+        "receipt": "m5-empty-lifecycle-recovery-add-1793847721843614000/result.json",
+        "receipt_sha256": "84add32ea32bd8257544db348b85c496e7fa1da3be29e124839d350fb4954f78",
+        "result": {
+          "passed": true,
+          "profile": "add",
+          "binary_sha256": "91aed2cb41a45b8c7e5c280c3dc9978b6192fbbde4b240980ed973fce59600f0",
+          "actual_writer_sigkill": true,
+          "legacy_execution_schema": 4,
+          "later_user_bytes_preserved": true,
+          "fresh_recovery_approval_after_restart": true,
+          "actual_native_original_restoration": true,
+          "resumed_actual_commit": true,
+          "product_complete": false,
+          "gui_editor_launched": false,
+          "private_roots_empty": true
+        }
+      },
+      {
+        "profile": "actual-killed-replace-recovery",
+        "receipt": "m5-empty-lifecycle-recovery-replace-1793847714982103000/result.json",
+        "receipt_sha256": "6906a1aa5fd3810dea34c43b005caeafd88a271355a7d3fe171da1e4cc438321",
+        "result": {
+          "passed": true,
+          "profile": "replace",
+          "binary_sha256": "91aed2cb41a45b8c7e5c280c3dc9978b6192fbbde4b240980ed973fce59600f0",
+          "actual_writer_sigkill": true,
+          "legacy_execution_schema": 4,
+          "later_user_bytes_preserved": true,
+          "fresh_recovery_approval_after_restart": true,
+          "actual_native_original_restoration": true,
+          "resumed_actual_commit": true,
+          "product_complete": false,
+          "gui_editor_launched": false,
+          "private_roots_empty": true
+        }
+      },
+      {
+        "profile": "source-library-authority-and-pinful-regression",
+        "receipt": "m5-empty-pinful-continuation-1793848612852687000/result.json",
+        "receipt_sha256": "83760dfffc48887e1919864dad75f2a314a10512e0b3ae3fc91dbf0b135b5b8d",
+        "result": {
+          "passed": true,
+          "binary_sha256": "91aed2cb41a45b8c7e5c280c3dc9978b6192fbbde4b240980ed973fce59600f0",
+          "actual_pinless_library_assignment": true,
+          "library_and_source_drift_permanently_revoke_approval": true,
+          "ordinary_two_pin_creation_and_assignment": true,
+          "existing_nonempty_assignment_and_restore": true,
+          "exact_two_unconnected_erc_items": true,
+          "prior_embedded_definition_mismatch_preserved_as_refusal": true,
+          "prior_receipts_not_replayed": true,
+          "actual_source_commits": 5,
+          "immutable_artifacts_rehashed": 20,
+          "private_roots_empty": true,
+          "gui_editor_launched": false,
+          "product_complete": false
+        }
+      },
+      {
+        "profile": "existing-relink-and-metadata",
+        "receipt": "m5-empty-lifecycle-old-metadata-control/result.json",
+        "receipt_sha256": "fcb1d1736dd96fd76a01c9b6f5e89123a8f0425134576e49f1294a4b67511d1a",
+        "result": {
+          "passed": true,
+          "server_sha256": "91aed2cb41a45b8c7e5c280c3dc9978b6192fbbde4b240980ed973fce59600f0",
+          "actual_stdio": true,
+          "zero_pin_relink_native_publication": true,
+          "zero_pin_source_value_publication": true,
+          "zero_pin_source_and_board_value_match": true,
+          "duplicate_reference_add_rejected": true,
+          "zero_pin_replace_native_preview": true,
+          "unnumbered_pad_records_unchanged": true,
+          "unrelated_objects_unchanged": true,
+          "native_prepared_synthetic_control": true,
+          "real_project_gate_claimed": false,
+          "gui_launched": false,
+          "product_complete": false
+        }
+      }
+    ],
+    "complete_native_physical_pad_and_graphics_preservation": true,
+    "actual_killed_add_and_replace_native_recovery": true,
+    "no_worker_or_journal_schema_change": true,
+    "complete_m5a": false,
+    "complete_m5b": false,
+    "product_complete": false,
+    "workflow_seal": {
+      "receipt": "empty-lifecycle-workflow-seal-1793849314370605000.json",
+      "sha256": "13bbb3676bc624ffeee91f39886f4c3e907233388de80ad8222d34c9e868844c",
+      "durable_records_rechecked": 57,
+      "artifact_references_rehashed": 283
+    }
+  },
+  "historical_installed_runtime_discovery": {
+    "passed": true,
+    "installed_sha256": "0260964b121d0e7e0195be4f0675906e363b5d0a369b019e42f3bb58d4b45191",
+    "tools": 13,
+    "synchronization_schemas_discovered": true
+  },
+  "final_resource_cleanup": {
+    "build_targets_absent": true,
+    "temporary_runtimes_absent": true,
+    "installed_runtime_retained": true,
+    "previous_install_backup_bytes_removed": 19877888,
+    "allocated_build_bytes_removed": 3665440768,
+    "all_acceptance_handles_terminal": true,
+    "gui_launched": false,
+    "abrupt_server_cleanup_qualified": false
   }
 }

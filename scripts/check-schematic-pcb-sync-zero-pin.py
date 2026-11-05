@@ -90,7 +90,7 @@ def main():
         fp = next(fp for fp in initial['footprints'].values() if fp['reference'] == 'H1')
         assert component['pins'] == {} and component['units'] == [dict(name='A', pins=[])]
         refused = plan(initial, dict(kind='add', component_id=component['id'], fields=[], placement=dict(position_nm=[45000000,30000000], orientation_mdeg=0, side='front')), ok=False)
-        assert 'zero-pin footprint creation/replacement' in refused['reason']
+        assert refused['reason'] == 'same_reference_board_collision: H1'
         assert snapshot(project) == before
         planned = plan(initial, dict(kind='relink', component_id=component['id'], footprint_uuid=fp['uuid'], fields=[], update_nets=False))
         assert planned['has_changes'] and not planned['drc_delta']['introduced']
@@ -108,8 +108,10 @@ def main():
         source.write_bytes(retained_source.replace(b'"MountingHole:MountingHole_4.3mm_M4"', b'"MountingHole:MountingHole_3.2mm_M3"'))
         try:
             changed = observe(); target = next(c for c in changed['components'] if c['reference'] == 'H1')
-            refused = plan(changed, dict(kind='replace', component_id=target['id'], footprint_uuid=fp['uuid'], fields=[]), ok=False)
-            assert 'zero-pin footprint creation/replacement' in refused['reason'] and board.read_bytes() == unchanged_board
+            replacement = plan(changed, dict(kind='replace', component_id=target['id'], footprint_uuid=fp['uuid'], fields=[]))
+            assert replacement['has_changes'] and board.read_bytes() == unchanged_board
+            assert len(replacement['native_preview']['templates']) == 1
+            call('kicad_inspect_project', dict(schematic_pcb_sync=dict(kind='release', observation_ids=[changed['observation_id']], plan_ids=[replacement['plan_id']])))
         finally:
             source.write_bytes(retained_source)
         # Existing source metadata also uses the same verified empty-component model.
@@ -142,7 +144,7 @@ def main():
         (run / 'result.json').write_text(json.dumps(dict(passed=True, server_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
             actual_stdio=True, zero_pin_relink_native_publication=True, zero_pin_source_value_publication=True,
             zero_pin_source_and_board_value_match=True,
-            zero_pin_add_and_replace_rejected=True, unnumbered_pad_records_unchanged=True, unrelated_objects_unchanged=True,
+            duplicate_reference_add_rejected=True, zero_pin_replace_native_preview=True, unnumbered_pad_records_unchanged=True, unrelated_objects_unchanged=True,
             native_prepared_synthetic_control=True, real_project_gate_claimed=False, gui_launched=False, product_complete=False), indent=2) + '\n')
     finally:
         rpc.close()

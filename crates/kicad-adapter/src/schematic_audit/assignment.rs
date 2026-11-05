@@ -1,6 +1,6 @@
 //! Server-derived footprint compatibility from exact native library pad numbers.
 use super::*;
-use kicad_schematic::editing::FootprintCompatibilityEvidence;
+use kicad_schematic::{editing::FootprintCompatibilityEvidence, pins::SourceUnitKey};
 use kiutils_sexpr::{Atom, Node, parse_one};
 
 impl SchematicAudit {
@@ -25,21 +25,35 @@ impl SchematicAudit {
             return Err("footprint source changed while reading compatibility".into());
         }
         let pads = numbered_pads(&bytes)?;
-        let pins = self
-            .pins()
-            .pins()
-            .iter()
-            .filter(|pin| {
-                pin.key
-                    .component_units
-                    .iter()
-                    .any(|unit| unit.file == file && unit.symbol_uuid == uuid)
-            })
-            .map(|pin| pin.key.number.clone())
-            .collect::<BTreeSet<_>>();
-        if pins.is_empty() {
-            return Err("footprint target has no complete observed component pins".into());
+        let mut observed_pins = None;
+        for identity in self.identities().components().iter().filter(|identity| {
+            identity
+                .units
+                .iter()
+                .any(|unit| unit.file == file && unit.source_uuid == uuid)
+        }) {
+            let mut units = identity
+                .units
+                .iter()
+                .map(SourceUnitKey::from)
+                .collect::<Vec<_>>();
+            units.sort();
+            let pins = self
+                .pins()
+                .component_pin_numbers(&units)
+                .ok_or("footprint target lacks complete observed component pin authority")?;
+            if observed_pins
+                .as_ref()
+                .is_some_and(|previous| previous != pins)
+            {
+                return Err(
+                    "footprint target instances have differing complete pin universes".into(),
+                );
+            }
+            observed_pins = Some(pins.clone());
         }
+        let pins =
+            observed_pins.ok_or("footprint target has no complete observed component identity")?;
         if pin_pad_map.is_empty() {
             pin_pad_map = pins
                 .iter()
@@ -120,9 +134,6 @@ fn numbered_pads(bytes: &[u8]) -> Result<BTreeSet<String>, String> {
             pads.insert(number);
         }
     }
-    if pads.is_empty() {
-        return Err("footprint has no numbered pads".into());
-    }
     Ok(pads)
 }
 
@@ -132,9 +143,16 @@ mod tests {
     #[test]
     fn compatibility_uses_actual_distinct_numbered_pads_and_rejects_escape_ambiguity() {
         assert_eq!(numbered_pads(br#"(footprint "x" (pad "1" smd rect) (pad "2" smd rect) (pad "2" smd rect) (pad "" np_thru_hole circle))"#).unwrap(), BTreeSet::from(["1".into(), "2".into()]));
+        assert_eq!(
+            numbered_pads(br#"(footprint "x" (pad "" np_thru_hole circle))"#).unwrap(),
+            BTreeSet::new()
+        );
+        assert_eq!(
+            numbered_pads(br#"(footprint "x" (fp_circle (center 0 0) (end 1 0)))"#).unwrap(),
+            BTreeSet::new()
+        );
         for raw in [
             br#"(footprint "x" (pad "\x31" smd rect))"#.as_slice(),
-            br#"(footprint "x" (pad "" np_thru_hole circle))"#,
             br#"(symbol "x" (pad "1"))"#,
         ] {
             assert!(numbered_pads(raw).is_err());

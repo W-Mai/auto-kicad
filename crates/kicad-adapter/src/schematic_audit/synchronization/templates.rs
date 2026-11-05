@@ -467,11 +467,6 @@ pub(super) fn capture(
     root_id: &str,
 ) -> Result<SavedFootprintTemplate, String> {
     source.verify()?;
-    if component.pins.is_empty() {
-        return Err(
-            "zero-pin footprint creation/replacement requires separate native qualification".into(),
-        );
-    }
     placement.validate()?;
     let assigned = component
         .footprint
