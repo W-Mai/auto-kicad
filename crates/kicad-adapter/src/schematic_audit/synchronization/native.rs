@@ -636,6 +636,33 @@ pub(super) fn verify_replacement_netclasses(
     }
     Ok(())
 }
+/// The complete final native class must contain every non-default source requirement.
+pub(super) fn verify_source_netclasses(
+    source: &SynchronizationSource,
+    project: &[u8],
+    report: &NativeReport,
+) -> Result<BTreeMap<String, BTreeSet<String>>, String> {
+    let requirements = super::source_classes::requirements(source, project)?;
+    for (net, required) in &requirements {
+        let actual = report
+            .netclasses
+            .get(net)
+            .ok_or_else(|| format!("source-class target net is absent from native PCB: {net:?}"))?;
+        for class in required {
+            if !actual
+                .constituents
+                .iter()
+                .any(|member| &member.name == class)
+            {
+                return Err(format!(
+                    "source netclass {class:?} is missing on PCB net {net:?}; select an explicit project netclass change"
+                ));
+            }
+        }
+    }
+    Ok(requirements)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

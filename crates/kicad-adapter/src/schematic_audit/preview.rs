@@ -8,6 +8,7 @@ use kicad_schematic::probes::{ConnectivityPin, PinConnectivity};
 use std::sync::atomic::{AtomicU8, Ordering};
 mod children;
 mod expectations;
+pub(super) use expectations::match_erc;
 mod publication;
 pub use publication::{
     SchematicPublicationCheck, SchematicPublicationWrite, VerifiedSchematicPublication,

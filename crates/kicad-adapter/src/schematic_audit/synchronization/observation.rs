@@ -507,6 +507,18 @@ impl SynchronizationBoardObservation {
             std::str::from_utf8(candidate.bytes()).map_err(|e| e.to_string())?,
         )?;
         raw.verify_native_units(&native.board)?;
+        let source_class_requirements = if project_transition_pending {
+            None
+        } else {
+            Some(native::verify_source_netclasses(
+                &self.source,
+                self.project
+                    .bytes
+                    .as_deref()
+                    .ok_or("missing project settings")?,
+                &native.report,
+            )?)
+        };
         if !project_transition_pending {
             native::verify_retained_netclasses(&self.native.report, &native.report)?;
             native::verify_replacement_netclasses(
@@ -565,7 +577,7 @@ impl SynchronizationBoardObservation {
         self.verify()?;
         let mut evidence = serde_json::json!({"schema_version":1,"observation_digest":self.digest,"source_digest":self.source.digest(),"candidate_digest":candidate.digest(),
             "before_board_sha256":self.board.digest(),"candidate_board_sha256":hash(candidate.bytes()),"project":self.project,"rules":self.rules,
-            "has_changes":candidate.has_changes(),"differences":candidate.differences(),"templates":candidate.template_evidence(),"native_before":self.native.report,"native_after":native.report,
+            "has_changes":candidate.has_changes(),"differences":candidate.differences(),"source_netclass_requirements":source_class_requirements,"templates":candidate.template_evidence(),"native_before":self.native.report,"native_after":native.report,
             "drc_before":self.drc.evidence,"drc_after":drc.evidence,"drc_delta":drc_delta,"connectivity_before":self.connectivity,"connectivity_after":connectivity,"native_after_digest":native.digest,"publication_authorized":false});
         if project_transition_pending {
             evidence["project_class_authority"] =

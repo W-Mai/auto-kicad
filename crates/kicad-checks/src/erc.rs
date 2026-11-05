@@ -52,7 +52,8 @@ pub struct CompleteErcReport {
     raw: Box<RawValue>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct ErcDiagnostic {
     pub sheet_path: String,
     pub sheet_uuid_path: String,

@@ -8,6 +8,7 @@ mod drc;
 mod native;
 mod observation;
 pub mod project;
+mod source_classes;
 mod templates;
 pub use observation::{
     MatchedSynchronizationPreview, MatchedSynchronizationProjectBoardPreview,

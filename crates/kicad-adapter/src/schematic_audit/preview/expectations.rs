@@ -29,7 +29,10 @@ pub struct NoConnectMarker {
 }
 
 /// Exact sheet-aware diagnostics and complete header transitions. Metadata changes reject.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(
+    Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(deny_unknown_fields)]
 pub struct ErcExpectation {
     pub removed_sheet_headers: Vec<String>,
     pub added_sheet_headers: Vec<String>,
@@ -474,7 +477,7 @@ fn diagnostic_keys(diagnostics: &[ErcDiagnostic]) -> Result<Vec<(&str, &str, &st
     keys.sort_unstable();
     Ok(keys)
 }
-fn match_erc(delta: &ErcDelta, expected: &ErcExpectation) -> Result<Value, String> {
+pub(crate) fn match_erc(delta: &ErcDelta, expected: &ErcExpectation) -> Result<Value, String> {
     if delta.metadata_changed {
         return Err("ERC metadata changed".into());
     }

@@ -9,6 +9,8 @@ pub struct SynchronizationProjectExpectation {
         Vec<crate::schematic_audit::synchronization::project::ProjectNetclassDifference>,
     pub netclasses: ProjectNetclassDelta,
     pub drc: kicad_checks::CompleteDrcExpectation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub erc: Option<crate::schematic_audit::preview::ErcExpectation>,
 }
 
 pub struct MatchedSynchronizationProjectPreview {
@@ -45,6 +47,7 @@ impl SynchronizationProjectPreview {
         }
         self.match_netclass_expectation(&expectation.netclasses)?;
         self.match_drc_expectation(&expectation.drc)?;
+        self.match_erc_expectation(expectation.erc.as_ref())?;
         let digest = hash(
             &serde_json::to_vec(&serde_json::json!({
                 "preview": self.digest, "expectation": expectation,

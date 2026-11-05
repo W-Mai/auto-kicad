@@ -929,6 +929,8 @@ fn is_allowed_unparsed_top_level(tag: &str) -> bool {
             | "label"
             | "hierarchical_label"
             | "global_label"
+            | "directive_label"
+            | "netclass_flag"
             | "sheet_instances"
             | "embedded_fonts"
     )

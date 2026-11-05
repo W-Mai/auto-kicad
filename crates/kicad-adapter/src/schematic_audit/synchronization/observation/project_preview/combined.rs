@@ -78,6 +78,11 @@ impl SynchronizationBoardObservation {
         let path = observed.inner.policy.project.join(relative(&self.path)?);
         let observed = source.observe_board(&path)?;
         let classes = observed.observe_project_netclasses()?;
+        let source_class_requirements = native::verify_source_netclasses(
+            &observed.source,
+            project.candidate.bytes(),
+            &observed.native.report,
+        )?;
         if classes.configured() != project.after.configured()
             || board.native.board.text() != observed.native.board.text()
             || board.connectivity.endpoints() != observed.connectivity.endpoints()
@@ -123,7 +128,8 @@ impl SynchronizationBoardObservation {
             "native_candidate_original_project": board.native.report,
             "native_candidate_project": observed.native.report,
             "netclasses_before": project.before, "netclasses_after": classes, "netclass_delta": delta,
-            "selected_assignment_changes": assignments,
+            "selected_assignment_changes": assignments, "source_netclass_requirements": source_class_requirements,
+            "erc_delta": project.erc_delta, "erc_before": audit.erc(), "erc_after": observed.source.audit.erc(),
             "source_netclasses_before": source::source_netclasses(audit.netlist())?,
             "source_netclasses_after": source::source_netclasses(observed.source.audit.netlist())?,
             "drc_before": self.drc.evidence, "drc_after": observed.drc.evidence, "drc_delta": drc_delta,
@@ -156,6 +162,9 @@ impl SynchronizationProjectBoardPreview {
     }
     pub fn netclasses_after(&self) -> &ProjectNetclassSnapshot {
         &self.classes
+    }
+    pub fn erc_delta(&self) -> &kicad_checks::erc::ErcDelta {
+        self.project.erc_delta()
     }
     pub fn netclass_delta(&self) -> &ProjectNetclassDelta {
         &self.delta

@@ -74,7 +74,7 @@ impl Preview {
         match self {
             Self::Board(_) => None,
             Self::Project(p) => Some(json!({
-            "project_differences":p.project_candidate().differences(),"netclass_delta":p.netclass_delta()})),
+            "project_differences":p.project_candidate().differences(),"netclass_delta":p.netclass_delta(),"erc_delta":p.erc_delta()})),
         }
     }
     pub(super) fn match_expectation(&self, expectation: Expectation) -> Result<Matched, String> {

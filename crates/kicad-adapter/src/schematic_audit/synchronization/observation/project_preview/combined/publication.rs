@@ -13,6 +13,8 @@ pub struct SynchronizationProjectBoardExpectation {
     pub project_differences: Vec<ProjectNetclassDifference>,
     pub netclasses: ProjectNetclassDelta,
     pub drc: kicad_checks::CompleteDrcExpectation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub erc: Option<crate::schematic_audit::preview::ErcExpectation>,
 }
 
 pub struct MatchedSynchronizationProjectBoardPreview {
@@ -57,6 +59,7 @@ impl SynchronizationProjectBoardPreview {
             return Err("combined_project_board_difference_expectation_mismatch".into());
         }
         self.delta.match_expectation(&expected.netclasses)?;
+        self.project.match_erc_expectation(expected.erc.as_ref())?;
         self.drc_delta
             .match_expectation(&expected.drc)
             .map_err(|e| e.to_string())?;

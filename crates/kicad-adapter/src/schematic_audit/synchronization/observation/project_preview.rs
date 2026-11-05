@@ -89,6 +89,7 @@ pub struct SynchronizationProjectPreview {
     observed: Arc<SynchronizationBoardObservation>,
     delta: ProjectNetclassDelta,
     drc_delta: kicad_checks::CompleteDrcDelta,
+    erc_delta: kicad_checks::erc::ErcDelta,
     evidence: Value,
     digest: String,
     valid: AtomicBool,
@@ -111,7 +112,13 @@ impl SynchronizationBoardObservation {
             .chain(audit.netlist().nets.iter().map(|net| net.name.clone()))
             .filter(|name| !name.is_empty())
             .collect();
-        let source_classes = source::source_class_references(audit.netlist(), before.configured())?;
+        let source_classes = super::super::source_classes::references(
+            audit,
+            self.project
+                .bytes
+                .as_deref()
+                .ok_or("missing captured project settings")?,
+        )?;
         let candidate = compile_project_netclasses(
             self.project
                 .bytes
@@ -148,7 +155,15 @@ impl SynchronizationBoardObservation {
         ]);
         let observed = audit.observe_candidate_files(&candidates)?;
         let source = observed.synchronization_source()?;
-        let source_delta = source::verify_source_classes(&self.source, &source)?;
+        let (source_delta, erc_delta) = source::verify_defined_source_classes(
+            &self.source,
+            &source,
+            self.project
+                .bytes
+                .as_deref()
+                .ok_or("missing original project settings")?,
+            actions,
+        )?;
         let board_path = observed.inner.policy.project.join(relative(&self.path)?);
         let observed = source.observe_board(&board_path)?;
         let after = observed.observe_project_netclasses()?;
@@ -192,7 +207,8 @@ impl SynchronizationBoardObservation {
             "project_actions": actions,
             "netclasses_before": before,
             "netclasses_after": after,
-            "netclass_delta": delta,
+            "netclass_delta": delta, "erc_delta": erc_delta,
+            "erc_before": audit.erc(), "erc_after": observed.source.audit.erc(),
             "native_before": self.native.report,
             "native_after": observed.native.report,
             "drc_before": self.drc.evidence,
@@ -216,6 +232,7 @@ impl SynchronizationBoardObservation {
             observed,
             delta,
             drc_delta,
+            erc_delta,
             evidence,
             digest,
             valid: AtomicBool::new(true),
@@ -228,6 +245,19 @@ impl SynchronizationBoardObservation {
 impl SynchronizationProjectPreview {
     pub fn candidate(&self) -> &ProjectNetclassCandidate {
         &self.candidate
+    }
+    pub fn erc_delta(&self) -> &kicad_checks::erc::ErcDelta {
+        &self.erc_delta
+    }
+    pub(super) fn match_erc_expectation(
+        &self,
+        expected: Option<&crate::schematic_audit::preview::ErcExpectation>,
+    ) -> Result<(), String> {
+        crate::schematic_audit::preview::match_erc(
+            &self.erc_delta,
+            expected.unwrap_or(&Default::default()),
+        )?;
+        Ok(())
     }
     pub fn netclasses_before(&self) -> &ProjectNetclassSnapshot {
         &self.before

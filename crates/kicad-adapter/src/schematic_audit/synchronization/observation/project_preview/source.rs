@@ -73,7 +73,7 @@ fn verify_netlist_classes(before: &NetlistDocument, after: &NetlistDocument) -> 
     Ok(())
 }
 
-pub(super) fn verify_source_classes(
+fn verify_source_class_records(
     before: &SynchronizationSource,
     after: &SynchronizationSource,
 ) -> Result<BTreeMap<String, NetclassRecordChange<SourceNetclass>>, String> {
@@ -114,10 +114,6 @@ pub(super) fn verify_source_classes(
             != after.connectivity.connectivity().isolated_no_connect()
         || components != after.components()
         || before.ineligible_units() != after.ineligible_units()
-        || !old
-            .erc()
-            .equivalent_to(new.erc())
-            .map_err(|e| e.to_string())?
     {
         return Err(
             "project candidate changes protected schematic hierarchy/pins/connectivity/ERC".into(),
@@ -138,6 +134,44 @@ pub(super) fn verify_source_classes(
         &source_netclasses(old.netlist())?,
         &classes,
     ))
+}
+
+pub(super) fn verify_source_classes(
+    before: &SynchronizationSource,
+    after: &SynchronizationSource,
+) -> Result<BTreeMap<String, NetclassRecordChange<SourceNetclass>>, String> {
+    let records = verify_source_class_records(before, after)?;
+    if !before
+        .audit
+        .erc()
+        .equivalent_to(after.audit.erc())
+        .map_err(|e| e.to_string())?
+    {
+        return Err("project source ERC differs from its matched candidate".into());
+    }
+    Ok(records)
+}
+
+pub(super) fn verify_defined_source_classes(
+    before: &SynchronizationSource,
+    after: &SynchronizationSource,
+    original_project: &[u8],
+    actions: &[ProjectNetclassChange],
+) -> Result<
+    (
+        BTreeMap<String, NetclassRecordChange<SourceNetclass>>,
+        kicad_checks::erc::ErcDelta,
+    ),
+    String,
+> {
+    let records = verify_source_class_records(before, after)?;
+    let erc = crate::schematic_audit::synchronization::source_classes::definition_erc(
+        &before.audit,
+        &after.audit,
+        original_project,
+        actions,
+    )?;
+    Ok((records, erc))
 }
 
 #[cfg(test)]

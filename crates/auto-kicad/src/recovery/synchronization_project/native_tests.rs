@@ -138,6 +138,7 @@ fn native_project_publication_and_restart_recovery() {
             .preview_board_and_project(&intent, &actions)
             .unwrap();
         let expected = SynchronizationProjectBoardExpectation {
+            erc: None,
             differences: preview.board_candidate().differences().to_vec(),
             project_differences: preview.project_candidate().differences().to_vec(),
             netclasses: preview.netclass_delta().clone(),

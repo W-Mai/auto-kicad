@@ -196,8 +196,20 @@ impl SynchronizationRecoveryBaseline {
         let audit = SchematicAudit::prepare(&policy)?;
         let current = dependencies(&audit, &self.footprint_ids)?;
         let path = policy.schematic.with_extension("kicad_pro");
-        if normalize_project_dependency(current, &path, original_project)? != self.dependencies {
-            return Err("project recovery protected dependencies changed".into());
+        let current = normalize_project_dependency(current, &path, original_project)?;
+        if current != self.dependencies {
+            let changed = self
+                .dependencies
+                .as_object()
+                .ok_or("invalid dependency manifest")?
+                .iter()
+                .filter(|(key, value)| current.get(*key) != Some(*value))
+                .map(|(key, _)| key.as_str())
+                .collect::<Vec<_>>();
+            return Err(format!(
+                "project recovery protected dependencies changed: {}",
+                changed.join(", ")
+            ));
         }
         audit.verify()?;
         Ok(audit)

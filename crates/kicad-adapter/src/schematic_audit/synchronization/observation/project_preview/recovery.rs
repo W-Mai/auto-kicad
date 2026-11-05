@@ -34,6 +34,7 @@ pub struct VerifiedSynchronizationProjectRecovery {
 fn scope(
     observation: &SynchronizationBoardObservation,
     classes: &ProjectNetclassSnapshot,
+    declaration_aware: bool,
 ) -> Result<(BTreeSet<String>, BTreeSet<String>), String> {
     let netlist = observation.source.audit.netlist();
     let allowed = classes
@@ -43,7 +44,18 @@ fn scope(
         .chain(netlist.nets.iter().map(|net| net.name.clone()))
         .filter(|name| !name.is_empty())
         .collect();
-    let references = super::source::source_class_references(netlist, classes.configured())?;
+    let references = if declaration_aware {
+        super::super::super::source_classes::references(
+            &observation.source.audit,
+            observation
+                .project
+                .bytes
+                .as_deref()
+                .ok_or("missing original project settings")?,
+        )?
+    } else {
+        super::source::source_class_references(netlist, classes.configured())?
+    };
     Ok((allowed, references))
 }
 
@@ -77,9 +89,9 @@ impl SynchronizationProjectRecoveryBaseline {
     ) -> Result<Self, String> {
         preview.verify()?;
         let observation = &preview.observation;
-        let (allowed_nets, source_classes) = scope(observation, &preview.before)?;
+        let (allowed_nets, source_classes) = scope(observation, &preview.before, true)?;
         let result = Self {
-            schema_version: 1,
+            schema_version: 2,
             original: observation.recovery_baseline()?,
             project: observation.project.requested.clone(),
             before_project_sha256: preview.candidate.before_sha256().into(),
@@ -149,7 +161,7 @@ impl SynchronizationProjectRecoveryBaseline {
         candidate_project: &[u8],
         prefix: usize,
     ) -> Result<(SchematicAudit, Inputs), String> {
-        if self.schema_version != 1
+        if !matches!(self.schema_version, 1 | 2)
             || self.project_worker_sha256 != hash(native::PROJECT_WORKER.as_bytes())
             || self.project != policy.schematic.with_extension("kicad_pro")
             || self.board_path() != policy.schematic.with_extension("kicad_pcb")
@@ -221,7 +233,7 @@ impl SynchronizationProjectRecoveryBaseline {
         {
             return Err("project recovery complete original source/classes mismatch".into());
         }
-        let (allowed, references) = scope(actual, &classes)?;
+        let (allowed, references) = scope(actual, &classes, self.schema_version == 2)?;
         if allowed != self.allowed_nets || references != self.source_classes {
             return Err(
                 "project recovery original native scope differs from recorded scope".into(),

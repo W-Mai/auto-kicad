@@ -254,6 +254,30 @@ fn validate_references(
     Ok(())
 }
 
+/// Exact configured names for resolving native source expressions; no write authority.
+pub(super) fn configured_class_names(bytes: &[u8]) -> Result<BTreeSet<String>, String> {
+    let text = std::str::from_utf8(bytes).map_err(|e| e.to_string())?;
+    let root = Object::new(json::parse(text)?)?;
+    let mut names = BTreeSet::new();
+    if let Some(settings) = root.get("net_settings") {
+        let settings = Object::new(settings)?;
+        if let Some(classes) = settings.get("classes") {
+            let classes = Array::new(classes)?;
+            if classes.len() > 512 {
+                return Err("configured project class inventory exceeds bound".into());
+            }
+            for definition in classes.values() {
+                let class = string(required(&Object::new(definition)?, "name")?)?;
+                if !names.insert(class) {
+                    return Err("duplicate configured project class name".into());
+                }
+            }
+        }
+    }
+    names.insert("Default".into());
+    Ok(names)
+}
+
 /// Compile typed selections against exact captured settings; no IO, approval or native-rule claim.
 pub fn compile_project_netclasses(
     bytes: &[u8],
