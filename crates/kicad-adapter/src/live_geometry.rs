@@ -9,8 +9,7 @@ mod saved_binding;
 mod teardrops;
 pub use filled_copper::FilledCopperEvidence;
 use kicad_ipc::{
-    DocumentQuery, KiCadClient, KiCadTransport, MAX_NATIVE_GEOMETRY_BYTES, NativeBoardGeometry,
-    base_types::LockedState,
+    DocumentQuery, KiCadClient, KiCadTransport, NativeBoardGeometry, base_types::LockedState,
 };
 use kiutils_sexpr::{Atom, CstDocument, Node, Span, parse_one};
 use serde::Serialize;
@@ -70,7 +69,13 @@ fn scalar(node: &Node) -> Result<&str, String> {
 // Bound allocation and recursion before invoking the CST parser. Match its token boundaries,
 // including quotes embedded in unquoted symbols, rather than counting whitespace as nodes.
 fn preflight(text: &str) -> Result<(), String> {
-    if text.is_empty() || text.len() > MAX_NATIVE_GEOMETRY_BYTES || text.contains('\0') {
+    preflight_profile(text, kicad_checks::connectivity::SavedBoardProfile::Live)
+}
+fn preflight_profile(
+    text: &str,
+    profile: kicad_checks::connectivity::SavedBoardProfile,
+) -> Result<(), String> {
+    if text.is_empty() || text.len() as u64 > profile.board_bytes() || text.contains('\0') {
         return Err("native board text is empty, contains NUL or exceeds byte bound".into());
     }
     let bytes = text.as_bytes();
@@ -514,7 +519,19 @@ fn feed_closed_footprint(
 impl LiveBoardText {
     /// Parse KiCad's live 20260206 board serialization, not an arbitrary source-file lock guess.
     pub fn parse(text: &str) -> Result<Self, String> {
-        preflight(text)?;
+        Self::parse_profile(text, kicad_checks::connectivity::SavedBoardProfile::Live)
+    }
+    pub(crate) fn parse_synchronization(text: &str) -> Result<Self, String> {
+        Self::parse_profile(
+            text,
+            kicad_checks::connectivity::SavedBoardProfile::Synchronization,
+        )
+    }
+    fn parse_profile(
+        text: &str,
+        profile: kicad_checks::connectivity::SavedBoardProfile,
+    ) -> Result<Self, String> {
+        preflight_profile(text, profile)?;
         let cst = parse_one(text).map_err(|e| format!("invalid live board syntax: {e}"))?;
         let root = cst.nodes.first().ok_or("missing native board root")?;
         if tag(root)? != "kicad_pcb" {
@@ -1266,3 +1283,22 @@ fn validate_zone_lock(locked: bool, zone: &kicad_ipc::board_types::Zone) -> Resu
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod saved_board_profile_tests {
+    use super::*;
+    #[test]
+    fn closed_parser_widens_only_byte_bound_and_keeps_live_depth_and_nul_guards() {
+        use kicad_checks::connectivity::SavedBoardProfile;
+        let source = "(kicad_pcb (version 20260206) (future exact))";
+        let live = LiveBoardText::parse(source).unwrap();
+        let closed = LiveBoardText::parse_synchronization(source).unwrap();
+        assert_eq!(live.structure_digest(), closed.structure_digest());
+        for profile in [SavedBoardProfile::Live, SavedBoardProfile::Synchronization] {
+            assert!(preflight_profile("(board)\0", profile).is_err());
+            assert!(preflight_profile(&"(".repeat(MAX_DEPTH + 1), profile).is_err());
+        }
+    }
+}
+
+pub(crate) use refill_candidate::canonical_direct_routes;

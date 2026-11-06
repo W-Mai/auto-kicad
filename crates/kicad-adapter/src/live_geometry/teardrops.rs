@@ -58,6 +58,7 @@ pub struct TeardropTextPartition {
     authored: LiveBoardText,
     generated: BTreeMap<Signature, GeneratedText>,
     full_text_digest: String,
+    profile: kicad_checks::connectivity::SavedBoardProfile,
 }
 
 fn hash_bytes(bytes: &[u8]) -> String {
@@ -188,7 +189,19 @@ fn native_signature(zone: &board_types::Zone) -> Result<Signature, String> {
 
 impl TeardropTextPartition {
     pub fn parse(text: &str) -> Result<Self, String> {
-        preflight(text)?;
+        Self::parse_profile(text, kicad_checks::connectivity::SavedBoardProfile::Live)
+    }
+    pub(crate) fn parse_synchronization(text: &str) -> Result<Self, String> {
+        Self::parse_profile(
+            text,
+            kicad_checks::connectivity::SavedBoardProfile::Synchronization,
+        )
+    }
+    fn parse_profile(
+        text: &str,
+        profile: kicad_checks::connectivity::SavedBoardProfile,
+    ) -> Result<Self, String> {
+        preflight_profile(text, profile)?;
         let cst = parse_one(text).map_err(|e| e.to_string())?;
         let root = cst.nodes.first().ok_or("missing board root")?;
         if tag(root)? != "kicad_pcb" {
@@ -272,7 +285,8 @@ impl TeardropTextPartition {
                 authored.push(&text[span.start..span.end]);
             }
         }
-        let authored = LiveBoardText::parse(&format!("(kicad_pcb {})", authored.join(" ")))?;
+        let authored =
+            LiveBoardText::parse_profile(&format!("(kicad_pcb {})", authored.join(" ")), profile)?;
         if authored.zones().len() + generated.len() > MAX_ZONES {
             return Err("combined zone count exceeds bound".into());
         }
@@ -281,6 +295,7 @@ impl TeardropTextPartition {
             generated,
             full_text_digest: structural_digest(text, root),
             source: cst,
+            profile,
         })
     }
     /// All non-generated native text, including complete pad/via/track settings and ordinary zones.

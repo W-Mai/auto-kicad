@@ -3,7 +3,7 @@ use super::*;
 use board::{SavedSynchronizationBoard, SynchronizationCandidate, SynchronizationIntent};
 use kicad_checks::{
     DrcPolicy,
-    connectivity::{ClosedConnectivityEvidence, check_saved_connectivity},
+    connectivity::{ClosedConnectivityEvidence, check_saved_synchronization_connectivity},
 };
 use std::time::Duration;
 mod project_preview;
@@ -179,8 +179,8 @@ impl SynchronizationSource {
             allowed_root: root,
             timeout: Duration::from_secs(60),
         };
-        let connectivity =
-            check_saved_connectivity(&saved, &policy).map_err(|e| format!("{e:?}"))?;
+        let connectivity = check_saved_synchronization_connectivity(&saved, &policy)
+            .map_err(|e| format!("{e:?}"))?;
         let native = native::capture(
             &self.audit,
             filename,
@@ -586,7 +586,7 @@ impl SynchronizationBoardObservation {
                 &self.project,
                 &self.rules,
             )?;
-            let connectivity = check_saved_connectivity(
+            let connectivity = check_saved_synchronization_connectivity(
                 &saved,
                 &DrcPolicy {
                     allowed_root: temporary_root,
@@ -694,8 +694,8 @@ impl SynchronizationBoardObservation {
             allowed_root: root,
             timeout: Duration::from_secs(60),
         };
-        let connectivity =
-            check_saved_connectivity(&path, &policy).map_err(|e| format!("{e:?}"))?;
+        let connectivity = check_saved_synchronization_connectivity(&path, &policy)
+            .map_err(|e| format!("{e:?}"))?;
         let native = native::capture(
             &self.source.audit,
             filename,
@@ -743,7 +743,16 @@ impl SynchronizationBoardObservation {
             }
             None => board.protected_native_digest(candidate.differences()),
         };
-        if protected(&self.native.board)? != protected(&native.board)? {
+        if protected(&self.native.board)? != protected(&native.board)?
+            && (region_refill.is_some()
+                || self
+                    .native
+                    .board
+                    .protected_routing_native_digest(candidate.differences())?
+                    != native
+                        .board
+                        .protected_routing_native_digest(candidate.differences())?)
+        {
             return Err("native synchronization changed unapproved board data".into());
         }
         if connectivity.endpoints().iter().any(|endpoint| {

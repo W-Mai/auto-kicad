@@ -351,8 +351,12 @@ impl NetlistRunner {
                 unsafe {
                     command.pre_exec(|| {
                         let limit = libc::rlimit {
-                            rlim_cur: 32 * 1024 * 1024,
-                            rlim_max: 32 * 1024 * 1024,
+                            rlim_cur:
+                                kicad_checks::connectivity::SavedBoardProfile::Synchronization
+                                    .board_bytes(),
+                            rlim_max:
+                                kicad_checks::connectivity::SavedBoardProfile::Synchronization
+                                    .board_bytes(),
                         };
                         if libc::setrlimit(libc::RLIMIT_FSIZE, &limit) != 0 {
                             return Err(io::Error::last_os_error());

@@ -37,9 +37,14 @@ impl NetlistRunner {
         }
         self.verify_context()?;
         let read = |path: &Path| -> Result<Vec<u8>, NetlistRunnerError> {
+            let limit = if path.extension().and_then(|value| value.to_str()) == Some("kicad_pcb") {
+                kicad_checks::connectivity::SavedBoardProfile::Synchronization.board_bytes()
+            } else {
+                32 * 1024 * 1024
+            };
             let metadata = fs::symlink_metadata(path)
                 .map_err(|e| NetlistRunnerError::OutputRead(e.to_string()))?;
-            if !metadata.is_file() || metadata.len() == 0 || metadata.len() > 32 * 1024 * 1024 {
+            if !metadata.is_file() || metadata.len() == 0 || metadata.len() > limit {
                 return Err(NetlistRunnerError::OutputRead(
                     "refill input exceeds regular-file bound".into(),
                 ));
@@ -47,7 +52,7 @@ impl NetlistRunner {
             let mut bytes = Vec::new();
             File::open(path)
                 .map_err(|e| NetlistRunnerError::OutputRead(e.to_string()))?
-                .take(32 * 1024 * 1024 + 1)
+                .take(limit + 1)
                 .read_to_end(&mut bytes)
                 .map_err(|e| NetlistRunnerError::OutputRead(e.to_string()))?;
             if bytes.len() as u64 != metadata.len() {

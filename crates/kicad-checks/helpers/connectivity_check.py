@@ -8,6 +8,7 @@ import pcbnew
 
 MAX_BYTES = 32 * 1024 * 1024
 MAX_ITEMS = 4096
+MAX_REPORT = 2 * 1024 * 1024
 
 
 def require(condition, message):
@@ -15,12 +16,13 @@ def require(condition, message):
         raise ValueError(message)
 
 
-def read(path):
+def read(path, limit=None):
+    limit = MAX_BYTES if limit is None else limit
     require(path.is_file() and not path.is_symlink(), "snapshot must be a regular file")
     size = path.stat().st_size
-    require(0 < size <= MAX_BYTES, "snapshot exceeds byte bound")
+    require(0 < size <= limit, "snapshot exceeds byte bound")
     with path.open('rb') as file:
-        data = file.read(MAX_BYTES + 1)
+        data = file.read(limit + 1)
     require(len(data) == size, "snapshot changed while reading")
     return data
 
@@ -32,10 +34,14 @@ def identifier(item):
 
 
 def main():
-    require(len(sys.argv) == 2, "one snapshot path required")
+    global MAX_BYTES, MAX_ITEMS, MAX_REPORT
+    if len(sys.argv) == 3 and sys.argv[2] == 'synchronization':
+        MAX_BYTES, MAX_ITEMS, MAX_REPORT = 128 * 1024 * 1024, 100_000, 64 * 1024 * 1024
+    else:
+        require(len(sys.argv) == 2, "one snapshot path required")
     board_path = Path(sys.argv[1])
     project_path = board_path.with_suffix('.kicad_pro')
-    board_bytes, project_bytes = read(board_path), read(project_path)
+    board_bytes, project_bytes = read(board_path), read(project_path, 32 * 1024 * 1024)
     require(pcbnew.GetBuildVersion() == '10.0.7', "unverified native version")
     board = pcbnew.LoadBoard(str(board_path))
     require(board is not None, "native board load failed")
@@ -73,6 +79,7 @@ def main():
             if drawing.GetClass() == 'PCB_SHAPE' and drawing.IsOnCopperLayer():
                 add(drawing)
     membership = {}
+    partitions = {}
     for uuid, item in native.items():
         members = {uuid}
         # Native traversal respects individual filled islands. A returned zone UUID is never a graph node.
@@ -85,21 +92,22 @@ def main():
             require(member_id in native, "native component has an unobserved endpoint: " + member.GetClass() + ":" + member_id)
             require(records[member_id]['net'] == records[uuid]['net'], "native component crosses nets")
             members.add(member_id)
-        membership[uuid] = tuple(sorted(members))
+        ordered = tuple(sorted(members))
+        membership[uuid] = partitions.setdefault(ordered, ordered)
     # Query every supported endpoint; overlap alone must never manufacture a component union.
     for uuid, members in membership.items():
-        require(all(membership[member] == members for member in members), "asymmetric or inconsistent native component")
+        require(all(membership[member] is members for member in members), "asymmetric or inconsistent native component")
         require(records[uuid]['net'] or members == (uuid,), "connected netless endpoints unsupported")
-    components = sorted(set(membership.values()))
-    indices = {members: index for index, members in enumerate(components)}
-    for uuid, record in records.items():
-        record['component'] = indices[membership[uuid]]
-    require(read(board_path) == board_bytes and read(project_path) == project_bytes, "saved inputs changed")
+    components = sorted(partitions)
+    for index, members in enumerate(components):
+        for uuid in members:
+            records[uuid]['component'] = index
+    require(read(board_path) == board_bytes and read(project_path, 32 * 1024 * 1024) == project_bytes, "saved inputs changed")
     result = dict(kicad_version='10.0.7', board_sha256=hashlib.sha256(board_bytes).hexdigest(),
                   project_sha256=hashlib.sha256(project_bytes).hexdigest(),
                   endpoints=[records[key] for key in sorted(records)], components=components)
     output = json.dumps(result, ensure_ascii=False, separators=(',', ':'))
-    require(len(output.encode('utf-8')) <= 2 * 1024 * 1024, "connectivity output exceeds bound")
+    require(len(output.encode('utf-8')) <= MAX_REPORT, "connectivity output exceeds bound")
     print(output)
 
 

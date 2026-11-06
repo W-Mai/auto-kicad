@@ -13,7 +13,7 @@ pub(in crate::recovery) fn region_payload_bytes(payloads: &[(&str, &[u8])]) -> i
     }
     if payloads.len() != 3
         || payloads.iter().zip(NAMES).any(|((name, bytes), expected)| {
-            *name != expected || bytes.is_empty() || bytes.len() > 32 * 1024 * 1024
+            *name != expected || bytes.is_empty() || bytes.len() > 128 * 1024 * 1024
         })
     {
         return Err(invalid(
@@ -133,7 +133,7 @@ pub(in crate::recovery) fn validate_region_preview(
     }
     let expected = hashes(preview, candidate)?;
     for ((artifact, name), expected) in artifacts.iter().zip(NAMES).zip(expected) {
-        if artifact.bytes > 32 * 1024 * 1024 || artifact.sha256.as_str() != expected {
+        if artifact.bytes > 128 * 1024 * 1024 || artifact.sha256.as_str() != expected {
             return Err(invalid(
                 "native region artifact disagrees with matched evidence",
             ));

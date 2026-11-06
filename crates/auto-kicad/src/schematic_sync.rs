@@ -22,8 +22,10 @@ use std::{
 };
 
 mod preview;
+mod response;
 pub use preview::Expectation;
 use preview::{Matched, Preview};
+use response::{ResponseEvidence, compact_native_evidence};
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -80,6 +82,7 @@ enum Phase {
     Terminal(Value),
 }
 struct Plan {
+    response_evidence: Mutex<Option<ResponseEvidence>>,
     source_run: String,
     project: PathBuf,
     hash: String,
@@ -370,6 +373,8 @@ impl Registry {
                     data["publication_kind"] = json!("board_only");
                 }
             }
+            let response_evidence =
+                compact_native_evidence(&mut data, preview.evidence(), preview.digest())?;
             bounded(&data)?;
             let phase = if has_changes {
                 Phase::Planned(preview)
@@ -379,6 +384,7 @@ impl Registry {
             Ok((
                 id,
                 Arc::new(Plan {
+                    response_evidence: Mutex::new(response_evidence),
                     source_run: source_run.into(),
                     project: observation.project.clone(),
                     hash,
@@ -406,6 +412,22 @@ impl Registry {
         if plan.hash != hash {
             return Err("synchronization plan hash mismatch".into());
         }
+        let proof_check = plan
+            .response_evidence
+            .lock()
+            .expect("response evidence")
+            .as_ref()
+            .map(ResponseEvidence::verify)
+            .transpose();
+        if let Err(reason) = proof_check {
+            *plan.phase.lock().expect("sync phase") =
+                Phase::Terminal(json!({"state":"rejected","reason":reason}));
+            plan.response_evidence
+                .lock()
+                .expect("response evidence")
+                .take();
+            return Err(reason);
+        }
         Ok(plan)
     }
     pub fn preview(&self, id: &str, hash: &str, expectation: Expectation) -> Result<Value, String> {
@@ -425,6 +447,10 @@ impl Registry {
         if let Err(reason) = preview.verify() {
             *plan.phase.lock().expect("sync phase") =
                 Phase::Terminal(json!({"state":"rejected","reason":reason}));
+            plan.response_evidence
+                .lock()
+                .expect("response evidence")
+                .take();
             return Err(reason);
         }
         let matched = match preview.match_expectation(expectation) {
@@ -506,6 +532,10 @@ impl Registry {
             }
         };
         *plan.phase.lock().expect("sync phase") = Phase::Terminal(data.clone());
+        plan.response_evidence
+            .lock()
+            .expect("response evidence")
+            .take();
         let mut state = self.state.lock().expect("sync registry");
         state.observations.retain(|_, o| o.project != plan.project);
         state.prune();
@@ -549,6 +579,7 @@ mod tests {
                 state.plans.insert(
                     format!("terminal-{index:03}"),
                     Arc::new(Plan {
+                        response_evidence: Mutex::new(None),
                         source_run: "run".into(),
                         project: "/unused".into(),
                         hash: "hash".into(),
@@ -560,6 +591,7 @@ mod tests {
             state.plans.insert(
                 "busy".into(),
                 Arc::new(Plan {
+                    response_evidence: Mutex::new(None),
                     source_run: "run".into(),
                     project: "/unused".into(),
                     hash: "hash".into(),

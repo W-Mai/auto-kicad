@@ -97,14 +97,27 @@ struct InputFile {
     size: u64,
     #[serde(skip)]
     bytes: Option<Vec<u8>>,
+    #[serde(skip)]
+    limit: u64,
 }
 #[derive(Clone, Default, Serialize)]
 struct Inputs {
     files: BTreeMap<PathBuf, InputFile>,
     total: u64,
+    #[serde(skip)]
+    synchronization: bool,
 }
 impl Inputs {
+    fn synchronization() -> Self {
+        Self {
+            synchronization: true,
+            ..Self::default()
+        }
+    }
     fn read(path: &Path) -> Result<InputFile, String> {
+        Self::read_bounded(path, MAX_FILE)
+    }
+    fn read_bounded(path: &Path, limit: u64) -> Result<InputFile, String> {
         if !path.is_absolute() {
             return Err("audit input path must be absolute".into());
         }
@@ -120,6 +133,7 @@ impl Inputs {
                     digest: None,
                     size: 0,
                     bytes: None,
+                    limit,
                 });
             }
             Err(e) => return Err(e.to_string()),
@@ -133,15 +147,15 @@ impl Inputs {
         }
         let file = options.open(&canonical).map_err(|e| e.to_string())?;
         let metadata = file.metadata().map_err(|e| e.to_string())?;
-        if !metadata.is_file() || metadata.len() > MAX_FILE {
+        if !metadata.is_file() || metadata.len() > limit {
             return Err("audit input exceeds regular-file bounds".into());
         }
         let mut bytes = Vec::new();
-        file.take(MAX_FILE + 1)
+        file.take(limit + 1)
             .read_to_end(&mut bytes)
             .map_err(|e| e.to_string())?;
         if bytes.len() as u64 != metadata.len()
-            || bytes.len() as u64 > MAX_FILE
+            || bytes.len() as u64 > limit
             || fs::canonicalize(path).map_err(|e| e.to_string())? != canonical
         {
             return Err("audit input changed while reading".into());
@@ -152,6 +166,7 @@ impl Inputs {
             digest: Some(hash(&bytes)),
             size: bytes.len() as u64,
             bytes: Some(bytes),
+            limit,
         })
     }
     fn track(&mut self, path: &Path) -> Result<&InputFile, String> {
@@ -159,11 +174,32 @@ impl Inputs {
             if self.files.len() >= 8192 {
                 return Err("audit input count exceeds bound".into());
             }
-            let file = Self::read(path)?;
-            self.total += file.size;
-            if self.total > MAX_TOTAL {
+            let limit = if self.synchronization {
+                match path.extension().and_then(|value| value.to_str()) {
+                    Some("kicad_pcb") => {
+                        kicad_checks::connectivity::SavedBoardProfile::Synchronization.board_bytes()
+                    }
+                    Some("json") => kicad_checks::connectivity::SavedBoardProfile::Synchronization
+                        .report_bytes(),
+                    _ => MAX_FILE,
+                }
+            } else {
+                MAX_FILE
+            };
+            let file = Self::read_bounded(path, limit)?;
+            let total = self
+                .total
+                .checked_add(file.size)
+                .ok_or("audit byte count overflow")?;
+            let max_total = if self.synchronization {
+                1024 * 1024 * 1024
+            } else {
+                MAX_TOTAL
+            };
+            if total > max_total {
                 return Err("audit input bytes exceed bound".into());
             }
+            self.total = total;
             self.files.insert(path.into(), file);
         }
         Ok(&self.files[path])
@@ -189,7 +225,7 @@ impl Inputs {
     }
     fn verify(&self) -> Result<(), String> {
         for (path, expected) in &self.files {
-            let actual = Self::read(path)?;
+            let actual = Self::read_bounded(path, expected.limit)?;
             if actual.canonical != expected.canonical
                 || actual.digest != expected.digest
                 || actual.size != expected.size
@@ -1163,5 +1199,38 @@ mod tests {
             assert!(english_config(raw).is_err());
             assert!(parse_json(Some(&raw.to_vec())).is_err());
         }
+    }
+}
+
+#[cfg(test)]
+mod saved_board_capture_tests {
+    use super::*;
+    #[test]
+    fn capture_profiles_keep_small_evidence_bytes_and_revalidation_authority() {
+        let owned = tempfile::tempdir().unwrap();
+        let path = fs::canonicalize(owned.path())
+            .unwrap()
+            .join("board.kicad_pcb");
+        fs::write(&path, b"captured").unwrap();
+        let mut legacy = Inputs::default();
+        let mut closed = Inputs::synchronization();
+        legacy.track(&path).unwrap();
+        closed.track(&path).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&legacy).unwrap(),
+            serde_json::to_vec(&closed).unwrap()
+        );
+        assert_eq!(legacy.files[&path].limit, MAX_FILE);
+        assert_eq!(closed.files[&path].limit, 128 * 1024 * 1024);
+        closed.verify().unwrap();
+        fs::write(&path, b"changed").unwrap();
+        assert!(closed.verify().is_err());
+        let mut bounded = Inputs {
+            total: 128 * 1024 * 1024,
+            ..Inputs::default()
+        };
+        assert!(bounded.track(&path).is_err());
+        assert!(bounded.files.is_empty());
+        assert_eq!(bounded.total, 128 * 1024 * 1024);
     }
 }

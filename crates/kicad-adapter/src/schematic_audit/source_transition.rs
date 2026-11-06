@@ -56,7 +56,7 @@ pub(super) fn verify_candidate_inputs_at_prefix(
         }
     }
     for (path, input) in inputs {
-        let actual = Inputs::read(path)?;
+        let actual = Inputs::read_bounded(path, input.limit)?;
         let relative = path.strip_prefix(project).ok().and_then(Path::to_str);
         let candidate = relative
             .filter(|relative| {

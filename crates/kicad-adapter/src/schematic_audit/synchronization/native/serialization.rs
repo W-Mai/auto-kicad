@@ -2,7 +2,7 @@
 use super::*;
 
 pub(super) fn generated_saved_signature(text: &str) -> Result<Option<String>, String> {
-    let partition = crate::live_geometry::TeardropTextPartition::parse(text)?;
+    let partition = crate::live_geometry::TeardropTextPartition::parse_synchronization(text)?;
     if partition.generated_count() == 0 {
         return Ok(None);
     }

@@ -82,6 +82,43 @@ fn raw<'a>(text: &'a str, node: &Node) -> &'a str {
     &text[value.start..value.end]
 }
 
+/// Comparison-only ordering for complete independent direct routing records.
+/// Every nested token/order and every non-route source span remains significant.
+pub(crate) fn canonical_direct_routes(text: &str) -> Result<String, String> {
+    preflight_profile(
+        text,
+        kicad_checks::connectivity::SavedBoardProfile::Synchronization,
+    )?;
+    let document = parse_one(text).map_err(|e| e.to_string())?;
+    let root = document
+        .nodes
+        .first()
+        .ok_or("missing routing comparison root")?;
+    if tag(root)? != "kicad_pcb" {
+        return Err("routing comparison requires a board".into());
+    }
+    let mut slots = Vec::new();
+    let mut routes = BTreeMap::new();
+    for node in &items(root)?[1..] {
+        if !matches!(tag(node)?, "segment" | "arc" | "via") {
+            continue;
+        }
+        let id = one(node, "uuid")?
+            .map(scalar)
+            .transpose()?
+            .ok_or("route lacks an exact UUID")?;
+        if routes.insert(id, raw(text, node)).is_some() {
+            return Err("duplicate direct route identity".into());
+        }
+        slots.push(span(node));
+    }
+    let mut projected = text.to_owned();
+    for (span, value) in slots.into_iter().zip(routes.into_values()).rev() {
+        projected.replace_range(span.start..span.end, value);
+    }
+    Ok(projected)
+}
+
 // KiCad serializes project text variables as direct board properties. Only the exact
 // synthetic variable established by the private project may be restored to source text.
 fn restore_project_root_property(
@@ -123,7 +160,7 @@ fn restore_project_root_property(
 }
 
 fn region_copper(text: &str, node: &Node) -> Result<ClosedRegionCopper, String> {
-    let wrapped = LiveBoardText::parse(&format!(
+    let wrapped = LiveBoardText::parse_synchronization(&format!(
         "(kicad_pcb (version 20260206) {})",
         raw(text, node)
     ))?;
@@ -241,7 +278,8 @@ pub(crate) fn synchronization_definitions(
     for (span, value) in patches.into_iter().rev() {
         projected.replace_range(span.start..span.end, &value);
     }
-    LiveBoardText::parse(&projected)?.closed_refill_definitions()
+    LiveBoardText::parse_synchronization(&canonical_direct_routes(&projected)?)?
+        .closed_refill_definitions()
 }
 
 impl ClosedRefillCandidate {
@@ -277,9 +315,9 @@ impl ClosedRefillCandidate {
         } else {
             (raw_native, raw_independent)
         };
-        let before = TeardropTextPartition::parse(original)?;
-        let first = TeardropTextPartition::parse(native)?;
-        let second = TeardropTextPartition::parse(independent)?;
+        let before = TeardropTextPartition::parse_synchronization(original)?;
+        let first = TeardropTextPartition::parse_synchronization(native)?;
+        let second = TeardropTextPartition::parse_synchronization(independent)?;
         let definitions = before.authored().closed_refill_definitions()?;
         let native_definitions = synchronization_definitions(before.authored())?;
         if native_definitions != synchronization_definitions(first.authored())?
@@ -408,7 +446,7 @@ impl ClosedRefillCandidate {
         for (span, value) in patches.into_iter().rev() {
             text.replace_range(span.start..span.end, &value);
         }
-        let candidate = TeardropTextPartition::parse(&text)?;
+        let candidate = TeardropTextPartition::parse_synchronization(&text)?;
         if candidate.authored().closed_refill_definitions()? != definitions
             || candidate.authored().filled_copper()? != copper
             || candidate.generated_content()? != generated_content
@@ -563,7 +601,7 @@ mod tests {
             r#"(net "GND") (uuid "aaaaaaaa-0000-4000-8000-000000000002")"#,
         );
         let board = |p: &str| {
-            LiveBoardText::parse(&format!(r#"(kicad_pcb (version 20260206) (footprint "Part:Exact" (uuid "aaaaaaaa-0000-4000-8000-000000000001") {p}))"#)).unwrap()
+            LiveBoardText::parse_synchronization(&format!(r#"(kicad_pcb (version 20260206) (footprint "Part:Exact" (uuid "aaaaaaaa-0000-4000-8000-000000000001") {p}))"#)).unwrap()
         };
         let expected = synchronization_definitions(&board(pad)).unwrap();
         assert_eq!(
@@ -590,8 +628,10 @@ mod tests {
         let b = format!(
             r#"(footprint "Part:Exact" (uuid "aaaaaaaa-0000-4000-8000-000000000001") (future_geometry (xy 1 2)) {property})"#
         );
-        let board =
-            |p: &str| LiveBoardText::parse(&format!("(kicad_pcb (version 20260206) {p})")).unwrap();
+        let board = |p: &str| {
+            LiveBoardText::parse_synchronization(&format!("(kicad_pcb (version 20260206) {p})"))
+                .unwrap()
+        };
         let expected = synchronization_definitions(&board(&a)).unwrap();
         assert_eq!(expected, synchronization_definitions(&board(&b)).unwrap());
         for changed in [
@@ -604,5 +644,34 @@ mod tests {
                 synchronization_definitions(&board(&changed)).unwrap()
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod routing_comparison_tests {
+    use super::*;
+    #[test]
+    fn routing_permutations_keep_complete_tokens_and_nonroute_order() {
+        let a = r#"(segment (start 0 0) (end 1 0) (width 0.2) (layer F.Cu) (net OLD) (uuid a) (future (ordered 1 2)))"#;
+        let b =
+            r#"(arc (start 1 0) (mid 2 1) (end 3 0) (width 0.3) (layer F.Cu) (net OLD) (uuid b))"#;
+        let wrap = |left: &str, right: &str| {
+            format!("(kicad_pcb (version 20260206) {left} (future_root 7) {right})")
+        };
+        let source = canonical_direct_routes(&wrap(a, b)).unwrap();
+        assert_eq!(source, canonical_direct_routes(&wrap(b, a)).unwrap());
+        for changed in [
+            a.replace("width 0.2", "width 0.3"),
+            a.replace("end 1 0", "end 2 0"),
+            a.replace("net OLD", "net NEW"),
+            a.replace("ordered 1 2", "ordered 2 1"),
+        ] {
+            assert_ne!(source, canonical_direct_routes(&wrap(&changed, b)).unwrap());
+        }
+        assert_ne!(
+            source,
+            canonical_direct_routes(&wrap(a, b).replace("future_root 7", "future_root 8")).unwrap()
+        );
+        assert!(canonical_direct_routes(&wrap(a, a)).is_err());
     }
 }

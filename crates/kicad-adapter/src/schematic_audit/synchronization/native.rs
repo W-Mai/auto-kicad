@@ -225,7 +225,7 @@ pub(super) fn run_fixed_worker(
     audit: &SchematicAudit,
     context: &NativeExecutionContext,
     root: &Path,
-    worker: &'static str,
+    worker: &str,
     args: &[&Path],
 ) -> Result<(Vec<u8>, NativeWorkerReceipt), String> {
     audit.verify()?;

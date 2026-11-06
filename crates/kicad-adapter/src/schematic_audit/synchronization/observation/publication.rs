@@ -188,13 +188,7 @@ impl PreparedSynchronizationPublication {
         {
             return Err("actual synchronization native board/serialization/connectivity differs from the matched preview".into());
         }
-        actual
-            .drc
-            .report
-            .compare_complete(&preview.drc.report)
-            .map_err(|e| e.to_string())?
-            .match_expectation(&kicad_checks::CompleteDrcExpectation::default())
-            .map_err(|e| e.to_string())?;
+        actual.drc.require_capture(&preview.drc)?;
         preview.verify_private()?;
         actual.verify()?;
         let candidate_sha256 = hash(self.candidate_bytes());

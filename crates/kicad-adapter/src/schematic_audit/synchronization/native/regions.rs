@@ -4,6 +4,14 @@ use kicad_checks::connectivity::ClosedConnectivityEvidence;
 
 const REGION_WORKER: &str = include_str!("../../../../helpers/synchronization_regions.py");
 
+// Preserve the exact legacy worker identity and validation body for existing baselines.
+fn large_region_worker() -> String {
+    format!(
+        "namespace = {{'__name__': 'auto_kicad_region_reader'}}\nexec({}, namespace)\nnamespace['MAX_INPUT'] = 128 * 1024 * 1024\nnamespace['MAX_ENDPOINTS'] = 100_000\nnamespace['main']()\n",
+        serde_json::to_string(REGION_WORKER).expect("embedded region reader is a string")
+    )
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct NativeZone {
@@ -38,10 +46,13 @@ pub(in crate::schematic_audit::synchronization) struct RegionRecoveryEvidence {
 }
 impl RegionRecoveryEvidence {
     pub(in crate::schematic_audit::synchronization) fn validate(&self) -> Result<(), String> {
-        if self.worker_sha256 != hash(REGION_WORKER.as_bytes())
+        let legacy = self.worker_sha256 == hash(REGION_WORKER.as_bytes());
+        let large = self.worker_sha256 == hash(large_region_worker().as_bytes());
+        let max_endpoints = if large { 100_000 } else { 4096 };
+        if (!legacy && !large)
             || self.native.schema_version != 1
             || self.native.native_version != "10.0.7"
-            || self.native.endpoints.len() > 4096
+            || self.native.endpoints.len() > max_endpoints
             || self.native.zones.len() + self.native.generated_count > 256
         {
             return Err("unsupported region restoration baseline or worker".into());
@@ -102,7 +113,7 @@ impl NativeRegionOwnership {
             return Err("region recovery signature belongs to another native input".into());
         }
         Ok(RegionRecoveryEvidence {
-            worker_sha256: hash(REGION_WORKER.as_bytes()),
+            worker_sha256: self.worker.worker_sha256.clone(),
             native: self.report.clone(),
             generated_saved_signature: native.generated_saved_signature()?,
         })
@@ -166,7 +177,7 @@ impl NativeRegionOwnership {
 
     pub(in crate::schematic_audit::synchronization) fn evidence(&self) -> Result<Value, String> {
         Ok(
-            serde_json::json!({"schema_version":1,"worker_sha256":hash(REGION_WORKER.as_bytes()),
+            serde_json::json!({"schema_version":1,"worker_sha256":self.worker.worker_sha256,
             "native":self.report,"execution":self.context.digest(),"source_files_read_only":true}),
         )
     }
@@ -278,7 +289,15 @@ pub(in crate::schematic_audit::synchronization) fn capture_regions(
     if let Some(bytes) = rules.bytes.as_deref() {
         write_new(&path.with_extension("kicad_dru"), bytes)?;
     }
-    let (bytes, worker) = run_fixed_worker(audit, &context, &root, REGION_WORKER, &[&path])?;
+    let large;
+    let selected = if board.text().len() > 32 * 1024 * 1024 || connectivity.endpoints().len() > 4096
+    {
+        large = large_region_worker();
+        large.as_str()
+    } else {
+        REGION_WORKER
+    };
+    let (bytes, worker) = run_fixed_worker(audit, &context, &root, selected, &[&path])?;
     if bytes.len() > 4 * 1024 * 1024 {
         return Err("native region report exceeds bound".into());
     }
@@ -296,7 +315,8 @@ pub(in crate::schematic_audit::synchronization) fn capture_regions(
         || report.zones.len() != board.zones()?.len()
         || report.zones.len() + report.generated_count > 256
         || report.generated_count
-            != crate::live_geometry::TeardropTextPartition::parse(board.text())?.generated_count()
+            != crate::live_geometry::TeardropTextPartition::parse_synchronization(board.text())?
+                .generated_count()
     {
         return Err("native region input or complete endpoint/zone inventory differs".into());
     }
@@ -311,7 +331,7 @@ pub(in crate::schematic_audit::synchronization) fn capture_regions(
             || zone.locked != original.locked
             || zone.rule_area != original.rule_area
             || zone.layers != original.layers
-            || zone.terminals.len() > 4096
+            || zone.terminals.len() > 100_000
             || zone.terminals.windows(2).any(|pair| pair[0] >= pair[1])
             || zone
                 .terminals
@@ -323,7 +343,7 @@ pub(in crate::schematic_audit::synchronization) fn capture_regions(
             );
         }
     }
-    let mut inputs = Inputs::default();
+    let mut inputs = Inputs::synchronization();
     inputs.track(&path)?;
     inputs.track(&path.with_extension("kicad_pro"))?;
     inputs.track(&path.with_extension("kicad_dru"))?;

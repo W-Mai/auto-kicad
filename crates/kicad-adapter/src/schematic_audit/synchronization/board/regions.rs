@@ -47,6 +47,6 @@ impl SavedSynchronizationBoard {
             projected.replace_range(span.start..span.end, &text);
         }
         let projected = SavedSynchronizationBoard::parse(&projected)?;
-        projected.protected_native_digest(changes)
+        projected.protected_routing_native_digest(changes)
     }
 }

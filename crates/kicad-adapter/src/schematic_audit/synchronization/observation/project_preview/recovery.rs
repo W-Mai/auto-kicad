@@ -182,7 +182,7 @@ impl SynchronizationProjectRecoveryBaseline {
             &self.allowed_nets,
             &self.source_classes,
         )?;
-        let mut selected = Inputs::default();
+        let mut selected = Inputs::synchronization();
         for (path, expected) in [
             (
                 self.project.as_path(),

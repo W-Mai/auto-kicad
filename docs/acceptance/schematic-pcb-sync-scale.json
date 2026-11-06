@@ -1,0 +1,193 @@
+{
+  "schema_version": 1,
+  "native_version": "10.0.7",
+  "backend": "closed_saved_documents",
+  "product_complete": false,
+  "m5b_complete": false,
+  "runtime_sha256": "e16f10e6902e50bfe130328fd6ab949d758f09ffb4a7375c3e2c72cb26bab8e8",
+  "quality": {
+    "passed": 633,
+    "failed": 0,
+    "ignored": 18,
+    "strict_all_target_clippy": true,
+    "format": true
+  },
+  "public_limits": {
+    "board_bytes": 134217728,
+    "component_actions": 128,
+    "copper_assignments": 4096,
+    "message_bytes": 4194304
+  },
+  "internal_limits": {
+    "endpoints": 100000,
+    "native_report_bytes": 67108864,
+    "project_bytes": 33554432,
+    "private_capture_bytes": 1073741824,
+    "publication_bytes": 268435456
+  },
+  "profiles": [
+    {
+      "profile": "maximum-codex",
+      "receipt": "m5-sync-scale-live-codex-1793897020878933000",
+      "result": {
+        "passed": true,
+        "cases": [
+          {
+            "name": "maximum-input-observed",
+            "elapsed": 63.37275395804318,
+            "components": 128,
+            "copper": 4097
+          },
+          {
+            "name": "over-action-and-copper-bounds-rejected",
+            "elapsed": 63.542777250055224
+          },
+          {
+            "name": "combined-maximum-plan",
+            "elapsed": 137.83757558302023,
+            "differences": 4602
+          },
+          {
+            "name": "combined-maximum-committed",
+            "elapsed": 210.9792767080362,
+            "candidate_bytes": 134048072
+          },
+          {
+            "name": "over-byte-bound-rejected-without-source-write",
+            "elapsed": 216.89772945805453
+          }
+        ],
+        "binary_sha256": "e16f10e6902e50bfe130328fd6ab949d758f09ffb4a7375c3e2c72cb26bab8e8",
+        "source_sha256": {
+          "sync.kicad_pro": "bf13c4914a75d0900e318d3741410400969bd9843364a83c93d7aa1952a418fb",
+          "sync.kicad_sch": "48d53c6aaf7dc14a5ee6a621001817ef4570b419fef1c34ed67ef52ddaef0c49",
+          "sync.kicad_prl": "5c7c4076686e60b8624492b47cc8208df2628995637fe0235e4231bf888b663d",
+          "sync.kicad_pcb": "653dede9d9933ecedfd508d8e73d2c4ec2e1aad3913b05e5e38ce45afce9169a",
+          ".auto-kicad-audit-owned": "3e4281a77dffbd4ae255eeffb466bdfd319b2faf426bd0abfabe15d743666ddc",
+          ".auto-kicad-sync-copper.json": "06976c3c5173770728910dc31cebcac4e249cfe5fd91bfd0badb5e1b8f200d28",
+          ".auto-kicad-scale-copper.json": "08517614f93b66b0146042d39846013004ff299877156b42b2a33999937c1ec2"
+        },
+        "private_roots_empty": true,
+        "gui_opened": false,
+        "synthetic_fixture": true,
+        "final_real_profile": false,
+        "cold_recovery_qualified": false
+      }
+    },
+    {
+      "profile": "large-region",
+      "receipt": "m5-sync-scale-final-cold-1793928234233604000/large-region",
+      "result": {
+        "passed": true,
+        "cases": [
+          {
+            "name": "region-approved",
+            "elapsed": 62.46523770899512,
+            "input_bytes": 67108864
+          },
+          {
+            "name": "actual-writer-killed-after-publication",
+            "elapsed": 81.54919841699302,
+            "pid": 64595
+          },
+          {
+            "name": "large-native-cold-recovery-and-later-user-protection",
+            "elapsed": 142.5289338750299
+          },
+          {
+            "name": "subsequent-large-region-commit",
+            "elapsed": 245.1239177089883,
+            "candidate_bytes": 67108864
+          }
+        ],
+        "binary_sha256": "e16f10e6902e50bfe130328fd6ab949d758f09ffb4a7375c3e2c72cb26bab8e8",
+        "original_source": {
+          "sync.kicad_pro": "edb608f627a8c63a9a4a952240641fc9729e3716b36559bc5c3ebf9116eed7f7",
+          "sync.kicad_sch": "65464b94b44b4608102d17be93ffa7e83c2cfee64c23a68043e726eac1378e99",
+          "sync.kicad_prl": "5c7c4076686e60b8624492b47cc8208df2628995637fe0235e4231bf888b663d",
+          "sync.kicad_pcb": "e2876f7c2bd1d717bec6a4bdf9b1b11413f80e18a44db2b47606e5868cb2af09",
+          ".auto-kicad-audit-owned": "3e4281a77dffbd4ae255eeffb466bdfd319b2faf426bd0abfabe15d743666ddc",
+          ".auto-kicad-sync-copper.json": "06976c3c5173770728910dc31cebcac4e249cfe5fd91bfd0badb5e1b8f200d28"
+        },
+        "private_roots_empty": true,
+        "controller_private_cleanup": false,
+        "native_cold_recovery": true,
+        "legacy_writer_handoff": false,
+        "gui_opened": false,
+        "final_real_profile": false
+      }
+    },
+    {
+      "profile": "legacy-handoff",
+      "receipt": "m5-sync-scale-final-cold-1793928234233604000/legacy-handoff",
+      "result": {
+        "passed": true,
+        "cases": [
+          {
+            "name": "region-approved",
+            "elapsed": 36.009674125001766,
+            "input_bytes": 16762
+          },
+          {
+            "name": "actual-writer-killed-after-publication",
+            "elapsed": 41.78552304202458,
+            "pid": 65827
+          },
+          {
+            "name": "large-native-cold-recovery-and-later-user-protection",
+            "elapsed": 82.23724591702921
+          },
+          {
+            "name": "subsequent-large-region-commit",
+            "elapsed": 130.0149954999797,
+            "candidate_bytes": 16762
+          }
+        ],
+        "binary_sha256": "e16f10e6902e50bfe130328fd6ab949d758f09ffb4a7375c3e2c72cb26bab8e8",
+        "original_source": {
+          "sync.kicad_pro": "edb608f627a8c63a9a4a952240641fc9729e3716b36559bc5c3ebf9116eed7f7",
+          "sync.kicad_sch": "65464b94b44b4608102d17be93ffa7e83c2cfee64c23a68043e726eac1378e99",
+          "sync.kicad_prl": "5c7c4076686e60b8624492b47cc8208df2628995637fe0235e4231bf888b663d",
+          "sync.kicad_pcb": "0864fb72c7446cf65235c4af477a584406067afd72f1e9d765f7e120d72e262b",
+          ".auto-kicad-audit-owned": "3e4281a77dffbd4ae255eeffb466bdfd319b2faf426bd0abfabe15d743666ddc",
+          ".auto-kicad-sync-copper.json": "06976c3c5173770728910dc31cebcac4e249cfe5fd91bfd0badb5e1b8f200d28"
+        },
+        "private_roots_empty": true,
+        "controller_private_cleanup": false,
+        "native_cold_recovery": true,
+        "legacy_writer_handoff": true,
+        "gui_opened": false,
+        "final_real_profile": false
+      }
+    }
+  ],
+  "independent_source_preservation": {
+    "passed": true,
+    "exact_approved_fields": {
+      "net": 4096,
+      "property:Value": 128,
+      "sheetfile": 126,
+      "sheetname": 126,
+      "units": 126
+    },
+    "differences": 4602,
+    "before_sha256": "653dede9d9933ecedfd508d8e73d2c4ec2e1aad3913b05e5e38ce45afce9169a",
+    "after_sha256": "bd49bb8d00f2f99d658cce60087bd93103d2b098c2879a95ab7363acabbb61f2",
+    "unselected_root_bytes_and_order_preserved": 14,
+    "retained_selected_item_children_checked": 46352,
+    "remaining_children_bytes_and_order_preserved": true,
+    "complete_selected_field_values_verified": true,
+    "trailing_source_bytes_preserved": true,
+    "artifacts_rehashed": 6,
+    "native_reports_rehashed": 11
+  },
+  "unchanged_legacy_workers": true,
+  "live_entry_bounds_unchanged": true,
+  "remaining": [
+    "source-hierarchy and template-bound cross-products",
+    "custom-rule authority",
+    "remaining policy and family gates",
+    "GUI",
+    "three complete distinct real-project profiles"
+  ]
+}

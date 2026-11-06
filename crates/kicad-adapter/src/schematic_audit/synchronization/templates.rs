@@ -532,7 +532,7 @@ pub(super) fn capture(
     fs::remove_file(&before_path).map_err(|e| e.to_string())?;
     fs::remove_file(&after_path).map_err(|e| e.to_string())?;
     let configuration_names = config_names(&configuration)?;
-    let mut settled = Inputs::default();
+    let mut settled = Inputs::synchronization();
     for path in &configuration_names {
         settled.track(path)?;
     }
@@ -611,7 +611,7 @@ pub(super) fn capture(
     }
     let footprint = after.footprint_text(root_id)?.to_owned();
     let tree = tree_names(&owned)?;
-    let mut private = Inputs::default();
+    let mut private = Inputs::synchronization();
     for path in &tree {
         if path.is_file() {
             private.track(path)?;

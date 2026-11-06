@@ -102,8 +102,8 @@ pub(super) fn refill_candidate(
     if Path::new(filename).file_name() != Some(filename) {
         return Err("refill requires one source board basename".into());
     }
-    let _bounded = crate::live_geometry::TeardropTextPartition::parse(candidate)?;
-    let mut inputs = Inputs::default();
+    let _bounded = crate::live_geometry::TeardropTextPartition::parse_synchronization(candidate)?;
+    let mut inputs = Inputs::synchronization();
     let mut owners = Vec::new();
     let mut runners = Vec::new();
     let mut outputs = Vec::new();

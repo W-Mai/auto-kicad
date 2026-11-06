@@ -15,9 +15,34 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 use wait_timeout::ChildExt;
 
-const MAX_INPUT: u64 = 32 * 1024 * 1024;
-const MAX_REPORT: u64 = 2 * 1024 * 1024;
-const MAX_ITEMS: usize = 4096;
+/// Fixed server-side bounds; this is not caller-supplied evidence or a request setting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SavedBoardProfile {
+    #[default]
+    Live,
+    Synchronization,
+}
+impl SavedBoardProfile {
+    pub const fn board_bytes(self) -> u64 {
+        match self {
+            Self::Live => 32 * 1024 * 1024,
+            Self::Synchronization => 128 * 1024 * 1024,
+        }
+    }
+    pub const fn endpoint_count(self) -> usize {
+        match self {
+            Self::Live => 4096,
+            Self::Synchronization => 100_000,
+        }
+    }
+    pub const fn report_bytes(self) -> u64 {
+        match self {
+            Self::Live => 2 * 1024 * 1024,
+            Self::Synchronization => 64 * 1024 * 1024,
+        }
+    }
+}
+const MAX_PROJECT: u64 = 32 * 1024 * 1024;
 const PYTHON: &str =
     "/Applications/KiCad/KiCad.app/Contents/Frameworks/Python.framework/Versions/3.9/bin/python3.9";
 const HELPER: &str = include_str!("../helpers/connectivity_check.py");
@@ -74,6 +99,8 @@ struct NativeConnectivity {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct ClosedConnectivityEvidence {
     native: NativeConnectivity,
+    #[serde(skip)]
+    profile: SavedBoardProfile,
 }
 impl ClosedConnectivityEvidence {
     /// Revalidate the exact saved inputs without launching another worker.
@@ -83,13 +110,13 @@ impl ClosedConnectivityEvidence {
         policy: &DrcPolicy,
     ) -> Result<(), CheckFailure> {
         let canonical = confined_board_path(board, &policy.allowed_root)?;
-        let supplied = bounded_file(board, MAX_INPUT)?;
+        let supplied = bounded_file(board, self.profile.board_bytes())?;
         let board = canonical;
         if digest(&supplied) != self.board_sha256()
-            || digest(&bounded_file(&board, MAX_INPUT)?) != self.board_sha256()
+            || digest(&bounded_file(&board, self.profile.board_bytes())?) != self.board_sha256()
             || digest(&bounded_file(
                 &board.with_extension("kicad_pro"),
-                MAX_INPUT,
+                MAX_PROJECT,
             )?) != self.project_sha256()
         {
             return Err(invalid("saved connectivity inputs changed"));
@@ -151,11 +178,12 @@ fn validate(
     native: NativeConnectivity,
     board: &[u8],
     project: &[u8],
+    profile: SavedBoardProfile,
 ) -> Result<ClosedConnectivityEvidence, CheckFailure> {
     if native.kicad_version != "10.0.7"
         || native.board_sha256 != digest(board)
         || native.project_sha256 != digest(project)
-        || native.endpoints.len() > MAX_ITEMS
+        || native.endpoints.len() > profile.endpoint_count()
         || native.components.len() > native.endpoints.len()
         || native
             .endpoints
@@ -167,7 +195,7 @@ fn validate(
             "connectivity input binding, ordering or bounds mismatch",
         ));
     }
-    let evidence = ClosedConnectivityEvidence { native };
+    let evidence = ClosedConnectivityEvidence { native, profile };
     for endpoint in evidence.endpoints() {
         if !valid_uuid(&endpoint.uuid)
             || endpoint.net.len() > 4096
@@ -184,7 +212,7 @@ fn validate(
     let mut seen = BTreeSet::new();
     for (index, component) in evidence.components().iter().enumerate() {
         if component.is_empty()
-            || component.len() > MAX_ITEMS
+            || component.len() > profile.endpoint_count()
             || component.windows(2).any(|pair| pair[0] >= pair[1])
         {
             return Err(malformed("invalid native connectivity partition"));
@@ -217,22 +245,36 @@ pub fn check_saved_connectivity(
     board: &Path,
     policy: &DrcPolicy,
 ) -> Result<ClosedConnectivityEvidence, CheckFailure> {
-    run(board, policy, Path::new(PYTHON))
+    run(board, policy, Path::new(PYTHON), SavedBoardProfile::Live)
+}
+
+/// Read the complete saved synchronization input with the fixed closed-board bounds.
+pub fn check_saved_synchronization_connectivity(
+    board: &Path,
+    policy: &DrcPolicy,
+) -> Result<ClosedConnectivityEvidence, CheckFailure> {
+    run(
+        board,
+        policy,
+        Path::new(PYTHON),
+        SavedBoardProfile::Synchronization,
+    )
 }
 
 fn run(
     board: &Path,
     policy: &DrcPolicy,
     executable: &Path,
+    profile: SavedBoardProfile,
 ) -> Result<ClosedConnectivityEvidence, CheckFailure> {
     let deadline = Instant::now() + policy.timeout.min(Duration::from_secs(60));
     // Confine before reading; O_NOFOLLOW also rejects a supplied file symlink inside the root.
     let canonical = confined_board_path(board, &policy.allowed_root)?;
-    let supplied_bytes = bounded_file(board, MAX_INPUT)?;
+    let supplied_bytes = bounded_file(board, profile.board_bytes())?;
     let board = canonical;
     let project = board.with_extension("kicad_pro");
-    let board_bytes = bounded_file(&board, MAX_INPUT)?;
-    let project_bytes = bounded_file(&project, MAX_INPUT)?;
+    let board_bytes = bounded_file(&board, profile.board_bytes())?;
+    let project_bytes = bounded_file(&project, MAX_PROJECT)?;
     if board_bytes != supplied_bytes {
         return Err(invalid("board changed during confinement"));
     }
@@ -256,15 +298,18 @@ fn run(
         .stdin(Stdio::null())
         .stdout(Stdio::from(File::create(&stdout_path).map_err(invalid)?))
         .stderr(Stdio::from(File::create(&stderr_path).map_err(invalid)?));
+    if profile == SavedBoardProfile::Synchronization {
+        command.arg("synchronization");
+    }
     #[cfg(unix)]
     unsafe {
-        command.pre_exec(|| {
+        command.pre_exec(move || {
             if libc::setpgid(0, 0) != 0 {
                 return Err(io::Error::last_os_error());
             }
             let limit = libc::rlimit {
-                rlim_cur: MAX_REPORT,
-                rlim_max: MAX_REPORT,
+                rlim_cur: profile.report_bytes(),
+                rlim_max: profile.report_bytes(),
             };
             if libc::setrlimit(libc::RLIMIT_FSIZE, &limit) != 0 {
                 return Err(io::Error::last_os_error());
@@ -309,13 +354,13 @@ fn run(
             stderr,
         });
     }
-    let bytes = bounded_file(&stdout_path, MAX_REPORT)?;
+    let bytes = bounded_file(&stdout_path, profile.report_bytes())?;
     let native = serde_json::from_slice(&bytes).map_err(malformed)?;
-    let evidence = validate(native, &board_bytes, &project_bytes)?;
-    if bounded_file(&snapshot, MAX_INPUT)? != board_bytes
-        || bounded_file(&snapshot_project, MAX_INPUT)? != project_bytes
-        || bounded_file(&board, MAX_INPUT)? != board_bytes
-        || bounded_file(&project, MAX_INPUT)? != project_bytes
+    let evidence = validate(native, &board_bytes, &project_bytes, profile)?;
+    if bounded_file(&snapshot, profile.board_bytes())? != board_bytes
+        || bounded_file(&snapshot_project, MAX_PROJECT)? != project_bytes
+        || bounded_file(&board, profile.board_bytes())? != board_bytes
+        || bounded_file(&project, MAX_PROJECT)? != project_bytes
     {
         return Err(invalid("connectivity source or private input changed"));
     }
@@ -350,11 +395,21 @@ mod tests {
     #[test]
     fn evidence_requires_exact_inputs_and_complete_disjoint_same_net_partitions() {
         let good = fixture();
-        let proof = validate(good.clone(), b"board", b"project").unwrap();
+        let proof = validate(good.clone(), b"board", b"project", SavedBoardProfile::Live).unwrap();
         assert_eq!(proof.component(&good.endpoints[0].uuid).unwrap().len(), 2);
-        assert!(validate(good.clone(), b"changed", b"project").is_err());
-        assert!(validate(good.clone(), b"board", b"changed").is_err());
-        let reject = |native| assert!(validate(native, b"board", b"project").is_err());
+        assert!(
+            validate(
+                good.clone(),
+                b"changed",
+                b"project",
+                SavedBoardProfile::Live
+            )
+            .is_err()
+        );
+        assert!(validate(good.clone(), b"board", b"changed", SavedBoardProfile::Live).is_err());
+        let reject = |native| {
+            assert!(validate(native, b"board", b"project", SavedBoardProfile::Live).is_err())
+        };
         let mut bad = good.clone();
         bad.endpoints[1].net = "VCC".into();
         reject(bad);
@@ -386,10 +441,59 @@ mod tests {
             .map(|item| vec![item.uuid.clone()])
             .collect();
         islands.endpoints[1].component = 1;
-        let islands = validate(islands, b"board", b"project").unwrap();
+        let islands = validate(islands, b"board", b"project", SavedBoardProfile::Live).unwrap();
         assert_ne!(
             islands.component(islands.endpoints()[0].uuid()),
             islands.component(islands.endpoints()[1].uuid())
+        );
+    }
+    #[test]
+    fn fixed_profiles_preserve_legacy_encoding_and_complete_partition_validation() {
+        let live = validate(fixture(), b"board", b"project", SavedBoardProfile::Live).unwrap();
+        let closed = validate(
+            fixture(),
+            b"board",
+            b"project",
+            SavedBoardProfile::Synchronization,
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_vec(&live).unwrap(),
+            serde_json::to_vec(&closed).unwrap()
+        );
+        let mut many = fixture();
+        many.endpoints.clear();
+        many.components.clear();
+        for index in 0..4097 {
+            let id = format!("{index:08x}-0000-4000-8000-000000000001");
+            many.endpoints.push(ConnectivityEndpoint {
+                uuid: id.clone(),
+                kind: ConnectivityKind::Track,
+                net: String::new(),
+                position_nm: [index as i64, 0],
+                component: index,
+            });
+            many.components.push(vec![id]);
+        }
+        assert!(validate(many.clone(), b"board", b"project", SavedBoardProfile::Live).is_err());
+        assert!(
+            validate(
+                many.clone(),
+                b"board",
+                b"project",
+                SavedBoardProfile::Synchronization
+            )
+            .is_ok()
+        );
+        many.endpoints[4096].component = 0;
+        assert!(
+            validate(
+                many,
+                b"board",
+                b"project",
+                SavedBoardProfile::Synchronization
+            )
+            .is_err()
         );
     }
 }

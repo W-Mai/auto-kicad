@@ -114,7 +114,7 @@ impl MatchedSynchronizationProjectBoardPreview {
             order.push(board.clone());
             candidates.insert(board, self.preview.board.candidate.bytes().to_vec());
         }
-        let mut pcb_inputs = Inputs::default();
+        let mut pcb_inputs = Inputs::synchronization();
         if pcb_inputs.track(&observation.path)?.bytes.as_deref() != Some(&observation.bytes) {
             return Err("publication PCB capture differs from matched original".into());
         }

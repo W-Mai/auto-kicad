@@ -258,10 +258,7 @@ impl SynchronizationRecoveryBaseline {
         }
         let drc =
             kicad_checks::CompleteDrcReport::parse(&self.drc_json).map_err(|e| e.to_string())?;
-        drc.compare_complete(&actual.drc.report)
-            .map_err(|e| e.to_string())?
-            .match_expectation(&kicad_checks::CompleteDrcExpectation::default())
-            .map_err(|e| e.to_string())?;
+        actual.drc.require_report(&drc)?;
         actual.verify()
     }
 
@@ -349,6 +346,7 @@ fn normalize_project_dependency(
         digest: Some(hash(original)),
         size: original.len() as u64,
         bytes: None,
+        limit: MAX_FILE,
     })
     .map_err(|e| e.to_string())?;
     if input.get("requested") != metadata.get("requested")
@@ -383,6 +381,7 @@ mod transition_tests {
             digest: Some(hash(b"candidate")),
             size: 9,
             bytes: None,
+            limit: MAX_FILE,
         };
         let current = serde_json::json!({"source":{"files":{path.to_str().unwrap():input,
             "/owned/project/main.kicad_sch":{"digest":"immutable","size":10}},"total":19},

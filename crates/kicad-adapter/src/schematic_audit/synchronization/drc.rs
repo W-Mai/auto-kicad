@@ -3,13 +3,14 @@ use super::*;
 use board::SavedSynchronizationBoard;
 use kicad_checks::{
     CompleteDrcReport, DrcPolicy,
-    connectivity::{ClosedConnectivityEvidence, check_saved_connectivity},
+    connectivity::{ClosedConnectivityEvidence, check_saved_synchronization_connectivity},
 };
 use std::time::Duration;
 
 pub(super) struct SynchronizationDrcCapture {
     pub report: CompleteDrcReport,
     pub evidence: Value,
+    connectivity: ClosedConnectivityEvidence,
     source: Inputs,
     private: Inputs,
     project_root: PathBuf,
@@ -25,6 +26,47 @@ pub(super) struct SynchronizationDrcCapture {
 }
 
 impl SynchronizationDrcCapture {
+    /// Same-input verification under the already qualified complete physical diagnostic grammar.
+    pub(super) fn require_report(&self, expected: &CompleteDrcReport) -> Result<(), String> {
+        if !expected
+            .equivalent_to(&self.report, &BTreeMap::new())
+            .map_err(|e| e.to_string())?
+            && !expected
+                .equivalent_with_closed_connectivity(
+                    &self.report,
+                    &BTreeMap::new(),
+                    &self.connectivity,
+                    &self.connectivity,
+                )
+                .map_err(|e| e.to_string())?
+        {
+            return Err(
+                "complete DRC differs under exact native physical-component authority".into(),
+            );
+        }
+        Ok(())
+    }
+    pub(super) fn require_capture(&self, expected: &Self) -> Result<(), String> {
+        if !expected
+            .report
+            .equivalent_to(&self.report, &BTreeMap::new())
+            .map_err(|e| e.to_string())?
+            && !expected
+                .report
+                .equivalent_with_closed_connectivity(
+                    &self.report,
+                    &BTreeMap::new(),
+                    &expected.connectivity,
+                    &self.connectivity,
+                )
+                .map_err(|e| e.to_string())?
+        {
+            return Err(
+                "complete DRC differs under exact native physical-component authority".into(),
+            );
+        }
+        Ok(())
+    }
     pub fn verify(&self, audit: &SchematicAudit) -> Result<(), String> {
         audit.verify()?;
         self.source.verify()?;
@@ -129,7 +171,8 @@ fn capture_profile(
 ) -> Result<SynchronizationDrcCapture, String> {
     audit.verify()?;
     let generated = if let Some(native) = native {
-        let partition = crate::live_geometry::TeardropTextPartition::parse(board.text())?;
+        let partition =
+            crate::live_geometry::TeardropTextPartition::parse_synchronization(board.text())?;
         if partition.generated_count() > 0 {
             if rules.bytes.is_some() {
                 return Err("generated custom-rule DRC requires independently qualified identity-invariant evaluation".into());
@@ -271,9 +314,10 @@ fn capture_profile(
         allowed_root: project_root.clone(),
         timeout: Duration::from_secs(120),
     };
-    let connectivity: ClosedConnectivityEvidence = check_saved_connectivity(&pcb, &policy)
-        .map_err(|e| format!("DRC connectivity capture: {e:?}"))?;
-    let mut private = Inputs::default();
+    let connectivity: ClosedConnectivityEvidence =
+        check_saved_synchronization_connectivity(&pcb, &policy)
+            .map_err(|e| format!("DRC connectivity capture: {e:?}"))?;
+    let mut private = Inputs::synchronization();
     let mut trees = BTreeMap::new();
     for root in [&project_root, &resources] {
         let names = tree_names(root)?;
@@ -332,6 +376,7 @@ fn capture_profile(
             serde_json::to_value(generated).map_err(|e| e.to_string())?;
     }
     let capture = SynchronizationDrcCapture {
+        connectivity,
         report,
         evidence,
         source,

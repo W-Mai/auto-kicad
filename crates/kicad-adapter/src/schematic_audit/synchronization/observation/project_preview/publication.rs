@@ -101,7 +101,7 @@ impl MatchedSynchronizationProjectPreview {
             .to_owned();
         let candidates =
             BTreeMap::from([(relative.clone(), self.preview.candidate.bytes().to_vec())]);
-        let mut board_inputs = Inputs::default();
+        let mut board_inputs = Inputs::synchronization();
         if board_inputs.track(&observation.path)?.bytes.as_deref() != Some(&observation.bytes) {
             return Err("project publication PCB differs from the captured source".into());
         }
@@ -350,13 +350,7 @@ pub(super) fn observe_published_candidate(
                 .into(),
         );
     }
-    actual
-        .drc
-        .report
-        .compare_complete(&observed.drc.report)
-        .map_err(|e| e.to_string())?
-        .match_expectation(&kicad_checks::CompleteDrcExpectation::default())
-        .map_err(|e| e.to_string())?;
+    actual.drc.require_capture(&observed.drc)?;
     actual.verify()?;
     Ok(actual)
 }

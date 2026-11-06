@@ -97,8 +97,8 @@ pub struct ClosedGeneratedDrcSnapshot {
 }
 impl ClosedGeneratedDrcSnapshot {
     pub(crate) fn bind_native_readback(source: &str, native_saved: &str) -> Result<Self, String> {
-        let partition = TeardropTextPartition::parse(source)?;
-        let native = TeardropTextPartition::parse(native_saved)?;
+        let partition = TeardropTextPartition::parse_synchronization(source)?;
+        let native = TeardropTextPartition::parse_synchronization(native_saved)?;
         let content = partition.generated_content()?;
         if content.is_empty()
             || content != native.generated_content()?
@@ -248,7 +248,7 @@ fn compile_mapped(
     for (at, value) in insertions {
         result.insert_str(at, &value);
     }
-    if result.len() > MAX_NATIVE_GEOMETRY_BYTES {
+    if result.len() as u64 > partition.profile.board_bytes() {
         return Err("bound DRC snapshot exceeds observation bound".into());
     }
     Ok(result)

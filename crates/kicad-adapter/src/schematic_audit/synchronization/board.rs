@@ -626,6 +626,20 @@ impl SavedSynchronizationBoard {
     ) -> Result<String, String> {
         self.protected_digest(changes, false)
     }
+    pub(super) fn protected_routing_native_digest(
+        &self,
+        changes: &[SynchronizationDifference],
+    ) -> Result<String, String> {
+        if !changes
+            .iter()
+            .any(|change| change.field == "net" && self.routes.contains_key(&change.uuid))
+        {
+            return self.protected_native_digest(changes);
+        }
+        let projected = crate::live_geometry::canonical_direct_routes(self.text())?;
+        Self::parse(&projected)?.protected_native_digest(changes)
+    }
+
     pub(super) fn protected_template_digest(
         &self,
         changes: &[SynchronizationDifference],

@@ -343,6 +343,7 @@ impl NativeArtifactExport {
                 .map_err(|e| e.to_string())?
                 .len(),
             bytes: None,
+            limit: MAX_FILE,
         };
         Ok(
             serde_json::json!({"source":self.original.inner.source,"additional":self.inputs,"native_executable":native,"inherited_environment_sha256":context.inherited_environment_digest(),
