@@ -1,6 +1,8 @@
-# Approved PCB geometry over MCP
+# Board outlines and copper zones
 
-`kicad_plan_change` accepts an exclusive `geometry` request on KiCad 10.0.7. Segment/arc Edge.Cuts replacement and ordinary solid-zone create/update/delete use one native definition transaction, followed by separate whole-board refill, saved reload, independent complete copper verification, topology, pad-connectivity and DRC checks.
+Use the `geometry` field of `kicad_plan_change` to replace segment/arc Edge.Cuts or create, update and delete solid zones on KiCad 10.0.7. Geometry is exclusive with other top-level operation fields.
+
+Outline and zone definitions share one native transaction. Whole-board refill runs afterward. Verification checks saved reload, filled copper against an independent native result, board topology, pad connectivity and DRC.
 
 ## Request and approval
 

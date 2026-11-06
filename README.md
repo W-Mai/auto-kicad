@@ -1,169 +1,65 @@
 # auto-kicad
 
-A Rust MCP server for inspecting KiCad designs and applying bounded, approval-bound PCB and schematic changes.
+Edit KiCad schematics and PCBs from an MCP client. Changes are previewed, checked with KiCad, and applied after approval. Execution records and source backups support recovery when an operation is interrupted.
 
-## Build and run
+`auto-kicad` is written in Rust and uses MCP over standard input/output. The verified runtime is **KiCad 10.0.7 on macOS arm64**.
+
+## What it does
+
+| Area | Supported work |
+| --- | --- |
+| Inspection | Read components, nets, pads, routing, board geometry and supported design rules; run ERC and DRC |
+| PCB editing | Place footprints, move or rotate free footprints, edit tracks and vias, flip or delete selected objects, draw outlines and edit solid zones |
+| Routing | Add explicit tracks, multilayer paths and through vias; refill zones affected by supported changes |
+| Schematic editing | Create symbols, edit properties and annotations, draw wires and labels, and manage sheets, hierarchical pins and child files |
+| Synchronization | Apply selected schematic changes to a saved PCB while preserving unrelated layout and routing |
+| Exports | Generate Gerber, Excellon drill, BOM and schematic PDF files into a new output directory |
+
+Each operation has limits. Connected-copper edits, replacement compatibility and custom rules need particular care; see [usage and restrictions](docs/usage.md) before editing an existing design.
+
+## Install
+
+Install KiCad with its libraries and bundled Python runtime. Building from source also requires Rust stable, Cargo and Python 3. Run these commands from the repository root:
 
 ```sh
-CARGO_INCREMENTAL=0 cargo build --release --locked -p auto-kicad
-python3 scripts/install-local.py target/release/auto-kicad
+env CARGO_INCREMENTAL=0 cargo build --release --locked -p auto-kicad --bin auto-kicad
+python3 scripts/install-local.py target/release/auto-kicad --no-rollback
+python3 scripts/install-local.py --verify
 codex mcp add auto-kicad -- "$HOME/.local/bin/auto-kicad"
 codex mcp get auto-kicad
 ```
 
-The [local installer](docs/acceptance/local-delivery-and-exports.md) stores checksum-verified releases under `~/.local/lib/auto-kicad/versions`, selects the active release atomically and writes a stable launcher into `~/.local/bin`. It supports `--status`, `--verify`, `--rollback` and `--uninstall`, retaining the active and previous release by default. Install with `--no-rollback` to retain only the active verified release. `--prefix` selects another installation root. The launcher adds the macOS KiCad CLI directory to `PATH`; the embedded fixed footprint helper needs no source checkout. KiCad and its bundled Python runtime must remain installed. The build directory can be removed after installation and verification. Restart the Codex session to load the registered server. Set `tool_timeout_sec = 600` under `[mcp_servers.auto-kicad]` in the Codex configuration to allow editor startup, reload and DRC.
+The installer writes a launcher to `~/.local/bin/auto-kicad` and checksum-verified releases to `~/.local/lib/auto-kicad/versions/`. The example keeps one release. Omit `--no-rollback` to retain the previous release for rollback. The installed runtime works without the source checkout or Cargo build directory; KiCad must remain installed.
 
-The server uses MCP over standard input/output. Configure an MCP client to launch the built executable. KiCad 10.0.7 is the verified protocol baseline. `kicad_inspect_project` can query [routing rules for existing net IDs](docs/acceptance/routing-rule-inspection.md), including effective netclass preferences and saved minima; native evidence details remain available to backend callers; [its read-only probe and boundaries](docs/acceptance/routing-rule-observation.md) are documented separately from routing support. Native track construction supports explicit copper layers with [receipt and saved-reload evidence](docs/acceptance/copper-layer-creation.md); public single-track requests accept an optional canonical `layer`, defaulting to F.Cu. [Explicit route requests](docs/acceptance/copper-route-mcp.md) bind native/rule evidence to preview and approval and support pad, track-end and via anchors. [Populated four-layer copy acceptance](docs/acceptance/populated-copper-route.md) verifies a SIM_VDD connection and rejection of approvals after unsaved stackup changes. Enable the KiCad IPC API and open the target PCB before using board tools. The endpoint identifies the editor instance; on macOS it is normally under `/tmp/kicad/`.
+Add `tool_timeout_sec = 600` to the existing `[mcp_servers.auto-kicad]` section in `~/.codex/config.toml`, keeping its `command` entry. Large previews can take several minutes. Start a new Codex session after registering the server. Other MCP clients can launch the same installed executable.
 
-Backend callers can read [complete native geometry and live board text](docs/acceptance/native-geometry-observation.md), including filled polygons and [bound live-text zone locks omitted by IPC](docs/acceptance/live-geometry-evidence.md). [Complete refill-definition evidence](docs/acceptance/refill-definition-preservation.md) checks whole-board and native zone settings across refill and saved reload. [Native solid-zone definition editing](docs/acceptance/native-solid-zone-edits.md) supports bounded create/update/delete batches with complete preservation checks. [Fixed native refill and complete copper verification](docs/acceptance/complete-zone-refill.md) provide independent CLI comparison and read-only isolation after uncertain dispatch. [Typed geometry requests](docs/acceptance/geometry-request-compilation.md) bind outline and solid-zone intent to complete native revisions, named nets, layers and locks; real zone edits/refill passed connected-fixture and CM5 copy acceptance. [Combined native geometry transactions](docs/acceptance/mixed-geometry-transactions.md) apply outline replacement and zone edits with complete preservation checks, saved topology, refill and electrical verification. [Candidate correspondence](docs/acceptance/geometry-candidate-correspondence.md) compares complete results across separate native executions using receipt-bound creation identities. MCP [geometry inspection](docs/acceptance/geometry-inspection.md) exposes zones, locks, authored definitions and general outlines with complete source digests through `kicad_inspect_project` with `geometry: true`. [Approved geometry changes](docs/acceptance/geometry-mcp.md) expose bounded outline and solid-zone editing with complete native/copper correspondence, DRC and durable evidence through the exclusive `geometry` request. [Complete DRC correspondence](docs/acceptance/complete-drc-correspondence.md) retains full unconnected/parity diagnostics and exact raw JSON alongside the normalized summary. [Zoned additive MCP changes](docs/acceptance/zoned-additive-mcp.md) combine explicit routes, tracks, through vias and mixed additive batches with complete refill, shared creation identities, native/closed connectivity, exact approval evidence and guarded recovery.
+Installation status, upgrade, rollback and removal are described in the [installation reference](docs/acceptance/local-delivery-and-exports.md#installation).
 
-Native backend callers can [create segment/arc Edge.Cuts primitives and replace exact unlocked outline objects](docs/acceptance/native-outline-primitives.md), with complete receipts and saved verification. [Complete arc envelopes](docs/acceptance/outline-preflight.md) reject unsafe geometry before IPC creation. [Serializable outline requests](docs/acceptance/outline-request-compilation.md) compile closed loops against native evidence; [complete saved boundary verification](docs/acceptance/saved-outline-verification.md) combines native geometry and absolute topology DRC. The `geometry` MCP family applies these definitions through saved-copy preview and exact candidate approval.
+## Use
 
-Backend callers can resolve [hierarchical schematic instances and multi-unit component identities](docs/acceptance/schematic-identities.md) against a native CLI netlist. This read-only identity model retains per-instance annotations and embedded library names; bounded editing and synchronization workflows have separate approval and preservation contracts.
+For live PCB editing, enable KiCad's IPC API and open the saved board in PCB Editor. Schematic editing, schematic-to-PCB synchronization and exports work on saved files with project editors closed.
 
-[Complete schematic ERC capture and comparison](docs/acceptance/schematic-erc.md) retains all diagnostics, exclusions, sheet identities and exact native fields. The backend validates KiCad 10.0.7 reports and detects ignored-check policy changes; bounded edits use the [native schematic MCP workflow](docs/acceptance/schematic-general-mcp.md).
+1. Inspect the design and select objects from the returned identities.
+2. Plan a specific change.
+3. Preview it on a disposable copy and review the design and diagnostic differences.
+4. Approve and commit that preview.
+5. Read the execution result. An `unknown` outcome requires inspection and a new recovery approval before further writes.
 
-[Symbol library context](docs/acceptance/symbol-library-context.md) records effective project/global tables and used library-file content or absence. Revalidation detects library changes even when ERC results remain unchanged.
+Source changes invalidate approval. Plans and approvals expire when the server restarts. Backups and execution history are stored in `~/.local/state/auto-kicad`; `AUTO_KICAD_STATE_DIR` selects another directory.
 
-[Fixed schematic CLI execution inputs](docs/acceptance/native-execution.md) bind executable bytes and the captured process environment for netlist export and ERC. Prepared native configuration copies can be selected explicitly; configuration and project-file content binding remain separate requirements.
+The [usage guide](docs/usage.md) lists the MCP tools, request examples and recovery steps.
 
-[Private schematic audit](docs/acceptance/schematic-audit.md) composes source, configuration and used-library snapshots with native netlist/ERC checks. It retains unresolved library states and detects input drift; the read-only backend does not authorize general schematic edits.
+## Limits
 
-[Logical schematic pin observation](docs/acceptance/schematic-pins.md) matches active unit/body-style pins, common pins and stacked numbers to native net membership. Source identities preserve connectivity across reference renaming; omitted power/virtual pins are observed through [private passive native witnesses](docs/acceptance/schematic-connectivity.md), with original ERC and no-connect evidence retained separately. [Exact physical contact positions](docs/acceptance/schematic-contacts.md) retain native-grid coordinates with qualified quarter-turn and mirror transforms.
+Movement and rotation reject footprints with attached copper. Explicit routing needs caller-supplied paths; general automatic placement and routing are outside the MCP API. Synchronization supports selected replacement and netclass changes, with conflicts rejected before publication. Custom-rule evaluation and unrestricted KiCad GUI parity are outside the supported scope.
 
-[Typed schematic edit candidates](docs/acceptance/schematic-edit-candidates.md) modify existing symbols, deterministic reference annotations, evidence-bound footprint assignments, wires, markers and labels through exact source spans. [Catalog-bound symbol creation](docs/acceptance/schematic-symbol-creation.md) resolves an approved native library definition and embeds it with deterministic symbol/pin UUIDs and instance records. [Inherited symbol creation](docs/acceptance/schematic-symbol-inheritance.md) expands bounded source-file chains into standalone cache definitions with native field/pin/ERC and geometry checks. [Component unit creation and insertion](docs/acceptance/schematic-multiunit.md) support compatible new component groups, missing units from observed metadata and explicit annotations on reused sheets. [Complete component edits](docs/acceptance/schematic-component-edits.md) validate shared references, values, flags and footprint mappings across explicitly listed units. [Existing sheet edits](docs/acceptance/schematic-sheets.md) change names, rectangles and explicit hierarchical pin contacts, with complete declared native network/ERC header changes. [Exact placement removal](docs/acceptance/schematic-sheet-removal.md) retains shared/orphan child files and validates the final reachable hierarchy. [Child placement authoring](docs/acceptance/schematic-children.md) creates empty children, attaches inspected existing hierarchies, retargets placements and explicitly assigns pages/references. These supported families are exposed through [bounded schematic MCP editing](docs/acceptance/schematic-general-mcp.md). [Actual Codex client acceptance](docs/acceptance/schematic-codex-client.md) replays native intent drivers through ephemeral app-server MCP connections and records owner cleanup separately from service cleanup.
+Native GUI saves can migrate older schematic caches, annotations and 3D-model references. Exported files reflect the saved design; they do not establish manufacturing readiness. See the [native GUI record](docs/acceptance/native-gui-qualification.md) and [export contract](docs/acceptance/local-delivery-and-exports.md) for details.
 
-[Complete native edit previews](docs/acceptance/schematic-native-preview.md) compile from captured source bytes and retain exact source/candidate artifacts, full ERC differences and source-identity connectivity. Source, library or configuration drift permanently invalidates a preview. This backend observation does not grant publication approval.
+## Documentation
 
-[Owned schematic preview evidence](docs/acceptance/schematic-preview-ownership.md) retains immutable audit snapshots across planning calls and worker threads. Matching handles share permanent invalidation, and candidate audits keep generated source trees until their last owner is released.
-
-[Explicit schematic expectations](docs/acceptance/schematic-expectations.md) require complete declared network, pin, physical no-connect-marker and ERC changes to match the native candidate. Unaffected connectivity remains exact, and matching evidence is bound to the full preview digest. Human approval and general source publication remain separate requirements.
-
-[Native publication of matched schematic candidates](docs/acceptance/schematic-native-publication.md) consumes a preview, journals exact existing/new-file changes and verifies the actual saved hierarchy, native netlist, complete ERC, pin connectivity and protected inputs before durable completion. Full preview/matching/verification reports and candidate copies are retained beside the execution record. [The bounded MCP workflow](docs/acceptance/schematic-general-mcp.md) binds this evidence to server-owned observations, typed plans, explicit expectations and exact approval. Child creation and attachment bind explicit source revisions, complete page/reference maps and exact absent-file authority.
-
-## Board workflow
-
-1. Save the PCB and project settings in KiCad.
-2. Call `kicad_inspect_project` for the target editor endpoint.
-3. Call `kicad_plan_change` to prepare board graphics, a rectangular Edge.Cuts outline, pad-bound tracks on selected copper layers, explicit multilayer routes, net-bound through vias, source-bound footprints, an atomic connected footprint assembly, or an exclusive geometry edit.
-4. Call `kicad_preview_change` to validate a disposable copy. Review its result before approving.
-5. Call `kicad_commit_change` with the exact plan, validation evidence and approval hashes returned by the preview.
-
-Preview copies the saved PCB, project and optional custom design rules. It verifies that the copy matches the editor state, applies the proposal in an owned editor, saves and reloads it in the same editor process, and compares the result and DRC changes. Source locks stay in place. Unsaved board differences are rejected. Source file, editor identity or observed content changes invalidate approval.
-
-## Scope
-
-PCB observation covers supported graphics, footprint placements and pads, routing and stackup metadata. The public authoring path supports board graphics, rectangular outlines, pad-bound straight tracks on enabled copper layers, explicit multilayer routes and net-bound through vias, including mixed additive batches. Routing previews remap pad identities into the disposable board and verify server-assigned creation IDs, geometry and networks. Graphics, pad-bound straight tracks and through vias have passed native and production MCP plan/preview/commit acceptance. Source-bound single-footprint placement has passed production MCP planning, disposable preview and approved IPC commit with the official R0603 library. It binds a closed saved schematic, its CLI netlist and the resolved library file and table provenance to the plan hash, verifies symbol paths and pin-to-pad network assignments, and rejects source changes. Template preparation reloads a confined staging copy in the existing owned editor. An `assembly` plan places multiple source-bound footprints and connects their pins in one native transaction. Connections use placement target IDs and pad numbers; native pad IDs and coordinates are resolved from validated creation receipts. All placements must share one saved schematic revision. Separate `footprint` requests remain supported. Unsupported objects or lossy observations can reject inspection.
-
-Schematic tools support [bounded native editing](docs/acceptance/schematic-general-mcp.md) with `general.schema_version: 1` and preserve the fixed two-resistor operation when `general` is omitted. Supported edits include properties, references, flags, transforms, compatible footprint assignments, catalog symbols with bounded native inheritance, existing sheet names/rectangles/hierarchical pins, explicit sheet placement creation/removal/retargeting, confined empty/existing children, configured pages, wires, markers and labels. Close editors before schematic operations; exact native electrical/ERC expectations and approval are required. [Native GUI and operation-family qualification](docs/acceptance/native-gui-qualification.md) includes configured nested page labels and saved native results. Automatic placement/routing through MCP and unrestricted GUI parity are outside this bounded capability. [Native artifact exports](docs/acceptance/local-delivery-and-exports.md) generate Gerber, Excellon drill, BOM and schematic PDF with complete inventory approval, exclusive directory publication and guarded recovery. Exports describe saved design contents; manufacturing readiness requires separate review. [Closed schematic-to-PCB synchronization](docs/acceptance/schematic-pcb-sync.md) with an explicit [authored/generated region profile](docs/acceptance/schematic-pcb-sync-regions.md) supports explicit PCB changes and typed project netclass assignments, patterns and definitions with complete native/DRC expectations, durable one- or two-file publication and guarded recovery. Project-only edits preserve PCB bytes and modification time. [Composed size and batch limits](docs/acceptance/schematic-pcb-sync-scale.md) qualify128MiB PCB input,128 component actions and4096 copper assignments through an actual Codex client; oversized native proof stays in a digest-bound local artifact. [Pinless symbols and footprints](docs/acceptance/schematic-empty-components.md) support source creation/assignment and explicit PCB addition, same-count replacement and removal with complete physical-pad preservation. Source-declared non-default classes must be present on final native PCB nets, including no-change plans. Explicit definitions of missing source classes require exact ERC expectations. Other project fields and custom-rule evaluation remain unsupported. [Custom-rule files block synchronization mutations](docs/acceptance/schematic-pcb-sync-rules.md); zone changes require the explicit region profile. [Native family and hierarchy qualification](docs/acceptance/schematic-pcb-sync-families.md) covers separated net split/merge, common-pin units and 128 thermal templates through actual Codex publication. [Connected footprint replacement](docs/acceptance/schematic-connected-replacement.md) retains connected contacts and verifies actual native recovery. Sessions and approvals expire on restart. The stdio server persists execution evidence, outcomes and pre-write source backups under `$HOME/.local/state/auto-kicad`; `AUTO_KICAD_STATE_DIR` selects a different private directory. `kicad_inspect_project` returns recent execution records and backup paths. An interrupted commit remains uncertain until its board/files are inspected; recovery requires a fresh plan, validation and approval. Source files are never restored automatically. Keep backups until the corresponding changes have been reviewed.
-
-[Three complete real-project profiles](docs/acceptance/final-real-projects.md) qualify a small NFC board, populated routed Sonde board and complete ECC83 schematic/PCB lifecycle through actual Codex, native saved readback and guarded recovery. [Actual GUI load/save and fill cancellation](docs/acceptance/native-gui-qualification.md) pass with fresh guarded recovery. The qualified runtime is active in the registered local installation; native legacy-cache and 3D-reference migrations are explicitly recorded.
-
-[Export project isolation](docs/acceptance/native-export-isolation.md) preserves source/audit files while native workers update private preferences. BOM validation resolves all units of each physical component. Source-bound exports reject mixed per-unit library definitions.
-
-Guarded recovery uses `kicad_plan_recovery`, `kicad_preview_recovery` and `kicad_commit_recovery` when a durable state directory is configured. Close all project editors before recovery; editor locks are rejected and never removed by these tools. Backups must match their original digests. Executions without publication intent require exact post-execution fingerprints, or unchanged source bytes when those fingerprints are unavailable. [Durable schematic publication intent](docs/acceptance/schematic-publication-recovery.md) binds exact original/candidate states before per-file writes and includes staging cleanup in fresh recovery approvals. Plans and approvals expire on server restart. Recovery replaces each file atomically, verifies the complete restored file set, and reports any post-write or journal ambiguity as `unknown`. Multi-file restoration is not a filesystem-wide transaction; concurrent external writers must remain stopped. See [recovery contract and acceptance](docs/acceptance/guarded-recovery.md).
-
-PCB and schematic commits acquire an OS writer lock in `.auto-kicad-writer.lock` at the canonical project directory. Multiple server instances share this lock even with different state directories. The file stays in place after release; it is separate from KiCad editor locks. Durable recording must succeed before mutation. An approval with a recorded completed or uncertain attempt cannot be replayed. Schematic attempts also retain a project-local pending marker until a terminal outcome or guarded recovery. [Mixed schematic recovery](docs/acceptance/schematic-recovery.md) restores existing backups and removes recorded new schematics with exact presence/digest evidence; unobserved new files are never deleted by inference. [Bounded schematic MCP publication](docs/acceptance/schematic-general-mcp.md) uses this same guarded recovery path.
-
-Geometry previews [preserve native library context](docs/acceptance/geometry-library-context.md), including unavailable project overrides, nested-table flags and read-only library settings.
-
-Backend [generated teardrop observations](docs/acceptance/teardrop-observation.md) bind UUID-free copper/mask regions to complete native records. [Complete refill verification](docs/acceptance/teardrop-refill.md) checks front/back copper and mask content against saved reload and independent CLI refill. [Generated candidate correspondence and private DRC snapshots](docs/acceptance/generated-correspondence.md) retain complete content while binding generated UUIDs. [Typed geometry with generated regions](docs/acceptance/typed-generated-geometry.md) binds ordinary edits to complete generated observations and candidates. [Production geometry MCP](docs/acceptance/generated-geometry-mcp.md) verifies generated regions through preview, approval, commit, private identity-bound DRC and saved reload. Used library content drift revokes approval; source and preview share only exact verified library files.
-
-## Geometry changes
-
-Inspect with `geometry: true` and use the returned geometry revision, source UUIDs, named nets and enabled copper layers in the exclusive `geometry` field of `kicad_plan_change`. Zone edits and zoned outline changes require `refill: "all"`. Preview and commit verify complete native definitions, independent filled copper, saved topology, pad connectivity and DRC. Definitions and refill are separate native undo entries. Detected source or rule drift revokes approval; uncertain execution blocks further project writes until matching guarded recovery. See [the request contract and actual MCP evidence](docs/acceptance/geometry-mcp.md) and [native fault/recovery evidence](docs/acceptance/geometry-recovery.md). [Combined geometry limits](docs/acceptance/geometry-boundaries.md) have passed production MCP acceptance with 100 outline removals, 512 new edges, 32 zones and 512 vertices including 16 holes per zone; complete execution records retain the 4 MiB bound using compact JSON. Use release builds for populated boards; CM5 previews can exceed 180 seconds even in release builds, so configure Codex `tool_timeout_sec = 600`.
-
-## Footprint sources
-
-Placement resolves exact local KiCad project/global library identifiers and aliases. The legacy resistor, LED and Type-C mappings remain compatible. Sources with unsupported geometry or unverified native fabrication properties reject. KiCad 10.0.7 preserves the official thermal QFN’s physical pads and heatsink properties through creation and saved reload. See [source configuration, bounds and actual acceptance](docs/acceptance/general-footprint-sources.md). Save and close the same-named `.kicad_sch` before planning. Its reference, value and footprint field must match the request. The preview returns the source-bound operations for review.
-
-Existing footprint movement and rotation use `move_footprint` in `kicad_plan_change`. Read `placement_id`, native `source_uuid` and `observed_revision` from `kicad_inspect_project` → `data.pcb`. Supply optional paired `x_nm`/`y_nm` absolute coordinates, optional `orientation_mdeg`, or both. At least one transform is required. Orientation is normalized modulo 360000; `copper_tolerance_nm` defaults to 250000 and is bounded to 1–250000. Connected tracks/vias, zones, unsupported copper, unsupported child geometry and selected native unit metadata reject. Accepted changes preserve native identities, rigid child geometry, nets and associations, then pass full saved/reloaded state and DRC checks. Front and back transforms and [native unit metadata protection](docs/acceptance/footprint-unit-metadata.md) pass KiCad 10.0.7 stdio MCP acceptance. Unit-bearing targets reject before mutation; ordinary transforms preserve unrelated unit metadata. See [the request contract, limits and reproducible evidence](docs/acceptance/existing-footprint-transform.md).
-
-Existing tracks, through vias and Dwgs.User segments use `edit_existing` with the current observed revision and 1–100 explicit target identities. Typed field patches preserve unrelated native data, nets and existing pad connections; isolated preview and saved source verification enforce DRC and protected-file checks. See [the field contract and native stdio acceptance](docs/acceptance/existing-item-edit.md). Existing free footprints use `flip_footprint` with an explicit target side and axis; connected/locked targets reject, and native reflection, saved state and DRC must pass. See [the flip contract and acceptance](docs/acceptance/footprint-flip.md). `delete_items` removes an explicit set of supported tracks, through vias, Dwgs.User segments or free unassociated footprints while preserving surviving pad connections; see [the deletion contract](docs/acceptance/item-deletion.md). [Populated-board copy acceptance](docs/acceptance/populated-existing-edit.md) verifies a saved route-width edit with complete preservation and DRC evidence.
-
-An assembly request is exclusive with `footprint`, `batch` and other top-level operation fields. Placements plus connections are limited to 100 items. Each connection requires two unambiguous front-copper pads on the same nonempty schematic net. A failed operation before commit drops the complete native transaction; uncertain commit/save results require inspection and a fresh approval.
-
-```json
-{
-  "endpoint": "ipc:///tmp/kicad/api.sock",
-  "source_run_id": "resistor-circuit",
-  "request_id": "place-connected-resistors",
-  "assembly": {
-    "placements": [
-      {"target_id": "r1", "library_nickname": "Resistor_SMD", "library_entry_name": "R_0603_1608Metric", "x_nm": 5000000, "y_nm": 5000000, "reference": "R1", "value": "1k"},
-      {"target_id": "r2", "library_nickname": "Resistor_SMD", "library_entry_name": "R_0603_1608Metric", "x_nm": 10000000, "y_nm": 5000000, "reference": "R2", "value": "1k"}
-    ],
-    "connections": [
-      {"track_id": "r1-r2", "start": {"target_id": "r1", "pad_number": "2"}, "end": {"target_id": "r2", "pad_number": "1"}, "width_nm": 250000}
-    ]
-  }
-}
-```
-
-Use the endpoint returned for the target editor. The matching saved schematic must already contain R1 and R2 with the specified values and footprint fields, with R1.2 and R2.1 connected. Preview evidence binds template byte digests and symbol/pin associations together with the plan, source fingerprints, saved snapshot and DRC result.
-
-`AUTO_KICAD_OFFICIAL_FOOTPRINT_ROOT` selects the installed `footprints` directory; the server resolves the corresponding `.pretty` subdirectory. `AUTO_KICAD_PROJECT_FOOTPRINT_ROOT` selects a USB-C `.pretty` directory, defaulting to `Type-C.pretty` inside its project directory. MCP requests cannot supply executable, script or library paths. The fixed template helper is embedded in the executable and uses KiCad's bundled macOS Python runtime. MCP input cannot replace its program.
-
-`kicad_capabilities` reports enabled tool names directly from the MCP router. Authoring marked `live_verification_pending` has not completed live acceptance; each request still requires its normal source, shadow, DRC and approval checks.
-
-## Verification
-
-The checked-in [capability matrix](schemas/capability-matrix.json) records each advertised capability's status, constraints, tested KiCad family, evidence command and record. `kicad_capabilities` returns this matrix together with the current runtime status, so an unavailable backend is not reported as verified. `scripts/check-capability-matrix.py` fails if router tool names drift from the matrix, verified entries lose evidence, or deferred entries are accidentally advertised. The same check runs in the repository quality workflow.
-
-The repository quality workflow and `scripts/quality.py` are the offline gate: they run the matrix validator, format check, warnings-denied Clippy and default workspace tests without starting KiCad or using a user project. Environment-dependent live tests remain ignored unless explicitly selected; their commands and disposable-fixture requirements are listed below.
-
-```sh
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-```
-
-Environment-dependent tests are ignored by default. The CLI-only source-binding test exercises schematic plan, preview and commit through the MCP router with the production CLI, then verifies footprint source binding; it requires official libraries and opens no editor. PCB live tests require the installed editor and CLI. Run each explicitly; they create disposable projects and close only their owned editor processes. Preview requests are serialized to avoid concurrent preview windows. The combined circuit test launches one owned editor and reloads in the same process. The mixed-routing PCB MCP test starts one source editor and one isolated preview editor. It checks changed-source rejection before preview startup, then reuses each process for save/reload. Failed post-commit assertions retain a diagnostic JSON file in the system temporary directory; its path is reported with the failure.
-
-```sh
-cargo test -p auto-kicad tests::production_cli_binds_fixed_circuit_footprints_without_editor -- --ignored --exact
-cargo test -p auto-kicad tests::source_bound_circuit_and_routing_reuse_one_owned_editor -- --ignored --exact
-cargo test -p auto-kicad tests::disposable_graphics_shadow_verifies_server_assigned_ids -- --ignored --exact
-cargo test -p auto-kicad tests::live_mcp_saved_routing_lifecycle_uses_two_editors -- --ignored --exact
-cargo test -p auto-kicad tests::live_mcp_source_bound_footprint_lifecycle_uses_two_editors -- --ignored --exact
-cargo test -p auto-kicad tests::live_mcp_connected_assembly_lifecycle_uses_two_editors -- --ignored --exact
-cargo test -p auto-kicad tests::recovery_acceptance::live_recovery_restores_native_board_and_allows_next_mcp_commit --lib -- --ignored --exact
-# Existing-footprint stdio acceptance requires AUTO_KICAD_MOVE_SERVER; see its linked contract.
-```
-
-The CLI-only MCP schematic lifecycle and source-binding test passed with installed KiCad, including unchanged source bytes during preview, exact candidate bytes after commit, idempotent replay, durable execution history and pre-write backups. Single-editor circuit acceptance passed with KiCad 10.0.6: both resistor placements and schematic pin/pad/net bindings, native graphics and connected-track creation, complete snapshot comparison after save/reload, and no introduced DRC violations. A separately added one-layer-connected via survived save/reload and produced only the expected dangling-via violation. The same editor PID was retained throughout; owned-editor cleanup and source board/project/schematic isolation passed. Offline contracts cover pad-coordinate transforms and serialized through-via inner shapes. Production MCP mixed graphics/track/via acceptance passed with one source editor and one preview editor: changed-source rejection, isolated save/reload and DRC, exact approval commit, replay rejection, committed-source DRC, preservation of existing objects, durable history and pre-write backups. Both owned editors and their disposable files were cleaned. The source-bound footprint MCP test also passed: it creates the fixed two-resistor schematic through MCP, places R1 through the PCB tools, and verifies saved symbol paths, pin/pad/net assignments, unchanged schematic bytes, DRC and both execution records. Atomic assembly MCP acceptance also passed from an empty PCB: both resistors and their connecting track were created through one approved plan, with zero unconnected items after save/reload and no introduced DRC violations. Injecting a verification failure into the second placement discarded the complete transaction and preserved the source board. Source isolation, exact approval, replay rejection, durable backups and owned-editor cleanup passed.
-
-Native explicit copper paths have passed separate 4-layer primitive acceptance with pad, track-end and via anchors, atomic rollback, saved reload and connectivity checks. Public route requests also pass the MCP approval lifecycle, including [256-copper and 100-graphic mixed-batch acceptance](docs/acceptance/copper-route-boundary.md). See [native route contracts and evidence](docs/acceptance/native-copper-routes.md). The backend supports [caller-owned additive transactions](docs/acceptance/additive-transaction.md) with shared creation validation and receipt checks.
-
-## Native placement and routing replay
-
-`auto-kicad-replay` rebuilds an owned PCB copy one component at a time through native IPC, then creates deterministic simple routes. It uses one PCB Editor process for placement, routing and saved reload, and closes that process afterward. This local utility is separate from the MCP approval workflow.
-
-```sh
-CARGO_INCREMENTAL=0 cargo build --release --locked -p auto-kicad --bins
-python3 scripts/install-local.py target/release/auto-kicad --replay-binary target/release/auto-kicad-replay
-~/.local/bin/auto-kicad-replay /absolute/input.kicad_pcb /absolute/new-output-directory 250
-```
-
-The input must be an unrouted front-side SMT PCB without zones and with matching `.kicad_pro` settings. macOS KiCad and its bundled Python runtime are required. The last argument controls the pause between steps in milliseconds (0–5000; default 250). The output directory must not exist. The utility preserves input files and placement coordinates; it does not optimize component placement. Ctrl+C cancels playback and closes the owned editor.
-
-Routing sorts same-net pad pairs by distance and tries straight, orthogonal and 45-degree paths, rejecting foreign-net pad and track collisions. Candidate paths use 0.2 mm width and clearance with an additional geometric margin, then undergo native DRC before IPC creation. Final checks compare every pad's geometry and net assignment, saved/reloaded observations, route counts, source hashes and introduced DRC violations. Board-level drawings other than Edge.Cuts are hidden in the replay copy; DRC deltas use that same prepared baseline.
-
-Each result contains `replay.html` with interactive playback and seeking, `events.jsonl`, `route-plan.json`, baseline/candidate/final DRC reports, `summary.json`, and the saved native PCB/project under `result/`. The HTML embeds the executed geometry and can be opened directly. Working copies are removed after success; the installed executable and results do not depend on Cargo build outputs.
-
-Two PawChrona pet-collar native replays produced identical route geometry: 38 components, 201 preserved pads, 58 connections and 80 copper segments. Unconnected items decreased from 101 to 43 with zero introduced DRC violations. This is partial routing: zones, vias, differential pairs, impedance and power-current requirements remain outside the algorithm. Existing input violations are retained; the result is not a manufacturing release.
-
-Native IPC field updates, flip, exact-set deletion receipts and pad connectivity primitives have a separate [protocol acceptance record](docs/acceptance/existing-item-protocol.md). Public field editing, footprint flipping and exact-set deletion have separate MCP acceptance contracts.
-
-## Installed-server acceptance
-
-`scripts/check-codex.py` uses the local Codex app-server protocol to initialize the registered `auto-kicad` server and verify tool discovery. It starts no model turn. This check was verified with Codex CLI 0.162.1.
-
-```sh
-PYTHONDONTWRITEBYTECODE=1 python3 scripts/check-codex.py --output /tmp/auto-kicad-codex.json
-cargo run --locked -p auto-kicad --example check-board-copy -- /absolute/project/board.kicad_pcb "$HOME/.local/bin/auto-kicad" /absolute/new-acceptance-directory
-```
-
-The board-copy check requires a saved same-named `.kicad_pro`, Python 3 and KiCad. The output directory must not exist. It opens an owned copy, launches the installed stdio server, validates a 3 mm marker on Dwgs.User at (80, 78) mm, commits with exact approval evidence, rejects invalid approval and replay, verifies backups, compares DRC, and reloads the saved PCB in the same editor. It compares existing footprints, pads, routing and stackup, closes owned editors and removes working copies. The output retains JSON evidence, private backups and a saved result PCB/project. The input project is not edited.
-
-PawChrona Air8000A copy acceptance passed with 38 components, 201 pads, 36 named nets and 4 copper layers. The Circuit JSON input was converted offline to an isolated KiCad PCB and all pad positions, sizes and nets were checked after load, including 17 U1 ground pads. Installed stdio plan/preview/commit, saved reload, source isolation, exact approval, replay rejection, durable backups and editor cleanup passed. The baseline and final DRC both contained 155 report items and 101 unconnected items, with zero introduced violations. This is an unrouted evaluation board; this acceptance does not establish manufacturing readiness or general schematic conversion support.
+- [Usage](docs/usage.md): tools, examples, configuration and recovery.
+- [Development](docs/development.md): workspace layout, quality checks and live tests.
+- [Placement and routing replay](docs/replay.md): a separate local playback utility.
+- [Reference index](docs/README.md): API contracts and native implementation records.
+- [Real-project acceptance](docs/acceptance/final-real-projects.md): NFC, routed Sonde and ECC83 project copies.
+- [Capability matrix](schemas/capability-matrix.json): operation status, limits and verification records. The same matrix is returned by `kicad_capabilities`.

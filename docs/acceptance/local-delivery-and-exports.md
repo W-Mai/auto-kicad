@@ -1,6 +1,8 @@
-# Local delivery and native exports
+# Installation and native exports
 
-The macOS arm64 runtime supports KiCad 10.0.7 and local installation. No public binary distribution is configured. `auto-kicad --version`, `--build-info` and `--help` report runtime metadata; invocation without arguments serves MCP on standard input/output.
+The local runtime is verified on macOS arm64 with KiCad 10.0.7. Public binary distribution is not configured.
+
+`auto-kicad --version`, `--build-info` and `--help` report runtime metadata. Running the executable without arguments starts the MCP server over standard input/output.
 
 ## Installation
 

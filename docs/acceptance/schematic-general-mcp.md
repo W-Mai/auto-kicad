@@ -1,6 +1,6 @@
-# Bounded schematic editing over MCP
+# Schematic editing over MCP
 
-`schematic.bounded_edit` exposes saved-file observation, typed plans, exact native expectations and approved publication through the existing schematic tools. KiCad 10.0.7 is the qualified CLI backend. Close project editors and stop external writers before using this workflow. PCB synchronization is separate.
+`kicad_schematic_audit` reads a saved schematic. The schematic plan, preview and commit tools apply selected edits after approval. The `schematic.bounded_edit` capability uses KiCad 10.0.7 to check native netlist and ERC results. Close project editors and stop external writers before editing. Schematic-to-PCB synchronization uses a separate request.
 
 ## Native resources and limits
 

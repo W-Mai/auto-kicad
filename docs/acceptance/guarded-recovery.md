@@ -1,6 +1,8 @@
-# Guarded recovery
+# Restoring an interrupted edit
 
-Recovery restores the exact byte backups associated with an uncertain PCB or schematic execution. It does not reconcile unsaved editor memory, reconstruct missing backups, reroute copper or perform schematic/PCB synchronization. All project editors and external writers must be stopped before restoration. KiCad lock files block recovery; the recovery tools never remove locks.
+Recovery restores recorded byte backups after an uncertain PCB or schematic execution. Close project editors and stop external writers before restoration. KiCad lock files block recovery; these tools never remove them.
+
+Recovery does not reconcile unsaved editor memory, reconstruct missing backups, reroute copper or synchronize a schematic and PCB. Recovery refuses to overwrite source changes made after the recorded attempt.
 
 ## Contract
 

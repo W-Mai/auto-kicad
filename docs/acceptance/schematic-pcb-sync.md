@@ -1,6 +1,8 @@
-# Closed schematic-to-PCB synchronization
+# Schematic-to-PCB synchronization
 
-The existing MCP tools synchronize a saved schematic hierarchy to its same-basename saved PCB. KiCad10.0.7 validates private candidates and the actual published board. Close the target schematic and PCB editors before observation, planning, publication and recovery. Publication writes the PCB and explicitly selected project netclass settings as needed; schematic authoring is a separate approved operation. Rules, libraries, source schematics, configuration and unselected project tokens remain unchanged. Project-only publication preserves PCB bytes and modification time.
+Synchronize a saved schematic hierarchy to its same-basename PCB through the MCP inspect, plan, preview and commit tools. KiCad 10.0.7 validates private candidates and the published board. Close schematic and PCB editors before observation, planning, publication and recovery.
+
+Publication writes the PCB and selected project netclass settings. Schematic edits require their own approval. Rules, libraries, source schematics, configuration and unselected project tokens remain unchanged. A project-only change preserves the PCB bytes and modification time.
 
 ## Observe and select changes
 
