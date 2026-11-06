@@ -5,6 +5,7 @@ pub use refill_candidate::{
     ClosedRefillCandidate, ClosedRefillDelta, ClosedRegionCopper, ClosedRegionCopperChange,
 };
 mod geometry_identity;
+pub(crate) use geometry_identity::board_identity_set;
 mod saved_binding;
 mod teardrops;
 pub use filled_copper::FilledCopperEvidence;

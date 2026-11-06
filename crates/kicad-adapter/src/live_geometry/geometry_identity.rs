@@ -2,28 +2,87 @@
 use super::*;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Dimension text serializes the same native BOARD_ITEM; all independent identities stay unique.
+pub(crate) fn board_identity_set(root: &Node) -> Result<BTreeSet<String>, String> {
+    fn identity_fields<'a>(node: &'a Node, name: &str) -> Result<Vec<&'a Node>, String> {
+        Ok(items(node)?
+            .iter()
+            .filter(|node| {
+                matches!(node, Node::List { .. }) && tag(node).is_ok_and(|tag| tag == name)
+            })
+            .collect())
+    }
+    fn optional_identity_field<'a>(node: &'a Node, name: &str) -> Result<Option<&'a Node>, String> {
+        let fields = identity_fields(node, name)?;
+        if fields.len() > 1 {
+            return Err(format!("duplicate board field: {name}"));
+        }
+        Ok(fields.first().copied())
+    }
+    fn required_identity_field<'a>(node: &'a Node, name: &str) -> Result<&'a Node, String> {
+        optional_identity_field(node, name)?.ok_or_else(|| format!("missing board field: {name}"))
+    }
+    let mut reserved = BTreeSet::new();
+    let mut pending = vec![(root, None::<&str>)];
+    while let Some((node, owned_alias)) = pending.pop() {
+        let Node::List { items: fields, .. } = node else {
+            continue;
+        };
+        let name = fields.first().and_then(|n| atom(n).ok());
+        if name == Some("uuid") {
+            let id = scalar(node)?;
+            if owned_alias.is_some_and(|owner| owner != id)
+                || owned_alias.is_none() && !reserved.insert(id.to_owned())
+            {
+                return Err("invalid or duplicate global board UUID".into());
+            }
+            if reserved.len() > 1_000_000 {
+                return Err("board UUID count exceeds bound".into());
+            }
+            continue;
+        }
+        let dimension = if name == Some("dimension")
+            && optional_identity_field(node, "type")?
+                .map(scalar)
+                .transpose()?
+                .is_some_and(|kind| matches!(kind, "aligned" | "orthogonal" | "leader" | "radial"))
+        {
+            let id = scalar(required_identity_field(node, "uuid")?)?;
+            let labels = identity_fields(node, "gr_text")?;
+            if labels.len() != 1 || scalar(required_identity_field(labels[0], "uuid")?)? != id {
+                return Err("native dimension must have one exact owned text identity".into());
+            }
+            Some(id)
+        } else {
+            None
+        };
+        for child in fields.iter().filter(|n| matches!(n, Node::List { .. })) {
+            let child_name = tag(child)?;
+            let alias = if dimension.is_some() && child_name == "gr_text" {
+                dimension
+            } else if name == Some("gr_text") && child_name == "uuid" {
+                owned_alias
+            } else {
+                None
+            };
+            pending.push((child, alias));
+        }
+    }
+    Ok(reserved)
+}
+
 impl LiveBoardText {
     pub(crate) fn identity_namespace<'a>(
         text: &str,
         derived: impl Iterator<Item = &'a str>,
     ) -> Result<BTreeMap<String, usize>, String> {
-        fn counts(node: &Node, result: &mut BTreeMap<String, usize>) -> Result<(), String> {
-            if let Node::List { items: fields, .. } = node {
-                if fields.first().and_then(|n| atom(n).ok()) == Some("uuid") {
-                    *result.entry(scalar(node)?.into()).or_default() += 1;
-                } else {
-                    for child in fields {
-                        counts(child, result)?;
-                    }
-                }
-            }
-            Ok(())
-        }
-
         preflight(text)?;
         let cst = parse_one(text).map_err(|e| e.to_string())?;
-        let mut result = BTreeMap::new();
-        counts(cst.nodes.first().ok_or("missing board root")?, &mut result)?;
+        let mut result: BTreeMap<String, usize> =
+            board_identity_set(cst.nodes.first().ok_or("missing board root")?)?
+                .into_iter()
+                .map(|id| (id, 1))
+                .collect();
         for id in derived {
             *result.entry(id.to_owned()).or_default() += 1;
         }
@@ -205,6 +264,32 @@ impl LiveBoardText {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn native_dimension_text_identity_is_owned_and_cannot_authorize_other_collisions() {
+        let owner = "77777777-7777-4777-8777-777777777777";
+        let other = "88888888-8888-4888-8888-888888888888";
+        let dimension = format!(
+            "(dimension (type leader) (uuid {owner}) (gr_text note (uuid {owner}) (at 2 2)))"
+        );
+        let raw = format!("(kicad_pcb {dimension})");
+        let namespace = LiveBoardText::identity_namespace(&raw, std::iter::empty()).unwrap();
+        assert_eq!(namespace, BTreeMap::from([(owner.to_owned(), 1)]));
+        for corrupted in [
+            format!("(kicad_pcb {dimension} (gr_text extra (uuid {owner})))"),
+            format!("(kicad_pcb {dimension} {dimension})"),
+            raw.replace("(type leader)", "(type future)"),
+            raw.replace(
+                "gr_text note",
+                &format!("gr_text note (future (uuid {owner}))"),
+            ),
+            raw.replace("gr_text note", &format!("gr_text note (uuid {other})")),
+        ] {
+            assert!(LiveBoardText::identity_namespace(&corrupted, std::iter::empty()).is_err());
+        }
+        assert!(LiveBoardText::identity_namespace(&raw, std::iter::once(owner)).is_err());
+        assert!(LiveBoardText::identity_namespace(&raw, std::iter::once(other)).is_ok());
+    }
     use super::*;
     fn parse(s: &str) -> LiveBoardText {
         LiveBoardText::parse(&format!("(kicad_pcb (version 20260206) {s})")).unwrap()

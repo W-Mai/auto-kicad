@@ -1,0 +1,793 @@
+{
+  "passed": true,
+  "product_complete": false,
+  "profiles": {
+    "small-nfc": {
+      "passed": true,
+      "original_project_unchanged": true,
+      "execution_and_recovery_records": [
+        {
+          "path": "small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937752756444000-73411-1/record.json",
+          "domain": "pcb_sync",
+          "state": "restored",
+          "superseded_by_recorded_restoration": true
+        },
+        {
+          "path": "small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937715002116000-73411-0/record.json",
+          "domain": "schematic",
+          "state": "committed",
+          "superseded_by_recorded_restoration": false
+        },
+        {
+          "path": "small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937829942431000-74704-0/record.json",
+          "domain": "pcb_sync",
+          "state": "committed",
+          "superseded_by_recorded_restoration": false
+        },
+        {
+          "path": "small-nfc/state/recoveries/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/recovery-000000000000000000001793937769382496000-74704-0/record.json",
+          "domain": "pcb_sync",
+          "state": "restored",
+          "superseded_by_recorded_restoration": true
+        }
+      ],
+      "runtime": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-family-seal-1793934633764893000/auto-kicad-qualified-release",
+      "runtime_sha256": "a01c822de7a4ec0e5288edeef7aabad8826e28e67762233b65f0be5919854b7c",
+      "result": {
+        "passed": true,
+        "actual_codex": true,
+        "profile": "small-nfc",
+        "steps": [
+          {
+            "kind": "source-value",
+            "reference": "J10",
+            "changes": [
+              {
+                "action": "SetProperty { uuid: \"d5224ac6-3b29-4f27-99e0-c4e878a39680\", property: Value, value: \"Antenna test connector\" }",
+                "file": "RoyalBlue54L-NFC-Antenna.kicad_sch",
+                "instance_paths": [
+                  "/1d90eb76-94ad-42ee-a1c7-3c040dcf91c0"
+                ],
+                "kind": "Symbol",
+                "uuid": "d5224ac6-3b29-4f27-99e0-c4e878a39680"
+              }
+            ]
+          },
+          {
+            "kind": "pcb-value-after-actual-recovery",
+            "differences": [
+              {
+                "after": "Antenna test connector",
+                "before": "NFC antenna FPC - probe access",
+                "field": "property:Value",
+                "uuid": "5ca606f5-2af6-4dcc-a67c-784d685f6c5d"
+              }
+            ],
+            "drc_delta": {
+              "introduced": [],
+              "metadata_changed": false,
+              "resolved": [
+                {
+                  "diagnostic_json": "{\"description\":\"Value (J10) doesn't match symbol value (NFC antenna FPC - probe access)\",\"items\":[{\"description\":\"Footprint J10\",\"pos\":{\"x\":151.44971,\"y\":66.560695},\"uuid\":\"5ca606f5-2af6-4dcc-a67c-784d685f6c5d\"}],\"severity\":\"warning\",\"type\":\"footprint_symbol_mismatch\"}",
+                  "section": "schematic_parity"
+                }
+              ],
+              "unchanged": 7
+            }
+          }
+        ],
+        "original_project_copied_intact": true,
+        "source_configuration_unchanged": true,
+        "original_copper_preserved": 166,
+        "actual_sigkill_and_fresh_native_recovery": true,
+        "sampled_resources": {
+          "sample_interval_seconds": 1,
+          "samples": 194,
+          "elapsed_seconds": 196.14190445799613,
+          "sampled_peak_logical_bytes": 22366351,
+          "sampled_peak_allocated_bytes": 22679552,
+          "sampled_peak_scratch_allocated_bytes": 21413888,
+          "scope": "All task-owned profile files; scratch includes native-tmp/runtime-tmp/work; global Codex caches and shared installed libraries excluded"
+        },
+        "product_complete": false
+      }
+    },
+    "populated-sonde": {
+      "passed": true,
+      "original_project_unchanged": true,
+      "execution_and_recovery_records": [
+        {
+          "path": "populated-sonde/acceptance/corrupt_saved_reply/state/sha256:e27f8c3349b7d4b7eca771f681fd23d6fbd9e097b4169e21d6166369cbb75732/000000000000000000001793940642553912000-55973-0/record.json",
+          "domain": "pcb",
+          "state": "unknown",
+          "superseded_by_recorded_restoration": true
+        },
+        {
+          "path": "populated-sonde/acceptance/corrupt_saved_reply/state/recoveries/sha256:e27f8c3349b7d4b7eca771f681fd23d6fbd9e097b4169e21d6166369cbb75732/recovery-000000000000000000001793940656917900000-57877-0/record.json",
+          "domain": "pcb",
+          "state": "awaiting_approval",
+          "superseded_by_recorded_restoration": true
+        },
+        {
+          "path": "populated-sonde/acceptance/corrupt_saved_reply/state/recoveries/sha256:e27f8c3349b7d4b7eca771f681fd23d6fbd9e097b4169e21d6166369cbb75732/recovery-000000000000000000001793940660915741000-58000-0/record.json",
+          "domain": "pcb",
+          "state": "restored",
+          "superseded_by_recorded_restoration": true
+        },
+        {
+          "path": "populated-sonde/acceptance/normal/state/sha256:e27f8c3349b7d4b7eca771f681fd23d6fbd9e097b4169e21d6166369cbb75732/000000000000000000001793940682104001000-58149-0/record.json",
+          "domain": "pcb",
+          "state": "committed",
+          "superseded_by_recorded_restoration": false
+        }
+      ],
+      "runtime": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/auto-kicad-final-qualified-release",
+      "runtime_sha256": "c1d337490fa59f4569a0f6d291d39fea0819e71f8ec50cd7c18f3cad9cbf15a0",
+      "result": {
+        "passed": true,
+        "profile": "populated-sonde",
+        "actual_codex": true,
+        "requested_task": "Increase the existing GND plane clearance by 0.01 mm and refill; verify actual saved-response-loss recovery",
+        "actual_post_write_response_loss": true,
+        "actual_native_restoration": true,
+        "subsequent_approved_commit": true,
+        "original_project_unchanged": true,
+        "resources": {
+          "sample_interval_seconds": 1,
+          "samples": 132,
+          "elapsed_seconds": 132.96386274998076,
+          "sampled_peak_logical_bytes": 41192487,
+          "sampled_peak_allocated_bytes": 41631744,
+          "sampled_peak_scratch_allocated_bytes": 1622016,
+          "scope": "All task-owned profile files; scratch includes native-tmp/runtime-tmp/work; global Codex caches and shared installed libraries excluded"
+        },
+        "source_editor_pids": [
+          55864,
+          58040
+        ],
+        "sampled_resource_scope": "Task-owned inputs, output, native snapshots and exclusive Codex connection scratch",
+        "product_complete": false
+      }
+    },
+    "pair-ecc83": {
+      "passed": true,
+      "original_project_unchanged": true,
+      "execution_and_recovery_records": [
+        {
+          "path": "pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940787502122000-59028-1/record.json",
+          "domain": "pcb_sync",
+          "state": "committed",
+          "superseded_by_recorded_restoration": false
+        },
+        {
+          "path": "pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940810425816000-59028-2/record.json",
+          "domain": "schematic",
+          "state": "committed",
+          "superseded_by_recorded_restoration": false
+        },
+        {
+          "path": "pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940832395060000-59028-3/record.json",
+          "domain": "schematic",
+          "state": "committed",
+          "superseded_by_recorded_restoration": false
+        },
+        {
+          "path": "pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940891672526000-59028-5/record.json",
+          "domain": "schematic",
+          "state": "committed",
+          "superseded_by_recorded_restoration": false
+        },
+        {
+          "path": "pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940754337238000-59028-0/record.json",
+          "domain": "schematic",
+          "state": "committed",
+          "superseded_by_recorded_restoration": false
+        },
+        {
+          "path": "pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940927765616000-59028-6/record.json",
+          "domain": "pcb_sync",
+          "state": "restored",
+          "superseded_by_recorded_restoration": true
+        },
+        {
+          "path": "pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793941209886861000-64576-0/record.json",
+          "domain": "pcb_sync",
+          "state": "committed",
+          "superseded_by_recorded_restoration": false
+        },
+        {
+          "path": "pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940869210970000-59028-4/record.json",
+          "domain": "pcb_sync",
+          "state": "committed",
+          "superseded_by_recorded_restoration": false
+        },
+        {
+          "path": "pair-ecc83/state/recoveries/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/recovery-000000000000000000001793941157009710000-64576-0/record.json",
+          "domain": "pcb_sync",
+          "state": "restored",
+          "superseded_by_recorded_restoration": true
+        }
+      ],
+      "runtime": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/auto-kicad-final-qualified-release",
+      "runtime_sha256": "c1d337490fa59f4569a0f6d291d39fea0819e71f8ec50cd7c18f3cad9cbf15a0",
+      "result": {
+        "passed": true,
+        "actual_codex": true,
+        "profile": "pair-ecc83",
+        "steps": [
+          {
+            "kind": "source-value",
+            "reference": "U1",
+            "changes": [
+              {
+                "action": "SetProperty { uuid: \"00000000-0000-0000-0000-000048b4f256\", property: Value, value: \"ECC83 / 12AX7\" }",
+                "file": "ecc83-pp.kicad_sch",
+                "instance_paths": [
+                  "/28f865a0-4433-4a53-bbd7-b62f276848e4"
+                ],
+                "kind": "Symbol",
+                "uuid": "00000000-0000-0000-0000-000048b4f256"
+              },
+              {
+                "action": "SetProperty { uuid: \"00000000-0000-0000-0000-000048b4f263\", property: Value, value: \"ECC83 / 12AX7\" }",
+                "file": "ecc83-pp.kicad_sch",
+                "instance_paths": [
+                  "/28f865a0-4433-4a53-bbd7-b62f276848e4"
+                ],
+                "kind": "Symbol",
+                "uuid": "00000000-0000-0000-0000-000048b4f263"
+              },
+              {
+                "action": "SetProperty { uuid: \"00000000-0000-0000-0000-000048b4f266\", property: Value, value: \"ECC83 / 12AX7\" }",
+                "file": "ecc83-pp.kicad_sch",
+                "instance_paths": [
+                  "/28f865a0-4433-4a53-bbd7-b62f276848e4"
+                ],
+                "kind": "Symbol",
+                "uuid": "00000000-0000-0000-0000-000048b4f266"
+              }
+            ]
+          },
+          {
+            "kind": "pcb-complete-multiunit-value",
+            "differences": [
+              {
+                "after": "ECC83 / 12AX7",
+                "before": "ECC83 - dual triode",
+                "field": "property:Value",
+                "uuid": "00000000-0000-0000-0000-00005a334ccc"
+              }
+            ],
+            "drc_delta": {
+              "introduced": [],
+              "metadata_changed": false,
+              "resolved": [
+                {
+                  "diagnostic_json": "{\"description\":\"Value (U1) doesn't match symbol value (ECC83 - dual triode)\",\"items\":[{\"description\":\"Footprint U1\",\"pos\":{\"x\":149.225,\"y\":113.665},\"uuid\":\"00000000-0000-0000-0000-00005a334ccc\"}],\"severity\":\"warning\",\"type\":\"footprint_symbol_mismatch\"}",
+                  "section": "schematic_parity"
+                }
+              ],
+              "unchanged": 2
+            }
+          },
+          {
+            "kind": "real-on-board-hole-add",
+            "position_nm": [
+              160000000,
+              131000000
+            ],
+            "differences": [
+              {
+                "after": "/28f865a0-4433-4a53-bbd7-b62f276848e4/1e5247cb-ea10-45ba-9b10-6a400d695834",
+                "before": null,
+                "field": "path",
+                "uuid": "3b6079bd-a295-826b-839e-7e84c6b3edf2"
+              },
+              {
+                "after": "H900",
+                "before": "REF**",
+                "field": "property:Reference",
+                "uuid": "3b6079bd-a295-826b-839e-7e84c6b3edf2"
+              },
+              {
+                "after": "Enclosure mounting hole",
+                "before": "MountingHole_3.2mm_M3",
+                "field": "property:Value",
+                "uuid": "3b6079bd-a295-826b-839e-7e84c6b3edf2"
+              },
+              {
+                "after": "ecc83-pp.kicad_sch",
+                "before": null,
+                "field": "sheetfile",
+                "uuid": "3b6079bd-a295-826b-839e-7e84c6b3edf2"
+              },
+              {
+                "after": "/",
+                "before": null,
+                "field": "sheetname",
+                "uuid": "3b6079bd-a295-826b-839e-7e84c6b3edf2"
+              },
+              {
+                "after": "(units (unit (name \"A\") (pins )))",
+                "before": null,
+                "field": "units",
+                "uuid": "3b6079bd-a295-826b-839e-7e84c6b3edf2"
+              },
+              {
+                "after": "H900",
+                "before": null,
+                "field": "footprint",
+                "uuid": "3b6079bd-a295-826b-839e-7e84c6b3edf2"
+              }
+            ],
+            "drc_delta": {
+              "introduced": [],
+              "metadata_changed": false,
+              "resolved": [
+                {
+                  "diagnostic_json": "{\"description\":\"Missing footprint H900 (Enclosure mounting hole)\",\"items\":[],\"severity\":\"warning\",\"type\":\"missing_footprint\"}",
+                  "section": "schematic_parity"
+                }
+              ],
+              "unchanged": 2
+            }
+          },
+          {
+            "kind": "pcb-hole-remove-after-actual-recovery",
+            "differences": [
+              {
+                "after": null,
+                "before": "H900",
+                "field": "footprint",
+                "uuid": "3b6079bd-a295-826b-839e-7e84c6b3edf2"
+              }
+            ],
+            "drc_delta": {
+              "introduced": [],
+              "metadata_changed": false,
+              "resolved": [
+                {
+                  "diagnostic_json": "{\"description\":\"Extra footprint\",\"items\":[{\"description\":\"Footprint H900\",\"pos\":{\"x\":160.0,\"y\":131.0},\"uuid\":\"3b6079bd-a295-826b-839e-7e84c6b3edf2\"}],\"severity\":\"warning\",\"type\":\"extra_footprint\"}",
+                  "section": "schematic_parity"
+                }
+              ],
+              "unchanged": 2
+            }
+          }
+        ],
+        "original_project_copied_intact": true,
+        "source_configuration_unchanged": true,
+        "original_copper_preserved": 59,
+        "actual_sigkill_and_fresh_native_recovery": true,
+        "actual_parent_sigkill": true,
+        "actual_writer_direct_sigkill_confirmed": false,
+        "manual_intervention": {
+          "reason": "Writer already exited after the actual Codex parent SIGKILL; explicit second kill raised ProcessLookupError",
+          "actual_parent_sigkill": true,
+          "actual_writer_direct_sigkill_confirmed": false,
+          "writer_exit_independently_verified": true,
+          "original_target_and_pending_retained": true,
+          "continuation": "Fresh recovery on the same actual candidate and journal; do not repeat source/addition work",
+          "retained_ownership_records": [
+            {
+              "schema_version": 1,
+              "token": "1933da50b64f7b91e0056b115c381137dce8a9f273c06ebe22cfacd112fe2e62",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-sync-regions-4220i5",
+              "device": 16777229,
+              "inode": 627893817,
+              "pid": 59028,
+              "process_birth": "Fri Nov  6 12:52:01 2026",
+              "released": false,
+              "created_ns": 1793940923196271000
+            },
+            {
+              "schema_version": 1,
+              "token": "d34b16bacd83f5cdf5558492d5e5e597c9be59744ce86b8c7b2ebd179688bbff",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-schematic-audit-rxJxDf",
+              "device": 16777229,
+              "inode": 627890937,
+              "pid": 59028,
+              "process_birth": "Fri Nov  6 12:52:01 2026",
+              "released": false,
+              "created_ns": 1793940898602271000
+            },
+            {
+              "schema_version": 1,
+              "token": "8c836cd6e850f7714301978d929db19362833d6447a3568e248f29c379972a8d",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-sync-drc-UbKZC2",
+              "device": 16777229,
+              "inode": 627891859,
+              "pid": 59028,
+              "process_birth": "Fri Nov  6 12:52:01 2026",
+              "released": false,
+              "created_ns": 1793940906096477000
+            },
+            {
+              "schema_version": 1,
+              "token": "d4477fb9fcbb0580649be32b4839f65908c19c891f9b0d4f5a4dae9208c30b2e",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-sync-refill-V4M8C8",
+              "device": 16777229,
+              "inode": 627891978,
+              "pid": 59028,
+              "process_birth": "Fri Nov  6 12:52:01 2026",
+              "released": false,
+              "created_ns": 1793940911955484000
+            },
+            {
+              "schema_version": 1,
+              "token": "a381b77016e0b6c751d06ffb32fb457cb56d7bdceb0dd44b4dac11bc13bb3841",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-sync-preview-QXbFZ0",
+              "device": 16777229,
+              "inode": 627892786,
+              "pid": 59028,
+              "process_birth": "Fri Nov  6 12:52:01 2026",
+              "released": false,
+              "created_ns": 1793940916714388000
+            },
+            {
+              "schema_version": 1,
+              "token": "0a6c69f3880f8236cf4a18645f08716574ebc38824b3f6b95f861b3f47c1c6c8",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-sync-observation-NAbxP9",
+              "device": 16777229,
+              "inode": 627891834,
+              "pid": 59028,
+              "process_birth": "Fri Nov  6 12:52:01 2026",
+              "released": false,
+              "created_ns": 1793940904750722000
+            },
+            {
+              "schema_version": 1,
+              "token": "0ad4c3a837d69a37695720ee8b0de93eaefa0597e2630f8710f2979185ed0943",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-sync-regions-tROuHh",
+              "device": 16777229,
+              "inode": 627891943,
+              "pid": 59028,
+              "process_birth": "Fri Nov  6 12:52:01 2026",
+              "released": false,
+              "created_ns": 1793940910241646000
+            },
+            {
+              "schema_version": 1,
+              "token": "84cedd17ffa25a1a720cca2ad36958859cb707d89729779a7e2d7f0af4af0bed",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-sync-refill-qGvrCc",
+              "device": 16777229,
+              "inode": 627892209,
+              "pid": 59028,
+              "process_birth": "Fri Nov  6 12:52:01 2026",
+              "released": false,
+              "created_ns": 1793940913892175000
+            },
+            {
+              "schema_version": 1,
+              "token": "7fe7583559afd881b30711bf770f34d134921ead743a2510da3418ed53bb7317",
+              "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-sync-drc-DRpOSY",
+              "device": 16777229,
+              "inode": 627893033,
+              "pid": 59028,
+              "process_birth": "Fri Nov  6 12:52:01 2026",
+              "released": false,
+              "created_ns": 1793940918568473000
+            }
+          ]
+        },
+        "sampled_resources": {
+          "sample_interval_seconds": 1,
+          "samples": 300,
+          "elapsed_seconds": 303.1177108750562,
+          "sampled_peak_logical_bytes": 22092610,
+          "sampled_peak_allocated_bytes": 22949888,
+          "sampled_peak_scratch_allocated_bytes": 4931584,
+          "scope": "All task-owned profile files; scratch includes native-tmp/runtime-tmp/work; global Codex caches and shared installed libraries excluded",
+          "segments": [
+            {
+              "sample_interval_seconds": 1,
+              "samples": 210,
+              "elapsed_seconds": 212.1058392500272,
+              "sampled_peak_logical_bytes": 14731382,
+              "sampled_peak_allocated_bytes": 15409152,
+              "sampled_peak_scratch_allocated_bytes": 4931584,
+              "scope": "All task-owned profile files; scratch includes native-tmp/runtime-tmp/work; global Codex caches and shared installed libraries excluded"
+            },
+            {
+              "sample_interval_seconds": 1,
+              "samples": 90,
+              "elapsed_seconds": 91.01187162502902,
+              "sampled_peak_logical_bytes": 22092610,
+              "sampled_peak_allocated_bytes": 22949888,
+              "sampled_peak_scratch_allocated_bytes": 4648960,
+              "scope": "All task-owned profile files; scratch includes native-tmp/runtime-tmp/work; global Codex caches and shared installed libraries excluded"
+            }
+          ],
+          "measurement_note": "Two actual execution segments; manual controller-repair interval excluded; original samples retained"
+        },
+        "product_complete": false
+      }
+    }
+  },
+  "immutable_artifacts": {
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937752756444000-73411-1/source-0.backup": "b8afcb8dc422a8f1e2aabbfbf559b72210acd27de6561b96a3ec875896f7674d",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937752756444000-73411-1/candidate.kicad_pcb": "b9b8d4ae6bc7953dffa6ffd8036c606afe2d2dd525d4800bb18c754b4fb8ad2a",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937752756444000-73411-1/baseline.json": "250949bb2a9b64b25779147fb85bfe0dd1a08e8efc5d948879a4049d1d93ec77",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937752756444000-73411-1/preview.json": "063b77b847423d8a0271f7bf4511635eaeaa6482567db96b44a7b5e98c9fd0b7",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937752756444000-73411-1/expectation.json": "376fa35d1c08923315214d1566638a05990b58c2e1466cfa216d50997e422ef7",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937715002116000-73411-0/preview.json": "627574ba45a4ddab2c34c2c9e3d4375ab18d4f9a891866ddf697d5e2acdc6bc7",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937715002116000-73411-0/matching.json": "c73e46ac9c8add3f716f644fc8e9b4e23b6d83088d675bd894777af322f34bdc",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937715002116000-73411-0/candidate-0.kicad_sch": "42f13fa6fbc8a600361af2d4daed8165e2d0ae55e9b945547b0d17f6c8f31fc5",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937715002116000-73411-0/verification.json": "70360e25a4b3516790f8140b9964988d22746b5d7a0c52288accd206140a9dba",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937715002116000-73411-0/source-0.backup": "eb6572e834e556604d30674125d59cf09fc9fb73eb06d4e3e32a4a7d96811180",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937829942431000-74704-0/verification.json": "d93c3c52ccfbfa37da782796c78445942edbf9b61ff8baf54e35708b0c6bf0d3",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937829942431000-74704-0/source-0.backup": "b8afcb8dc422a8f1e2aabbfbf559b72210acd27de6561b96a3ec875896f7674d",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937829942431000-74704-0/candidate.kicad_pcb": "b9b8d4ae6bc7953dffa6ffd8036c606afe2d2dd525d4800bb18c754b4fb8ad2a",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937829942431000-74704-0/baseline.json": "08c7d1866878fa550aab5a7b957b38471d1af65a23de6e54c455ff71b3258084",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937829942431000-74704-0/preview.json": "e5829a1650878ab6bce814a6b7aacf297c82a473f5fa80057b7f667f765663f5",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/small-nfc/state/sha256:6c59898de18470fa3fb658d948740b25e1a8bb189c43eb81f1cbee0d68d223b2/000000000000000000001793937829942431000-74704-0/expectation.json": "376fa35d1c08923315214d1566638a05990b58c2e1466cfa216d50997e422ef7",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/populated-sonde/acceptance/corrupt_saved_reply/state/sha256:e27f8c3349b7d4b7eca771f681fd23d6fbd9e097b4169e21d6166369cbb75732/000000000000000000001793940642553912000-55973-0/source-0.backup": "975f75b4c84da13b35f3241d4728b0185757a4bfb07f23b9a9e13e7c834c7fc6",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/populated-sonde/acceptance/corrupt_saved_reply/state/sha256:e27f8c3349b7d4b7eca771f681fd23d6fbd9e097b4169e21d6166369cbb75732/000000000000000000001793940642553912000-55973-0/source-1.backup": "360cf6921d7ce139ed23006a67c001fc58191623264d25ec7ad72778665deded",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/populated-sonde/acceptance/normal/state/sha256:e27f8c3349b7d4b7eca771f681fd23d6fbd9e097b4169e21d6166369cbb75732/000000000000000000001793940682104001000-58149-0/source-0.backup": "975f75b4c84da13b35f3241d4728b0185757a4bfb07f23b9a9e13e7c834c7fc6",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/populated-sonde/acceptance/normal/state/sha256:e27f8c3349b7d4b7eca771f681fd23d6fbd9e097b4169e21d6166369cbb75732/000000000000000000001793940682104001000-58149-0/source-1.backup": "360cf6921d7ce139ed23006a67c001fc58191623264d25ec7ad72778665deded",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940787502122000-59028-1/verification.json": "01b54264e75ca0ce591096d7a91ece04a7c22be4f307b3537a8ab6e385131601",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940787502122000-59028-1/source-0.backup": "32aa1c005d4845a1bfe39db5caee400921832df70b33220b86201f632bd66886",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940787502122000-59028-1/candidate.kicad_pcb": "df61ada1da953f57e87e68eed5f341b545026f8ca11c09c68b3c6a1ed3bc5c4b",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940787502122000-59028-1/baseline.json": "f68d06655f97281f05fe886f8e2e9a0b3ebdd86e2f1755d8e89d89bdd3d327f2",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940787502122000-59028-1/preview.json": "a9dd8b97507934ffe89ae040fcd639cb273b47e5b8907e447596ba4cc175bf36",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940787502122000-59028-1/expectation.json": "ae4dedbd49a7fa4da4aba4a45a9c4c92988875f77365925c31c2d73ca4e4f76f",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940810425816000-59028-2/preview.json": "42850fe0ae8dbc7f7b9e97b7baa1a1ef45c4867181241c0a76fda06266408b13",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940810425816000-59028-2/matching.json": "70d54147f9d5b8ac9bba3fb3b4b16918078d3823039b90b44e0a100c8bcefd55",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940810425816000-59028-2/candidate-0.kicad_sch": "6788ab4b84cec3c6f0195a9afcc3b4d2339ef9856b9211a19f1a311d2d1f48ed",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940810425816000-59028-2/verification.json": "eb1785283e1e7b3af8cfe8a3d53f31e717c1edecc1c13eabd90e84a770e11120",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940810425816000-59028-2/source-0.backup": "c71386775ae9401a8071b6e72e496c66af77b11ef6ee568e9726ee4c0a32155c",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940832395060000-59028-3/preview.json": "b7de1fa204123199027dc273b4947e404ac3d99de667a6e478efd1908a8a0a1c",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940832395060000-59028-3/matching.json": "45e0ffee65f21eee5d1cfa1c7d0767bace6767670de99219a2ad3de849d554b8",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940832395060000-59028-3/candidate-0.kicad_sch": "043667da4f4056455b3fdcaeee1302a60af3ac84621ee2abb5b512cec5548ef3",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940832395060000-59028-3/verification.json": "533dd42172fefe4c8ab23729b3b2ba870504b524c43832373d8e84fc578fb5e8",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940832395060000-59028-3/source-0.backup": "6788ab4b84cec3c6f0195a9afcc3b4d2339ef9856b9211a19f1a311d2d1f48ed",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940891672526000-59028-5/preview.json": "30e55c9e22580ce7491aa3d68cbb07864fca5a06f07579440887e849d299bf22",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940891672526000-59028-5/matching.json": "8811e80777b77d6062ee12fa92c709ba4a5895791275c8e2379ab7bcb2f5bb1c",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940891672526000-59028-5/candidate-0.kicad_sch": "bd51fac340a2dd7c89a01d03ea40796025089642bbb87190261900a0034c5483",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940891672526000-59028-5/verification.json": "725e34fdfff1ad3266ce9b418b2e4785a5f1415e3b50b7f2e1c02c39cc552ae4",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940891672526000-59028-5/source-0.backup": "043667da4f4056455b3fdcaeee1302a60af3ac84621ee2abb5b512cec5548ef3",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940754337238000-59028-0/preview.json": "b7becf753110d70de1ff8a10bcab54719dfbc1ad49382b0dc8c74e29802909c8",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940754337238000-59028-0/matching.json": "1a91c836b0ee21ae6f692d7f8a5db3fc7d770959d13fbe5f40f4d5496ccd79e1",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940754337238000-59028-0/candidate-0.kicad_sch": "c71386775ae9401a8071b6e72e496c66af77b11ef6ee568e9726ee4c0a32155c",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940754337238000-59028-0/verification.json": "53f7cf513f2bf7490e41d8ce54c7de3db292f1eb943d5c42180839f6e4bb7c00",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940754337238000-59028-0/source-0.backup": "91f1bc797804326ca347f9c6f23b3e8e0d1577e5dbf3038b56c1a1ef79352c58",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940927765616000-59028-6/source-0.backup": "12cfb11948a71f15ff805dbe0859c14455061ff4ee127dfcf909cd17c18cf9e5",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940927765616000-59028-6/candidate.kicad_pcb": "3bd9602160b43872fee89eb74b76a6843bc6dbf4ac50f119d6cb6c22ab59048a",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940927765616000-59028-6/baseline.json": "ce24c19bcdcb71cf44b8dac5fa4344fcf9cdff533bdeb7006a6685a076ae3ba1",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940927765616000-59028-6/preview.json": "00e72a87aa666dd75a033942f187639a5b3fb4332e7648a23d68a133e058ff05",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940927765616000-59028-6/expectation.json": "8b00beaba720c793867304f3924b7c26391c51e772d38d2de9ff3f096416c00e",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793941209886861000-64576-0/verification.json": "49ab294dc2b54d26a5092f2e227e41bcc2d476990ab8078e4fa5f4bfec983c90",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793941209886861000-64576-0/source-0.backup": "12cfb11948a71f15ff805dbe0859c14455061ff4ee127dfcf909cd17c18cf9e5",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793941209886861000-64576-0/candidate.kicad_pcb": "3bd9602160b43872fee89eb74b76a6843bc6dbf4ac50f119d6cb6c22ab59048a",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793941209886861000-64576-0/baseline.json": "b7335b4a7defed830461c226e2d42f6be88b7994866e3c74f9a6fe2bfe305bf7",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793941209886861000-64576-0/preview.json": "d1d05fed3e794b167d88c8763cbdbb9dbb49244e5e7eca0ac5823b962d6e0dfb",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793941209886861000-64576-0/expectation.json": "8b00beaba720c793867304f3924b7c26391c51e772d38d2de9ff3f096416c00e",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940869210970000-59028-4/verification.json": "40fa771ec534375970ee693ac34e17738f6107273b74ae79e6c4a549a8fa5121",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940869210970000-59028-4/source-0.backup": "df61ada1da953f57e87e68eed5f341b545026f8ca11c09c68b3c6a1ed3bc5c4b",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940869210970000-59028-4/candidate.kicad_pcb": "12cfb11948a71f15ff805dbe0859c14455061ff4ee127dfcf909cd17c18cf9e5",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940869210970000-59028-4/baseline.json": "4c7891bd46d7835c2368e20cbc10056d441a1d82097b0415621a42360953b75f",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940869210970000-59028-4/preview.json": "45226cb82e5e2fb9073a52aa6a859ea87fe0e73afc5b62ab2b3eab76c4c711db",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/state/sha256:fbc1153b0ff244369513d1ceab54fc6fc025958ea1ea14c5988399e9dc20d638/000000000000000000001793940869210970000-59028-4/expectation.json": "c5e379aca5916a745fcef39df0cf5b7690987b80bd997e558c2aae4aebb4f23e"
+  },
+  "immutable_artifact_count": 63,
+  "owned_recorded_processes_terminal": true,
+  "original_projects_unchanged": true,
+  "pending_markers_absent": true,
+  "gui_qualification": "Separate open gate; CLI/native readback is not GUI evidence",
+  "evidence_root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000",
+  "source_provenance": {
+    "baseline": "ba8f1a868b1c78bac8c6c983ed3375044f829361",
+    "changed_source_sha256": {
+      "crates/kicad-adapter/src/live_geometry.rs": "b47d97430103a3e9d662a5de545cf34beec910d4d235ac6d6d0f11d726bf1547",
+      "crates/kicad-adapter/src/live_geometry/geometry_identity.rs": "2cfd044a49ee26072ad2d0ac86397089a50e3f7cad1608943af3591ba03a8837",
+      "crates/kicad-adapter/src/schematic_audit/synchronization/board.rs": "26d324eb087922cc5053c34a8c490851034f85832321cb9e70fc19a054b6d736"
+    }
+  },
+  "quality": {
+    "passed": 634,
+    "failed": 0,
+    "ignored": 18,
+    "format": true,
+    "capability_matrix": true,
+    "strict_workspace_all_target_clippy": true
+  },
+  "build_cleanup": {
+    "debug-build-cleanup.json": {
+      "path": "/private/tmp/auto-kicad-sync-target/debug",
+      "allocated_bytes_removed": 1569542144,
+      "entries": 3511,
+      "reason": "Offline quality terminal; active release uses separate profile",
+      "path_absent": true
+    },
+    "release-cache-cleanup.json": {
+      "allocated_bytes_removed": 585461760,
+      "before": 589271040,
+      "after": 3809280,
+      "preserved_executables": [
+        "/private/tmp/auto-kicad-sync-target/release/examples/check-final-populated-copy",
+        "/private/tmp/auto-kicad-sync-target/release/examples/geometry-fault-relay"
+      ],
+      "reason": "Cargo terminal; preserve running acceptance executables while removing build caches under acute disk pressure"
+    },
+    "final-build-cleanup.json": {
+      "path": "/private/tmp/auto-kicad-sync-target",
+      "allocated_bytes_removed": 3809280,
+      "path_absent": true,
+      "reason": "Native controller terminal; source archived; remaining ECC83 runs retained standalone runtime"
+    }
+  },
+  "allocated_bytes_removed": 2158813184,
+  "failed_controls": [
+    {
+      "profile": "pair-ecc83",
+      "reason": "Unnecessary typed inventory rejects the legacy v4 project netclass_assignments:null",
+      "correction": "Omit unrelated project-netclass inventory; keep native effective-rule and DRC checks",
+      "source_writes": false
+    },
+    {
+      "profile": "populated-sonde",
+      "reason": "Live drawing probe rejects native dimension-owned text UUID",
+      "correction": "Share exact native ownership validation with closed synchronization",
+      "fault_armed": false,
+      "source_writes": false
+    },
+    {
+      "passed": false,
+      "reason": "Cross-process Codex connection directory collision before recovery startup",
+      "actual_fault_armed": true,
+      "actual_native_save_completed": true,
+      "recovery_completed": false,
+      "temporary_target_removed_by_old_controller": true,
+      "unknown_records_retained": [
+        {
+          "path": "acceptance/corrupt_saved_reply/state/sha256:4576c4881f242620e9b8355d5723a436ad297e04670b097567ee5fb2e5ebbdad/000000000000000000001793940402710903000-51653-0/record.json",
+          "state": "unknown",
+          "project": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/populated-sonde/acceptance/work/auto-kicad-shadow-UV3ng4"
+        }
+      ],
+      "original_project_unchanged": true
+    },
+    {
+      "reason": "Writer already exited after the actual Codex parent SIGKILL; explicit second kill raised ProcessLookupError",
+      "actual_parent_sigkill": true,
+      "actual_writer_direct_sigkill_confirmed": false,
+      "writer_exit_independently_verified": true,
+      "original_target_and_pending_retained": true,
+      "continuation": "Fresh recovery on the same actual candidate and journal; do not repeat source/addition work",
+      "retained_ownership_records": [
+        {
+          "schema_version": 1,
+          "token": "1933da50b64f7b91e0056b115c381137dce8a9f273c06ebe22cfacd112fe2e62",
+          "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-sync-regions-4220i5",
+          "device": 16777229,
+          "inode": 627893817,
+          "pid": 59028,
+          "process_birth": "Fri Nov  6 12:52:01 2026",
+          "released": false,
+          "created_ns": 1793940923196271000
+        },
+        {
+          "schema_version": 1,
+          "token": "d34b16bacd83f5cdf5558492d5e5e597c9be59744ce86b8c7b2ebd179688bbff",
+          "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-schematic-audit-rxJxDf",
+          "device": 16777229,
+          "inode": 627890937,
+          "pid": 59028,
+          "process_birth": "Fri Nov  6 12:52:01 2026",
+          "released": false,
+          "created_ns": 1793940898602271000
+        },
+        {
+          "schema_version": 1,
+          "token": "8c836cd6e850f7714301978d929db19362833d6447a3568e248f29c379972a8d",
+          "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-sync-drc-UbKZC2",
+          "device": 16777229,
+          "inode": 627891859,
+          "pid": 59028,
+          "process_birth": "Fri Nov  6 12:52:01 2026",
+          "released": false,
+          "created_ns": 1793940906096477000
+        },
+        {
+          "schema_version": 1,
+          "token": "d4477fb9fcbb0580649be32b4839f65908c19c891f9b0d4f5a4dae9208c30b2e",
+          "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-sync-refill-V4M8C8",
+          "device": 16777229,
+          "inode": 627891978,
+          "pid": 59028,
+          "process_birth": "Fri Nov  6 12:52:01 2026",
+          "released": false,
+          "created_ns": 1793940911955484000
+        },
+        {
+          "schema_version": 1,
+          "token": "a381b77016e0b6c751d06ffb32fb457cb56d7bdceb0dd44b4dac11bc13bb3841",
+          "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-sync-preview-QXbFZ0",
+          "device": 16777229,
+          "inode": 627892786,
+          "pid": 59028,
+          "process_birth": "Fri Nov  6 12:52:01 2026",
+          "released": false,
+          "created_ns": 1793940916714388000
+        },
+        {
+          "schema_version": 1,
+          "token": "0a6c69f3880f8236cf4a18645f08716574ebc38824b3f6b95f861b3f47c1c6c8",
+          "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-sync-observation-NAbxP9",
+          "device": 16777229,
+          "inode": 627891834,
+          "pid": 59028,
+          "process_birth": "Fri Nov  6 12:52:01 2026",
+          "released": false,
+          "created_ns": 1793940904750722000
+        },
+        {
+          "schema_version": 1,
+          "token": "0ad4c3a837d69a37695720ee8b0de93eaefa0597e2630f8710f2979185ed0943",
+          "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-sync-regions-tROuHh",
+          "device": 16777229,
+          "inode": 627891943,
+          "pid": 59028,
+          "process_birth": "Fri Nov  6 12:52:01 2026",
+          "released": false,
+          "created_ns": 1793940910241646000
+        },
+        {
+          "schema_version": 1,
+          "token": "84cedd17ffa25a1a720cca2ad36958859cb707d89729779a7e2d7f0af4af0bed",
+          "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-sync-refill-qGvrCc",
+          "device": 16777229,
+          "inode": 627892209,
+          "pid": 59028,
+          "process_birth": "Fri Nov  6 12:52:01 2026",
+          "released": false,
+          "created_ns": 1793940913892175000
+        },
+        {
+          "schema_version": 1,
+          "token": "7fe7583559afd881b30711bf770f34d134921ead743a2510da3418ed53bb7317",
+          "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000/pair-ecc83/native-tmp/auto-kicad-sync-drc-DRpOSY",
+          "device": 16777229,
+          "inode": 627893033,
+          "pid": 59028,
+          "process_birth": "Fri Nov  6 12:52:01 2026",
+          "released": false,
+          "created_ns": 1793940918568473000
+        }
+      ]
+    }
+  ],
+  "input_preparation": {
+    "small_nfc": "Complete prior accepted real source-declaration copy",
+    "populated_sonde": "Complete installed Sonde Xilinx demo",
+    "pair_ecc83": "Complete prior real copy with 6 previously corrected footprint assignments and 15 source links; no native objects removed"
+  },
+  "remaining_gates": [
+    "Actual GUI fill cancellation",
+    "Schematic GUI load/save and configured nested displayed pages",
+    "Saved schematic/PCB GUI qualification",
+    "Select and activate the final qualified local runtime"
+  ],
+  "gui_access": {
+    "id": "dc0eb000-05a3-41af-a976-1ee26004412a",
+    "ok": false,
+    "error": {
+      "code": "permission_denied",
+      "message": "Accessibility permission is required for Orca Computer Use. Run `orca computer permissions` or open Settings > Computer Use, grant Accessibility to Orca Computer Use, then retry.",
+      "data": {
+        "nextSteps": [
+          "Run `orca computer permissions --json`, or `orca computer permissions --id accessibility --json` / `--id screenshots --json` when the message names one missing permission.",
+          "For remote or SSH targets, verify the command is running inside an active graphical desktop session."
+        ]
+      }
+    },
+    "_meta": {
+      "runtimeId": "3c59469b-195f-4073-ba44-7637d79271d4"
+    }
+  },
+  "global_installation": {
+    "changed": false,
+    "current": "versions/0.1.0-1832f2362ccbfa1d",
+    "runtime_sha256": "a7233eef8ae1a131848b02a1aa757c9bad0b24b0a14354e083379604bba952ff"
+  }
+}

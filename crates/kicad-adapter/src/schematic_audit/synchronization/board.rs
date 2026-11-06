@@ -161,56 +161,13 @@ fn net(node: &Node, nets: &BTreeMap<String, String>) -> Result<String, String> {
     }
 }
 
-/// Dimension text serializes the same native BOARD_ITEM; all independent identities stay unique.
+/// Validate UUID spelling after the shared native ownership/uniqueness check.
 fn board_identities(root: &Node) -> Result<BTreeSet<String>, String> {
-    let mut reserved = BTreeSet::new();
-    let mut pending = vec![(root, None::<&str>)];
-    while let Some((node, owned_alias)) = pending.pop() {
-        let Node::List { items: fields, .. } = node else {
-            continue;
-        };
-        let name = fields.first().and_then(|n| atom(n).ok());
-        if name == Some("uuid") {
-            let id = scalar(node)?;
-            if !uuid(id)
-                || owned_alias.is_some_and(|owner| owner != id)
-                || owned_alias.is_none() && !reserved.insert(id.to_owned())
-            {
-                return Err("invalid or duplicate global board UUID".into());
-            }
-            if reserved.len() > 1_000_000 {
-                return Err("board UUID count exceeds bound".into());
-            }
-            continue;
-        }
-        let dimension = if name == Some("dimension")
-            && optional(node, "type")?
-                .map(scalar)
-                .transpose()?
-                .is_some_and(|kind| matches!(kind, "aligned" | "orthogonal" | "leader" | "radial"))
-        {
-            let id = scalar(required(node, "uuid")?)?;
-            let labels = children(node, "gr_text")?;
-            if labels.len() != 1 || scalar(required(labels[0], "uuid")?)? != id {
-                return Err("native dimension must have one exact owned text identity".into());
-            }
-            Some(id)
-        } else {
-            None
-        };
-        for child in fields.iter().filter(|n| matches!(n, Node::List { .. })) {
-            let child_name = tag(child)?;
-            let alias = if dimension.is_some() && child_name == "gr_text" {
-                dimension
-            } else if name == Some("gr_text") && child_name == "uuid" {
-                owned_alias
-            } else {
-                None
-            };
-            pending.push((child, alias));
-        }
+    let identities = crate::live_geometry::board_identity_set(root)?;
+    if identities.iter().any(|id| !uuid(id)) {
+        return Err("invalid or duplicate global board UUID".into());
     }
-    Ok(reserved)
+    Ok(identities)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
