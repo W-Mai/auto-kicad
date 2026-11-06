@@ -5,11 +5,12 @@
 # auto-kicad · KiCad MCP server
 
 [![CI](https://github.com/W-Mai/auto-kicad/actions/workflows/quality.yml/badge.svg)](https://github.com/W-Mai/auto-kicad/actions/workflows/quality.yml)
+[![Release](https://img.shields.io/github/v/release/W-Mai/auto-kicad)](https://github.com/W-Mai/auto-kicad/releases/latest)
 [![License](https://img.shields.io/github/license/W-Mai/auto-kicad)](LICENSE)
 
 Edit KiCad schematics and PCBs from an MCP client. Changes are previewed, checked with KiCad, and applied after approval. Execution records and source backups support recovery when an operation is interrupted.
 
-`auto-kicad` is written in Rust and uses MCP over standard input/output. The verified runtime is **KiCad 10.0.7 on macOS arm64**.
+`auto-kicad` is written in Rust and uses MCP over standard input/output. Native runtime qualification covers **KiCad 10.0.7 on macOS arm64**. Releases also provide Intel Mac, Linux and Windows builds; those builds have no native KiCad acceptance guarantee.
 
 ## What it does
 
@@ -26,23 +27,18 @@ Each operation has limits. Connected-copper edits, replacement compatibility and
 
 ## Install
 
-Download a macOS arm64 package from a successful [CI run](https://github.com/W-Mai/auto-kicad/actions/workflows/quality.yml), or build from source below. [Download and verification instructions](docs/releases.md) cover checksums, the included installer and matching source archives.
-
-Install KiCad with its libraries and bundled Python runtime. Building from source also requires Rust stable, Cargo and Python 3. Run these commands from the repository root:
+Download a matching platform archive from [Releases](https://github.com/W-Mai/auto-kicad/releases/latest), or use the generated installer on macOS and Linux:
 
 ```sh
-env CARGO_INCREMENTAL=0 cargo build --release --locked -p auto-kicad --bin auto-kicad
-python3 scripts/install-local.py target/release/auto-kicad --no-rollback
-python3 scripts/install-local.py --verify
-codex mcp add auto-kicad -- "$HOME/.local/bin/auto-kicad"
-codex mcp get auto-kicad
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/W-Mai/auto-kicad/releases/latest/download/auto-kicad-installer.sh | sh
+codex mcp add auto-kicad -- "$HOME/.cargo/bin/auto-kicad"
 ```
 
-The installer writes a launcher to `~/.local/bin/auto-kicad` and checksum-verified releases to `~/.local/lib/auto-kicad/versions/`. The example keeps one release. Omit `--no-rollback` to retain the previous release for rollback. The installed runtime works without the source checkout or Cargo build directory; KiCad must remain installed.
+Windows archives and the PowerShell installer are available on the same release page. KiCad and its libraries must be installed separately. Platform builds are published after compilation and packaging; native runtime failures may occur. See [downloads and installation](docs/releases.md) for platform details, checksums and corresponding source.
 
-Add `tool_timeout_sec = 600` to the existing `[mcp_servers.auto-kicad]` section in `~/.codex/config.toml`, keeping its `command` entry. Large previews can take several minutes. Start a new Codex session after registering the server. Other MCP clients can launch the same installed executable.
+Set `tool_timeout_sec = 600` in the existing `[mcp_servers.auto-kicad]` section in `~/.codex/config.toml`, keeping its command entry, and start a new session. Other MCP clients can launch the same executable over standard input/output.
 
-Installation status, upgrade, rollback and removal are described in the [installation reference](docs/acceptance/local-delivery-and-exports.md#installation).
+For a source build and the existing macOS installer, see [development](docs/development.md) and the [local installation reference](docs/acceptance/local-delivery-and-exports.md#installation).
 
 ## Use
 

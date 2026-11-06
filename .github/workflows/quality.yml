@@ -2,6 +2,7 @@ name: CI
 
 "on":
   push:
+    branches: ["**"]
   pull_request:
   workflow_dispatch:
 
@@ -37,51 +38,3 @@ jobs:
           python-version: "3.11"
       - name: Run workspace checks
         run: python3 scripts/quality.py
-
-  build:
-    name: MCP binary (macOS arm64)
-    runs-on: macos-15
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
-      - uses: actions/setup-python@v7.1.0
-        with:
-          python-version: "3.11"
-      - name: Build the MCP executable
-        run: cargo build --release --locked --target aarch64-apple-darwin -p auto-kicad --bin auto-kicad
-      - name: Smoke-test and package executable, notices and source
-        run: python3 scripts/package-ci.py --binary target/aarch64-apple-darwin/release/auto-kicad --output dist
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v7.0.2
-        with:
-          name: auto-kicad-macos-arm64
-          path: dist/*
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 14
-
-  release:
-    name: Publish tagged assets
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: [quality, build]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/download-artifact@v8.0.2
-        with:
-          name: auto-kicad-macos-arm64
-          path: dist
-      - name: Publish verified tag assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: |
-          python3 -c 'import json, os; from pathlib import Path; info=json.loads(Path("dist/build-info.json").read_text()); assert os.environ["RELEASE_TAG"] == "v" + info["version"], "tag differs from Cargo package version"'
-          gh release create "$RELEASE_TAG" dist/* --verify-tag --title "$RELEASE_TAG" --notes-file dist/RELEASE_NOTES.md

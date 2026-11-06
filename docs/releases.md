@@ -1,48 +1,61 @@
 # Downloads and builds
 
-CI builds the MCP executable for macOS arm64. KiCad 10.0.7 and its libraries must be installed separately. Build archives are unsigned; the CI smoke check verifies the CLI and MCP tool handshake without starting a native editor. Tool discovery is checked against the capability matrix and runtime backend availability; runners without KiCad omit schematic editing tools. The native CAD qualification is recorded separately in [real-project acceptance](acceptance/final-real-projects.md).
+[GitHub Releases](https://github.com/W-Mai/auto-kicad/releases/latest) provides MCP executables built by cargo-dist. KiCad 10.0.7, its libraries and any native Python dependencies are installed separately. Builds are unsigned. Native KiCad acceptance covers macOS arm64; the additional platform builds are published without runtime acceptance and may fail at startup or when invoking native operations.
 
-## Download
+## Platforms
 
-Open a successful [CI run](https://github.com/W-Mai/auto-kicad/actions/workflows/quality.yml) and download the `auto-kicad-macos-arm64` artifact. GitHub requires sign-in for Actions artifact downloads. Artifacts are retained for 14 days. A pushed `vVERSION` tag publishes the same assets to [Releases](https://github.com/W-Mai/auto-kicad/releases) after quality and build jobs pass; the tag must match the Cargo package version.
+| Platform | Rust target | Archive |
+| --- | --- | --- |
+| macOS Apple Silicon | `aarch64-apple-darwin` | `.tar.xz` |
+| macOS Intel | `x86_64-apple-darwin` | `.tar.xz` |
+| Linux ARM64 | `aarch64-unknown-linux-gnu` | `.tar.xz` |
+| Linux x86_64 | `x86_64-unknown-linux-gnu` | `.tar.xz` |
+| Windows x86_64 | `x86_64-pc-windows-msvc` | `.zip` |
 
-| File | Contents |
+Archives contain `auto-kicad` or `auto-kicad.exe` and license notices. The separate replay utility is built from source and is not part of MCP release archives. Linux builds use GNU libc; the release manifest records platform and linkage requirements. Windows native backends still contain unsupported operations. A successful build does not establish platform feature parity.
+
+## Install
+
+macOS and Linux:
+
+```sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/W-Mai/auto-kicad/releases/latest/download/auto-kicad-installer.sh | sh
+codex mcp add auto-kicad -- "$HOME/.cargo/bin/auto-kicad"
+```
+
+Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/W-Mai/auto-kicad/releases/latest/download/auto-kicad-installer.ps1 | iex"
+codex mcp add auto-kicad -- "$env:USERPROFILE\.cargo\bin\auto-kicad.exe"
+```
+
+The generated installers select the host platform and install under Cargo home. Adjust the MCP executable path when using a custom `CARGO_HOME`. Alternatively, extract the matching archive and configure the client to launch its executable directly. Set `tool_timeout_sec = 600` in the existing Codex MCP configuration section, then start a new session.
+
+The cargo-dist installer installs the executable directly. The separate `scripts/install-local.py` retains its existing macOS arm64 release layout, rollback and verification behavior; it is not the cross-platform release installer.
+
+## Checksums and source
+
+| Asset | Contents |
 | --- | --- |
-| `auto-kicad-VERSION-aarch64-apple-darwin.tar.gz` | Executable, local installer, GPL license, dependency notices, SBOM, build metadata and smoke result |
-| `auto-kicad-VERSION-source.tar.gz` | Corresponding tracked source, vendored Cargo dependencies and offline source configuration |
-| `SHA256SUMS` | SHA-256 checksums for the archives and accompanying records |
-| `build-info.json`, `smoke.json` | Version, source revision, platform and executed CLI/MCP checks |
+| `auto-kicad-TARGET.tar.xz` / `.zip` | MCP executable and license notices |
+| `auto-kicad-installer.sh`, `auto-kicad-installer.ps1` | Generated platform-selecting installers |
+| `sha256.sum`, `*.sha256` | Release checksums |
+| `auto-kicad-source.tar.gz` | Corresponding tracked source and vendored Cargo dependencies |
+| `auto-kicad-dependency-notices.tar.gz` | Dependency notice files, project license and inventory |
+| `dependency-inventory.json` | Locked package versions, licenses, source revision and lockfile digest |
+| `dist-manifest.json` | Release, artifact and linkage metadata |
 
-Keep both archives when redistributing a build. They identify the same source revision. The dependency inventory includes locked versions and license expressions; copied notice files and vendored sources preserve dependency notices.
+Verify a downloaded archive against its checksum. On macOS, `shasum -a 256 ARCHIVE`; on Linux, `sha256sum ARCHIVE`; on Windows, `Get-FileHash ARCHIVE -Algorithm SHA256`. Compare the output with the matching `.sha256` asset or `sha256.sum`.
 
-## Verify and install
-
-Extract the downloaded Actions artifact, then check its contents:
-
-```sh
-shasum -a 256 -c SHA256SUMS
-```
-
-For version 0.1.0, extract and install the executable:
+Keep the matching source and dependency notices available when redistributing a build. Source and inventory records identify the release commit. To rebuild the source archive, install Rust stable, Cargo, CMake and the platform C/C++ build tools, extract it, then run:
 
 ```sh
-tar -xzf auto-kicad-0.1.0-aarch64-apple-darwin.tar.gz
-cd auto-kicad-0.1.0-aarch64-apple-darwin
-python3 scripts/install-local.py ./auto-kicad --no-rollback
-python3 scripts/install-local.py --verify
-codex mcp add auto-kicad -- "$HOME/.local/bin/auto-kicad"
+cargo build --release --locked --offline --no-default-features -p auto-kicad --bin auto-kicad
 ```
 
-Add `tool_timeout_sec = 600` to the existing `[mcp_servers.auto-kicad]` section in `~/.codex/config.toml`, keeping its command entry, then start a new session. The installer adds the macOS KiCad CLI directory to PATH and verifies the packaged inventory against the executable. It needs no Cargo checkout. `--no-rollback` keeps one release; omit it to retain the previous release.
+The included `.cargo/config.toml` resolves dependencies from `vendor/`.
 
-Local installation retains its existing manifest layout for compatibility with older installed releases. New executable metadata and package notices declare GPL-3.0-or-later; the legacy local-installation layout identifier does not restrict the GPL grant. Existing installed payloads and historical records are not rewritten by a source upgrade.
+## Publication
 
-## Rebuild the source archive
-
-Install Rust stable, Cargo, CMake and the Xcode command-line tools. Extract the source archive and run from its root:
-
-```sh
-env CARGO_INCREMENTAL=0 cargo build --release --locked --offline -p auto-kicad --bin auto-kicad
-```
-
-The included `.cargo/config.toml` resolves dependencies from `vendor/`. CI verifies the source archive's dependency graph with a fresh Cargo home in offline mode. This checks source completeness; it does not promise byte-identical compiler output across toolchains.
+A version tag matching the Cargo package version triggers the generated [release workflow](../.github/workflows/release.yml). cargo-dist builds each target on a native runner, creates archives and installers, builds source/license assets and publishes the GitHub Release. Runtime smoke checks, installer execution and native KiCad acceptance do not gate publication. Branch and pull-request quality checks run separately.

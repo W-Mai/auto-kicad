@@ -22,3 +22,7 @@ opt-level = 3
 
 [profile.test.package.sha2]
 opt-level = 3
+
+[profile.dist]
+inherits = "release"
+lto = "thin"

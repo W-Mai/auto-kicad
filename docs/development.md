@@ -64,4 +64,6 @@ It adds a 3 mm Dwgs.User marker at (80, 78) mm on an owned copy, checks approval
 
 ## CI packages
 
-The CI workflow runs workspace quality and a release build on macOS 15 arm64. The build job calls `scripts/package-ci.py` to exercise CLI metadata, MCP discovery/capabilities and install/verify/uninstall outside the source checkout. It packages the executable, license notices and a matching source archive with vendored dependencies, then uploads both with checksums. Only a version-tag push can publish release assets, and that job requires quality and build success. See [downloads and builds](releases.md).
+`dist-workspace.toml` configures cargo-dist 0.33.0 for native macOS ARM64/x86_64, Linux ARM64/x86_64 and Windows x86_64 builds. `dist generate` owns `.github/workflows/release.yml`; use `dist plan` to inspect the build matrix. Shell and PowerShell installers install the MCP executable. Dist disables default features so the separate Unix replay utility is excluded; normal source builds retain the `replay` default feature.
+
+`scripts/package-source.py` adds corresponding tracked source with vendored Cargo dependencies, dependency notice files and a locked inventory to the release. It reuses archive and notice helpers from `scripts/package-ci.py`; the latter remains the separate macOS package/smoke utility. Release publication requires successful builds and packaging, without native runtime acceptance or MCP smoke. Branch and pull-request quality checks run separately. See [downloads and builds](releases.md).

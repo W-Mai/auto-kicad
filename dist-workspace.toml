@@ -1,0 +1,50 @@
+[workspace]
+members = ["cargo:."]
+
+[dist]
+cargo-dist-version = "0.33.0"
+ci = "github"
+hosting = "github"
+installers = ["shell", "powershell"]
+targets = [
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+]
+pr-run-mode = "plan"
+default-features = false
+precise-builds = true
+fail-fast = false
+source-tarball = false
+include = ["THIRD_PARTY_NOTICES.md"]
+install-path = "CARGO_HOME"
+
+[dist.github-custom-runners]
+global = "ubuntu-24.04"
+aarch64-apple-darwin = "macos-15"
+x86_64-apple-darwin = "macos-15-intel"
+aarch64-unknown-linux-gnu = "ubuntu-24.04-arm"
+x86_64-unknown-linux-gnu = "ubuntu-24.04"
+x86_64-pc-windows-msvc = "windows-2022"
+
+[dist.dependencies.apt]
+cmake = "*"
+
+[dist.dependencies.homebrew]
+cmake = "*"
+
+[dist.dependencies.chocolatey]
+cmake = "*"
+
+[[dist.extra-artifacts]]
+artifacts = ["target/dist/auto-kicad-source.tar.gz", "target/dist/auto-kicad-dependency-notices.tar.gz", "target/dist/dependency-inventory.json"]
+build = ["python3", "scripts/package-source.py"]
+
+[dist.binaries]
+aarch64-apple-darwin = ["auto-kicad"]
+x86_64-apple-darwin = ["auto-kicad"]
+aarch64-unknown-linux-gnu = ["auto-kicad"]
+x86_64-unknown-linux-gnu = ["auto-kicad"]
+x86_64-pc-windows-msvc = ["auto-kicad"]
