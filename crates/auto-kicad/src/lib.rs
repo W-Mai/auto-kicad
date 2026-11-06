@@ -841,13 +841,9 @@ fn bind_shadow_operations_with_source(
             }
             OperationKind::AddStraightTrack { intent, .. } => {
                 let mut intent = intent.clone();
-                intent.start_pad = intent
-                    .start_pad
-                    .as_ref()
-                    .map(&rebind_endpoint)
-                    .transpose()?;
-                intent.end_pad = intent.end_pad.as_ref().map(&rebind_endpoint).transpose()?;
-                intent.net = intent.net.as_ref().map(&rebind_net);
+                intent.start_pad = intent.start_pad.as_ref().map(rebind_endpoint).transpose()?;
+                intent.end_pad = intent.end_pad.as_ref().map(rebind_endpoint).transpose()?;
+                intent.net = intent.net.as_ref().map(rebind_net);
                 OperationKind::AddStraightTrack {
                     board: shadow_board.clone(),
                     intent,
@@ -855,7 +851,7 @@ fn bind_shadow_operations_with_source(
             }
             OperationKind::AddThroughVia { intent, .. } => {
                 let mut intent = intent.clone();
-                intent.net = intent.net.as_ref().map(&rebind_net);
+                intent.net = intent.net.as_ref().map(rebind_net);
                 OperationKind::AddThroughVia {
                     board: shadow_board.clone(),
                     intent,
@@ -8926,9 +8922,17 @@ mod tests {
 
     #[tokio::test]
     async fn sdk_initialize_and_tool_list_advertises_verified_schematic_tools() {
-        let client = connected(Server::with_discovery(Arc::new(FakeDiscovery {
-            write_capability: true,
-        })))
+        let client = connected(Server::with_all_services(
+            Arc::new(FakeDiscovery {
+                write_capability: true,
+            }),
+            Arc::new(IpcBoardGraphicsExecutionService::default()),
+            Arc::new(IpcBoardValidationService),
+            Arc::new(FakeSchematic {
+                preview_calls: Arc::default(),
+                commit_calls: Arc::default(),
+            }),
+        ))
         .await;
         let tools = client.list_tools(None).await.expect("tool list");
         let names: Vec<_> = tools.tools.iter().map(|tool| tool.name.clone()).collect();
