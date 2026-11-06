@@ -1,7 +1,7 @@
 {
   "schema_version": "1",
   "product": "auto-kicad",
-  "source_revision": "11b2550",
+  "source_revision": "a2c6e3f",
   "supported_kicad_family": "10.x",
   "advertised_tools": {
     "always": [
@@ -284,9 +284,41 @@
       "status": "deferred",
       "mcp_tools": [],
       "constraints": [
-        "complete GUI/Codex and operation-family lifecycle qualification remain pending; bounded saved-file authoring is recorded separately"
+        "GUI load/save and nested displayed-page qualification remain pending; bounded native authoring and actual Codex client evidence are recorded separately"
       ],
       "evidence": null
+    },
+    {
+      "id": "schematic.bounded_pcb_sync",
+      "domain": "integration",
+      "mode": "write",
+      "status": "verified",
+      "mcp_tools": [
+        "kicad_inspect_project",
+        "kicad_plan_change",
+        "kicad_preview_change",
+        "kicad_commit_change",
+        "kicad_plan_recovery",
+        "kicad_preview_recovery",
+        "kicad_commit_recovery"
+      ],
+      "constraints": [
+        "Closed KiCad 10.0.7 saved schematic hierarchy and same-basename PCB; durable state and server-owned native resources are required",
+        "Explicit UUID/path-bound update, relink, add, same-cardinality replacement, keep, detach and qualified removal; exact source pin/pad membership",
+        "Complete physical partitions, copper assignments, source declarations and typed project netclasses; opt-in independently refilled authored/generated regions",
+        "Custom-rule mutations, incompatible contacts, unsupported affected native forms and repeated physical no-connect pads reject",
+        "128 MiB PCB input, 128 component actions, 4096 selected copper assignments, 4 MiB messages and digest-bound bounded native proof artifacts",
+        "Exact complete differences/DRC/class/region expectations and session-bound approval; guarded per-file publication and fresh recovery preserve later user bytes",
+        "4 observations/4 plans, 900-second expiry and explicit release; unrestricted synchronization and GUI load/save qualification remain deferred"
+      ],
+      "evidence": {
+        "fixture": "Owned routed, zoned, thermal-pad and repeated-hierarchy projects through native stdio and actual Codex",
+        "tested_versions": [
+          "10.0.7"
+        ],
+        "command": "python3 scripts/check-schematic-pcb-sync.py SERVER OWNED_SOURCE OWNED_CONFIG NEW_OUTPUT",
+        "record": "docs/acceptance/schematic-pcb-sync.md"
+      }
     },
     {
       "id": "schematic.pcb_sync",
@@ -295,7 +327,7 @@
       "status": "deferred",
       "mcp_tools": [],
       "constraints": [
-        "requires conflict-aware synchronization policy"
+        "Unrestricted source/template/rule semantics and GUI load/save remain unqualified; bounded saved-document synchronization is recorded separately"
       ],
       "evidence": null
     },

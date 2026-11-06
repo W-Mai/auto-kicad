@@ -1,0 +1,405 @@
+{
+  "schema_version": 1,
+  "scope": "Bounded native source families and actual Codex publication",
+  "passed": true,
+  "product_complete": false,
+  "source_commit": "a2c6e3f88555255d82b64603883cd32a725a597d",
+  "committed_publications": 9,
+  "profiles": {
+    "separated-net": {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-separated-net-codex-1793931981129369000",
+      "receipt_sha256": "8dee5b5f9c7befa2c70458498e582b1dd6325ad0d76e13e75984524ffecc6616",
+      "source_configuration_unchanged": true,
+      "private_roots_empty": true,
+      "owner_cleanup": [
+        ".tmpxP7niE",
+        ".tmpz18vTq"
+      ]
+    },
+    "reused-child": {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-reused-child-codex-1793932167336778000",
+      "receipt_sha256": "00f9af73d5ff8cba242ad78fe17ab0ad9da8aecd03cc47a65efdbe83a39fe914",
+      "source_configuration_unchanged": true,
+      "private_roots_empty": true,
+      "owner_cleanup": [
+        ".tmp95FMeM",
+        ".tmpRvOA0h"
+      ]
+    },
+    "thermal-family": {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-thermal-qfn-codex-1793932022884821000",
+      "receipt_sha256": "d6d8d07bb614f408847a6a63d58bb103340ad964ca51c3c25fe5a36ab79dbb29",
+      "source_configuration_unchanged": true,
+      "private_roots_empty": true,
+      "owner_cleanup": [
+        ".tmp5gOzHn",
+        "auto-kicad-schematic-audit-4RF2cB",
+        "auto-kicad-sync-drc-tR4SDg",
+        ".tmpZIvIXS",
+        "auto-kicad-sync-observation-iaacTQ"
+      ]
+    },
+    "thermal-replace": {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-thermal-replace-codex-1793932316623224000",
+      "receipt_sha256": "d896bd9c66fd6f4457563b9a26fd3eab4daa34f66e05f9384851238164983737",
+      "source_configuration_unchanged": true,
+      "private_roots_empty": true,
+      "owner_cleanup": [
+        ".tmpydo2ci",
+        ".tmp4srxxH"
+      ]
+    },
+    "common-unit": {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-common-unit-release-codex-1793933877450932000",
+      "receipt_sha256": "1b40d61bde3e9f573c8697b5b64702304a7a0a05e79f80854f925d99f4a7312f",
+      "source_configuration_unchanged": true,
+      "private_roots_empty": true,
+      "owner_cleanup": [
+        ".tmpGRu6FV",
+        ".tmp9w6pTw"
+      ]
+    },
+    "hierarchy-thermal-scale": {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-hierarchy-thermal-scale-codex-1793932984943374000",
+      "receipt_sha256": "72ef1ff75faa7d92f509b5306686c3fa87db7a953289b1ac4038f750ef8d9315",
+      "source_configuration_unchanged": true,
+      "private_roots_empty": true,
+      "owner_cleanup": [
+        ".tmpoPoFHP",
+        ".tmpVDfKEU"
+      ]
+    }
+  },
+  "records": [
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-separated-net-codex-1793931981129369000/state/sha256:c9db9e76e63f4931083d53649f26162d4387a962db0c6233f251489b63624ff2/000000000000000000001793932019870962000-7332-0/record.json",
+      "sha256": "c296e6d60ae72e0e98f8cd89f64457b673f1ef2d4a3372cc613f732ab52b2397",
+      "state": "committed"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-separated-net-codex-1793931981129369000/state/sha256:c9db9e76e63f4931083d53649f26162d4387a962db0c6233f251489b63624ff2/000000000000000000001793932067143974000-7332-1/record.json",
+      "sha256": "89dcda66a1b6172fd6d9df7b80186a5601a7152c3c1d4de50b16fdb853135222",
+      "state": "committed"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-reused-child-codex-1793932167336778000/state/sha256:4d32d30e0d806578a1b2e6be2e3acdd762a6898ac1fda403a252f4dd66711d30/000000000000000000001793932219348620000-9510-0/record.json",
+      "sha256": "65da05434056f0c33ede57603586b6bc53bafc46f168fcc83cdb6e58ee8d11d1",
+      "state": "committed"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-reused-child-codex-1793932167336778000/state/sha256:4d32d30e0d806578a1b2e6be2e3acdd762a6898ac1fda403a252f4dd66711d30/000000000000000000001793932267806600000-9510-1/record.json",
+      "sha256": "ecc51a888ebf84a4c0cfe109fe885f1a6c7130469abc04037691623056195743",
+      "state": "committed"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-thermal-qfn-codex-1793932022884821000/state/sha256:e473a14d0318be5870ac59f3e04176d42164a81355db823b709fb8d9c0392f8d/000000000000000000001793932067218310000-7908-0/record.json",
+      "sha256": "ac432670b07201323fb7b9a5fd1f91710a07afe0eb14050c797c0e21e0691a49",
+      "state": "committed"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-thermal-replace-codex-1793932316623224000/state/sha256:eeee1b7b9ba75d673f78baccfab126d293464a0f780523fc9955cb54c91c9a07/000000000000000000001793932354732593000-10802-0/record.json",
+      "sha256": "3680727ea6816cae97a20a83e2c2de9ed6672d9a211807360efbfbc2f60c3b64",
+      "state": "committed"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-common-unit-release-codex-1793933877450932000/state/sha256:c8ae7f824fd4dc8beaf3d663d1816bcaa004cd42b42cfc9f0e1cadd361866ae4/000000000000000000001793933915061052000-40111-0/record.json",
+      "sha256": "c797591b1b0057e76e4f40334a9f1fcee7c68f494752f1811ee325fcb7a7c26b",
+      "state": "committed"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-common-unit-release-codex-1793933877450932000/state/sha256:c8ae7f824fd4dc8beaf3d663d1816bcaa004cd42b42cfc9f0e1cadd361866ae4/000000000000000000001793933947193424000-40111-1/record.json",
+      "sha256": "7a73e609b9457a666b82d3e3b8de59147048d4003628ebc2223566fe684b7751",
+      "state": "committed"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-hierarchy-thermal-scale-codex-1793932984943374000/state/sha256:11264000e2ac057293023a24f0ae85b5b31a8242e889560aa16e3fc40d9d5421/000000000000000000001793933643873392000-17767-0/record.json",
+      "sha256": "ff4a382933afbe32765ffafcdfd466a4e7c72f561e90993ac81d5387bd1a611b",
+      "state": "committed"
+    }
+  ],
+  "durable_artifacts": {
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-separated-net-codex-1793931981129369000/state/sha256:c9db9e76e63f4931083d53649f26162d4387a962db0c6233f251489b63624ff2/000000000000000000001793932019870962000-7332-0/candidate.kicad_pcb": {
+      "sha256": "16b0d72276f3037aa75eb06d28e220c0ccc5805a662865575015a6fea10c7d19",
+      "bytes": 10909
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-separated-net-codex-1793931981129369000/state/sha256:c9db9e76e63f4931083d53649f26162d4387a962db0c6233f251489b63624ff2/000000000000000000001793932019870962000-7332-0/baseline.json": {
+      "sha256": "7c3196393872f9d61f3299f0a444ee37318dd14ed30272302f0658f0922bbf0a",
+      "bytes": 111310
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-separated-net-codex-1793931981129369000/state/sha256:c9db9e76e63f4931083d53649f26162d4387a962db0c6233f251489b63624ff2/000000000000000000001793932019870962000-7332-0/preview.json": {
+      "sha256": "50796e4561d3d6814aa1ac0f69adf080f946aa6ee13b2aab8747028e84cd679b",
+      "bytes": 109709
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-separated-net-codex-1793931981129369000/state/sha256:c9db9e76e63f4931083d53649f26162d4387a962db0c6233f251489b63624ff2/000000000000000000001793932019870962000-7332-0/expectation.json": {
+      "sha256": "cf8c5386908985cf0887d9d479e15222ca615f91f4f2b88eac36ff557f1c3284",
+      "bytes": 2278
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-separated-net-codex-1793931981129369000/state/sha256:c9db9e76e63f4931083d53649f26162d4387a962db0c6233f251489b63624ff2/000000000000000000001793932019870962000-7332-0/source-0.backup": {
+      "sha256": "7974086cc503dc56b270cdfc82f8796923a826d02a7e0fda40298cdabc55257c",
+      "bytes": 10907
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-separated-net-codex-1793931981129369000/state/sha256:c9db9e76e63f4931083d53649f26162d4387a962db0c6233f251489b63624ff2/000000000000000000001793932067143974000-7332-1/candidate.kicad_pcb": {
+      "sha256": "7974086cc503dc56b270cdfc82f8796923a826d02a7e0fda40298cdabc55257c",
+      "bytes": 10907
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-separated-net-codex-1793931981129369000/state/sha256:c9db9e76e63f4931083d53649f26162d4387a962db0c6233f251489b63624ff2/000000000000000000001793932067143974000-7332-1/baseline.json": {
+      "sha256": "d8589512a99d0389252fbec59a8c1237dcfa41fea75607c61c8f858405754e2b",
+      "bytes": 111430
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-separated-net-codex-1793931981129369000/state/sha256:c9db9e76e63f4931083d53649f26162d4387a962db0c6233f251489b63624ff2/000000000000000000001793932067143974000-7332-1/preview.json": {
+      "sha256": "8abe02e87f2bb551cfd5fb7e442bd99170d3bb8259e0588c75bf187a758c0c95",
+      "bytes": 109711
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-separated-net-codex-1793931981129369000/state/sha256:c9db9e76e63f4931083d53649f26162d4387a962db0c6233f251489b63624ff2/000000000000000000001793932067143974000-7332-1/expectation.json": {
+      "sha256": "2ac0f8513093af308d703fa56112da17c45a4dafec054caa88a17c41cb2a3a83",
+      "bytes": 2279
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-separated-net-codex-1793931981129369000/state/sha256:c9db9e76e63f4931083d53649f26162d4387a962db0c6233f251489b63624ff2/000000000000000000001793932067143974000-7332-1/source-0.backup": {
+      "sha256": "16b0d72276f3037aa75eb06d28e220c0ccc5805a662865575015a6fea10c7d19",
+      "bytes": 10909
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-reused-child-codex-1793932167336778000/state/sha256:4d32d30e0d806578a1b2e6be2e3acdd762a6898ac1fda403a252f4dd66711d30/000000000000000000001793932219348620000-9510-0/candidate.kicad_pcb": {
+      "sha256": "4b297b4c64e461ccf6ad08a6faab00b73ec34f14314fb8fdd8ec9f011afdbe1f",
+      "bytes": 15513
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-reused-child-codex-1793932167336778000/state/sha256:4d32d30e0d806578a1b2e6be2e3acdd762a6898ac1fda403a252f4dd66711d30/000000000000000000001793932219348620000-9510-0/baseline.json": {
+      "sha256": "7f260bd15ef5b4150c64180fbec492feeaefd4e11ccced730633302fe5cbb80c",
+      "bytes": 95540
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-reused-child-codex-1793932167336778000/state/sha256:4d32d30e0d806578a1b2e6be2e3acdd762a6898ac1fda403a252f4dd66711d30/000000000000000000001793932219348620000-9510-0/preview.json": {
+      "sha256": "8895fb8e6e06ca9bf8393be2531162675b4a4790614fd8603b949ab3e973a93a",
+      "bytes": 204733
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-reused-child-codex-1793932167336778000/state/sha256:4d32d30e0d806578a1b2e6be2e3acdd762a6898ac1fda403a252f4dd66711d30/000000000000000000001793932219348620000-9510-0/expectation.json": {
+      "sha256": "19409c46b136055bd1ba7f60e89e0e76e94b25b47be0226fcdb602020edabdae",
+      "bytes": 8837
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-reused-child-codex-1793932167336778000/state/sha256:4d32d30e0d806578a1b2e6be2e3acdd762a6898ac1fda403a252f4dd66711d30/000000000000000000001793932219348620000-9510-0/source-0.backup": {
+      "sha256": "56e2930dbb2b282a25baafb802e384c9b30c3f12bdcb096f46b606aaf272c3d4",
+      "bytes": 2379
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-reused-child-codex-1793932167336778000/state/sha256:4d32d30e0d806578a1b2e6be2e3acdd762a6898ac1fda403a252f4dd66711d30/000000000000000000001793932267806600000-9510-1/candidate.kicad_pcb": {
+      "sha256": "5e74f544c57608c8f059451aefb49ba6b4c1ce0ed8e10392201d051d80622ac0",
+      "bytes": 15513
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-reused-child-codex-1793932167336778000/state/sha256:4d32d30e0d806578a1b2e6be2e3acdd762a6898ac1fda403a252f4dd66711d30/000000000000000000001793932267806600000-9510-1/baseline.json": {
+      "sha256": "e80dc74ffc0ab86f2c0e6fbf8bc60c6549888107884ecd9e0cbfed13aaeb32fe",
+      "bytes": 110824
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-reused-child-codex-1793932167336778000/state/sha256:4d32d30e0d806578a1b2e6be2e3acdd762a6898ac1fda403a252f4dd66711d30/000000000000000000001793932267806600000-9510-1/preview.json": {
+      "sha256": "61ea20367728e6fac8b235f7ddd459e99743cdb80656bde93d9c3e0c74d3f7a3",
+      "bytes": 98692
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-reused-child-codex-1793932167336778000/state/sha256:4d32d30e0d806578a1b2e6be2e3acdd762a6898ac1fda403a252f4dd66711d30/000000000000000000001793932267806600000-9510-1/expectation.json": {
+      "sha256": "a3d7ef755acffd032b39371c43ba6665965a8cc8f1c2f4c7d47d876056b0551c",
+      "bytes": 872
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-reused-child-codex-1793932167336778000/state/sha256:4d32d30e0d806578a1b2e6be2e3acdd762a6898ac1fda403a252f4dd66711d30/000000000000000000001793932267806600000-9510-1/source-0.backup": {
+      "sha256": "4b297b4c64e461ccf6ad08a6faab00b73ec34f14314fb8fdd8ec9f011afdbe1f",
+      "bytes": 15513
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-thermal-qfn-codex-1793932022884821000/state/sha256:e473a14d0318be5870ac59f3e04176d42164a81355db823b709fb8d9c0392f8d/000000000000000000001793932067218310000-7908-0/candidate.kicad_pcb": {
+      "sha256": "de322a72a5155cfa52f9ea63f8d96ab7e0de52cca4790111c22efefe136d52e3",
+      "bytes": 33961
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-thermal-qfn-codex-1793932022884821000/state/sha256:e473a14d0318be5870ac59f3e04176d42164a81355db823b709fb8d9c0392f8d/000000000000000000001793932067218310000-7908-0/baseline.json": {
+      "sha256": "91f899d9437a7bf6b92ed6613478fa6ca2cc978b1a02cbf7c20e2f472d616a2f",
+      "bytes": 111989
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-thermal-qfn-codex-1793932022884821000/state/sha256:e473a14d0318be5870ac59f3e04176d42164a81355db823b709fb8d9c0392f8d/000000000000000000001793932067218310000-7908-0/preview.json": {
+      "sha256": "f87384fb20a55d97e1f89c38949aa53712d32d592e223e0b063d2e3393e6894f",
+      "bytes": 261978
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-thermal-qfn-codex-1793932022884821000/state/sha256:e473a14d0318be5870ac59f3e04176d42164a81355db823b709fb8d9c0392f8d/000000000000000000001793932067218310000-7908-0/expectation.json": {
+      "sha256": "7b8eff8f7ab69649e0e0b75704c73b2133c329b6aaa40505d8d82f77fe82b5f9",
+      "bytes": 18510
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-thermal-qfn-codex-1793932022884821000/state/sha256:e473a14d0318be5870ac59f3e04176d42164a81355db823b709fb8d9c0392f8d/000000000000000000001793932067218310000-7908-0/source-0.backup": {
+      "sha256": "62503cbd71b4000b35ffdb43e447504b2b06b53de8f353155dd6068e6e07c79b",
+      "bytes": 12641
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-thermal-replace-codex-1793932316623224000/state/sha256:eeee1b7b9ba75d673f78baccfab126d293464a0f780523fc9955cb54c91c9a07/000000000000000000001793932354732593000-10802-0/candidate.kicad_pcb": {
+      "sha256": "c07b7f3bf94a6d296ec8dc3f125223ad7b4cc2f2f41e1af8f5110e9195df52d6",
+      "bytes": 33864
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-thermal-replace-codex-1793932316623224000/state/sha256:eeee1b7b9ba75d673f78baccfab126d293464a0f780523fc9955cb54c91c9a07/000000000000000000001793932354732593000-10802-0/baseline.json": {
+      "sha256": "858eb8e0e649d74b439efc41e01942b58bb29151b8d51471f3bb61c682a0fb10",
+      "bytes": 179502
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-thermal-replace-codex-1793932316623224000/state/sha256:eeee1b7b9ba75d673f78baccfab126d293464a0f780523fc9955cb54c91c9a07/000000000000000000001793932354732593000-10802-0/preview.json": {
+      "sha256": "bacadc741f32ab09e80307b97ebeda0d3349aa98c33d1a66d02976faf11b26ec",
+      "bytes": 346461
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-thermal-replace-codex-1793932316623224000/state/sha256:eeee1b7b9ba75d673f78baccfab126d293464a0f780523fc9955cb54c91c9a07/000000000000000000001793932354732593000-10802-0/expectation.json": {
+      "sha256": "b7d264b626553d225da987af29204ab828985a61f8eaddb374ef4d3c0510dd6b",
+      "bytes": 16058
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-thermal-replace-codex-1793932316623224000/state/sha256:eeee1b7b9ba75d673f78baccfab126d293464a0f780523fc9955cb54c91c9a07/000000000000000000001793932354732593000-10802-0/source-0.backup": {
+      "sha256": "de322a72a5155cfa52f9ea63f8d96ab7e0de52cca4790111c22efefe136d52e3",
+      "bytes": 33961
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-common-unit-release-codex-1793933877450932000/state/sha256:c8ae7f824fd4dc8beaf3d663d1816bcaa004cd42b42cfc9f0e1cadd361866ae4/000000000000000000001793933915061052000-40111-0/candidate.kicad_pcb": {
+      "sha256": "a995856c29323fa09fea66fd3399b0d7a465ffd44826ea5d2007929c45777c57",
+      "bytes": 20417
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-common-unit-release-codex-1793933877450932000/state/sha256:c8ae7f824fd4dc8beaf3d663d1816bcaa004cd42b42cfc9f0e1cadd361866ae4/000000000000000000001793933915061052000-40111-0/baseline.json": {
+      "sha256": "3ba89910663821bdf48b15fbec3085c4028d0ca110e91d4103e659d92c530127",
+      "bytes": 112521
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-common-unit-release-codex-1793933877450932000/state/sha256:c8ae7f824fd4dc8beaf3d663d1816bcaa004cd42b42cfc9f0e1cadd361866ae4/000000000000000000001793933915061052000-40111-0/preview.json": {
+      "sha256": "17c23359561f2406003211f77115003e04dc04ee5a7c26331f53d9495aff230e",
+      "bytes": 154396
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-common-unit-release-codex-1793933877450932000/state/sha256:c8ae7f824fd4dc8beaf3d663d1816bcaa004cd42b42cfc9f0e1cadd361866ae4/000000000000000000001793933915061052000-40111-0/expectation.json": {
+      "sha256": "6843d8f2b57084c5682a0edbc92fcb6328dcb806e7750f36e9969d2b4361e991",
+      "bytes": 3024
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-common-unit-release-codex-1793933877450932000/state/sha256:c8ae7f824fd4dc8beaf3d663d1816bcaa004cd42b42cfc9f0e1cadd361866ae4/000000000000000000001793933915061052000-40111-0/source-0.backup": {
+      "sha256": "62503cbd71b4000b35ffdb43e447504b2b06b53de8f353155dd6068e6e07c79b",
+      "bytes": 12641
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-common-unit-release-codex-1793933877450932000/state/sha256:c8ae7f824fd4dc8beaf3d663d1816bcaa004cd42b42cfc9f0e1cadd361866ae4/000000000000000000001793933947193424000-40111-1/candidate.kicad_pcb": {
+      "sha256": "2996d47dd6395415fb26b559afe900dc6e7d0dc802a812a50d68804cf5620845",
+      "bytes": 20424
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-common-unit-release-codex-1793933877450932000/state/sha256:c8ae7f824fd4dc8beaf3d663d1816bcaa004cd42b42cfc9f0e1cadd361866ae4/000000000000000000001793933947193424000-40111-1/baseline.json": {
+      "sha256": "8f6a6892e268b1b6f05883871ea9149d656fc99baf2fa879b7858a029de24b89",
+      "bytes": 121556
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-common-unit-release-codex-1793933877450932000/state/sha256:c8ae7f824fd4dc8beaf3d663d1816bcaa004cd42b42cfc9f0e1cadd361866ae4/000000000000000000001793933947193424000-40111-1/preview.json": {
+      "sha256": "225eea90cf115352d337ac784c92dac32cb8d05c6e7312f400679679aa636610",
+      "bytes": 129044
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-common-unit-release-codex-1793933877450932000/state/sha256:c8ae7f824fd4dc8beaf3d663d1816bcaa004cd42b42cfc9f0e1cadd361866ae4/000000000000000000001793933947193424000-40111-1/expectation.json": {
+      "sha256": "0952108f9c1b91f079da4735b77dc52fee0c109da7b1f912bfb62e7a260ec9ea",
+      "bytes": 499
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-common-unit-release-codex-1793933877450932000/state/sha256:c8ae7f824fd4dc8beaf3d663d1816bcaa004cd42b42cfc9f0e1cadd361866ae4/000000000000000000001793933947193424000-40111-1/source-0.backup": {
+      "sha256": "a995856c29323fa09fea66fd3399b0d7a465ffd44826ea5d2007929c45777c57",
+      "bytes": 20417
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-hierarchy-thermal-scale-codex-1793932984943374000/state/sha256:11264000e2ac057293023a24f0ae85b5b31a8242e889560aa16e3fc40d9d5421/000000000000000000001793933643873392000-17767-0/candidate.kicad_pcb": {
+      "sha256": "6634f75486c900f9f5ef161818b3017e4f6be9950c467286213a6ebbc89afc7d",
+      "bytes": 2677727
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-hierarchy-thermal-scale-codex-1793932984943374000/state/sha256:11264000e2ac057293023a24f0ae85b5b31a8242e889560aa16e3fc40d9d5421/000000000000000000001793933643873392000-17767-0/baseline.json": {
+      "sha256": "881d26c8e9fd8bb16ad79d78816a74579e63604e6d3445a918716412d6775c26",
+      "bytes": 122487
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-hierarchy-thermal-scale-codex-1793932984943374000/state/sha256:11264000e2ac057293023a24f0ae85b5b31a8242e889560aa16e3fc40d9d5421/000000000000000000001793933643873392000-17767-0/preview.json": {
+      "sha256": "016511b8b3dffe33db241d01dfe414db85f554f1cf5a55653b9757f17b04784c",
+      "bytes": 18812528
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-hierarchy-thermal-scale-codex-1793932984943374000/state/sha256:11264000e2ac057293023a24f0ae85b5b31a8242e889560aa16e3fc40d9d5421/000000000000000000001793933643873392000-17767-0/expectation.json": {
+      "sha256": "9cae9c4a2faf392ffb9a0f58b0f8fe760e960ce35fd612f9b8b87976093befac",
+      "bytes": 2090900
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-hierarchy-thermal-scale-codex-1793932984943374000/state/sha256:11264000e2ac057293023a24f0ae85b5b31a8242e889560aa16e3fc40d9d5421/000000000000000000001793933643873392000-17767-0/source-0.backup": {
+      "sha256": "56e2930dbb2b282a25baafb802e384c9b30c3f12bdcb096f46b606aaf272c3d4",
+      "bytes": 2379
+    }
+  },
+  "unchanged_synchronization_sources": {
+    "crates/auto-kicad/src/schematic_sync.rs": "bf878210ec773eb269aaee1add367ee763e772bba6a6fa845d5f9326c51f4610",
+    "crates/auto-kicad/src/schematic_sync/preview.rs": "d96f573d917b04ef5bb6e53ccffc13785f1314682e639b02f52ffb6ded2bd0ec",
+    "crates/auto-kicad/src/schematic_sync/response.rs": "0b19b25b5f2780b8ddbe6e1afca5e0ab96edf7a590de22151116450f13be7c89",
+    "crates/kicad-adapter/src/schematic_audit/synchronization.rs": "8f5ab43a52e8aeb11d62105893fc4df002c60dd37ecc7147b30861e322be3d60",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/board.rs": "6533c1f85aa68886c587445c69309709009ba126e6dfcf5187a97ce2cc7e8ed5",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/board/disposition.rs": "f5ccd0fc1fd8a115dead0c6266cc34916b1302c108a50d22b9561d0fae89e38f",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/board/regions.rs": "0fa827da0c0592e301bdaab8212623588af05329a73f196e1275c64e2c163ebf",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/board/replacement.rs": "f849be23fe6ade21975a035bbf4e20c76a2845006e0c916d696611f3d3e5244b",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/drc.rs": "95ff545f280fef669d5a0a150c8b19f34b92808db4c23478d946ac1915a9f097",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/native.rs": "1126f87035fd01b934a4a9ae2490e361d962f21606b1e5d2de0fd472946ff5eb",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/native/project_rules.rs": "5cf631b12754fdb7fb5c1ea7110f28781329337f714be3a6d76620e2511eeddb",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/native/regions.rs": "36f79b21e9e84d86ae7fc638541baf4caa0cb6e7b4e67648c7b4a964c7bd2f55",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/native/serialization.rs": "1a525307eea8938681c73dcd46a95cf47b1885328d430a3ceb592715e1d117f6",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/observation.rs": "9b6557b3b599abe5e9108b19590266fe48849aa514702afc728f9a13200ce0a8",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/observation/project_preview.rs": "15ba7695fd3a05849a4b898a0c8977a8ff875e825c50a73ac8aac80d883d2648",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/observation/project_preview/combined.rs": "8a33c764b038dba07f246193fc159d1708160049dfcf5de200e7d13b47347f15",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/observation/project_preview/combined/publication.rs": "32e3fd149a1a0a1095a72636410c2f088934c5a9385800c3cf845bbf2271a271",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/observation/project_preview/intent.rs": "eddde4fe027c905547339ed7ccaecea1dec97cc47b7005a832c2005aed489712",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/observation/project_preview/publication.rs": "129ed1f0faa2705598940fd893b1f28a6b33297769faecfd8d2f69f378200da8",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/observation/project_preview/recovery.rs": "5e52bfa9a8f064af419829fb437828f2af7d54bf21e031d6ee674aa30b935fef",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/observation/project_preview/recovery/source.rs": "439210863860c11b9fb63a6212d8096287278d7631342a0d1357de2bf7a6b1f5",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/observation/project_preview/source.rs": "abacb6f4d2f5648b038ae74e5508b0082685022b2ad3ca22a2bb95d96079b0cd",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/observation/publication.rs": "eca79346c75fe374d166ea7967c8acf9cda9e16eb16bedf19786c7707915a430",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/observation/publication/recovery.rs": "e801aefc300e1c409b0ec22930f9f10a3e4326675ed662cbad281c01ace30382",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/observation/refill.rs": "d20cb2deb1c184a4aed1c7386939178263b1049f4df08b09d3acbaadf19cfd01",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/project.rs": "17936d1847f4b7c4d0366b600964cfc7d41848525ddbc9ea9fe2b629c56071b1",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/project/json.rs": "cab668dd39cff4dce9b568fcb5877ab7852c59d28dcf22c705b8c7858e9b4c36",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/project/native.rs": "4c1168d9fbc0887a0ca3a31003faaa36c9dcc4575c2fff22f95735c484411f86",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/project/selections.rs": "c185b1d7b13858c7a897c143a9d777cd79a5b47ff0d2b4d6002e9a503b69d1c4",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/source_classes.rs": "a5039d00cd8442be0234f04395892a02a3b839fb6d9e99403c2c812473e3fc7d",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/templates.rs": "8c8114830f529fd1b60b7c2c1d23f3c6955615f02904792a0e90ce3e98a0cf80",
+    "crates/kicad-adapter/src/schematic_audit/synchronization/templates/frame.rs": "7bb189dd74541f022a24ac6cbfe35f640e237903de4eb6dcdf4da922b00441a1"
+  },
+  "runtime_sha256": {
+    "debug": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+    "release_common_pin": "12aa2fe00c10b61f44c62e971778b8313130c7a6ca23e446ce16f3a4a923c35e"
+  },
+  "quality": {
+    "passed": 633,
+    "failed": 0,
+    "ignored": 18,
+    "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-family-quality-1793933339247668000"
+  },
+  "hierarchy_thermal_scale": {
+    "passed": true,
+    "actual_codex": true,
+    "runtime_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+    "elapsed_seconds": 805.6856077910052,
+    "actions": 128,
+    "shared_physical_symbols": 64,
+    "instances": 2,
+    "physical_pads": 6656,
+    "apertures": 1152,
+    "thermal_pad33_instances": 1408,
+    "heatsink_properties": 1408,
+    "native_proof_externalized": true,
+    "differences": 17408,
+    "product_complete": false
+  },
+  "peak_temporary_disk_bytes": null,
+  "peak_temporary_disk_note": "Not sampled for these synthetic profiles; final real-project profiles require resource measurements",
+  "known_refusals": [
+    "Repeated physical NC pads require separate net-name authority",
+    "Same-assignment replacement rejects without a changed authoritative source",
+    "Missing explicit text thickness can cause conservative region authored-definition refusal"
+  ],
+  "harness_failures_retained": [
+    "Local labels need the complete slash-prefixed native net name",
+    "PCB-only preview expectations omit project-only fields",
+    "Thermal replacement continuation explicitly selects a byte-identical project library alias",
+    "The initial 180-second Codex planning request timed out before publication"
+  ],
+  "native_gc_receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-thermal-qfn-codex-1793932022884821000/startup-gc.json",
+  "gui_qualified": false,
+  "final_three_real_project_gate": false,
+  "final_release": {
+    "runtime_sha256": "a01c822de7a4ec0e5288edeef7aabad8826e28e67762233b65f0be5919854b7c",
+    "bytes": 22311840,
+    "actual_codex_discovery": true,
+    "tools": 13,
+    "capability_availability_agrees": true,
+    "final_embedding_receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-family-seal-1793934633764893000/final-embedding.json",
+    "fixed_worker_sha256": {
+      "board": "53a397ce69609dfbde0fc5096ce4b45f9bf464078865ff9c0750feaf27451331",
+      "project": "6595d3bb0a4412611bc0063490bb14e6499e2af19e925f0350c7ba3606a056a9",
+      "template": "22d9e57c24bf65e62278f9ae0394e4d23983e766a5fa606bdfe32b6228a6de33"
+    },
+    "only_catalog_wording_changed_after_common_pin_publication": true
+  },
+  "build_cleanup": {
+    "allocated_build_bytes_reclaimed": 2134249472,
+    "retained_runtime": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-family-seal-1793934633764893000/auto-kicad-qualified-release",
+    "runtime_bytes": 22311840,
+    "runtime_sha256": "a01c822de7a4ec0e5288edeef7aabad8826e28e67762233b65f0be5919854b7c",
+    "fixed_worker_sha256": {
+      "board": "53a397ce69609dfbde0fc5096ce4b45f9bf464078865ff9c0750feaf27451331",
+      "project": "6595d3bb0a4412611bc0063490bb14e6499e2af19e925f0350c7ba3606a056a9",
+      "template": "22d9e57c24bf65e62278f9ae0394e4d23983e766a5fa606bdfe32b6228a6de33"
+    },
+    "both_targets_absent": true,
+    "global_installation_unchanged": true
+  }
+}

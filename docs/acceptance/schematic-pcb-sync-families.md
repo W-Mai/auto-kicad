@@ -1,0 +1,17 @@
+# Native synchronization families
+
+Actual Codex app-server connections qualify 9 durable PCB publications with full source/configuration protection, complete diagnostic expectations and saved native readback. The source/PCB synchronization, template and recovery modules remain byte-identical to the qualified a2c6e3f implementation; capability reporting and the acceptance request budget are verified separately on the current release build.
+
+| Family | Actual publication and independent postconditions |
+| --- | --- |
+| Separated physical nets | Split and merge two disconnected copper islands with explicit copper UUID/net assignments; omitted selections reject and all non-net structure remains exact |
+| Reused physical child | Add 4 independently linked footprints from 2 source placements expanded across 2 sheet instances; one shared source Value change updates exactly 2 placements and preserves 8 pads |
+| Official thermal QFN | Add and explicitly replace the unmodified 52-pad template on an oblique back-side placement; preserve 9 unnumbered apertures, 11 pad 33 instances and 11 heatsink properties |
+| Shared common-pin component | Add one 5-pad component represented by 2 source units, then update its complete Value; both unit records retain common pin 5 and distinct source aliases |
+| Hierarchy/template batch | Expand 64 source symbols across 2 sheet instances and publish 128 thermal templates, 6656 physical pads, 1152 apertures and 1408 heatsink properties; 129 actions reject |
+
+The composed batch returns 17408 complete differences, externalizes the large native proof with a verified digest, and releases that sidecar after consumption/release. The complete debug-build workflow takes 805.69 seconds; individual native commands retain their existing deadlines. Temporary Codex acceptance connections use the documented [600-second per-tool budget](https://learn.chatgpt.com/docs/config-file/config-reference). This does not change global Codex configuration. Release builds are recommended for populated designs. Input/batch qualification remains separate from [the 128 MiB/4096-copper profile](schematic-pcb-sync-scale.md); arbitrary combinations of all maxima are not established.
+
+The thermal add runner commits and validates the footprint, then correctly refuses a replacement with an unchanged library assignment. A separate sealed replacement selects an explicit byte-identical confined library alias and verifies identical starting PCB bytes. Repeated physical no-connect pads remain unsupported; the accepted thermal pad uses a named net. Initial fixture net-name/preview errors and the 180-second client timeout remain recorded. No source protection, physical correspondence, diagnostic identity or approval check is relaxed.
+
+Nine terminal execution records and 45 immutable artifacts are independently rehashed. All source configurations remain exact, no pending marker remains and owned client/native processes stop. A failed driver teardown leaves 3 stale ownership records after its owner removes snapshots; normal production startup removes those 3 records with zero errors or live leases. This intervention is recorded separately from automatic cleanup. Peak temporary disk was not sampled for these synthetic profiles. GUI load/save, GUI cancellation, the complete real-pair lifecycle and the 3 distinct final real-project profiles remain unqualified. [Machine-readable records](schematic-pcb-sync-families.json) retain exact runtime identities, failures, continuations and artifact hashes.

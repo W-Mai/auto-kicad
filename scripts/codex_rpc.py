@@ -20,7 +20,7 @@ class CodexRpc:
         override = 'mcp_servers.auto-kicad.env={' + ','.join(key + '=' + json.dumps(value) for key, value in selected.items()) + '}'
         self.temporary = Path(selected['TMPDIR']).resolve()
         assert self.temporary == Path(log).parent.resolve() / 'runtime-tmp'
-        self.rpc = Rpc(['codex', 'app-server', '--stdio', '-c', 'mcp_servers.auto-kicad.command=' + json.dumps(str(binary)), '-c', 'mcp_servers.auto-kicad.args=[]', '-c', override], env=env, log=log)
+        self.rpc = Rpc(['codex', 'app-server', '--stdio', '-c', 'mcp_servers.auto-kicad.command=' + json.dumps(str(binary)), '-c', 'mcp_servers.auto-kicad.args=[]', '-c', 'mcp_servers.auto-kicad.tool_timeout_sec=600', '-c', override], env=env, log=log)
         self.process = self.rpc.process
         self.log = Path(str(log) + '.codex.jsonl.gz')
         self.cwd = str(Path(log).parent.resolve())

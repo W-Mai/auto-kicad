@@ -3709,6 +3709,15 @@ impl Server {
         &self.capabilities
     }
 
+    fn saved_document_writes_available(&self) -> bool {
+        self.execution_store.is_some()
+            && self
+                .library_settings
+                .as_ref()
+                .as_ref()
+                .is_ok_and(|settings| settings.schematic_available())
+    }
+
     fn capability_matrix(&self) -> Value {
         let mut matrix: Value = serde_json::from_str(CAPABILITY_MATRIX_JSON)
             .expect("embedded capability matrix must be valid JSON");
@@ -3720,6 +3729,13 @@ impl Server {
         if let Some(entries) = matrix["capabilities"].as_array_mut() {
             for entry in entries {
                 if entry["id"] == "project.guarded_recovery" && self.execution_store.is_none() {
+                    entry["status"] = json!("unavailable");
+                }
+                if matches!(
+                    entry["id"].as_str(),
+                    Some("schematic.bounded_pcb_sync" | "release.exports")
+                ) && !self.saved_document_writes_available()
+                {
                     entry["status"] = json!("unavailable");
                 }
                 if let Some(id) = entry["id"].as_str()
@@ -3769,7 +3785,7 @@ impl Server {
                 "advertised_tools": advertised_tools,
                 "native_temporary_cleanup": runtime::owned_temp::last_cleanup(),
                 "artifact_export": {"backend":"closed_saved_documents","native_version":"10.0.7",
-                    "available":self.execution_store.is_some() && self.library_settings.as_ref().as_ref().is_ok_and(|s|s.schematic_available()),
+                    "available":self.saved_document_writes_available(),
                     "formats":["gerber","drill","bom","schematic_pdf"],"schema_version":1,
                     "requires_complete_inventory_expectation":true,"requires_durable_state":true,
                     "output_policy":"new_directory_only","publication":"exclusive_atomic_directory_rename",
@@ -3779,7 +3795,7 @@ impl Server {
                     "maximum_files":512,"maximum_file_bytes":67108864,"maximum_total_bytes":268435456,
                     "maximum_pcb_input_bytes":33554432},
                 "schematic_pcb_sync": {"backend":"closed_saved_documents","native_version":"10.0.7",
-                    "available":self.execution_store.is_some() && self.library_settings.as_ref().as_ref().is_ok_and(|s|s.schematic_available()),
+                    "available":self.saved_document_writes_available(),
                     "requires_complete_difference_and_drc_expectation":true,"requires_durable_state":true,
                     "maximum_observations":4,"maximum_live_plans":4,"session_ttl_seconds":900,
                     "publication_files":["kicad_pro","kicad_pcb"],"project_settings_changes":true,
@@ -9009,6 +9025,22 @@ mod tests {
         let matrix = &structured["data"]["capability_matrix"];
         assert_eq!(matrix["schema_version"], "1");
         assert_eq!(matrix["product"], "auto-kicad");
+        for (id, report) in [
+            ("schematic.bounded_pcb_sync", "schematic_pcb_sync"),
+            ("release.exports", "artifact_export"),
+        ] {
+            let entry = matrix["capabilities"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["id"] == id)
+                .unwrap();
+            assert_eq!(
+                entry["status"] == "verified",
+                structured["data"][report]["available"] == true,
+                "saved-document catalog and runtime availability must agree: {id}"
+            );
+        }
         assert!(
             matrix["capabilities"]
                 .as_array()
