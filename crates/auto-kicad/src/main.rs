@@ -21,7 +21,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
                     "cargo_lock_sha256": hex::encode(Sha256::digest(include_bytes!("../../../Cargo.lock"))),
                     "native_versions": ["10.0.7"],
                     "transport": "mcp-stdio",
-                    "distribution": "local-only"
+                    "distribution": "gpl-3.0-or-later",
+                    "license": env!("CARGO_PKG_LICENSE"),
+                    "repository": env!("CARGO_PKG_REPOSITORY")
                 })
             );
             return Ok(());

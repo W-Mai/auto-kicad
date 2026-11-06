@@ -1,6 +1,6 @@
 # Installation and native exports
 
-The local runtime is verified on macOS arm64 with KiCad 10.0.7. Public binary distribution is not configured.
+The runtime is verified on macOS arm64 with KiCad 10.0.7. [CI packages](../releases.md) distribute the MCP executable under GPL-3.0-or-later with checksums, dependency notices and corresponding source. The local installer supports both source checkouts and matching packaged dependency inventories.
 
 `auto-kicad --version`, `--build-info` and `--help` report runtime metadata. Running the executable without arguments starts the MCP server over standard input/output.
 
@@ -16,7 +16,7 @@ python3 scripts/install-local.py --uninstall
 
 `--prefix` selects an isolated installation root. Existing launcher paths remain stable. Immutable releases under `lib/auto-kicad/versions/` contain the executable, checksums, build information and dependency/license inventory. The atomic `current` symlink selects a release. Installation retains the active and previous release by default; rollback validates checksums before switching. Install with `--no-rollback` to retain only the active verified release and prune older owned releases. This flag accepts an installation source and rejects lifecycle actions; rollback is unavailable until a later installation retains a previous release. The known legacy layout is adopted after exact layout and launcher verification. Optional `--replay-binary` installs the separate replay utility and an existing replay executable is carried forward during upgrade.
 
-Verification rejects changed binaries, launchers, manifests and unrecognized release files. Uninstall preserves modified or unrecognized files, all CAD projects, execution/recovery state and Codex registration. Installation records dependency licenses and a local-only distribution decision; this does not grant public redistribution rights. Interrupted activation uses the atomic pointer as its commit point. Incomplete unregistered installer staging directories are retained for inspection.
+Verification rejects changed binaries, launchers, manifests and unrecognized release files. Uninstall preserves modified or unrecognized files, all CAD projects, execution/recovery state and Codex registration. Installation records dependency licenses. New public build metadata declares GPL-3.0-or-later; older local-only records remain readable. The legacy installation-manifest layout identifier remains unchanged. Interrupted activation uses the atomic pointer as its commit point. Incomplete unregistered installer staging directories are retained for inspection.
 
 An isolated-prefix acceptance installed the accepted region runtime, upgraded to the immutable-owner runtime with `--no-rollback`, verified one retained release and exact executable hashes, repeated the installation idempotently, rejected incompatible lifecycle action combinations, and uninstalled. Project, recovery, user configuration and unrecognized-file sentinels remained byte-identical; the global installation was untouched.
 

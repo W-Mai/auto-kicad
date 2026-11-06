@@ -177,6 +177,23 @@ def sbom(binary, info):
     cargo = root / 'Cargo.lock'
     packages = []
     lock_matches = cargo.is_file() and digest(cargo) == info.get('cargo_lock_sha256')
+    if not lock_matches and (root / 'sbom.json').is_file():
+        packaged = read_json(root / 'sbom.json')
+        if (packaged.get('schema_version') != 1
+                or packaged.get('format') != 'auto-kicad-dependency-inventory'
+                or packaged.get('component') != 'auto-kicad'
+                or packaged.get('version') != info.get('version')
+                or packaged.get('binary_sha256') != digest(binary)
+                or packaged.get('cargo_lock_sha256') != info.get('cargo_lock_sha256')
+                or not packaged.get('dependency_lock_verified')
+                or not packaged.get('dependency_inventory_complete')
+                or not isinstance(packaged.get('packages'), list)
+                or not packaged['packages']
+                or not all(isinstance(p, dict) and isinstance(p.get('name'), str) and p['name']
+                    and isinstance(p.get('version'), str) and p['version']
+                    and (p.get('license') or p.get('license_file')) for p in packaged['packages'])):
+            raise ValueError('packaged dependency inventory differs from executable')
+        return packaged
     if lock_matches:
         try:
             command = subprocess.run(['cargo', 'metadata', '--locked', '--format-version', '1'], cwd=root,
@@ -190,7 +207,8 @@ def sbom(binary, info):
     return dict(schema_version=1, format='auto-kicad-dependency-inventory', component='auto-kicad',
         version=info.get('version'), binary_sha256=digest(binary), packages=packages,
         cargo_lock_sha256=info.get('cargo_lock_sha256'), dependency_lock_verified=lock_matches,
-        dependency_inventory_complete=bool(packages), license_decision='local-only; public distribution is not authorized',
+        dependency_inventory_complete=bool(packages), license_decision=('GPL-3.0-or-later; see LICENSE and THIRD_PARTY_NOTICES.md'
+            if info.get('license') == 'GPL-3.0-or-later' else 'legacy local-only inventory; executable license metadata unavailable'),
         embedded_protocol_notice='KiCad protocol source headers include GPL-3.0-or-later')
 
 

@@ -12,6 +12,10 @@ members = [
 ]
 resolver = "3"
 
+[workspace.package]
+license = "GPL-3.0-or-later"
+repository = "https://github.com/W-Mai/auto-kicad"
+
 # Keep native executable verification fast in development and acceptance builds.
 [profile.dev.package.sha2]
 opt-level = 3

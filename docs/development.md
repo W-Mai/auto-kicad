@@ -61,3 +61,7 @@ env CARGO_TARGET_DIR=/tmp/auto-kicad-target CARGO_INCREMENTAL=0 CARGO_PROFILE_DE
 It adds a 3 mm Dwgs.User marker at (80, 78) mm on an owned copy, checks approval and replay rejection, verifies saved reload, DRC, backups and existing objects, then closes the editors. Saved results and evidence remain in the output directory. The input files stay unchanged.
 
 [Real-project records](acceptance/final-real-projects.md) cover NFC, routed Sonde and ECC83 copies. [GUI records](acceptance/native-gui-qualification.md) cover native saves, nested page labels and actual fill cancellation/recovery. Individual backend and failure tests are listed in the [reference index](README.md); their reported scope applies to that recorded run.
+
+## CI packages
+
+The CI workflow runs workspace quality and a release build on macOS 15 arm64. The build job calls `scripts/package-ci.py` to exercise CLI metadata, MCP discovery/capabilities and install/verify/uninstall outside the source checkout. It packages the executable, license notices and a matching source archive with vendored dependencies, then uploads both with checksums. Only a version-tag push can publish release assets, and that job requires quality and build success. See [downloads and builds](releases.md).

@@ -2,7 +2,10 @@
   <img src="docs/assets/hero.svg" alt="auto-kicad: circuit edits ready for review" width="100%">
 </p>
 
-# auto-kicad
+# auto-kicad · KiCad MCP server
+
+[![CI](https://github.com/W-Mai/auto-kicad/actions/workflows/quality.yml/badge.svg)](https://github.com/W-Mai/auto-kicad/actions/workflows/quality.yml)
+[![License](https://img.shields.io/github/license/W-Mai/auto-kicad)](LICENSE)
 
 Edit KiCad schematics and PCBs from an MCP client. Changes are previewed, checked with KiCad, and applied after approval. Execution records and source backups support recovery when an operation is interrupted.
 
@@ -22,6 +25,8 @@ Edit KiCad schematics and PCBs from an MCP client. Changes are previewed, checke
 Each operation has limits. Connected-copper edits, replacement compatibility and custom rules need particular care; see [usage and restrictions](docs/usage.md) before editing an existing design.
 
 ## Install
+
+Download a macOS arm64 package from a successful [CI run](https://github.com/W-Mai/auto-kicad/actions/workflows/quality.yml), or build from source below. [Download and verification instructions](docs/releases.md) cover checksums, the included installer and matching source archives.
 
 Install KiCad with its libraries and bundled Python runtime. Building from source also requires Rust stable, Cargo and Python 3. Run these commands from the repository root:
 
@@ -67,3 +72,7 @@ Native GUI saves can migrate older schematic caches, annotations and 3D-model re
 - [Reference index](docs/README.md): API contracts and native implementation records.
 - [Real-project acceptance](docs/acceptance/final-real-projects.md): NFC, routed Sonde and ECC83 project copies.
 - [Capability matrix](schemas/capability-matrix.json): operation status, limits and verification records. The same matrix is returned by `kicad_capabilities`.
+
+## License
+
+GPL-3.0-or-later. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md). KiCad and its libraries are installed separately.

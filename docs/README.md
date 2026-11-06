@@ -1,5 +1,7 @@
 # Documentation
 
+[Downloads and builds](releases.md) describes CI artifacts, checksums, installation and corresponding source.
+
 Start with [usage](usage.md) for MCP tools and editing workflows. [Development](development.md) covers builds and tests; [replay](replay.md) covers the separate local playback utility.
 
 The references below describe request fields, limits and native verification. Each acceptance document states the inputs and runtime it verifies. Machine-readable JSON records accompany the acceptance documents.

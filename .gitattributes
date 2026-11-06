@@ -1,0 +1,2 @@
+docs/acceptance/*.json linguist-generated=true
+crates/kicad-ipc/proto/** linguist-vendored=true
