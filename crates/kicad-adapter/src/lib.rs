@@ -2211,31 +2211,27 @@ impl BoardGraphicsExecutor {
                 }
                 None => ipc.create_through_via(board_filename, via),
             };
-            match created {
-                Ok(receipt) => {
-                    if receipt.request_index == 0
-                        && legacy_via_receipt_matches(&receipt.via, via)
-                        && identities.is_none_or(|ids| receipt.source_uuid == ids.via(index))
-                    {
-                        via_receipts.push(receipt);
-                    } else {
-                        return Err(format!(
-                            "created via receipt did not match the request: index={} actual=({}, {}, {}, {}, {:?}) expected=({}, {}, {}, {}, {:?})",
-                            receipt.request_index,
-                            receipt.via.position_x_nm,
-                            receipt.via.position_y_nm,
-                            receipt.via.pad_diameter_nm,
-                            receipt.via.drill_diameter_nm,
-                            receipt.via.net.as_ref().map(|net| net.name.as_str()),
-                            via.position_x_nm,
-                            via.position_y_nm,
-                            via.pad_diameter_nm,
-                            via.drill_diameter_nm,
-                            via.net.as_ref().map(|net| net.name.as_str()),
-                        ));
-                    }
-                }
-                Err(reason) => return Err(reason),
+            let receipt = created?;
+            if receipt.request_index == 0
+                && legacy_via_receipt_matches(&receipt.via, via)
+                && identities.is_none_or(|ids| receipt.source_uuid == ids.via(index))
+            {
+                via_receipts.push(receipt);
+            } else {
+                return Err(format!(
+                    "created via receipt did not match the request: index={} actual=({}, {}, {}, {}, {:?}) expected=({}, {}, {}, {}, {:?})",
+                    receipt.request_index,
+                    receipt.via.position_x_nm,
+                    receipt.via.position_y_nm,
+                    receipt.via.pad_diameter_nm,
+                    receipt.via.drill_diameter_nm,
+                    receipt.via.net.as_ref().map(|net| net.name.as_str()),
+                    via.position_x_nm,
+                    via.position_y_nm,
+                    via.pad_diameter_nm,
+                    via.drill_diameter_nm,
+                    via.net.as_ref().map(|net| net.name.as_str()),
+                ));
             }
         }
         let receipt = NativePcbBatchReceipt {
