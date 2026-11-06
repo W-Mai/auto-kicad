@@ -1,6 +1,6 @@
 # Downloads and builds
 
-CI builds the MCP executable for macOS arm64. KiCad 10.0.7 and its libraries must be installed separately. Build archives are unsigned; the CI smoke check verifies the CLI and MCP tool handshake without starting a native editor. The native CAD qualification is recorded separately in [real-project acceptance](acceptance/final-real-projects.md).
+CI builds the MCP executable for macOS arm64. KiCad 10.0.7 and its libraries must be installed separately. Build archives are unsigned; the CI smoke check verifies the CLI and MCP tool handshake without starting a native editor. Tool discovery is checked against the capability matrix and runtime backend availability; runners without KiCad omit schematic editing tools. The native CAD qualification is recorded separately in [real-project acceptance](acceptance/final-real-projects.md).
 
 ## Download
 

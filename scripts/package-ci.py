@@ -18,13 +18,6 @@ from stdio_rpc import Rpc
 
 ROOT = Path(__file__).resolve().parents[1]
 TARGET = 'aarch64-apple-darwin'
-TOOLS = {
-    'kicad_capabilities', 'kicad_inspect_project', 'kicad_plan_change',
-    'kicad_preview_change', 'kicad_commit_change', 'kicad_validate_project',
-    'kicad_schematic_audit', 'kicad_plan_schematic_change',
-    'kicad_preview_schematic_change', 'kicad_commit_schematic_change',
-    'kicad_plan_recovery', 'kicad_preview_recovery', 'kicad_commit_recovery',
-}
 
 
 def run(command, **kwargs):
@@ -61,6 +54,25 @@ def archive(folder, destination, name, timestamp):
                     tar.addfile(info)
 
 
+def verify_tools(names, data):
+    matrix = json.loads((ROOT / 'schemas/capability-matrix.json').read_text())
+    declared = matrix['advertised_tools']
+    always = set(declared['always'])
+    conditional = set(declared['conditional'])
+    schematic = set(next(entry for entry in matrix['capabilities']
+                         if entry['id'] == 'schematic.fixed_two_resistor_change')['mcp_tools'])
+    recovery = {'kicad_plan_recovery', 'kicad_preview_recovery', 'kicad_commit_recovery'}
+    assert conditional == schematic | recovery, declared
+    statuses = {entry['id']: entry['status'] for entry in data['capabilities']}
+    status = statuses['schematic.fixed_two_resistor_change']
+    assert status in {'verified', 'unavailable'}, status
+    expected = always | recovery | (schematic if status == 'verified' else set())
+    assert names == expected, dict(expected=sorted(expected), actual=sorted(names))
+    assert set(data['advertised_tools']) == names, data['advertised_tools']
+    return dict(schematic_backend_available=status == 'verified',
+                unavailable_optional_tools=sorted((always | conditional) - names))
+
+
 def smoke(binary, output):
     version = run([str(binary), '--version'], timeout=15).strip()
     info = json.loads(run([str(binary), '--build-info'], timeout=15))
@@ -80,14 +92,13 @@ def smoke(binary, output):
                                        clientInfo=dict(name='auto-kicad-ci', version='1')))
             rpc.send(dict(jsonrpc='2.0', method='notifications/initialized'))
             names = {tool['name'] for tool in rpc.call('tools/list', {})['tools']}
-            assert names == TOOLS, names
             response = rpc.call('tools/call', dict(name='kicad_capabilities', arguments={}))
             assert not response.get('isError') and response['structuredContent']['ok'], response
-            assert set(response['structuredContent']['data']['advertised_tools']) == names
+            availability = verify_tools(names, response['structuredContent']['data'])
         finally:
             rpc.close()
     result = dict(passed=True, version=version, tools=sorted(names),
-                  native_editor_started=False, native_cad_acceptance=False)
+                  native_editor_started=False, native_cad_acceptance=False, **availability)
     write_json(output / 'smoke.json', result)
     return info
 
@@ -114,7 +125,7 @@ def package(binary, output):
     info = smoke(binary, output)
     revision = run(['git', 'rev-parse', 'HEAD']).strip()
     timestamp = int(run(['git', 'log', '-1', '--format=%ct']).strip())
-    metadata = json.loads(run(['cargo', 'metadata', '--locked', '--offline', '--format-version', '1']))
+    metadata = json.loads(run(['cargo', 'metadata', '--locked', '--format-version', '1']))
     version = info['version']
     binary_name = f'auto-kicad-{version}-{TARGET}'
     source_name = f'auto-kicad-{version}-source'
