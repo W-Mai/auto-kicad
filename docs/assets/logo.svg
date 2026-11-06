@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">auto-kicad logo</title>
+  <desc id="desc">A letter A drawn as mint circuit traces with two through-hole terminals on a dark rounded square.</desc>
+  <rect x="1" y="1" width="126" height="126" rx="30" fill="#0b1923" stroke="#2b4553" stroke-width="2"/>
+  <path d="M28 96V64L64 28L100 64V96" fill="none" stroke="#b8f5e2" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M28 74H66L88 52" fill="none" stroke="#43d9ac" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#0b1923" stroke="#b8f5e2" stroke-width="5">
+    <circle cx="28" cy="96" r="6"/><circle cx="100" cy="96" r="6"/>
+  </g>
+  <circle cx="88" cy="52" r="5" fill="#0b1923" stroke="#43d9ac" stroke-width="4"/>
+</svg>

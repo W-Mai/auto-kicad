@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/hero.svg" alt="auto-kicad: circuit edits ready for review" width="100%">
+</p>
+
 # auto-kicad
 
 Edit KiCad schematics and PCBs from an MCP client. Changes are previewed, checked with KiCad, and applied after approval. Execution records and source backups support recovery when an operation is interrupted.

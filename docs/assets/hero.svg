@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="440" viewBox="0 0 1280 440" role="img" aria-labelledby="title desc">
+  <title id="title">auto-kicad</title>
+  <desc id="desc">Circuit edits. Ready for review. An MCP interface for KiCad schematics, PCB edits and manufacturing files, illustrated with a circuit board.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1280" y2="440" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#09151f"/><stop offset="1" stop-color="#0b1f27"/>
+    </linearGradient>
+    <radialGradient id="glow">
+      <stop stop-color="#1c695d" stop-opacity=".35"/><stop offset="1" stop-color="#1c695d" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="headline" x1="54" y1="208" x2="622" y2="272" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#b9f5e4"/><stop offset="1" stop-color="#55dcb2"/>
+    </linearGradient>
+    <pattern id="dots" width="20" height="20" patternUnits="userSpaceOnUse">
+      <circle cx="1" cy="1" r=".75" fill="#698a94" fill-opacity=".22"/>
+    </pattern>
+    <clipPath id="frame"><rect width="1280" height="440" rx="24"/></clipPath>
+    <clipPath id="board"><rect x="752" y="78" width="458" height="286" rx="20"/></clipPath>
+  </defs>
+  <g clip-path="url(#frame)">
+    <rect width="1280" height="440" fill="url(#background)"/>
+    <ellipse cx="1042" cy="211" rx="490" ry="370" fill="url(#glow)"/>
+    <path d="M704 0V440" stroke="#7b9a9f" stroke-opacity=".10"/>
+    <path d="M0 408H1280" stroke="#7b9a9f" stroke-opacity=".08"/>
+
+    <g transform="translate(54 44) scale(.375)"><rect x="1" y="1" width="126" height="126" rx="30" fill="#0b1923" stroke="#2b4553" stroke-width="2"/>
+  <path d="M28 96V64L64 28L100 64V96" fill="none" stroke="#b8f5e2" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M28 74H66L88 52" fill="none" stroke="#43d9ac" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#0b1923" stroke="#b8f5e2" stroke-width="5">
+    <circle cx="28" cy="96" r="6"/><circle cx="100" cy="96" r="6"/>
+  </g>
+  <circle cx="88" cy="52" r="5" fill="#0b1923" stroke="#43d9ac" stroke-width="4"/></g>
+    <text x="118" y="77" fill="#eff8f6" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="30" font-weight="600" letter-spacing="-.8">auto-kicad</text>
+    <text x="54" y="190" fill="#f0f8f6" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="64" font-weight="600" letter-spacing="-2.6">Circuit edits.</text>
+    <text x="54" y="264" fill="url(#headline)" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="64" font-weight="600" letter-spacing="-2.6">Ready for review.</text>
+    <text x="57" y="312" fill="#9bb2bc" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="18">Schematics · PCB · Manufacturing files</text>
+
+    <g font-family="'SFMono-Regular', Consolas, 'Liberation Mono', monospace" font-size="11" letter-spacing="1.3">
+      <circle cx="60" cy="377" r="3" fill="#58dfb2"/>
+      <text x="74" y="381" fill="#bad1d4">INSPECT</text>
+      <path d="M155 377H174M169 373L174 377L169 381" fill="none" stroke="#526e7b"/>
+      <text x="190" y="381" fill="#bad1d4">PLAN</text>
+      <path d="M251 377H270M265 373L270 377L265 381" fill="none" stroke="#526e7b"/>
+      <text x="286" y="381" fill="#bad1d4">REVIEW</text>
+      <path d="M361 377H380M375 373L380 377L375 381" fill="none" stroke="#526e7b"/>
+      <text x="396" y="381" fill="#bad1d4">COMMIT</text>
+    </g>
+
+    <rect x="752" y="78" width="458" height="286" rx="20" fill="#102731" stroke="#34515a" stroke-width="1.5"/>
+    <g clip-path="url(#board)">
+      <rect x="752" y="78" width="458" height="286" fill="url(#dots)"/>
+      <g fill="none" stroke="#426878" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M786 186H842L866 210H888"/>
+        <path d="M786 244H824L856 216H888"/>
+        <path d="M850 126H880L920 166"/>
+        <path d="M960 145V112H1060"/>
+        <path d="M988 145V130L1010 108H1104"/>
+        <path d="M1020 192H1074L1102 164H1166"/>
+        <path d="M1020 220H1052L1084 252H1166"/>
+        <path d="M932 273V302L910 324H852"/>
+        <path d="M960 273V324H1040L1056 308H1166"/>
+      </g>
+      <g fill="none" stroke="#6b9aaf" stroke-width="2" stroke-opacity=".6" stroke-linecap="round">
+        <path d="M786 202H828L850 224H888"/>
+        <path d="M1020 234H1044L1074 264H1166"/>
+        <path d="M974 273V310H1034L1050 294H1166"/>
+      </g>
+      <g fill="none" stroke="#55dfb1" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M786 158H842L874 190H888"/>
+        <path d="M1020 178H1058L1096 140H1166"/>
+        <path d="M946 273V288L978 320H1094"/>
+      </g>
+      <g fill="#102731" stroke="#608a97" stroke-width="2">
+        <circle cx="786" cy="186" r="4"/><circle cx="786" cy="202" r="4"/><circle cx="786" cy="244" r="4"/>
+        <circle cx="850" cy="126" r="4"/><circle cx="1060" cy="112" r="4"/><circle cx="1104" cy="108" r="4"/>
+        <circle cx="1166" cy="164" r="4"/><circle cx="1166" cy="252" r="4"/><circle cx="1166" cy="264" r="4"/>
+        <circle cx="1166" cy="294" r="4"/><circle cx="1166" cy="308" r="4"/><circle cx="852" cy="324" r="4"/>
+      </g>
+      <g fill="#102731" stroke="#55dfb1" stroke-width="3">
+        <circle cx="786" cy="158" r="5"/><circle cx="1166" cy="140" r="5"/><circle cx="1094" cy="320" r="5"/>
+      </g>
+      <g fill="#7c9a9c"><rect x="918" y="145" width="6" height="18" rx="2"/><rect x="918" y="255" width="6" height="18" rx="2"/>
+<rect x="932" y="145" width="6" height="18" rx="2"/><rect x="932" y="255" width="6" height="18" rx="2"/>
+<rect x="946" y="145" width="6" height="18" rx="2"/><rect x="946" y="255" width="6" height="18" rx="2"/>
+<rect x="960" y="145" width="6" height="18" rx="2"/><rect x="960" y="255" width="6" height="18" rx="2"/>
+<rect x="974" y="145" width="6" height="18" rx="2"/><rect x="974" y="255" width="6" height="18" rx="2"/>
+<rect x="988" y="145" width="6" height="18" rx="2"/><rect x="988" y="255" width="6" height="18" rx="2"/>
+<rect x="888" y="174" width="18" height="6" rx="2"/><rect x="1002" y="174" width="18" height="6" rx="2"/>
+<rect x="888" y="188" width="18" height="6" rx="2"/><rect x="1002" y="188" width="18" height="6" rx="2"/>
+<rect x="888" y="202" width="18" height="6" rx="2"/><rect x="1002" y="202" width="18" height="6" rx="2"/>
+<rect x="888" y="216" width="18" height="6" rx="2"/><rect x="1002" y="216" width="18" height="6" rx="2"/>
+<rect x="888" y="230" width="18" height="6" rx="2"/><rect x="1002" y="230" width="18" height="6" rx="2"/>
+<rect x="888" y="244" width="18" height="6" rx="2"/><rect x="1002" y="244" width="18" height="6" rx="2"/>
+</g>
+      <rect x="906" y="163" width="96" height="92" rx="8" fill="#0b1923" stroke="#68888d" stroke-width="1.5"/>
+      <rect x="916" y="173" width="76" height="72" rx="4" fill="none" stroke="#2b4653"/>
+      <circle cx="921" cy="178" r="2.5" fill="#84a5aa"/>
+      <g transform="translate(931 184) scale(.36)"><rect x="1" y="1" width="126" height="126" rx="30" fill="#0b1923" stroke="#2b4553" stroke-width="2"/>
+  <path d="M28 96V64L64 28L100 64V96" fill="none" stroke="#b8f5e2" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M28 74H66L88 52" fill="none" stroke="#43d9ac" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#0b1923" stroke="#b8f5e2" stroke-width="5">
+    <circle cx="28" cy="96" r="6"/><circle cx="100" cy="96" r="6"/>
+  </g>
+  <circle cx="88" cy="52" r="5" fill="#0b1923" stroke="#43d9ac" stroke-width="4"/></g>
+      <g fill="#0b1923" stroke="#40616d" stroke-width="2">
+        <circle cx="773" cy="99" r="7"/><circle cx="1189" cy="99" r="7"/>
+        <circle cx="773" cy="343" r="7"/><circle cx="1189" cy="343" r="7"/>
+      </g>
+      <g fill="#86a5af" font-family="'SFMono-Regular', Consolas, monospace" font-size="10" letter-spacing="1">
+        <text x="909" y="151">U1</text><text x="810" y="349">F.Cu</text>
+      </g>
+    </g>
+    <g transform="translate(1127 333)">
+      <rect width="56" height="56" rx="16" fill="#0b1923" stroke="#426b66" stroke-width="1.5"/>
+      <path d="M17 28L25 36L40 20" fill="none" stroke="#73e5bd" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </g>
+  <rect x=".75" y=".75" width="1278.5" height="438.5" rx="23.25" fill="none" stroke="#37515a" stroke-opacity=".5" stroke-width="1.5"/>
+</svg>
