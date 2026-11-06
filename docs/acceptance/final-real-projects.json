@@ -573,7 +573,7 @@
   "owned_recorded_processes_terminal": true,
   "original_projects_unchanged": true,
   "pending_markers_absent": true,
-  "gui_qualification": "Separate open gate; CLI/native readback is not GUI evidence",
+  "gui_qualification": "Qualified with explicit native legacy migrations; native-gui-qualification.md/json",
   "evidence_root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/final-project-gates-1793936831866916000",
   "source_provenance": {
     "baseline": "ba8f1a868b1c78bac8c6c983ed3375044f829361",
@@ -762,13 +762,14 @@
     "populated_sonde": "Complete installed Sonde Xilinx demo",
     "pair_ecc83": "Complete prior real copy with 6 previously corrected footprint assignments and 15 source links; no native objects removed"
   },
-  "remaining_gates": [
-    "Actual GUI fill cancellation",
-    "Schematic GUI load/save and configured nested displayed pages",
-    "Saved schematic/PCB GUI qualification",
-    "Select and activate the final qualified local runtime"
-  ],
-  "gui_access": {
+  "remaining_gates": [],
+  "global_installation": {
+    "active": "0.1.0-d15c5bd75e557d1b",
+    "runtime_sha256": "0e71326ecbd4868cb5c6ea9e11c7f8901580ec458a06940ca142cf062f5c801c",
+    "actual_codex_tools": 13,
+    "no_rollback": true
+  },
+  "earlier_gui_access": {
     "id": "dc0eb000-05a3-41af-a976-1ee26004412a",
     "ok": false,
     "error": {
@@ -785,9 +786,5 @@
       "runtimeId": "3c59469b-195f-4073-ba44-7637d79271d4"
     }
   },
-  "global_installation": {
-    "changed": false,
-    "current": "versions/0.1.0-1832f2362ccbfa1d",
-    "runtime_sha256": "a7233eef8ae1a131848b02a1aa757c9bad0b24b0a14354e083379604bba952ff"
-  }
+  "bounded_product_gates_qualified": true
 }

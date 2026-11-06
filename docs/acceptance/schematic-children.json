@@ -299,7 +299,11 @@
   },
   "fixed_two_resistor_native_stdio_regression": true,
   "gui_launched": false,
-  "remaining": [
+  "remaining": [],
+  "failed_attempts_are_separate": true,
+  "full_product_goal_complete": false,
+  "additional_gui_evidence": "native-gui-qualification.json",
+  "remaining_at_original_native_run": [
     "nested displayed-page GUI qualification",
     "complete schematic operation-family GUI/Codex qualification",
     "schematic-to-PCB synchronization",
@@ -307,6 +311,5 @@
     "installation release and manufacturing exports",
     "final three-real-project gate"
   ],
-  "failed_attempts_are_separate": true,
-  "full_product_goal_complete": false
+  "current_bounded_gui_qualification": true
 }

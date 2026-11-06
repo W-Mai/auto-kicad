@@ -1,0 +1,392 @@
+{
+  "scope": "Bounded native GUI load/save, configured sheet labels, real-pair PCB preservation, actual production fill cancellation and local activation",
+  "qualified": true,
+  "native_version": "10.0.7",
+  "runtime_sha256": "0e71326ecbd4868cb5c6ea9e11c7f8901580ec458a06940ca142cf062f5c801c",
+  "source_commit": "00be841",
+  "evidence_root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/gui-final-1793946169790642000",
+  "schematic": {
+    "schematic_profiles": [
+      {
+        "profile": "component",
+        "actual_gui_save": {
+          "actual_native_menu_save": true,
+          "owned_pid": 50079,
+          "source": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/gui-final-1793946169790642000/component/project/ecc83-pp.kicad_sch",
+          "before": {
+            "mtime_ns": 1793940891711666003,
+            "sha256": "bd51fac340a2dd7c89a01d03ea40796025089642bbb87190261900a0034c5483"
+          },
+          "after": {
+            "mtime_ns": 1793946850351887913,
+            "sha256": "95f9033c5ca4d9f8e08b4e7c840e1b9b37fe67e0658a5440c32f947b85d97467"
+          },
+          "title": "ecc83-pp \u2014 Schematic Editor"
+        },
+        "saved_result_read_by_current_mcp": true,
+        "complete_connections_contacts_units_pages_equal": true,
+        "complete_erc_equal": true,
+        "complete_netlist_equal_with_declared_metadata_order_and_empty_field_label_migrations": true,
+        "unit_count": 26,
+        "page_count": 1,
+        "byte_identical_gui_serialization": false,
+        "legacy_migration_evidence": "verified-gui-save.json"
+      },
+      {
+        "profile": "general",
+        "actual_gui_save": {
+          "actual_native_menu_save": true,
+          "owned_pid": 88913,
+          "source": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/gui-final-1793946169790642000/general/project/ecc83-pp.kicad_sch",
+          "before": {
+            "mtime_ns": 1793279719650347661,
+            "sha256": "d2e7ac9195c293bc49295259dc101a627bf89b7a6c66af05c7166770b7d05bce"
+          },
+          "after": {
+            "mtime_ns": 1793951286471641498,
+            "sha256": "77ebf687bbdfbe3a4908c84578afffdd0ed126129e3e423f8e2c49e0139ad1a1"
+          },
+          "title": "ecc83-pp \u2014 \u539f\u7406\u56fe\u7f16\u8f91\u5668"
+        },
+        "saved_result_read_by_current_mcp": true,
+        "complete_connections_contacts_units_pages_equal": true,
+        "complete_erc_equal": true,
+        "complete_netlist_equal_with_declared_metadata_order_and_empty_field_label_migrations": true,
+        "unit_count": 26,
+        "page_count": 1,
+        "byte_identical_gui_serialization": false,
+        "legacy_migration_evidence": "verified-gui-save.json"
+      },
+      {
+        "profile": "nested",
+        "actual_gui_save": {
+          "actual_native_menu_save": true,
+          "owned_pid": 88913,
+          "source": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/gui-final-1793946169790642000/nested/project/multichannel_mixer.kicad_sch",
+          "before": {
+            "mtime_ns": 1793353586323116626,
+            "sha256": "1bccea4b8fb296b8f60fbafa39511cd462bfb97cab059de847146f75d9ccee00"
+          },
+          "after": {
+            "mtime_ns": 1793951468194711322,
+            "sha256": "e04e936c97979dee3459992c33aa8839b16b5baee61ba75c4e9cc410f690312f"
+          },
+          "title": "multichannel_mixer \u2014 \u539f\u7406\u56fe\u7f16\u8f91\u5668"
+        },
+        "saved_result_read_by_current_mcp": true,
+        "complete_connections_contacts_units_pages_equal": true,
+        "complete_erc_equal": true,
+        "complete_netlist_equal_with_declared_metadata_order_and_empty_field_label_migrations": true,
+        "unit_count": 285,
+        "page_count": 7,
+        "byte_identical_gui_serialization": false,
+        "legacy_migration_evidence": "cache-migration-diff.txt and non-cache-diff.txt"
+      }
+    ],
+    "actual_native_nested_page_labels": [
+      99,
+      100
+    ],
+    "whole_product_complete": false,
+    "legacy_native_migrations": [
+      "20250114 to 20260306; explicit defaults, hidden-property syntax and record ordering",
+      "Native inactive current-project annotation pruning and active Reference fallback refresh",
+      "Legacy cache Datasheet tilde emptying, hidden graphical text removal, body-style metadata and empty synthetic field labels",
+      "Root project settings migration from net_settings4 to5; complete deltas retained"
+    ],
+    "exact_legacy_source_and_library_cache_preservation": false,
+    "production_source_preservation_guards_unchanged": true
+  },
+  "nested_active_source": {
+    "passed": true,
+    "files": [
+      {
+        "file": "nested-leaf.kicad_sch",
+        "active_instance_paths": [
+          "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8/dffc1ca9-f332-4c8b-9a30-d2c5d06274fc/b0e5429a-65ed-4f68-b865-05dcf3f1ae94"
+        ],
+        "all_existing_active_geometry_fields_and_maps_preserved": true
+      },
+      {
+        "file": "channel_strip.kicad_sch",
+        "active_instance_paths": [
+          "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8/28f12a69-adb8-432e-b16f-23450e62f642",
+          "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8/8b945230-5f99-4834-98ec-44a11b86c8e7",
+          "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8/b924e033-d20d-4b7d-8c8a-6be6c11f2802",
+          "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8/eaae7191-0144-4728-9382-3abf6e7a2d68"
+        ],
+        "all_existing_active_geometry_fields_and_maps_preserved": true
+      },
+      {
+        "file": "multichannel_mixer.kicad_sch",
+        "active_instance_paths": [
+          "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8"
+        ],
+        "all_existing_active_geometry_fields_and_maps_preserved": true
+      },
+      {
+        "file": "orphan.kicad_sch",
+        "active_instance_paths": [
+          "/203cc2bf-f6fc-43f5-9a16-6804dfef98e8/dffc1ca9-f332-4c8b-9a30-d2c5d06274fc"
+        ],
+        "all_existing_active_geometry_fields_and_maps_preserved": true
+      }
+    ],
+    "projection": [
+      "Native format conversion and explicit sheet/simulation defaults",
+      "Exact decimal spellings, direct field ordering and trailing annotation UUID-path slash",
+      "Absent blank standard fields at symbol origins use exact native default attributes",
+      "Additional pin UUID records are canonical and complete native pin inventories stay equal",
+      "Only inactive current-project symbol annotations are pruned",
+      "Fallback Reference must be a complete captured annotation value; all active maps remain exact"
+    ],
+    "native_cache_migrations_sealed_separately": true
+  },
+  "pcb": {
+    "passed": true,
+    "actual_gui_save": true,
+    "full_board_syntax_preserved_except_documented_native_changes": true,
+    "native_3d_model_path_migrations": [
+      [
+        "\"${KICAD6_3DMODEL_DIR}/Capacitor_THT.3dshapes/CP_Radial_D10.0mm_P5.00mm.wrl\"",
+        "\"${KICAD10_3DMODEL_DIR}/Capacitor_THT.3dshapes/CP_Radial_D10.0mm_P5.00mm.step\""
+      ],
+      [
+        "\"${KICAD6_3DMODEL_DIR}/Capacitor_THT.3dshapes/C_Disc_D4.7mm_W2.5mm_P5.00mm.wrl\"",
+        "\"${KICAD10_3DMODEL_DIR}/Capacitor_THT.3dshapes/C_Disc_D4.7mm_W2.5mm_P5.00mm.step\""
+      ],
+      [
+        "\"${KICAD6_3DMODEL_DIR}/Resistor_THT.3dshapes/R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal.wrl\"",
+        "\"${KICAD10_3DMODEL_DIR}/Resistor_THT.3dshapes/R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal.step\""
+      ],
+      [
+        "\"${KICAD6_3DMODEL_DIR}/Resistor_THT.3dshapes/R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal.wrl\"",
+        "\"${KICAD10_3DMODEL_DIR}/Resistor_THT.3dshapes/R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal.step\""
+      ],
+      [
+        "\"${KICAD6_3DMODEL_DIR}/Resistor_THT.3dshapes/R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal.wrl\"",
+        "\"${KICAD10_3DMODEL_DIR}/Resistor_THT.3dshapes/R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal.step\""
+      ],
+      [
+        "\"${KICAD6_3DMODEL_DIR}/TerminalBlock_Altech.3dshapes/Altech_AK300_1x02_P5.00mm_45-Degree.wrl\"",
+        "\"${KICAD10_3DMODEL_DIR}/TerminalBlock_Altech.3dshapes/Altech_AK300_1x02_P5.00mm_45-Degree.step\""
+      ],
+      [
+        "\"${KICAD6_3DMODEL_DIR}/TerminalBlock_Altech.3dshapes/Altech_AK300_1x02_P5.00mm_45-Degree.wrl\"",
+        "\"${KICAD10_3DMODEL_DIR}/TerminalBlock_Altech.3dshapes/Altech_AK300_1x02_P5.00mm_45-Degree.step\""
+      ],
+      [
+        "\"${KICAD6_3DMODEL_DIR}/TerminalBlock_Altech.3dshapes/Altech_AK300_1x02_P5.00mm_45-Degree.wrl\"",
+        "\"${KICAD10_3DMODEL_DIR}/TerminalBlock_Altech.3dshapes/Altech_AK300_1x02_P5.00mm_45-Degree.step\""
+      ],
+      [
+        "\"${KICAD6_3DMODEL_DIR}/Resistor_THT.3dshapes/R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal.wrl\"",
+        "\"${KICAD10_3DMODEL_DIR}/Resistor_THT.3dshapes/R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal.step\""
+      ],
+      [
+        "\"${KICAD6_3DMODEL_DIR}/TerminalBlock_Altech.3dshapes/Altech_AK300_1x02_P5.00mm_45-Degree.wrl\"",
+        "\"${KICAD10_3DMODEL_DIR}/TerminalBlock_Altech.3dshapes/Altech_AK300_1x02_P5.00mm_45-Degree.step\""
+      ]
+    ],
+    "footprints": 15,
+    "segments": 59,
+    "arcs": 0,
+    "vias": 0,
+    "projection": [
+      "Direct root and footprint field ordering",
+      "Exact KICAD6 wrl to KICAD10 step paths"
+    ],
+    "original_source_untouched": true
+  },
+  "cancellation": {
+    "passed": true,
+    "actual_native_gui_cancel": true,
+    "source_commit_outcome": "unknown",
+    "attempt_id": "000000000000000000001793953139642893000-10162-0",
+    "post_attempt_fingerprints_verified": true,
+    "open_editor_recovery_rejected": true,
+    "fresh_guarded_recovery": true,
+    "original_execution_history_preserved": true,
+    "exact_pre_commit_board_restored": true,
+    "pending_marker_removed": true,
+    "owned_editor_closed": true,
+    "lock_cleanup_interventions": [
+      {
+        "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/gui-final-1793946169790642000/fill-cancel/project/~CM5_MINIMA_3.kicad_pro.lck",
+        "sha256": "5a6f9f214ffb73a6ffdbfb809d498b06dfeb315ffed5f54774c111636201cef1",
+        "owned_pid": 5282
+      },
+      {
+        "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/gui-final-1793946169790642000/fill-cancel/project/~CM5_MINIMA_3.kicad_pcb.lck",
+        "sha256": "5a6f9f214ffb73a6ffdbfb809d498b06dfeb315ffed5f54774c111636201cef1",
+        "owned_pid": 5282
+      }
+    ],
+    "retained_failed_observer_attempt": "mcp-watcher-failed-commit-succeeded",
+    "automatic_retries": false
+  },
+  "cleanup": {
+    "all_owned_editors_terminal": true,
+    "all_task_gui_scratch_empty": true,
+    "acceptance_owner_registry_cleanup": [
+      {
+        "path": "pcb-pair/runtime-tmp/org.kicad.kicad/instances/pcbnew-10.0",
+        "pid": 2076,
+        "sha256": "d90c22e9cc7308a8c10c70f34f058c8bfa48891142144ad3b0f258efada3ffd8",
+        "terminal_confirmed": true
+      },
+      {
+        "path": "fill-cancel/runtime-tmp/org.kicad.kicad/instances/pcbnew-10.0",
+        "pid": 5282,
+        "sha256": "c42251f8748b7153fc3ac956194b80c2c38689843e3a22ca178b4f0f9a3d0dfe",
+        "terminal_confirmed": true
+      },
+      {
+        "path": "fill-cancel/mcp-watcher-failed-commit-succeeded/runtime-tmp/org.kicad.kicad/instances/pcbnew-10.0",
+        "pid": 7480,
+        "sha256": "400c8361446e5686550b002b913b2f22c31ac16c16794267cb00206861c05455",
+        "terminal_confirmed": true
+      },
+      {
+        "path": "fill-cancel/mcp-refused-unsettled-live/runtime-tmp/org.kicad.kicad/instances/pcbnew-10.0",
+        "pid": 6316,
+        "sha256": "686c361d8c015a287626c0d36dafc876cb888bfac23fd76a4544132c261fafb6",
+        "terminal_confirmed": true
+      },
+      {
+        "path": "fill-cancel/mcp/runtime-tmp/org.kicad.kicad/instances/pcbnew-10.0",
+        "pid": 10485,
+        "sha256": "23573c5e92534c4ceea7373af90f8786502b815f34fb6de66b824bc32276e13b",
+        "terminal_confirmed": true
+      },
+      {
+        "path": "attempt-general-nested/runtime-tmp/org.kicad.kicad/instances/eeschema-10.0",
+        "pid": 88913,
+        "sha256": "2e62ace1bb47b44511337e029e0fa3587bcf16793af81692e4b32416689ccffe",
+        "terminal_confirmed": true
+      }
+    ],
+    "project_settings_checks": [
+      {
+        "profile": "component",
+        "all_existing_board_design_settings_and_netclass_values_preserved": true
+      },
+      {
+        "profile": "general",
+        "all_existing_board_design_settings_and_netclass_values_preserved": true
+      },
+      {
+        "profile": "nested",
+        "all_existing_board_design_settings_and_netclass_values_preserved": true
+      }
+    ],
+    "native_version": "10.0.7",
+    "runtime_sha256": "0e71326ecbd4868cb5c6ea9e11c7f8901580ec458a06940ca142cf062f5c801c",
+    "no_new_build": true,
+    "sole_cargo_target_absent": true,
+    "whole_product_complete": false
+  },
+  "activation": {
+    "before": {
+      "installed": true,
+      "prefix": "/Users/w-mai/.local",
+      "active": "0.1.0-1832f2362ccbfa1d",
+      "previous": null,
+      "releases": [
+        "0.1.0-1832f2362ccbfa1d"
+      ],
+      "verified": true,
+      "build_info": {
+        "cargo_lock_sha256": "244b2894171d4c7cc8f3a67579250f3748f6ae3311ae9c8abc41dc0329aa62d0",
+        "contract_schema": "1",
+        "distribution": "local-only",
+        "native_versions": [
+          "10.0.7"
+        ],
+        "target_arch": "aarch64",
+        "target_os": "macos",
+        "transport": "mcp-stdio",
+        "version": "0.1.0"
+      },
+      "distribution": "local-only"
+    },
+    "installation": {
+      "installed": true,
+      "schema_version": 1,
+      "active": "0.1.0-d15c5bd75e557d1b",
+      "previous": null,
+      "releases": [
+        "0.1.0-d15c5bd75e557d1b"
+      ],
+      "pruned_releases": [
+        "0.1.0-1832f2362ccbfa1d"
+      ]
+    },
+    "verified": {
+      "installed": true,
+      "prefix": "/Users/w-mai/.local",
+      "active": "0.1.0-d15c5bd75e557d1b",
+      "previous": null,
+      "releases": [
+        "0.1.0-d15c5bd75e557d1b"
+      ],
+      "verified": true,
+      "build_info": {
+        "cargo_lock_sha256": "244b2894171d4c7cc8f3a67579250f3748f6ae3311ae9c8abc41dc0329aa62d0",
+        "contract_schema": "1",
+        "distribution": "local-only",
+        "native_versions": [
+          "10.0.7"
+        ],
+        "target_arch": "aarch64",
+        "target_os": "macos",
+        "transport": "mcp-stdio",
+        "version": "0.1.0"
+      },
+      "distribution": "local-only"
+    },
+    "runtime_sha256": "0e71326ecbd4868cb5c6ea9e11c7f8901580ec458a06940ca142cf062f5c801c",
+    "source_commit": "00be841",
+    "all_affected_gui_gates_qualified": true,
+    "native_legacy_cache_migrations_are_not_byte_preservation": true,
+    "retention": "no-rollback",
+    "public_distribution": false
+  },
+  "actual_global_codex_discovery": {
+    "tool_count": 13,
+    "server_override": false,
+    "capabilities_call": true,
+    "capabilities_evidence": "global-codex-capabilities.json"
+  },
+  "retained_evidence_sha256": {
+    "schematic-gui-seal.json": "7efd99c008780c392eed34ec34a0bcd680ef5ecb0bcec181e5e6bda80d6da4f9",
+    "nested/verified-active-source.json": "1b82d84bbbe1808534021ca43c842f1e6cfcf81a4f7d8f078df72162d1e319d2",
+    "nested/configured-page-labels.txt": "c83aa95b3f1e61596da3c43e8a84f3a56d3fa0d5d89c847ac9c51374738dcbf8",
+    "nested/cache-migration-diff.txt": "32838b4f16b86c5ed87a84082ee7f00cdd6699d2a1aa06dbe09e50acd30e87ce",
+    "nested/non-cache-diff.txt": "e527883c334e2d6e8d15bd2ccbdc5f587ca524199319c33315a6245bbf74dcbb",
+    "pcb-pair/verified-gui-save.json": "b777ed518742c1c1b84db6d7106f2a8aa5a862f4b3af9a2a797adbb3b343a293",
+    "fill-cancel/verified-gui-cancellation.json": "8185b16cfa88fd33e783a5e8e3969caee77a6603d1ec2cfc40a085ff661ff37e",
+    "fill-cancel/verified-fresh-recovery.json": "0b729c2e7c59644c3ef26a9a892e7cd006a7d0677650d887adaa7484e0e5b379",
+    "fill-cancel/mcp/actual-gui-cancel.json": "651eff0cf0838e86bfcea238f23c902f1312a56ac7af6420e81093375e703943",
+    "fill-cancel/open-editor-recovery-refusal.json": "7869175edaf671248ecc143c62093c7e310add1b3289c84babc4045fd22cf8f9",
+    "cleanup-and-settings.json": "81b8687b8a3d978102df938a415f4babf8f1d007b2ecd1c51a3cf9d381c07d71",
+    "activation.json": "aad5ad301b2ea0ffce9195fb5cbe1a91a60628d87d142c6b184845952393ccc4",
+    "global-codex-discovery.json": "09128ddd47a33f5ec0e06a88d159cc89b68600b2ef107c0ae52caa3f29b6cdc8",
+    "global-codex-capabilities.json": "847bdfc7fb357d16c391746282dd39861a5b500915f21a9a8f161d926724390b"
+  },
+  "quality": {
+    "passed": 636,
+    "failed": 0,
+    "ignored": 18,
+    "strict_all_target_clippy": true,
+    "source_receipt": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-export-repair-1793942476209547000/qualified-runtime.json",
+    "executable_source_unchanged": true
+  },
+  "limitations": [
+    "Native GUI serialization migrates legacy caches and annotations; exact legacy byte/cache preservation is not qualified",
+    "Screen Recording permission is unavailable; evidence uses actual native Accessibility controls and independent saved native reads",
+    "Acceptance-owner lock and native-registry cleanup is explicit; automatic cleanup is not inferred",
+    "Historical environment-drift unknown attempts retain their backups, journals and strict refusals"
+  ],
+  "all_required_bounded_gates_qualified": true
+}

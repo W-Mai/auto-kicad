@@ -27,6 +27,6 @@ An earlier environment-selection failure remains excluded. Two intent runners co
 
 ## GUI gate
 
-Native GUI loading and saving remain unqualified. A single owned schematic editor reached its setup window, but both Orca and native Apple Events denied assistive access after permission queries reported granted and the user re-enabled the permission. The owned process was closed, its two known stale locks were quarantined after actual Codex lock rejection, and the source copies/originals were verified unchanged. No successful GUI load/save or nested displayed-page verification is claimed. Full schematic, synchronization, release/export and final three-real-project gates remain open.
+[Native GUI qualification](native-gui-qualification.md) records actual component/general/nested loading and saving, configured page labels 99/100, complete native network/ERC and current MCP compatibility. The original permission-denied attempt remains retained separately. Native legacy cache/default/annotation migrations are explicit; exact legacy source/cache byte preservation is not claimed. Every owned editor closes and original accepted inputs remain unchanged.
 
 The client protocol is documented in [Codex App Server](https://learn.chatgpt.com/docs/app-server). The generated schema from the tested local Codex version is retained with the private acceptance evidence.

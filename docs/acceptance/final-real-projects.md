@@ -1,6 +1,6 @@
 # Real-project final profiles
 
-Three complete real-project copies pass actual Codex MCP publication, native verification and guarded recovery on KiCad 10.0.7. Original projects remain byte-identical. These functional profiles are separate from the open GUI qualification and local runtime activation gates.
+Three complete real-project copies pass actual Codex MCP publication, native verification and guarded recovery on KiCad 10.0.7. Original projects remain byte-identical. [GUI qualification and local activation](native-gui-qualification.md) have separate native receipts, complete saved comparisons and actual Codex discovery.
 
 | Profile | Requested change and actual verification |
 | --- | --- |
@@ -32,6 +32,6 @@ One-second samples cover all task-owned profile inputs, results, logs and scratc
 
 The batch removes 2158813184 allocated bytes of debug/release build output; the sole Cargo target is absent. One repaired standalone runtime and small acceptance evidence remain. All recorded owned editor/client processes are absent; active accepted-profile markers are clear. The native editor registry file is retained separately from disposable snapshot scratch. Immutable durable artifacts are independently rehashed (63 unique files).
 
-Actual Accessibility reads still return permission_denied, although the permission query reports granted. The check reads the existing owned Sonde editor and creates no additional window. GUI fill cancellation, schematic load/save, nested displayed-page verification and saved-pair GUI qualification remain open. Global installation is unchanged; public distribution is not performed. The complete product goal remains active.
+The earlier Orca Accessibility refusal remains historical evidence. Native System Events and Accessibility subsequently qualify actual schematic GUI save, nested labels 99/100, real-pair PCB save and production fill cancellation with fresh guarded recovery. All owned editors close; native legacy migrations and acceptance-owner cleanup are explicit. The qualified local runtime is active with one retained release and actual global Codex discovery. See [native GUI qualification](native-gui-qualification.md). Public distribution is not performed.
 
-[Machine-readable evidence](final-real-projects.json) records exact runtime/source identities, artifact digests, outcomes, failures, resource samples and open gates.
+[Machine-readable evidence](final-real-projects.json) records exact runtime/source identities, artifact digests, outcomes, failures, resource samples and linked GUI qualification.
