@@ -620,12 +620,9 @@ impl SynchronizationBoardObservation {
             };
             compiled.bind_templates(&self.board, intent, &templates)?
         };
-        if region_profile
-            && self.rules.bytes.is_some()
-            && (candidate.has_changes() || final_project.is_some())
-        {
+        if self.rules.bytes.is_some() && (candidate.has_changes() || final_project.is_some()) {
             return Err(
-                "region changes with custom rules require separately qualified rule authority"
+                "synchronization changes with custom rules require separately qualified rule authority"
                     .into(),
             );
         }

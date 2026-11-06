@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "passed": true,
+  "product_complete": false,
+  "runtime_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+  "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/populated-zone-sonde-1793930381315846000",
+  "requested_task": "Increase existing GND plane clearance from 0.508 to 0.518 mm and refill",
+  "elapsed_seconds": 74.25541370798601,
+  "footprints": 25,
+  "pads": 108,
+  "route_records": 211,
+  "zones": 1,
+  "changed_zone": "00000000-0000-0000-0000-00005b221ae5",
+  "clearance_nm": {
+    "before": 508000,
+    "after": 518000
+  },
+  "filled_points": {
+    "before": 4483,
+    "after": 4208
+  },
+  "introduced_drc": 0,
+  "resolved_drc": 0,
+  "retained_drc": "One existing lib_footprint_mismatch warning",
+  "complete_unrelated_root_records_preserved": true,
+  "complete_unselected_zone_definition_preserved": true,
+  "same_process_reload": true,
+  "original_project_unchanged": true,
+  "owned_editor_closed": true,
+  "private_roots_empty": true,
+  "independent_seal": {
+    "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/populated-zone-sonde-1793930381315846000/independent-seal.json",
+    "sha256": "3e8041627026f46d687bc07c7b5031b4332ec9ead7dca9fb2ea18b3222cd3cb4"
+  },
+  "artifacts": {
+    "acceptance/stage-0.kicad_pcb": {
+      "sha256": "b81bd56924218558f072fb29526eda7da844c97fdce0c2d92b7211fedcbf909f",
+      "bytes": 329231
+    },
+    "acceptance/request-0.json": {
+      "sha256": "962c979e76d43a8f7e40c8fd550b48907a04639808fd3727141b2f49edfde98e",
+      "bytes": 309
+    },
+    "acceptance/result.kicad_pro": {
+      "sha256": "360cf6921d7ce139ed23006a67c001fc58191623264d25ec7ad72778665deded",
+      "bytes": 17086
+    },
+    "acceptance/result.json": {
+      "sha256": "91c1c583de40291380b76775cd19050d071c185380e6e82643b9a37fefd2a314",
+      "bytes": 2456
+    },
+    "acceptance/owned-editor.json": {
+      "sha256": "a8afd032e05e7d6b26590204bbc6d03beb63bcbedb1d7d7d35d6fa79e3ca806a",
+      "bytes": 67
+    },
+    "acceptance/snapshot.json": {
+      "sha256": "6f168975db71702af884cea41215f2eed7164b30788f21ec538e25ae632bc42a",
+      "bytes": 197
+    },
+    "acceptance/bound.kicad_pcb": {
+      "sha256": "b81bd56924218558f072fb29526eda7da844c97fdce0c2d92b7211fedcbf909f",
+      "bytes": 329231
+    },
+    "acceptance/stdio.log": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    "acceptance/baseline.kicad_pcb": {
+      "sha256": "975f75b4c84da13b35f3241d4728b0185757a4bfb07f23b9a9e13e7c834c7fc6",
+      "bytes": 336182
+    },
+    "acceptance/cleanup.json": {
+      "sha256": "65d6b2cf75e15ae6c13b75aafbf8a95b2de50849a1323a67c1777283ab6e5c3b",
+      "bytes": 104
+    },
+    "acceptance/result.kicad_pcb": {
+      "sha256": "b81bd56924218558f072fb29526eda7da844c97fdce0c2d92b7211fedcbf909f",
+      "bytes": 329231
+    },
+    "acceptance/independent-saved-intent.json": {
+      "sha256": "fa4b9db5a14a0ca35e5786633dfa1dc09255e5a2c459c668568de936683e0b71",
+      "bytes": 425
+    },
+    "acceptance/result-reload.json": {
+      "sha256": "872217f7efff2ddac738ced095c53c149b3627582bef0a13ecf43a7ab4bacd50",
+      "bytes": 633
+    },
+    "acceptance/baseline-refill.json": {
+      "sha256": "900461e9fcaca03a8f8c5e1081e3531ea07fe4cbdf842eec7880843cebdde6bd",
+      "bytes": 633
+    },
+    "acceptance/mcp.json": {
+      "sha256": "8f48da5382a278279691ed1e7348e9baff2aef916c916c869a28892a1c1f8898",
+      "bytes": 7186647
+    },
+    "acceptance/state/sha256:0ab0fe6d6342e95ae6c17dade67c11d72b170c7ff5a43d15ddbe0d108833bb60/000000000000000000001793930436896474000-93121-0/record.json": {
+      "sha256": "cd0245997c868fdbe67d3395a47c4719600cfc586374d6fb25cb1d1be942e08a",
+      "bytes": 47386
+    },
+    "acceptance/state/sha256:0ab0fe6d6342e95ae6c17dade67c11d72b170c7ff5a43d15ddbe0d108833bb60/000000000000000000001793930436896474000-93121-0/source-1.backup": {
+      "sha256": "360cf6921d7ce139ed23006a67c001fc58191623264d25ec7ad72778665deded",
+      "bytes": 17086
+    },
+    "acceptance/state/sha256:0ab0fe6d6342e95ae6c17dade67c11d72b170c7ff5a43d15ddbe0d108833bb60/000000000000000000001793930436896474000-93121-0/source-0.backup": {
+      "sha256": "975f75b4c84da13b35f3241d4728b0185757a4bfb07f23b9a9e13e7c834c7fc6",
+      "bytes": 336182
+    }
+  },
+  "acceptance_owner_native_instance_cleanup": {
+    "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/populated-zone-sonde-1793930381315846000/runtime-tmp/org.kicad.kicad/instances/pcbnew-10.0",
+    "exited_pid": 93073,
+    "sha256": "fc2bf5226b44961660bad20938a064c99f73cc3ee521473aacd958b1039ef57e",
+    "removed_by": "acceptance owner after verified editor exit"
+  },
+  "gui_fill_cancellation_qualified": false,
+  "final_three_project_gate": false
+}

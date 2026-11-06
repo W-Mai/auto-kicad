@@ -1,0 +1,7 @@
+# Populated routed-board zone editing
+
+The installed Sonde Xilinx demo passes actual production MCP modification on a complete owned copy: increase the existing GND plane clearance from 0.508 to 0.518 mm and refill. The result retains 25 footprints, 108 pads, 211 track/via records and the original zone UUID. Filled copper changes from 4483 to 4208 points across 7 polygons. No DRC item is introduced or resolved; the existing library-footprint mismatch warning remains exact. The complete operation takes 74.26 seconds on macOS arm64/KiCad 10.0.7.
+
+Actual planning, shadow preview, approval, durable source commit, same-process saved reload and independent CLI refill all pass. Stale revisions, mixed requests, duplicate previews, invalid approvals, replay and changed-rule evidence reject. An independent CST audit compares every non-zone root record in full and every unselected zone-definition token. Source project files remain byte-identical. This qualifies a useful populated zoned-board edit; GUI fill cancellation and the complete three-project product gate remain open.
+
+The runner closes its owned source/preview editors and removes shadow files. KiCad leaves a small native instance marker naming the exited source PID; the acceptance owner verifies its exact PID bytes and removes that marker. This intervention is recorded separately from server cleanup. Full boards, requests, diagnostics, durable backups and rehashed artifacts remain in [the machine-readable record](populated-zone-edit.json).

@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "passed": true,
+  "product_complete": false,
+  "runtime_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+  "accepted_parent": "0c6481b093d498905425e0053fbebf432fff4de6",
+  "quality": {
+    "passed": 633,
+    "failed": 0,
+    "ignored": 18,
+    "root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/m5-sync-scale-quality-1793929753995092000"
+  },
+  "authority": "Custom-rule presence rejects actual synchronization mutations in every profile; verified no-ops remain read-only",
+  "profiles": [
+    {
+      "name": "prior-metadata-preview",
+      "passed": true,
+      "rejected": false,
+      "profile": "ordinary",
+      "operation": "metadata",
+      "binary_sha256": "e16f10e6902e50bfe130328fd6ab949d758f09ffb4a7375c3e2c72cb26bab8e8",
+      "preserved_inputs": true,
+      "private_roots_empty": true
+    },
+    {
+      "name": "False-empty-metadata",
+      "passed": true,
+      "rejected": true,
+      "profile": "ordinary",
+      "operation": "metadata",
+      "binary_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+      "preserved_inputs": true,
+      "private_roots_empty": true
+    },
+    {
+      "name": "False-empty-net",
+      "passed": true,
+      "rejected": true,
+      "profile": "ordinary",
+      "operation": "net",
+      "binary_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+      "preserved_inputs": true,
+      "private_roots_empty": true
+    },
+    {
+      "name": "False-empty-noop",
+      "passed": true,
+      "rejected": false,
+      "profile": "ordinary",
+      "operation": "noop",
+      "binary_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+      "preserved_inputs": true,
+      "private_roots_empty": true
+    },
+    {
+      "name": "False-empty-project-noop",
+      "passed": true,
+      "rejected": false,
+      "profile": "ordinary",
+      "operation": "project-noop",
+      "binary_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+      "preserved_inputs": true,
+      "private_roots_empty": true
+    },
+    {
+      "name": "False-empty-project-change",
+      "passed": true,
+      "rejected": true,
+      "profile": "ordinary",
+      "operation": "project-change",
+      "binary_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+      "preserved_inputs": true,
+      "private_roots_empty": true
+    },
+    {
+      "name": "False-conditional-metadata",
+      "passed": true,
+      "rejected": true,
+      "profile": "ordinary",
+      "operation": "metadata",
+      "binary_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+      "preserved_inputs": true,
+      "private_roots_empty": true
+    },
+    {
+      "name": "True-conditional-metadata",
+      "passed": true,
+      "rejected": true,
+      "profile": "regions",
+      "operation": "metadata",
+      "binary_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+      "preserved_inputs": true,
+      "private_roots_empty": true
+    },
+    {
+      "name": "True-conditional-net",
+      "passed": true,
+      "rejected": true,
+      "profile": "regions",
+      "operation": "net",
+      "binary_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+      "preserved_inputs": true,
+      "private_roots_empty": true
+    },
+    {
+      "name": "True-conditional-noop",
+      "passed": true,
+      "rejected": false,
+      "profile": "regions",
+      "operation": "noop",
+      "binary_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+      "preserved_inputs": true,
+      "private_roots_empty": true
+    },
+    {
+      "name": "True-conditional-project-noop",
+      "passed": true,
+      "rejected": false,
+      "profile": "regions",
+      "operation": "project-noop",
+      "binary_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+      "preserved_inputs": true,
+      "private_roots_empty": true
+    },
+    {
+      "name": "True-conditional-project-change",
+      "passed": true,
+      "rejected": true,
+      "profile": "regions",
+      "operation": "project-change",
+      "binary_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+      "preserved_inputs": true,
+      "private_roots_empty": true
+    },
+    {
+      "name": "True-empty-metadata",
+      "passed": true,
+      "rejected": true,
+      "profile": "regions",
+      "operation": "metadata",
+      "binary_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+      "preserved_inputs": true,
+      "private_roots_empty": true
+    },
+    {
+      "name": "False-no-rule-publication",
+      "passed": true,
+      "rejected": false,
+      "profile": "ordinary",
+      "operation": "metadata",
+      "binary_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+      "preserved_inputs": true,
+      "private_roots_empty": true
+    },
+    {
+      "name": "True-no-rule-publication",
+      "passed": true,
+      "rejected": false,
+      "profile": "regions",
+      "operation": "metadata",
+      "binary_sha256": "c799388f1e76b714ae51ac819c9c2c5b096b96da091f4e968c1a82a8ce4a9830",
+      "preserved_inputs": true,
+      "private_roots_empty": true
+    }
+  ],
+  "records": [
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-rule-boundary-1793930000845402000/False-no-rule-publication/state/sha256:b748ed12dce97087ed5e8a76522ce67db30f5c3104e2822915edd7465f47b17c/000000000000000000001793930475418298000-93420-0/record.json",
+      "sha256": "92237e3a623dc0e4a9531a607b33e107d51aa76676fca4500c6eef080f332bd1",
+      "state": "committed"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-rule-boundary-1793930000845402000/True-no-rule-publication/state/sha256:d0840db3f52cf401e38d6d0fd76fcc857db103eaf17109389af91556a44472af/000000000000000000001793930859637207000-95816-0/record.json",
+      "sha256": "73e4be22ee870b81fbfe4e323b64037de7bb44d767fb34aa936be1e71eace8e4",
+      "state": "committed"
+    }
+  ],
+  "harness_corrections": [
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-rule-boundary-1793930000845402000/False-empty-project-noop-fixture-failure",
+      "reason": "An empty class-definition edit was invalid; corrected to an exact observed assignment no-op"
+    },
+    {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-rule-boundary-1793930000845402000/True-no-rule-publication-fixture-failure",
+      "reason": "Missing explicit text thickness caused native serialization to add its default; protected authored-definition comparison refused before publication"
+    }
+  ],
+  "region_positive_preparation": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/sync-rule-boundary-1793930000845402000/True-no-rule-publication/fixture-preparation.json",
+  "custom_rule_evaluation_supported": false
+}
