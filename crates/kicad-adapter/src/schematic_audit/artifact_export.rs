@@ -38,6 +38,8 @@ pub struct NativeArtifactExport {
     inputs: Inputs,
     native_inputs: Inputs,
     native_configuration: PathBuf,
+    native_project: FrozenExportProject,
+    project_source_inputs: Inputs,
     files: Vec<ArtifactFile>,
     root: PathBuf,
     tree: BTreeSet<PathBuf>,
@@ -52,6 +54,117 @@ fn input_bytes(input: &InputFile) -> Result<&[u8], String> {
         .bytes
         .as_deref()
         .ok_or_else(|| "required artifact input is missing".into())
+}
+
+/// Native export preferences belong to a worker copy, never the verified source audit.
+struct ExportProject {
+    root: PathBuf,
+    source: PathBuf,
+    preferences: PathBuf,
+    inputs: Inputs,
+    tree: BTreeSet<PathBuf>,
+    preference_seed: InputFile,
+}
+
+#[derive(Serialize)]
+struct FrozenExportProject {
+    root: PathBuf,
+    inputs: Inputs,
+    tree: BTreeSet<PathBuf>,
+}
+
+impl ExportProject {
+    fn copy(
+        original: &Path,
+        source: &Path,
+        destination: &Path,
+        originals: &mut Inputs,
+    ) -> Result<Self, String> {
+        let relative = source.strip_prefix(original).map_err(|e| e.to_string())?;
+        if relative
+            .components()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+        {
+            return Err("export schematic is outside its captured project".into());
+        }
+        fs::create_dir(destination).map_err(|e| e.to_string())?;
+        let source = destination.join(relative);
+        let preferences = source.with_extension("kicad_prl");
+        let mut inputs = Inputs::default();
+        for path in tree_names(original)? {
+            let target = destination.join(path.strip_prefix(original).map_err(|e| e.to_string())?);
+            if path.is_dir() {
+                fs::create_dir_all(&target).map_err(|e| e.to_string())?;
+            } else {
+                write_new(&target, input_bytes(originals.track(&path)?)?)?;
+                if target != preferences {
+                    inputs.track(&target)?;
+                }
+            }
+        }
+        let preference_seed = Inputs::read(&preferences)?;
+        let tree = tree_names(destination)?
+            .into_iter()
+            .filter(|path| path != &preferences)
+            .collect();
+        let result = Self {
+            root: destination.into(),
+            source,
+            preferences,
+            inputs,
+            tree,
+            preference_seed,
+        };
+        originals.verify()?;
+        result.verify()?;
+        Ok(result)
+    }
+
+    fn verify(&self) -> Result<(), String> {
+        self.inputs.verify()?;
+        if tree_names(&self.root)?
+            .into_iter()
+            .filter(|path| path != &self.preferences)
+            .collect::<BTreeSet<_>>()
+            != self.tree
+        {
+            return Err("native export changed the worker project namespace".into());
+        }
+        if let Some(bytes) = Inputs::read(&self.preferences)?.bytes {
+            kicad_checks::validate_json_structure(&bytes).map_err(|e| e.to_string())?;
+            serde_json::from_slice::<BTreeMap<String, Box<RawValue>>>(&bytes)
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    fn freeze(self) -> Result<FrozenExportProject, String> {
+        self.verify()?;
+        let tree = tree_names(&self.root)?;
+        let mut inputs = Inputs::default();
+        for path in &tree {
+            if path.is_file() {
+                inputs.track(path)?;
+            }
+        }
+        let result = FrozenExportProject {
+            root: self.root,
+            inputs,
+            tree,
+        };
+        result.verify()?;
+        Ok(result)
+    }
+}
+
+impl FrozenExportProject {
+    fn verify(&self) -> Result<(), String> {
+        self.inputs.verify()?;
+        if tree_names(&self.root)? != self.tree {
+            return Err("sealed export project namespace changed".into());
+        }
+        Ok(())
+    }
 }
 
 impl SchematicAudit {
@@ -114,8 +227,16 @@ impl SchematicAudit {
         let owned = fs::canonicalize(owner.path()).map_err(|e| e.to_string())?;
         let root = owned.join("artifacts");
         fs::create_dir(&root).map_err(|e| e.to_string())?;
-        let native_root = &observed.inner.policy.project;
-        let native_source = &observed.inner.policy.schematic;
+        let mut project_source_inputs = Inputs::default();
+        let project = ExportProject::copy(
+            &observed.inner.policy.project,
+            &observed.inner.policy.schematic,
+            &owned.join("project"),
+            &mut project_source_inputs,
+        )?;
+        let project_seed = serde_json::json!({"inputs":project.inputs,"tree":project.tree,"local_preferences":project.preference_seed});
+        let native_root = &project.root;
+        let native_source = &project.source;
         let native_board = native_source.with_extension("kicad_pcb");
         // Export commands may persist their own preferences. Seed an isolated configuration from
         // the verified audit without granting mutations to the immutable audit configuration.
@@ -169,7 +290,7 @@ impl SchematicAudit {
         let physical = if pcb_selected {
             inputs.track(Path::new(PYTHON))?;
             Some(manufacturing_inventory(
-                &observed,
+                native_root,
                 &runner,
                 &native_board,
                 &owned,
@@ -234,6 +355,8 @@ impl SchematicAudit {
             self.verify()?;
             inputs.verify()?;
             observed.verify()?;
+            project.verify()?;
+            project_source_inputs.verify()?;
             runner
                 .run_artifact_export(native_root, input, &destination, &recipe)
                 .map_err(|error| {
@@ -245,6 +368,8 @@ impl SchematicAudit {
             self.verify()?;
             inputs.verify()?;
             observed.verify()?;
+            project.verify()?;
+            project_source_inputs.verify()?;
             let paths = if destination.is_dir() {
                 plain_files(&destination)?
             } else {
@@ -278,10 +403,11 @@ impl SchematicAudit {
         for path in config_names(&native_configuration)? {
             native_inputs.track(&path)?;
         }
+        let native_project = project.freeze()?;
         let tree = artifact_tree(&root)?;
         let evidence = serde_json::json!({"schema_version":1,"native_version":"10.0.7","formats":selected,"files":files,
             "source_revision":self.revision(),"source":self.evidence()?,"native_source":observed.evidence()?,
-            "additional_inputs":inputs,"export_configuration_seed":initial_configuration,"export_configuration_final":native_inputs,"physical":physical,"manufacturing_worker_sha256":hash(INVENTORY_WORKER.as_bytes()),
+            "additional_inputs":inputs,"export_configuration_seed":initial_configuration,"export_configuration_final":native_inputs,"export_project_seed":project_seed,"export_project_final":native_project,"export_project_sources":project_source_inputs,"physical":physical,"manufacturing_worker_sha256":hash(INVENTORY_WORKER.as_bytes()),
             "native_execution":runner.execution_context().ok_or("missing artifact native execution context")?.digest(),
             "sheet_count":self.netlist().sheets.len(),"source_files_immutable":true,"publication_authorized":false});
         let evidence_bytes = serde_json::to_vec(&evidence).map_err(|e| e.to_string())?;
@@ -294,6 +420,8 @@ impl SchematicAudit {
             inputs,
             native_inputs,
             native_configuration,
+            native_project,
+            project_source_inputs,
             files,
             root,
             tree,
@@ -356,6 +484,8 @@ impl NativeArtifactExport {
         self.observed.verify()?;
         self.inputs.verify()?;
         self.native_inputs.verify()?;
+        self.native_project.verify()?;
+        self.project_source_inputs.verify()?;
         if config_names(&self.native_configuration)?
             != self.native_inputs.files.keys().cloned().collect::<Vec<_>>()
         {
@@ -481,29 +611,26 @@ fn validate_artifact(
             {
                 return Err("BOM field order differs from the fixed recipe".into());
             }
+            let mut source_flags = BTreeMap::new();
+            for file in &audit.inner.parsed.files {
+                for symbol in &file.symbols {
+                    if source_flags
+                        .insert(
+                            (
+                                file.artifact.relative_path.as_str(),
+                                symbol.source_uuid.as_str(),
+                            ),
+                            (symbol.in_bom.unwrap_or(true), symbol.dnp.unwrap_or(false)),
+                        )
+                        .is_some()
+                    {
+                        return Err("duplicate BOM source-unit identity".into());
+                    }
+                }
+            }
             let mut expected = BTreeSet::new();
-            for component in &audit.netlist().components {
-                let units = audit
-                    .inner
-                    .parsed
-                    .files
-                    .iter()
-                    .flat_map(|file| &file.symbols)
-                    .filter(|symbol| {
-                        Some(symbol.source_uuid.as_str()) == component.symbol_uuid.as_deref()
-                    })
-                    .collect::<Vec<_>>();
-                if units.is_empty() {
-                    return Err("BOM component has no captured source flags".into());
-                }
-                let flags = units
-                    .iter()
-                    .map(|unit| (unit.in_bom.unwrap_or(true), unit.dnp.unwrap_or(false)))
-                    .collect::<BTreeSet<_>>();
-                if flags.len() != 1 {
-                    return Err("BOM units have inconsistent exclusion flags".into());
-                }
-                if flags.contains(&(true, false)) {
+            for component in audit.identities().components() {
+                if component_bom_flags(component, &source_flags)? == (true, false) {
                     expected.insert(component.reference.clone());
                 }
             }
@@ -545,6 +672,29 @@ fn validate_artifact(
         }
     }
     Ok(())
+}
+
+fn component_bom_flags(
+    component: &kicad_schematic::identities::ComponentIdentity,
+    source_flags: &BTreeMap<(&str, &str), (bool, bool)>,
+) -> Result<(bool, bool), String> {
+    let flags = component
+        .units
+        .iter()
+        .map(|unit| {
+            source_flags
+                .get(&(unit.file.as_str(), unit.source_uuid.as_str()))
+                .copied()
+                .ok_or_else(|| "BOM component has no complete captured source flags".to_owned())
+        })
+        .collect::<Result<BTreeSet<_>, String>>()?;
+    if flags.len() != 1 {
+        return Err("BOM units have inconsistent or missing exclusion flags".into());
+    }
+    flags
+        .first()
+        .copied()
+        .ok_or_else(|| "BOM component has no source units".into())
 }
 
 fn csv_rows(text: &str) -> Result<Vec<Vec<String>>, String> {
@@ -706,7 +856,7 @@ fn reject_external_fonts(audit: &SchematicAudit) -> Result<(), String> {
 }
 
 fn manufacturing_inventory(
-    audit: &SchematicAudit,
+    project_root: &Path,
     runner: &NetlistRunner,
     board: &Path,
     root: &Path,
@@ -720,7 +870,7 @@ fn manufacturing_inventory(
         .ok_or("missing manufacturing context")?;
     context.verify().map_err(|e| e.to_string())?;
     let mut command = Command::new(PYTHON);
-    context.apply(&mut command, &audit.inner.policy.project);
+    context.apply(&mut command, project_root);
     command
         .args(["-I", "-B"])
         .arg(&helper)
@@ -772,4 +922,128 @@ fn manufacturing_inventory(
         return Err("native manufacturing inventory differs from captured board".into());
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod project_isolation_tests {
+    use super::*;
+
+    #[test]
+    fn bom_flags_require_every_resolved_unit_in_its_exact_source_file() {
+        use kicad_schematic::identities::{ComponentIdentity, SymbolUnitIdentity};
+        let component = ComponentIdentity {
+            reference: "U1".into(),
+            sheet_path: "/root".into(),
+            units: (1..=3)
+                .map(|unit| SymbolUnitIdentity {
+                    file: "child.kicad_sch".into(),
+                    sheet_path: "/root".into(),
+                    source_uuid: format!("00000000-0000-4000-8000-{unit:012}"),
+                    reference: "U1".into(),
+                    unit,
+                })
+                .collect(),
+        };
+        let mut flags = component
+            .units
+            .iter()
+            .map(|unit| {
+                (
+                    (unit.file.as_str(), unit.source_uuid.as_str()),
+                    (true, false),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        assert_eq!(
+            component_bom_flags(&component, &flags).unwrap(),
+            (true, false)
+        );
+        let key = (
+            component.units[2].file.as_str(),
+            component.units[2].source_uuid.as_str(),
+        );
+        flags.insert(key, (true, true));
+        assert!(component_bom_flags(&component, &flags).is_err());
+        flags.values_mut().for_each(|value| *value = (false, false));
+        assert_eq!(
+            component_bom_flags(&component, &flags).unwrap(),
+            (false, false)
+        );
+        flags.values_mut().for_each(|value| *value = (true, true));
+        assert_eq!(
+            component_bom_flags(&component, &flags).unwrap(),
+            (true, true)
+        );
+        flags.remove(&key);
+        assert!(component_bom_flags(&component, &flags).is_err());
+        flags.insert(key, (true, true));
+        let mut foreign = component.clone();
+        foreign.units[0].file = "other.kicad_sch".into();
+        assert!(component_bom_flags(&foreign, &flags).is_err());
+    }
+
+    #[test]
+    fn export_worker_preferences_are_exactly_scoped_and_every_final_input_is_sealed() {
+        let owner = tempfile::tempdir().unwrap();
+        let original = owner.path().join("original");
+        fs::create_dir(&original).unwrap();
+        let source = original.join("design.kicad_sch");
+        let board = original.join("design.kicad_pcb");
+        let preferences = original.join("design.kicad_prl");
+        fs::write(&source, b"source").unwrap();
+        fs::write(&board, b"board").unwrap();
+        fs::write(&preferences, br#"{"native":0}"#).unwrap();
+        let mut originals = Inputs::default();
+        let project = ExportProject::copy(
+            &original,
+            &source,
+            &owner.path().join("worker"),
+            &mut originals,
+        )
+        .unwrap();
+        fs::write(&project.preferences, br#"{"native":1}"#).unwrap();
+        project.verify().unwrap();
+        originals.verify().unwrap();
+        assert_eq!(fs::read(&preferences).unwrap(), br#"{"native":0}"#);
+        let worker_board = project.root.join("design.kicad_pcb");
+        fs::write(&worker_board, b"changed").unwrap();
+        assert!(project.verify().is_err());
+        fs::write(&worker_board, b"board").unwrap();
+        let unrelated = project.root.join("other.kicad_prl");
+        fs::write(&unrelated, b"{}").unwrap();
+        assert!(project.verify().is_err());
+        fs::remove_file(unrelated).unwrap();
+        fs::write(&project.preferences, b"[]").unwrap();
+        assert!(project.verify().is_err());
+        fs::write(&project.preferences, b"{}").unwrap();
+        #[cfg(unix)]
+        {
+            fs::remove_file(&project.preferences).unwrap();
+            std::os::unix::fs::symlink(&preferences, &project.preferences).unwrap();
+            assert!(project.verify().is_err());
+            fs::remove_file(&project.preferences).unwrap();
+            fs::write(&project.preferences, b"{}").unwrap();
+        }
+        let worker_preferences = project.preferences.clone();
+        let sealed = project.freeze().unwrap();
+        sealed.verify().unwrap();
+        fs::write(worker_preferences, br#"{"later":true}"#).unwrap();
+        assert!(sealed.verify().is_err());
+        fs::write(&board, b"later source edit").unwrap();
+        assert!(originals.verify().is_err());
+        fs::remove_file(&preferences).unwrap();
+        let mut absent_originals = Inputs::default();
+        let initialized = ExportProject::copy(
+            &original,
+            &source,
+            &owner.path().join("initialized"),
+            &mut absent_originals,
+        )
+        .unwrap();
+        assert!(!initialized.preferences.exists());
+        fs::write(&initialized.preferences, b"{}").unwrap();
+        initialized.verify().unwrap();
+        initialized.freeze().unwrap().verify().unwrap();
+        absent_originals.verify().unwrap();
+    }
 }

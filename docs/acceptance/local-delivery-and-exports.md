@@ -57,3 +57,5 @@ python3 scripts/check-artifact-exports.py --binary /path/to/auto-kicad --project
 ```
 
 Add `--codex` to run the same export through the Codex app-server transport. That transport owns child-process cleanup and can remove abandoned private trees; it does not establish automatic server cleanup. Automatic ownership cleanup is qualified separately by the actual native-worker crash test described above.
+
+[Native export isolation and multi-unit BOM qualification](native-export-isolation.md) cover an installed local candidate, actual Codex exports of the complete ECC83 pair, a reused-sheet BOM/PDF, sealed native preferences and persistent source dependency checks after private cleanup. Source-bound exports require a consistent complete component definition; mixed per-unit cached library definitions reject.

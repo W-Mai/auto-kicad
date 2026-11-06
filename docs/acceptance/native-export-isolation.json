@@ -1,0 +1,446 @@
+{
+  "passed": true,
+  "product_complete": false,
+  "source_provenance": {
+    "runtime": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-export-repair-1793942476209547000/auto-kicad-export-batch-release",
+    "runtime_sha256": "0e71326ecbd4868cb5c6ea9e11c7f8901580ec458a06940ca142cf062f5c801c",
+    "baseline_commit": "90048fafbb052766d4ad8a8e5eb3f67cd810907b",
+    "changed_source_sha256": {
+      "crates/kicad-adapter/src/schematic_audit/artifact_export.rs": "0d40e781e0d3e14f6a785d743ba03923a92d723e12835a06b86ac5da8b77326f"
+    },
+    "quality": {
+      "passed": 636,
+      "failed": 0,
+      "ignored": 18,
+      "strict_workspace_all_targets_clippy": true,
+      "format": true,
+      "capability_matrix": true,
+      "log": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-export-repair-1793942476209547000/final-quality.log"
+    }
+  },
+  "package": {
+    "binaries": {
+      "auto-kicad": {
+        "bytes": 22344464,
+        "mode": 493,
+        "sha256": "0e71326ecbd4868cb5c6ea9e11c7f8901580ec458a06940ca142cf062f5c801c"
+      },
+      "auto-kicad-replay": {
+        "bytes": 6339904,
+        "mode": 493,
+        "sha256": "081a23ac8b3a445eb398b02788e71eb8cb8ce0b2738b0a71b8e1cd4dd95f13f5"
+      }
+    },
+    "build_info": {
+      "cargo_lock_sha256": "244b2894171d4c7cc8f3a67579250f3748f6ae3311ae9c8abc41dc0329aa62d0",
+      "contract_schema": "1",
+      "distribution": "local-only",
+      "native_versions": [
+        "10.0.7"
+      ],
+      "target_arch": "aarch64",
+      "target_os": "macos",
+      "transport": "mcp-stdio",
+      "version": "0.1.0"
+    },
+    "distribution": "local-only",
+    "release_id": "0.1.0-d15c5bd75e557d1b",
+    "sbom_sha256": "c62f4185812970ea622162405ae583bd59c38fdd60ad773211fec060307ae35f",
+    "schema_version": 1
+  },
+  "candidate_prefix": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/candidate",
+  "global_installation_unchanged": true,
+  "global_installation": {
+    "pointer": "versions/0.1.0-1832f2362ccbfa1d",
+    "runtime_sha256": "a7233eef8ae1a131848b02a1aa757c9bad0b24b0a14354e083379604bba952ff",
+    "replay_sha256": "081a23ac8b3a445eb398b02788e71eb8cb8ce0b2738b0a71b8e1cd4dd95f13f5"
+  },
+  "dependency_package_count": 140,
+  "successful_profiles": {
+    "real-ecc83": {
+      "result": {
+        "passed": true,
+        "transport": "codex-app-server",
+        "native_version": "10.0.7",
+        "files": [
+          {
+            "bytes": 2471,
+            "format": "manifest",
+            "path": "auto-kicad-manifest.json",
+            "sha256": "7a1e72d737a4eb12d3db019ffc1186ba9a9ec62df56365c59447dc11cc628f59"
+          },
+          {
+            "bytes": 820,
+            "format": "bom",
+            "path": "bom.csv",
+            "sha256": "d32c43418eebf7032170cbc7e6f0e7747e0afb3da1e4e6e2eb99bfcf569fc1b7"
+          },
+          {
+            "bytes": 264,
+            "format": "drill",
+            "path": "drill/ecc83-pp-NPTH.drl",
+            "sha256": "ffdfe0ea0b43b9359f76c55aedf2e26048e33733fdce57af06bce89cbde7f2f3"
+          },
+          {
+            "bytes": 1132,
+            "format": "drill",
+            "path": "drill/ecc83-pp-PTH.drl",
+            "sha256": "e0528caed37f11ee3a0ab9f2c8a91d2214aee223c47eec768e4da3aafab43eea"
+          },
+          {
+            "bytes": 1854,
+            "format": "gerber",
+            "path": "gerber/ecc83-pp-B_Mask.gbr",
+            "sha256": "b227850bfbd0f6e823099c62ae4e5190524413499f321c2a88101ac5cafb3807"
+          },
+          {
+            "bytes": 454,
+            "format": "gerber",
+            "path": "gerber/ecc83-pp-B_Silkscreen.gbr",
+            "sha256": "1e93916803d6ff8b73079f37e42a9d66faddd8d238fe7441a0e1a587d22cc1ea"
+          },
+          {
+            "bytes": 687,
+            "format": "gerber",
+            "path": "gerber/ecc83-pp-Edge_Cuts.gbr",
+            "sha256": "1a541c5dbe8140f9c7adfdf618af14dfa45e8370c95d491ad1dc3c0b032b7f21"
+          },
+          {
+            "bytes": 1854,
+            "format": "gerber",
+            "path": "gerber/ecc83-pp-F_Mask.gbr",
+            "sha256": "77c00d77e619a4343bcfa41bbf1c1f31f532071e2f3cc4dc9801d77f4887e7f6"
+          },
+          {
+            "bytes": 29460,
+            "format": "gerber",
+            "path": "gerber/ecc83-pp-F_Silkscreen.gbr",
+            "sha256": "d53b21b0a82d8ca8b52204c8edcf81859b1632101263ae03a042e6925ef28e23"
+          },
+          {
+            "bytes": 51793,
+            "format": "gerber",
+            "path": "gerber/ecc83-pp-bottom_cu.gbr",
+            "sha256": "ddd7961ba0886c41beb54bbda92836dfef62d7279fb5982ccbdc681dcc98f7d6"
+          },
+          {
+            "bytes": 2568,
+            "format": "gerber",
+            "path": "gerber/ecc83-pp-job.gbrjob",
+            "sha256": "50d93ce2817386aceac7ccddf0da8c38c24a3f823210f9e36f8d2607c2431fca"
+          },
+          {
+            "bytes": 3140,
+            "format": "gerber",
+            "path": "gerber/ecc83-pp-top_cu.gbr",
+            "sha256": "b2c212a37f17c22a3818ab0d066daff90112dab9337978ecd95afa5b0a4a1dea"
+          },
+          {
+            "bytes": 105572,
+            "format": "schematic_pdf",
+            "path": "schematic.pdf",
+            "sha256": "7c7928c89ab606418b8ac5784b4bcbcf00a891644b05105f4cd0a5dfb9e32dc4"
+          }
+        ],
+        "output_dir": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/project/manufacturing",
+        "original_inputs_unchanged": true
+      },
+      "bom_rows": 11,
+      "pdf_pages": 1,
+      "source_dependencies_verified_after_private_cleanup": 33,
+      "native_worker_seed_cad_unchanged": true,
+      "native_worker_local_preferences_initialized": true,
+      "physical_holes": 33,
+      "record": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/state/artifact-exports/caab003e5f9c5b5791ab59f908c02a9e7772e475fca875bad52e96269930e791/record.json",
+      "native_evidence": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/state/artifact-exports/caab003e5f9c5b5791ab59f908c02a9e7772e475fca875bad52e96269930e791/native-evidence.json",
+      "lifecycle": {
+        "owned_descendants": {
+          "13600": "Fri Nov  6 13:38:08 2026",
+          "13602": "Fri Nov  6 13:38:08 2026",
+          "13603": "Fri Nov  6 13:38:08 2026",
+          "13731": "Fri Nov  6 13:38:13 2026",
+          "13671": "Fri Nov  6 13:38:09 2026",
+          "13614": "Fri Nov  6 13:38:08 2026",
+          "13626": "Fri Nov  6 13:38:08 2026",
+          "13627": "Fri Nov  6 13:38:08 2026"
+        },
+        "children_stopped": true,
+        "orphaned_private_directories_removed_by_acceptance_owner": [
+          ".tmp5Xkr7G",
+          "auto-kicad-schematic-audit-FXVGUn",
+          ".tmpmWgzdT"
+        ],
+        "automatic_server_cleanup_not_claimed": true
+      }
+    },
+    "reused-hierarchy": {
+      "result": {
+        "passed": true,
+        "transport": "codex-app-server",
+        "native_version": "10.0.7",
+        "files": [
+          {
+            "bytes": 565,
+            "format": "manifest",
+            "path": "auto-kicad-manifest.json",
+            "sha256": "b028351fcd4418d3ea0d94c9bf43ff97a0d4233e524aac38c4477cace3111a5a"
+          },
+          {
+            "bytes": 249,
+            "format": "bom",
+            "path": "bom.csv",
+            "sha256": "a4ff444e008ec4ca48dfab6bb84d72ba021f81f8a25515f11490c6c787d9b5c3"
+          },
+          {
+            "bytes": 39097,
+            "format": "schematic_pdf",
+            "path": "schematic.pdf",
+            "sha256": "706707d5e64164e99163a06f5a4209078ea7bc55428f30470cc4e0ae32bb3719"
+          }
+        ],
+        "output_dir": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/reused-hierarchy/project/manufacturing",
+        "original_inputs_unchanged": true
+      },
+      "bom_rows": 4,
+      "pdf_pages": 3,
+      "source_dependencies_verified_after_private_cleanup": 27,
+      "native_worker_seed_cad_unchanged": true,
+      "native_worker_local_preferences_initialized": false,
+      "physical_holes": null,
+      "record": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/reused-hierarchy/state/artifact-exports/09014d920caf3568fa0b0f18d2cd24fe33079a8ca1355236a3e29cd86c51de79/record.json",
+      "native_evidence": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/reused-hierarchy/state/artifact-exports/09014d920caf3568fa0b0f18d2cd24fe33079a8ca1355236a3e29cd86c51de79/native-evidence.json",
+      "lifecycle": {
+        "owned_descendants": {
+          "20708": "Fri Nov  6 13:47:23 2026",
+          "20709": "Fri Nov  6 13:47:23 2026",
+          "20679": "Fri Nov  6 13:47:23 2026",
+          "20713": "Fri Nov  6 13:47:23 2026",
+          "20682": "Fri Nov  6 13:47:23 2026",
+          "20684": "Fri Nov  6 13:47:23 2026",
+          "20826": "Fri Nov  6 13:47:28 2026",
+          "20764": "Fri Nov  6 13:47:24 2026"
+        },
+        "children_stopped": true,
+        "orphaned_private_directories_removed_by_acceptance_owner": [
+          "auto-kicad-schematic-audit-tvODKH",
+          ".tmpYOjA2X",
+          ".tmpLi7y0r"
+        ],
+        "automatic_server_cleanup_not_claimed": true
+      }
+    }
+  },
+  "rehashed_artifacts": {
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/candidate/lib/auto-kicad/versions/0.1.0-d15c5bd75e557d1b/auto-kicad": {
+      "sha256": "0e71326ecbd4868cb5c6ea9e11c7f8901580ec458a06940ca142cf062f5c801c",
+      "bytes": 22344464
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/candidate/lib/auto-kicad/versions/0.1.0-d15c5bd75e557d1b/auto-kicad-replay": {
+      "sha256": "081a23ac8b3a445eb398b02788e71eb8cb8ce0b2738b0a71b8e1cd4dd95f13f5",
+      "bytes": 6339904
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/candidate/lib/auto-kicad/versions/0.1.0-d15c5bd75e557d1b/release.json": {
+      "sha256": "2b8ef924cd1539bcd0311eba786d4c5efd7a2f625f61f7ded9a9969515d03543",
+      "bytes": 853
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/candidate/lib/auto-kicad/versions/0.1.0-d15c5bd75e557d1b/sbom.json": {
+      "sha256": "c62f4185812970ea622162405ae583bd59c38fdd60ad773211fec060307ae35f",
+      "bytes": 28806
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/candidate/bin/auto-kicad": {
+      "sha256": "9494eca31e810b2a03796a762069bc8adee82d46fad85a74dd99f7a510a8cbdc",
+      "bytes": 238
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/project/manufacturing/auto-kicad-manifest.json": {
+      "sha256": "7a1e72d737a4eb12d3db019ffc1186ba9a9ec62df56365c59447dc11cc628f59",
+      "bytes": 2471
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/project/manufacturing/bom.csv": {
+      "sha256": "d32c43418eebf7032170cbc7e6f0e7747e0afb3da1e4e6e2eb99bfcf569fc1b7",
+      "bytes": 820
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/project/manufacturing/drill/ecc83-pp-NPTH.drl": {
+      "sha256": "ffdfe0ea0b43b9359f76c55aedf2e26048e33733fdce57af06bce89cbde7f2f3",
+      "bytes": 264
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/project/manufacturing/drill/ecc83-pp-PTH.drl": {
+      "sha256": "e0528caed37f11ee3a0ab9f2c8a91d2214aee223c47eec768e4da3aafab43eea",
+      "bytes": 1132
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/project/manufacturing/gerber/ecc83-pp-B_Mask.gbr": {
+      "sha256": "b227850bfbd0f6e823099c62ae4e5190524413499f321c2a88101ac5cafb3807",
+      "bytes": 1854
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/project/manufacturing/gerber/ecc83-pp-B_Silkscreen.gbr": {
+      "sha256": "1e93916803d6ff8b73079f37e42a9d66faddd8d238fe7441a0e1a587d22cc1ea",
+      "bytes": 454
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/project/manufacturing/gerber/ecc83-pp-Edge_Cuts.gbr": {
+      "sha256": "1a541c5dbe8140f9c7adfdf618af14dfa45e8370c95d491ad1dc3c0b032b7f21",
+      "bytes": 687
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/project/manufacturing/gerber/ecc83-pp-F_Mask.gbr": {
+      "sha256": "77c00d77e619a4343bcfa41bbf1c1f31f532071e2f3cc4dc9801d77f4887e7f6",
+      "bytes": 1854
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/project/manufacturing/gerber/ecc83-pp-F_Silkscreen.gbr": {
+      "sha256": "d53b21b0a82d8ca8b52204c8edcf81859b1632101263ae03a042e6925ef28e23",
+      "bytes": 29460
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/project/manufacturing/gerber/ecc83-pp-bottom_cu.gbr": {
+      "sha256": "ddd7961ba0886c41beb54bbda92836dfef62d7279fb5982ccbdc681dcc98f7d6",
+      "bytes": 51793
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/project/manufacturing/gerber/ecc83-pp-job.gbrjob": {
+      "sha256": "50d93ce2817386aceac7ccddf0da8c38c24a3f823210f9e36f8d2607c2431fca",
+      "bytes": 2568
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/project/manufacturing/gerber/ecc83-pp-top_cu.gbr": {
+      "sha256": "b2c212a37f17c22a3818ab0d066daff90112dab9337978ecd95afa5b0a4a1dea",
+      "bytes": 3140
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/project/manufacturing/schematic.pdf": {
+      "sha256": "7c7928c89ab606418b8ac5784b4bcbcf00a891644b05105f4cd0a5dfb9e32dc4",
+      "bytes": 105572
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/state/artifact-exports/caab003e5f9c5b5791ab59f908c02a9e7772e475fca875bad52e96269930e791/record.json": {
+      "sha256": "ea56999e57c08e56759201b210bb54a89525c80947a4322e75e4edce2d2a6110",
+      "bytes": 25898
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/real-ecc83/state/artifact-exports/caab003e5f9c5b5791ab59f908c02a9e7772e475fca875bad52e96269930e791/native-evidence.json": {
+      "sha256": "184259dbea8a0ed5a13d9849b39e1abb9b75c7537dbf692c0b601a940d2009ed",
+      "bytes": 158402
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/reused-hierarchy/project/manufacturing/auto-kicad-manifest.json": {
+      "sha256": "b028351fcd4418d3ea0d94c9bf43ff97a0d4233e524aac38c4477cace3111a5a",
+      "bytes": 565
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/reused-hierarchy/project/manufacturing/bom.csv": {
+      "sha256": "a4ff444e008ec4ca48dfab6bb84d72ba021f81f8a25515f11490c6c787d9b5c3",
+      "bytes": 249
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/reused-hierarchy/project/manufacturing/schematic.pdf": {
+      "sha256": "706707d5e64164e99163a06f5a4209078ea7bc55428f30470cc4e0ae32bb3719",
+      "bytes": 39097
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/reused-hierarchy/state/artifact-exports/09014d920caf3568fa0b0f18d2cd24fe33079a8ca1355236a3e29cd86c51de79/record.json": {
+      "sha256": "3b054dd3107126e8adf2cf688e90c50fbd13e0f71fde8ad6f124fd9979582926",
+      "bytes": 19923
+    },
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000/reused-hierarchy/state/artifact-exports/09014d920caf3568fa0b0f18d2cd24fe33079a8ca1355236a3e29cd86c51de79/native-evidence.json": {
+      "sha256": "3e499b8eb51e7c26e32c80cd7636108abac1fd5ae7575ea3c843297d22ef572e",
+      "bytes": 111639
+    }
+  },
+  "owned_recorded_processes_terminal": true,
+  "cleanup": {
+    "final_target_allocated_bytes_removed": 2136039424,
+    "cargo_target_absent": true,
+    "failed_candidates": [
+      {
+        "prefix": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793941927073651000/candidate",
+        "removed_allocated_bytes": 28721152,
+        "installation_removed": true,
+        "global_prefix_touched": false
+      },
+      {
+        "prefix": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943013913932000/candidate",
+        "removed_allocated_bytes": 28721152,
+        "installation_removed": true,
+        "global_prefix_touched": false
+      }
+    ],
+    "removed_isolation_only_runtime": {
+      "path": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-export-repair-1793942476209547000/auto-kicad-export-qualified-release",
+      "sha256": "a13be259d15cee0dd518e3e5fd72aa6a62261167a5dcd262ba3e0a280c320ccc",
+      "allocated_bytes": 22331392
+    },
+    "prior_build_cleanups": {
+      "debug-cleanup.json": {
+        "allocated_bytes_removed": 1553760256,
+        "path": "/private/tmp/auto-kicad-sync-target/debug",
+        "path_absent": true
+      },
+      "release-cleanup.json": {
+        "allocated_bytes_removed": 581509120,
+        "path": "/private/tmp/auto-kicad-sync-target",
+        "path_absent": true
+      },
+      "final-debug-cleanup.json": {
+        "allocated_bytes_removed": 1553813504,
+        "path": "/private/tmp/auto-kicad-sync-target/debug",
+        "path_absent": true
+      }
+    },
+    "batch_allocated_build_bytes_removed": 5825122304
+  },
+  "known_source_refusal": {
+    "profile": "Sonde U1 mixed cached definitions",
+    "attempted_formats": [
+      "gerber",
+      "drill",
+      "bom",
+      "schematic_pdf"
+    ],
+    "native_library_part": "74LS125_1",
+    "source_definitions": [
+      "74LS125_1",
+      "74LS125_6",
+      "74LS125_7",
+      "sonde_xilinx:74LS125"
+    ],
+    "contract": "One compatible definition across a complete component; no metadata or identity relaxation",
+    "rejected_before_export_plan": true,
+    "original_project_and_configuration_unchanged": true,
+    "counted_as_passing_export": false
+  },
+  "previous_failed_attempts": [
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793941927073651000",
+    "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943013913932000"
+  ],
+  "gui_remaining": true,
+  "staged_global_activation": false,
+  "normal_owner_gc": {
+    "real-ecc83": {
+      "before": [
+        "fb8b0cbd6c0c35c30127d1dca2804d2119b10a8a8e386a67dff938135ebfedf0.json"
+      ],
+      "after": [],
+      "normal_startup_reclaimed": 1,
+      "lifecycle": {
+        "owned_descendants": {
+          "43501": "Fri Nov  6 14:12:35 2026",
+          "43505": "Fri Nov  6 14:12:35 2026",
+          "43506": "Fri Nov  6 14:12:35 2026",
+          "43481": "Fri Nov  6 14:12:35 2026",
+          "43483": "Fri Nov  6 14:12:35 2026",
+          "43484": "Fri Nov  6 14:12:35 2026"
+        },
+        "children_stopped": true,
+        "orphaned_private_directories_removed_by_acceptance_owner": [],
+        "automatic_server_cleanup_not_claimed": false
+      }
+    },
+    "reused-hierarchy": {
+      "before": [
+        "c9085bc4d6e8d36b51f86ea088ea85f158b37e0de6081535b060a6cd0b8329c6.json"
+      ],
+      "after": [],
+      "normal_startup_reclaimed": 1,
+      "lifecycle": {
+        "owned_descendants": {
+          "43609": "Fri Nov  6 14:12:38 2026",
+          "43610": "Fri Nov  6 14:12:38 2026",
+          "43611": "Fri Nov  6 14:12:38 2026",
+          "43623": "Fri Nov  6 14:12:38 2026"
+        },
+        "children_stopped": true,
+        "orphaned_private_directories_removed_by_acceptance_owner": [],
+        "automatic_server_cleanup_not_claimed": false
+      }
+    }
+  },
+  "evidence_root": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-seal-1793943483816043000",
+  "failed_native_build_log": "/Users/w-mai/Projects/PawChrona/.local/auto-kicad-acceptance/delivery-export-repair-1793942476209547000/quality-native-build-failed.log",
+  "failed_native_build_note": "nng-sys build exited without a detailed diagnostic; cached retry passed, no source change"
+}
